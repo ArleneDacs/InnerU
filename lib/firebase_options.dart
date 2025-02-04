@@ -41,48 +41,47 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCDxwOyQDgEB1cUe5QU_b6l6SNUTkiAdf0',
-    appId: '1:44385611967:web:40ed00b21219bd5bf8960a',
-    messagingSenderId: '44385611967',
-    projectId: 'selfcare-c5d55',
-    authDomain: 'selfcare-c5d55.firebaseapp.com',
-    storageBucket: 'selfcare-c5d55.firebasestorage.app',
-    measurementId: 'G-R6TX4R6R9G',
+    apiKey: 'AIzaSyBNlcpQZI3TgfuP-bf1sCuhQjSNFXAdUvs',
+    appId: '1:609604667702:web:c38c55273e0638e4558b97',
+    messagingSenderId: '609604667702',
+    projectId: 'selfcare-1476e',
+    authDomain: 'selfcare-1476e.firebaseapp.com',
+    storageBucket: 'selfcare-1476e.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyARpMey2fP6NQE3J4cbWw4CWt6YuGBNO10',
-    appId: '1:44385611967:android:93b8dad421ad77f8f8960a',
-    messagingSenderId: '44385611967',
-    projectId: 'selfcare-c5d55',
-    storageBucket: 'selfcare-c5d55.firebasestorage.app',
+    apiKey: 'AIzaSyD9ITfkOctFd-8tgO0O52q9kM55k7rLZgo',
+    appId: '1:609604667702:android:a5c085ba60873b18558b97',
+    messagingSenderId: '609604667702',
+    projectId: 'selfcare-1476e',
+    storageBucket: 'selfcare-1476e.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDoqNJ__P7Kkw1R1EuGTCHZ8z3YlYzjGyo',
-    appId: '1:44385611967:ios:aa51fff84530bda9f8960a',
-    messagingSenderId: '44385611967',
-    projectId: 'selfcare-c5d55',
-    storageBucket: 'selfcare-c5d55.firebasestorage.app',
+    apiKey: 'AIzaSyCJPV86bYifMqGZKRUfMR3gsrHJ5ScxXxs',
+    appId: '1:609604667702:ios:49e500c6cf998ee7558b97',
+    messagingSenderId: '609604667702',
+    projectId: 'selfcare-1476e',
+    storageBucket: 'selfcare-1476e.firebasestorage.app',
     iosBundleId: 'com.example.selfcareProjects',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyDoqNJ__P7Kkw1R1EuGTCHZ8z3YlYzjGyo',
-    appId: '1:44385611967:ios:aa51fff84530bda9f8960a',
-    messagingSenderId: '44385611967',
-    projectId: 'selfcare-c5d55',
-    storageBucket: 'selfcare-c5d55.firebasestorage.app',
+    apiKey: 'AIzaSyCJPV86bYifMqGZKRUfMR3gsrHJ5ScxXxs',
+    appId: '1:609604667702:ios:49e500c6cf998ee7558b97',
+    messagingSenderId: '609604667702',
+    projectId: 'selfcare-1476e',
+    storageBucket: 'selfcare-1476e.firebasestorage.app',
     iosBundleId: 'com.example.selfcareProjects',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCDxwOyQDgEB1cUe5QU_b6l6SNUTkiAdf0',
-    appId: '1:44385611967:web:1925981970a2a2faf8960a',
-    messagingSenderId: '44385611967',
-    projectId: 'selfcare-c5d55',
-    authDomain: 'selfcare-c5d55.firebaseapp.com',
-    storageBucket: 'selfcare-c5d55.firebasestorage.app',
-    measurementId: 'G-BK11VY4QZW',
+    apiKey: 'AIzaSyBNlcpQZI3TgfuP-bf1sCuhQjSNFXAdUvs',
+    appId: '1:609604667702:web:37726298edfa70ed558b97',
+    messagingSenderId: '609604667702',
+    projectId: 'selfcare-1476e',
+    authDomain: 'selfcare-1476e.firebaseapp.com',
+    storageBucket: 'selfcare-1476e.firebasestorage.app',
   );
+
 }
