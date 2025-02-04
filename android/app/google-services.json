@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "44385611967",
+    "project_id": "selfcare-c5d55",
+    "storage_bucket": "selfcare-c5d55.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:44385611967:android:93b8dad421ad77f8f8960a",
+        "android_client_info": {
+          "package_name": "com.example.selfcare_projects"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARpMey2fP6NQE3J4cbWw4CWt6YuGBNO10"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
