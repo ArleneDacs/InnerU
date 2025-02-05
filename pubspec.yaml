@@ -81,6 +81,8 @@ flutter_launcher_icons:
 
 # The following section is specific to Flutter packages.
 flutter:
+  uses-material-design: true
+
   assets:
     - assets/images/splashscreen.gif
     - assets/images/login-image/login.png
@@ -89,12 +91,12 @@ flutter:
     - assets/logo/ios.png
     - assets/images/forgot-password.gif
 
-fonts:
-  - family: MaterialIcons
-    fonts:
-      - asset: packages/flutter_icons/fonts/MaterialIcons-Regular.ttf
+  fonts:
+  
 
-    uses-material-design: true
+    - family: Parisienne
+      fonts:
+        - asset: assets/fonts/Parisienne-Regular.ttf
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
@@ -117,17 +119,7 @@ fonts:
   # "family" key with the font family name, and a "fonts" key with a
   # list giving the asset and other descriptors for the font. For
   # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
+  
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

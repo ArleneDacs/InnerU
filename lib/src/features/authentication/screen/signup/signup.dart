@@ -10,17 +10,38 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
+  final _formKey = GlobalKey<FormState>();
   bool _isPasswordVisible = false;
-  bool _isLoading = false; // To show loading state
+  bool _isLoading = false;
 
-  // Controllers for user input
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _numberController = TextEditingController();
+  final TextEditingController _retypepassController = TextEditingController();
 
-  // Function to handle signup
+  bool _isValidEmail(String email) {
+    final RegExp emailRegex = RegExp(
+        r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]+");
+    return emailRegex.hasMatch(email);
+  }
+
+  bool _isValidPhoneNumber(String number) {
+    final RegExp phoneRegex = RegExp(r'^[0-9]{10,15}$');
+    return phoneRegex.hasMatch(number);
+  }
+
+  bool _isValidPassword(String password) {
+    final RegExp passwordRegex = RegExp(
+        r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$');
+    return passwordRegex.hasMatch(password);
+  }
+
   void _handleSignup() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -30,6 +51,7 @@ class _SignupScreenState extends State<SignupScreen> {
       email: _emailController.text.trim(),
       password: _passwordController.text.trim(),
       number: _numberController.text.trim(),
+      retypepassword: _retypepassController.text.trim(),
     );
 
     setState(() {
@@ -37,20 +59,28 @@ class _SignupScreenState extends State<SignupScreen> {
     });
 
     if (error == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Signup successful! Redirecting to Login..."),
-          duration: Duration(seconds: 2),
-        ),
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text("Verify Your Email"),
+            content: const Text(
+                "A verification email has been sent. Please check your email and verify your account."),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pop(context);
+                },
+                child: const Text("OK"),
+              ),
+            ],
+          );
+        },
       );
-
-      // Wait for 2 seconds before navigating to the login screen
-      Future.delayed(const Duration(seconds: 2), () {
-        Navigator.pop(context); // Go back to login screen
-      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
       );
     }
   }
@@ -61,7 +91,6 @@ class _SignupScreenState extends State<SignupScreen> {
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // Background Image
           Positioned(
             top: 0,
             left: 0,
@@ -71,163 +100,153 @@ class _SignupScreenState extends State<SignupScreen> {
               fit: BoxFit.cover,
             ),
           ),
-
           SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 25),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 120), // Space for image
-
-                  const Text(
-                    "Create Account",
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Username Field
-                  TextFormField(
-                    controller: _usernameController,
-                    decoration: const InputDecoration(
-                      labelText: "Username",
-                      labelStyle: TextStyle(color: Colors.brown),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown, width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 130),
+                    const Text(
+                      "Create an Account",
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Parisienne',
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Password Field
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: !_isPasswordVisible,
-                    decoration: InputDecoration(
-                      labelText: "Password",
-                      labelStyle: const TextStyle(color: Colors.brown),
-                      enabledBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown),
-                      ),
-                      focusedBorder: const UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown, width: 2),
-                      ),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordVisible ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
-                          size: 28,
-                          color: Colors.brown,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordVisible = !_isPasswordVisible;
-                          });
-                        },
-                      ),
+                    const SizedBox(height: 13),
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: const InputDecoration(labelText: "Username"),
+                      validator: (value) =>
+                          value!.isEmpty ? "Username cannot be empty" : null,
                     ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Number Field
-                  TextFormField(
-                    controller: _numberController,
-                    keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: "Number",
-                      labelStyle: TextStyle(color: Colors.brown),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Email Field
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      labelStyle: TextStyle(color: Colors.brown),
-                      enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown),
-                      ),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.brown, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-
-                  // Register Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.brown.shade400,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: _isLoading ? null : _handleSignup, // Disable when loading
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text(
-                        "Register",
-                        style: TextStyle(fontSize: 18, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // OR Divider
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Divider(color: Colors.brown, thickness: 1),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 10),
-                        child: Text("OR"),
-                      ),
-                      Expanded(
-                        child: Divider(color: Colors.brown, thickness: 1),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 15),
-
-                  // Social Login (Google & Apple)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Image.asset("assets/logo/google.png", width: 75), // Ensure assets exist
-                      const SizedBox(width: 20),
-                      Image.asset("assets/logo/ios.png", width: 40),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Already have an account text link
-                  Center(
-                    child: TextButton(
-                      onPressed: () {
-                        Navigator.pop(context);
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(labelText: "Email"),
+                      validator: (value) {
+                        if (value!.isEmpty) return "Email cannot be empty";
+                        if (!_isValidEmail(value))
+                          return "Invalid email format!";
+                        return null;
                       },
-                      child: const Text(
-                        "Already have an account? Login",
-                        style: TextStyle(color: Colors.brown),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _numberController,
+                      keyboardType: TextInputType.phone,
+                      decoration:
+                          const InputDecoration(labelText: "Phone Number"),
+                      validator: (value) {
+                        if (value!.isEmpty)
+                          return "Phone number cannot be empty";
+                        if (!_isValidPhoneNumber(value))
+                          return "Invalid phone number!";
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: !_isPasswordVisible,
+                      decoration: InputDecoration(
+                        labelText: "Password",
+                        suffixIcon: IconButton(
+                          icon: Icon(_isPasswordVisible
+                              ? CupertinoIcons.eye_slash
+                              : CupertinoIcons.eye),
+                          onPressed: () {
+                            setState(() {
+                              _isPasswordVisible = !_isPasswordVisible;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) {
+                        // Added `validator` key
+                        if (value == null || value.isEmpty) {
+                          return "Password cannot be empty.";
+                        }
+                        if (!_isValidPassword(value)) {
+                          return "Weak password! It must contain:\n"
+                              "- At least one lowercase letter\n"
+                              "- At least one uppercase letter\n"
+                              "- At least one special character (!@#%^&*()-+)\n"
+                              "- At least one digit\n"
+                              "- Minimum length of 8 characters";
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _retypepassController,
+                      obscureText: !_isPasswordVisible,
+                      decoration: InputDecoration(
+                        labelText: "Re-type Password",
+                        suffixIcon: IconButton(
+                          icon: Icon(_isPasswordVisible
+                              ? CupertinoIcons.eye_slash
+                              : CupertinoIcons.eye),
+                          onPressed: () {
+                            setState(() {
+                              _isPasswordVisible = !_isPasswordVisible;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) => value != _passwordController.text
+                          ? "Passwords do not match!"
+                          : null,
+                    ),
+                    const SizedBox(height: 25),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _handleSignup,
+                        child: _isLoading
+                            ? const CircularProgressIndicator(
+                                color: Colors.white)
+                            : const Text("Register"),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Already have an account? Login"),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                            child: Divider(color: Colors.brown, thickness: 1)),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          child: Text("OR"),
+                        ),
+                        Expanded(
+                            child: Divider(color: Colors.brown, thickness: 1)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset("assets/logo/google.png", width: 60),
+                        const SizedBox(width: 15),
+                        Image.asset("assets/logo/ios.png", width: 35),
+                      ],
+                    ),
+                    const SizedBox(height: 15),
+                  ],
+                ),
               ),
             ),
           ),

@@ -17,7 +17,7 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
 
     // Navigate to LoginScreen after 6 seconds
-    Timer(Duration(seconds: 6), navigateToLogin);
+    Timer(Duration(seconds: 3), navigateToLogin);
   }
 
   void navigateToLogin() {
@@ -39,30 +39,6 @@ class _SplashScreenState extends State<SplashScreen> {
               width: MediaQuery.of(context).size.width,
               height: MediaQuery.of(context).size.height,
               fit: BoxFit.cover,
-            ),
-          ),
-
-
-          // Continue Button
-          Positioned(
-            bottom: 30,
-            left: 20,
-            right: 20,
-            child: Center(
-              child: ElevatedButton(
-                onPressed: navigateToLogin,
-                style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(horizontal: 50, vertical: 10),
-                  backgroundColor: Colors.green.shade200,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
-                child: Text(
-                  "Continue",
-                  style: TextStyle(fontSize: 15, color: Colors.white),
-                ),
-              ),
             ),
           ),
         ],
