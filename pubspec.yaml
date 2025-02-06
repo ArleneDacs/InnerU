@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  lottie: ^3.1.0
   get: ^4.6.5
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -84,10 +84,16 @@ flutter:
     - assets/images/login-image/signup.png
     - assets/logo/google.png
     - assets/logo/ios.png
+    - assets/images/walking.json
     - assets/images/forgot-password.gif
     - assets/images/Diary-bro.png
     - assets/images/meditation-freepik.png
     - assets/images/Diary-bro (1).png
+    - assets/images/avatar.png
+    - assets/images/right.png
+    - assets/images/reminder.png
+    - assets/images/card.png
+    - assets/images/alert.png
 
   fonts:
     - family: Parisienne
