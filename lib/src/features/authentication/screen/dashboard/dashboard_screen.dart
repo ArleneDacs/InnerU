@@ -25,37 +25,25 @@ class DashboardScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: Icon(CupertinoIcons.person, size: 28, color: Colors.black),
-<<<<<<< HEAD
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => ProfilePage()),
-          ),
-=======
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => ProfilePage(title: 'Profile',)),
+              MaterialPageRoute(
+                  builder: (context) => ProfilePage(title: 'Profile')),
             );
           },
->>>>>>> 95799488fa096817d5c616eba32d979e746b0689
         ),
         actions: [
           IconButton(
             icon: Icon(CupertinoIcons.line_horizontal_3,
                 size: 28, color: Colors.black),
-<<<<<<< HEAD
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => ProfilePage()),
-            ),
-=======
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => ProfilePage(title: 'Profile')),
+                MaterialPageRoute(
+                    builder: (context) => ProfilePage(title: 'Profile')),
               );
             },
->>>>>>> 95799488fa096817d5c616eba32d979e746b0689
           ),
         ],
       ),
