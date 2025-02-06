@@ -1,17 +1,78 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:selfcare_projects/src/constants/sizes.dart';
-import 'package:selfcare_projects/src/constants/text_strings.dart'; // Ensure correct constants import
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 
 class ForgotPasswordMail extends StatefulWidget {
   const ForgotPasswordMail({Key? key}) : super(key: key);
 
   @override
-  _ForgotPasswordMail createState() => _ForgotPasswordMail();
+  _ForgotPasswordMailState createState() => _ForgotPasswordMailState();
 }
 
-class _ForgotPasswordMail extends State<ForgotPasswordMail> {
+class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
   final TextEditingController _emailController = TextEditingController();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  String? _errorMessage; // To hold the error message
+
+  Future<void> _resetPassword() async {
+    String email = _emailController.text.trim();
+
+    if (email.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter your email address.';
+      });
+      return;
+    }
+
+    try {
+      // Check if the email exists in Firestore
+      QuerySnapshot querySnapshot = await _firestore
+          .collection('users') // Change to your actual collection name
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isEmpty) {
+        // Email not found in Firestore
+        setState(() {
+          _errorMessage = 'Email is not registered.';
+        });
+        return;
+      }
+
+      // Send reset password email
+      await _auth.sendPasswordResetEmail(email: email);
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Email Sent'),
+          content: Text('A password reset link has been sent to $email'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Navigate back to login page
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      String errorMessage = 'An error occurred. Please try again.';
+      if (e is FirebaseAuthException) {
+        if (e.code == 'invalid-email') {
+          errorMessage =
+              'Invalid email format. Please enter a valid email address.';
+        }
+      }
+      setState(() {
+        _errorMessage = errorMessage; // Update the error message
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,21 +84,15 @@ class _ForgotPasswordMail extends State<ForgotPasswordMail> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 150),
-
-              // Title
               const Text(
                 "Reset Password",
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
-
               const SizedBox(height: 40),
-
-              // Form Fields
               SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 25),
                 child: Column(
                   children: [
-                    // Email TextField with Icon in prefixIcon
                     TextFormField(
                       controller: _emailController,
                       decoration: const InputDecoration(
@@ -56,9 +111,16 @@ class _ForgotPasswordMail extends State<ForgotPasswordMail> {
                         ),
                       ),
                     ),
+                    if (_errorMessage !=
+                        null) // Display error message if it exists
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(color: Colors.red, fontSize: 14),
+                        ),
+                      ),
                     const SizedBox(height: 20),
-
-                    // Submit Button
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -69,13 +131,7 @@ class _ForgotPasswordMail extends State<ForgotPasswordMail> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        onPressed: () {
-                          // Your logic for sending reset instructions goes here
-                          // You can use Firebase or other services to send the email
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Password reset link sent to ${_emailController.text}')),
-                          );
-                        },
+                        onPressed: _resetPassword,
                         child: const Text(
                           "Reset Password",
                           style: TextStyle(fontSize: 18, color: Colors.white),
@@ -87,8 +143,6 @@ class _ForgotPasswordMail extends State<ForgotPasswordMail> {
               ),
             ],
           ),
-
-          // Bottom Image
           Positioned(
             bottom: 0,
             left: 0,

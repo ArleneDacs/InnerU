@@ -1,7 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:selfcare_projects/src/constants/sizes.dart';
-import 'package:selfcare_projects/src/constants/text_strings.dart'; // Ensure correct constants import
+import 'package:selfcare_projects/src/constants/text_strings.dart';
 
 class ForgotPasswordOTP extends StatefulWidget {
   const ForgotPasswordOTP({Key? key}) : super(key: key);
@@ -12,8 +13,81 @@ class ForgotPasswordOTP extends StatefulWidget {
 
 class _ForgotPasswordOTP extends State<ForgotPasswordOTP> {
   final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _otpController = TextEditingController();
 
   bool _isOTPSent = false;
+  bool _isOTPVerified = false;
+  String verificationId = ''; // Store verification ID to verify OTP
+
+  // Firebase Authentication instance
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  Future<void> _sendOTP() async {
+    await _auth.verifyPhoneNumber(
+      phoneNumber: _phoneController.text,
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        // Auto-retrieved OTP (for testing)
+        await _auth.signInWithCredential(credential);
+        setState(() {
+          _isOTPVerified = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('OTP automatically verified!')),
+        );
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Verification failed: ${e.message}')),
+        );
+      },
+      codeSent: (String verId, int? resendToken) {
+        setState(() {
+          _isOTPSent = true;
+          verificationId = verId; // Store the verification ID
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('OTP sent to ${_phoneController.text}')),
+        );
+      },
+      codeAutoRetrievalTimeout: (String verId) {
+        verificationId = verId;
+      },
+    );
+  }
+
+  Future<void> _verifyOTP() async {
+    if (_otpController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter OTP')),
+      );
+      return;
+    }
+
+    // Create PhoneAuthCredential
+    PhoneAuthCredential credential = PhoneAuthProvider.credential(
+      verificationId: verificationId,
+      smsCode: _otpController.text,
+    );
+
+    try {
+      // Sign in with the OTP
+      await _auth.signInWithCredential(credential);
+      setState(() {
+        _isOTPVerified = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('OTP Verified, proceed to reset password.')),
+      );
+
+      // Navigate to the password reset screen here
+      // Example: Navigator.push(context, MaterialPageRoute(builder: (context) => ResetPasswordScreen()));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invalid OTP or error: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,18 +147,7 @@ class _ForgotPasswordOTP extends State<ForgotPasswordOTP> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          onPressed: () {
-                            // Your logic for sending OTP goes here
-                            // Example: Send OTP through Firebase or custom service
-                            setState(() {
-                              _isOTPSent = true; // Indicate OTP is sent
-                            });
-
-                            // Show Snackbar or other success indication
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('OTP sent to ${_phoneController.text}')),
-                            );
-                          },
+                          onPressed: _sendOTP, // Call the send OTP function
                           child: const Text(
                             "Send OTP",
                             style: TextStyle(fontSize: 18, color: Colors.white),
@@ -95,6 +158,8 @@ class _ForgotPasswordOTP extends State<ForgotPasswordOTP> {
                     // OTP TextField (Only shown after OTP is sent)
                     if (_isOTPSent)
                       TextFormField(
+                        controller: _otpController,
+                        keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: "Enter OTP",
                           labelStyle: TextStyle(color: Colors.brown),
@@ -102,7 +167,8 @@ class _ForgotPasswordOTP extends State<ForgotPasswordOTP> {
                             borderSide: BorderSide(color: Colors.brown),
                           ),
                           focusedBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: Colors.brown, width: 2),
+                            borderSide:
+                                BorderSide(color: Colors.brown, width: 2),
                           ),
                           prefixIcon: Icon(
                             CupertinoIcons.lock,
@@ -125,15 +191,7 @@ class _ForgotPasswordOTP extends State<ForgotPasswordOTP> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          onPressed: () {
-                            // Your OTP verification logic goes here
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('OTP Verified, proceed to reset password.')),
-                            );
-
-                            // Navigate to password reset screen
-                            // Navigator.push(context, MaterialPageRoute(builder: (context) => ResetPasswordScreen()));
-                          },
+                          onPressed: _verifyOTP, // Call the verify OTP function
                           child: const Text(
                             "Verify OTP",
                             style: TextStyle(fontSize: 18, color: Colors.white),

@@ -14,11 +14,7 @@ class DashboardScreen extends StatelessWidget {
         .doc(user.uid)
         .get();
 
-    if (userDoc.exists) {
-      return userDoc["username"] ?? "User";
-    } else {
-      return "User";
-    }
+    return userDoc.exists ? userDoc["username"] ?? "User" : "User";
   }
 
   @override
@@ -29,27 +25,23 @@ class DashboardScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: Icon(CupertinoIcons.person, size: 28, color: Colors.black),
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => ProfilePage()),
-            );
-          },
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => ProfilePage()),
+          ),
         ),
         actions: [
           IconButton(
             icon: Icon(CupertinoIcons.line_horizontal_3,
                 size: 28, color: Colors.black),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => ProfilePage()),
-              );
-            },
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage()),
+            ),
           ),
         ],
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -57,73 +49,35 @@ class DashboardScreen extends StatelessWidget {
             FutureBuilder<String>(
               future: _getUsername(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Text("Loading...",
-                      style:
-                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
-                } else if (snapshot.hasError) {
-                  return Text("Error loading username",
-                      style:
-                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
-                }
-                return Text("Hello, ${snapshot.data}!",
-                    style:
-                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
+                return Text(
+                  snapshot.connectionState == ConnectionState.waiting
+                      ? "Loading..."
+                      : "Hello, ${snapshot.data}!",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                );
               },
             ),
-            SizedBox(height: 10),
-            Container(
-              height: 150,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisAlignment:
-                    MainAxisAlignment.start, // Aligns items to the top-left
-                crossAxisAlignment:
-                    CrossAxisAlignment.start, // Aligns text to the left
-                children: [
-                  Text(
-                    "Quotes of the Day",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 10),
-                ],
-              ),
-            ),
+            SizedBox(height: 20),
+            _buildSectionTitle("Quote of the Day"),
+            _buildCardContainer(
+                height: 100, content: "Your daily inspiration..."),
             SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _buildInfoCard("Steps", "2k", CupertinoIcons.flame_fill,
                     Colors.brown.shade300),
-                _buildInfoCard("Meditation", "40%", CupertinoIcons.zzz,
+                _buildInfoCard("Meditation", "40%", CupertinoIcons.hourglass,
                     Colors.green.shade400),
               ],
             ),
             SizedBox(height: 20),
-            Container(
-              height: 150,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text("Coaches",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 10),
-                ],
-              ),
-            ),
+            _buildSectionTitle("Today's Coach"),
+            _buildCardContainer(
+                height: 120,
+                content: "Maychell Alcorin\nCEO of Valentin, Life Coach"),
             SizedBox(height: 20),
-            Text("How do you feel today?",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            _buildSectionTitle("How do you feel today?"),
             SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -134,8 +88,60 @@ class DashboardScreen extends StatelessWidget {
                 Text("😡", style: TextStyle(fontSize: 36)),
               ],
             ),
+            SizedBox(height: 20),
+            _buildSleepTrackingUI(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSleepTrackingUI() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            blurRadius: 8,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Text("Sleep Tracking",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+          SizedBox(height: 10),
+          Text("Set your bedtime and sleep goal, then let us do the rest!"),
+          SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildDropdown("Alarm"),
+              _buildDropdown("10:00 PM"),
+              _buildDropdown("9 Hrs"),
+            ],
+          ),
+          SizedBox(height: 10),
+          Center(
+            child: ElevatedButton(
+              onPressed: () {},
+              child: Text("Save details"),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white),
+            ),
+          ),
+          SizedBox(height: 10),
+          _buildSectionTitle("Did you meet your goal?"),
+          _buildCardContainer(height: 80, content: "Sleep goal tracker"),
+        ],
       ),
     );
   }
@@ -176,17 +182,36 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLeaderboardRow(String name, String score) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(name,
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          Text(score, style: TextStyle(fontSize: 16)),
-        ],
+  Widget _buildCardContainer(
+      {required double height, required String content}) {
+    return Container(
+      height: height,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Center(
+        child: Text(content,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       ),
     );
+  }
+
+  Widget _buildDropdown(String label) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey),
+      ),
+      child: Text(label),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(title,
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold));
   }
 }
