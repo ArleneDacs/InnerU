@@ -23,7 +23,7 @@ class TAppTheme {
     brightness: Brightness.light,
     primarySwatch: customTeal,
     primaryColor: customTeal,
-    scaffoldBackgroundColor: customTeal.shade50,
+    scaffoldBackgroundColor: Color(0xFFE0F2F1),
     appBarTheme: AppBarTheme(
       backgroundColor: customTeal,
       foregroundColor: Colors.white,

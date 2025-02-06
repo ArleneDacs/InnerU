@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgetpassword_otp/forgotpasswordotp.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgotpassword_mail/forgotpasswordmail.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
@@ -41,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (user!.emailVerified) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => DashboardScreen()),
+            MaterialPageRoute(builder: (context) => CurvedNavBar()),
           );
         } else {
           _showEmailNotVerifiedDialog(user);

@@ -9,8 +9,10 @@ class DashboardScreen extends StatelessWidget {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return "User";
 
-    DocumentSnapshot userDoc =
-    await FirebaseFirestore.instance.collection("users").doc(user.uid).get();
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .get();
 
     if (userDoc.exists) {
       return userDoc["username"] ?? "User";
@@ -23,7 +25,7 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Color(0xFFE0F2F1),
         elevation: 0,
         leading: IconButton(
           icon: Icon(CupertinoIcons.person, size: 28, color: Colors.black),
@@ -36,7 +38,8 @@ class DashboardScreen extends StatelessWidget {
         ),
         actions: [
           IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28, color: Colors.black),
+            icon: Icon(CupertinoIcons.line_horizontal_3,
+                size: 28, color: Colors.black),
             onPressed: () {
               Navigator.push(
                 context,
@@ -55,11 +58,17 @@ class DashboardScreen extends StatelessWidget {
               future: _getUsername(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Text("Loading...", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
+                  return Text("Loading...",
+                      style:
+                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
                 } else if (snapshot.hasError) {
-                  return Text("Error loading username", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
+                  return Text("Error loading username",
+                      style:
+                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
                 }
-                return Text("Hello, ${snapshot.data}!", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
+                return Text("Hello, ${snapshot.data}!",
+                    style:
+                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold));
               },
             ),
             SizedBox(height: 10),
@@ -71,8 +80,10 @@ class DashboardScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.start, // Aligns items to the top-left
-                crossAxisAlignment: CrossAxisAlignment.start, // Aligns text to the left
+                mainAxisAlignment:
+                    MainAxisAlignment.start, // Aligns items to the top-left
+                crossAxisAlignment:
+                    CrossAxisAlignment.start, // Aligns text to the left
                 children: [
                   Text(
                     "Quotes of the Day",
@@ -81,14 +92,15 @@ class DashboardScreen extends StatelessWidget {
                   SizedBox(height: 10),
                 ],
               ),
-
             ),
             SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildInfoCard("Steps", "2k", CupertinoIcons.flame_fill, Colors.brown.shade300),
-                _buildInfoCard("Meditation", "40%", CupertinoIcons.zzz, Colors.green.shade400),
+                _buildInfoCard("Steps", "2k", CupertinoIcons.flame_fill,
+                    Colors.brown.shade300),
+                _buildInfoCard("Meditation", "40%", CupertinoIcons.zzz,
+                    Colors.green.shade400),
               ],
             ),
             SizedBox(height: 20),
@@ -102,14 +114,16 @@ class DashboardScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text("Coaches", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text("Coaches",
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   SizedBox(height: 10),
-
                 ],
               ),
             ),
             SizedBox(height: 20),
-            Text("How do you feel today?", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text("How do you feel today?",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -122,14 +136,6 @@ class DashboardScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
-      bottomNavigationBar: CupertinoTabBar(
-        items: [
-          BottomNavigationBarItem(icon: Icon(CupertinoIcons.home), label: "Dashboard"),
-          BottomNavigationBarItem(icon: Icon(CupertinoIcons.snow), label: "Meditate"),
-          BottomNavigationBarItem(icon: Icon(CupertinoIcons.pencil), label: "Write"),
-          BottomNavigationBarItem(icon: Icon(CupertinoIcons.star), label: "Leaderboard"),
-        ],
       ),
     );
   }
@@ -151,11 +157,19 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 Icon(icon, color: Colors.white),
                 SizedBox(width: 10),
-                Text(title, style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(title,
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
               ],
             ),
             SizedBox(height: 10),
-            Text(data, style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(data,
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -168,7 +182,8 @@ class DashboardScreen extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(name,
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           Text(score, style: TextStyle(fontSize: 16)),
         ],
       ),
