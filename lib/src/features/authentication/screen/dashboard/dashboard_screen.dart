@@ -81,7 +81,7 @@ class DashboardScreen extends StatelessWidget {
             _buildSectionTitle("Today's Coach"),
             _buildCardContainer(
                 height: 120,
-                content: "Maychell Alcorin\nCEO of Valentin, Life Coach"),
+                content: "Maychell Alcorin\nCEO of Valenin, Life Coach"),
             SizedBox(height: 20),
             _buildSectionTitle("How do you feel today?"),
             SizedBox(height: 10),
