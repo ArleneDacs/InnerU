@@ -1,77 +1,76 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+
+// Dummy screens (Replace with your actual screens)
+class EditProfileScreen extends StatelessWidget {
+  
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Edit Profile")));
+}
+
+class ChangeMeditationScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Change Meditation Song")));
+}
+
+class PrivacyScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Privacy")));
+}
+
+class SubscriptionScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Manage Subscription")));
+}
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key, required this.title});
   final String title;
 
   @override
-  State<ProfilePage> createState() => _MyprofileState();
+  State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _MyprofileState extends State<ProfilePage> {
-  Future<Map<String, String>> _getUserData() async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return {"username": "Guest", "email": "No Email Found"};
-    }
-
-    DocumentSnapshot userDoc =
-        await FirebaseFirestore.instance.collection("users").doc(user.uid).get();
-
-    if (userDoc.exists) {
-      return {
-        "username": userDoc["username"] ?? "Unknown",
-        "email": userDoc["email"] ?? "No Email Found",
-      };
-    } else {
-      return {"username": "Unknown", "email": "No Email Found"};
-    }
-  }
-
+class _ProfilePageState extends State<ProfilePage> {
   bool _isPressed = false;
-
+  String username = "Loading...";
+  String email = "Loading...";
+   String? _base64Image;
+ @override
+  void initState() {
+    super.initState();
+    UserService.getUserData().then((data) => setState(() {
+          username = data["username"]!;
+          email = data["email"]!;
+          _base64Image = data["profilePic"];
+        }));
+  }
+  // Logout confirmation dialog
   Future<void> _showLogOutDialog(BuildContext context) async {
-    setState(() {
-      _isPressed = true;
-    });
-
-    await Future.delayed(Duration(milliseconds: 500));
-
-    setState(() {
-      _isPressed = false;
-    });
+    setState(() => _isPressed = true);
+    await Future.delayed(Duration(milliseconds: 300));
+    setState(() => _isPressed = false);
 
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Log out'),
-          content: Text('Are you sure you want to log out?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => LoginScreen(),
-                  ),
-                );
-              },
-              child: Text('Yes'),
-            ),
-          ],
-        );
-      },
+      builder: (BuildContext context) => AlertDialog(
+        title: Text('Log out'),
+        content: Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+            },
+            child: Text('Yes'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -81,54 +80,62 @@ class _MyprofileState extends State<ProfilePage> {
     double containerWidth = screenWidth * 0.85;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
+      appBar: AppBar(title: Text(widget.title)),
       body: SingleChildScrollView(
         child: Center(
           child: Padding(
             padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
             child: Column(
               children: [
-                Image.asset(
-                  'assets/images/avatar.png',
-                  width: screenWidth * 0.35,
-                  height: screenWidth * 0.35,
-                ),
+                _base64Image == null
+                    ? Image.asset(
+                        'assets/images/avatar.png', // Default image if no profilePic is available
+                        width: screenWidth * 0.35,
+                        height: screenWidth * 0.35,
+                      )
+                    : ClipOval(
+                        child: Image.memory(
+                          base64Decode(_base64Image!), // Decode the base64 string to display the image
+                          width: screenWidth * 0.35,
+                          height: screenWidth * 0.35,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                 SizedBox(height: 10),
-                FutureBuilder<Map<String, String>>(
-                  future: _getUserData(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return CircularProgressIndicator();
-                    } else if (snapshot.hasError) {
-                      return Text("Error fetching user data", style: TextStyle(color: Colors.red));
-                    } else {
-                      return Column(
-                        children: [
-                          Text(
-                            snapshot.data?["username"] ?? "Guest",
-                            style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            snapshot.data?["email"] ?? "No Email Found",
-                            style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-                          ),
-                        ],
-                      );
-                    }
-                  },
-                ),
-                SizedBox(height: 50),
-                _buildSectionTitle("General", containerWidth),
-                _buildButton(context, "Edit Profile", containerWidth),
-                _buildSectionTitle("Audio Settings", containerWidth),
-                _buildButton(context, "Change Meditation Song", containerWidth),
-                _buildSectionTitle("Account Settings", containerWidth),
-                _buildButton(context, "Privacy", containerWidth),
-                _buildSectionTitle("Subscription", containerWidth),
-                _buildButton(context, "Manage Subscription", containerWidth),
-                SizedBox(height: 30),
+
+                // Fetch and Display User Data
+                Column(
+                      children: [
+                        Text(
+                         "$username",
+                          style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          "$email",
+                          style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                        ),
+                      ],
+                    ),
+                
+
+                SizedBox(height: 20),
+
+                // Section Titles & Buttons with Navigation
+                _buildSectionTitle("General"),
+                _buildButton(context, "Edit Profile", EditProfile(title: 'Edit Profile',)),
+
+                _buildSectionTitle("Audio Settings"),
+                _buildButton(context, "Change Meditation Song", ChangeMeditationScreen()),
+
+                _buildSectionTitle("Account Settings"),
+                _buildButton(context, "Privacy", PrivacyScreen()),
+
+                _buildSectionTitle("Subscription"),
+                _buildButton(context, "Manage Subscription", SubscriptionScreen()),
+
+                SizedBox(height: 10),
+
+                // Logout Button
                 ElevatedButton(
                   onPressed: () => _showLogOutDialog(context),
                   style: ElevatedButton.styleFrom(
@@ -157,23 +164,31 @@ class _MyprofileState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildSectionTitle(String title, double width) {
+  // Section Title Widget
+  Widget _buildSectionTitle(String title) {
     return Container(
       alignment: Alignment.centerLeft,
-      width: 700,
+      margin: EdgeInsets.only(top: 10, bottom: 10),
       padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-      decoration: BoxDecoration(color: Color(0xFFc4f0d9)),
+      decoration: BoxDecoration(color: Color(0xFFc4f0d9), borderRadius: BorderRadius.circular(5)),
       child: Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildButton(BuildContext context, String label, double width) {
+  // Button Widget with Navigation
+  Widget _buildButton(BuildContext context, String label, Widget targetScreen) {
     return Container(
-      margin: EdgeInsets.only(top: 5),
-      width: width,
+      margin: EdgeInsets.only(bottom: 10),
+      width: double.infinity,
       child: TextButton(
-        onPressed: () {},
-        style: ButtonStyle(padding: MaterialStateProperty.all(EdgeInsets.symmetric(vertical: 15, horizontal: 20))),
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen)),
+        style: ButtonStyle(
+          padding: MaterialStateProperty.all(EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
+          overlayColor: MaterialStateProperty.all(Colors.grey.shade200),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
