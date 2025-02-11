@@ -16,12 +16,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String quote = "Your daily inspiration...";
   String author = "Unknown";
   String? selectedEmotion; // ✅ Declared at the class level
+  String? currentUserEmotion; // Emotion for the current user
 
   @override
   void initState() {
     super.initState();
     fetchQuote();
-    _loadTodayEmotion(); // Load the emotion from SharedPreferences when the app starts
+    _loadTodayEmotion(); // Load the emotion for the current user when the app starts
   }
 
   void selectEmotion(String emotion) {
@@ -35,25 +36,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _saveEmotionToSharedPreferences(String emotion) async {
     final prefs = await SharedPreferences.getInstance();
-    prefs.setString('selected_emotion', emotion); // Save selected emotion
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Save emotion with the key as the user's UID to make it specific to the user
+    prefs.setString('selected_emotion_${user.uid}', emotion);
+    prefs.setString('emotion_date_${user.uid}',
+        DateTime.now().toString().split(' ')[0]); // Save today's date
   }
 
   Future<void> _loadTodayEmotion() async {
     final prefs = await SharedPreferences.getInstance();
-    String? savedEmotion = prefs.getString('selected_emotion');
-    if (savedEmotion != null) {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Load the saved emotion for the current user using the UID as the key
+    String? savedEmotion = prefs.getString('selected_emotion_${user.uid}');
+    String? savedDate = prefs.getString('emotion_date_${user.uid}');
+    String today = DateTime.now().toString().split(' ')[0]; // Get today's date
+
+    if (savedEmotion != null && savedDate == today) {
+      // If emotion is logged today, show it
       setState(() {
-        selectedEmotion = savedEmotion; // Load saved emotion
+        currentUserEmotion = savedEmotion; // Load saved emotion for this user
+      });
+    } else {
+      // If no emotion for today, show the picker
+      setState(() {
+        currentUserEmotion = null; // Clear the emotion display, show the picker
       });
     }
   }
 
   Future<void> _clearEmotionOnLogout() async {
     final prefs = await SharedPreferences.getInstance();
-    prefs
-        .remove('selected_emotion'); // Clear the saved emotion when logging out
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Clear the saved emotion for the current user
+    prefs.remove('selected_emotion_${user.uid}');
+    prefs.remove('emotion_date_${user.uid}');
     setState(() {
-      selectedEmotion = null; // Reset the selected emotion
+      currentUserEmotion = null; // Reset the selected emotion
     });
   }
 
@@ -231,10 +255,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
-            SizedBox(height: 20),
-            _buildSectionTitle("How do you feel today?"),
             SizedBox(height: 10),
-            selectedEmotion == null
+            currentUserEmotion == null
                 ? Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -259,7 +281,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : Column(
                     children: [
                       Text(
-                        "Today I'm feeling $selectedEmotion",
+                        "Today I'm feeling $currentUserEmotion",
                         style: TextStyle(
                             fontSize: 24, fontWeight: FontWeight.bold),
                       ),
@@ -307,21 +329,17 @@ Widget _buildInfoCard(String title, String data, IconData icon, Color color) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Icon(icon, color: Colors.white),
-            SizedBox(width: 10),
-            Text(title,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold))
-          ]),
-          SizedBox(height: 10),
-          Text(data,
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Icon(icon, color: Colors.white),
+              SizedBox(height: 10),
+              Text(data,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+            ],
+          ),
         ],
       ),
     ),

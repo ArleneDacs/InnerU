@@ -10,6 +10,9 @@ class EmotionTrackerPage extends StatefulWidget {
 class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
   @override
   Widget build(BuildContext context) {
+    // Get the current user's UID
+    String userId = FirebaseAuth.instance.currentUser?.uid ?? "";
+
     return Scaffold(
       appBar: AppBar(
         title: Text("Emotion Tracker"),
@@ -17,14 +20,15 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection("emotions")
-            .where("username",
-                isEqualTo: FirebaseAuth.instance.currentUser?.displayName)
-            .orderBy("date", descending: true)
+            .where("userId", isEqualTo: userId) // Fetch based on userId
+            .orderBy("date",
+                descending: true) // Order by date, most recent first
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
           }
+
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return Center(child: Text("No emotions tracked yet."));
           }
