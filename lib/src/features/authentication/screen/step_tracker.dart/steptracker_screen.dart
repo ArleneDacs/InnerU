@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
@@ -8,7 +9,8 @@ class StepTracker extends StatefulWidget {
   State<StepTracker> createState() => _TrackingStepsState();
 }
 
-class _TrackingStepsState extends State<StepTracker> with SingleTickerProviderStateMixin {
+class _TrackingStepsState extends State<StepTracker>
+    with SingleTickerProviderStateMixin {
   late AnimationController _lottieController;
   bool isPlaying = true; // Track if animation is playing
 
@@ -38,7 +40,17 @@ class _TrackingStepsState extends State<StepTracker> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      
+      appBar: AppBar(
+        title: Text("Step Tracker"),
+        actions: [
+          IconButton(
+            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
+            onPressed: () {
+              Navigator.pushNamed(context, "/profile");
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -75,4 +87,3 @@ class _TrackingStepsState extends State<StepTracker> with SingleTickerProviderSt
     );
   }
 }
-

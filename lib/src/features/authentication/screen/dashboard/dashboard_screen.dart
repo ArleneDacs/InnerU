@@ -21,28 +21,16 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Color(0xFFE0F2F1),
         elevation: 0,
         leading: IconButton(
           icon: Icon(CupertinoIcons.person, size: 28, color: Colors.black),
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => ProfilePage(title: 'Profile')),
-            );
-          },
+          onPressed: () => Navigator.pushNamed(context, '/profile'),
         ),
         actions: [
           IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3,
-                size: 28, color: Colors.black),
+            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => ProfilePage(title: 'Profile')),
-              );
+              Navigator.pushNamed(context, "/profile");
             },
           ),
         ],
@@ -59,7 +47,10 @@ class DashboardScreen extends StatelessWidget {
                   snapshot.connectionState == ConnectionState.waiting
                       ? "Loading..."
                       : "Hello, ${snapshot.data}!",
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge!
+                      .copyWith(fontSize: 25),
                 );
               },
             ),

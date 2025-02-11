@@ -45,6 +45,8 @@ dependencies:
   intl: ^0.20.2
   image_picker: ^1.1.2
   firebase_storage: ^12.4.2
+  flutter_gif: ^0.0.4
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -98,7 +100,7 @@ flutter:
     - assets/images/reminder.png
     - assets/images/card.png
     - assets/images/alert.png
-
+    - assets/images/
   fonts:
     - family: Parisienne
       fonts:

@@ -1,11 +1,14 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/splash_screen/splash_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
@@ -28,7 +31,11 @@ class App extends StatelessWidget {
       create: (context) => TimeProvider(),
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: TAppTheme.lightTheme,
+        theme: ThemeData(
+            textTheme: TextTheme(
+                titleLarge: GoogleFonts.parisienne(fontSize: 40),
+                bodyMedium: GoogleFonts.puritan(
+                    color: const Color.fromARGB(255, 60, 60, 60)))),
         darkTheme: TAppTheme.darkTheme,
         themeMode: ThemeMode.system,
         home: SplashScreen(),
@@ -38,8 +45,25 @@ class App extends StatelessWidget {
           '/meditation': (context) => Meditation(),
           '/notes': (context) => Notes(),
           '/stepTracker': (context) => StepTracker(),
+          '/notesType': (context) => NotesType(),
+          '/profile': (context) => ProfilePage(
+                title: '',
+              )
         },
       ),
+    );
+  }
+}
+
+class GlobalPaddingWrapper extends StatelessWidget {
+  final Widget child;
+  const GlobalPaddingWrapper({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0), // Set global padding
+      child: child,
     );
   }
 }

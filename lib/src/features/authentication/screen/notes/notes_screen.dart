@@ -1,4 +1,6 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 
 class Notes extends StatefulWidget {
   const Notes({super.key});
@@ -11,6 +13,17 @@ class _NotesState extends State<Notes> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text("Journal"),
+        actions: [
+          IconButton(
+            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
+            onPressed: () {
+              Navigator.pushNamed(context, "/profile");
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: Container(
           margin: EdgeInsets.all(20),
@@ -18,11 +31,11 @@ class _NotesState extends State<Notes> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Image(image: AssetImage('assets/images/Diary-bro (1).png')),
+              Lottie.asset("assets/images/lottie_writing.json"),
               Center(
                 child: ElevatedButton(
                     onPressed: () {
-                      Navigator.pushNamed(context, 'notesType');
+                      Navigator.pushNamed(context, '/notesType');
                     },
                     child: Text("Write")),
               ),

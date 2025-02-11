@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
+import 'package:selfcare_projects/src/constants/image_strings.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 
 class Meditation extends StatefulWidget {
@@ -17,12 +19,14 @@ class _MeditationState extends State<Meditation> {
     return Scaffold(
       appBar: AppBar(
         title: Text("Meditation"),
-        leading: IconButton(
+        actions: [
+          IconButton(
+            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pushNamed(context, "/profile");
             },
-            icon: Icon(Icons.arrow_back)),
-        actions: [IconButton(onPressed: () {}, icon: Icon(Icons.menu))],
+          ),
+        ],
       ),
       body: Center(
         child: Container(
@@ -31,8 +35,7 @@ class _MeditationState extends State<Meditation> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Image.asset('assets/images/meditation-freepik.png'),
-              SizedBox(height: 0), // Reduce spacing
+              Lottie.asset("assets/images/lottie_meditation.json", height: 300),
               Center(
                 child: GestureDetector(
                   onTap: () => _showTimePicker(context, timeProvider),
