@@ -35,14 +35,14 @@ class _NotesState extends State<Notes> {
               Center(
                 child: ElevatedButton(
                     onPressed: () {
-                      Navigator.pushNamed(context, '/notesType');
+                      Navigator.pushNamed(context, 'notesType');
                     },
                     child: Text("Write")),
               ),
               Center(
                 child: InkWell(
                   onTap: () {
-                    Navigator.pushNamed(context, 'noteGallery');
+                    Navigator.pushNamed(context, '/noteGallery');
                   },
                   child: Padding(
                     padding: EdgeInsets.all(20.0),

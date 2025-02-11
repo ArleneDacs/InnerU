@@ -6,11 +6,13 @@ import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/note_gallery.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/splash_screen/splash_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/utils/theme/theme.dart';
 
@@ -45,7 +47,15 @@ class App extends StatelessWidget {
           '/meditation': (context) => Meditation(),
           '/notes': (context) => Notes(),
           '/stepTracker': (context) => StepTracker(),
-          '/notesType': (context) => NotesType(),
+          '/noteGallery': (context) => NotesGallery(),
+          'notesType': (context) => NotesType(
+              note: Note(
+                  username: '',
+                  id: '',
+                  title: '',
+                  note: '',
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now())),
           '/profile': (context) => ProfilePage(
                 title: '',
               )

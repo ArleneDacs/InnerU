@@ -1,0 +1,48 @@
+import 'dart:math';
+
+class Note {
+  String username;
+  String id;
+  String title;
+  String note;
+  int color;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Note({
+    required this.username,
+    required this.id,
+    required this.title,
+    required this.note,
+    this.color = 0xFFFFFFFF,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+}
+
+int generateRandomLightShade() {
+  Random random = Random();
+
+  // Define base colors
+  List<int> baseColors = [
+    0xFF80C8BC, // Teal
+    0xFFEFD199, // Yellow
+    0xFF62A782, // Greenish teal
+    0xFF5EC0CA // Light blue cyan
+  ];
+
+  int baseColor = baseColors[random.nextInt(baseColors.length)];
+
+  int red = (baseColor >> 16) & 0xFF;
+  int green = (baseColor >> 8) & 0xFF;
+  int blue = baseColor & 0xFF;
+
+  double lightenFactor =
+      0.3 + random.nextDouble() * 0.4; // Adjust how much lighter (0.3 - 0.7)
+
+  red = (red + (255 - red) * lightenFactor).toInt().clamp(0, 255);
+  green = (green + (255 - green) * lightenFactor).toInt().clamp(0, 255);
+  blue = (blue + (255 - blue) * lightenFactor).toInt().clamp(0, 255);
+
+  return (0xFF << 24) | (red << 16) | (green << 8) | blue;
+}
