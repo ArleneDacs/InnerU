@@ -1,10 +1,26 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
+  @override
+  _DashboardScreenState createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  String quote = "Your daily inspiration...";
+  String author = "Unknown";
+
+  @override
+  void initState() {
+    super.initState();
+    fetchQuote();
+  }
+
   Future<String> _getUsername() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return "User";
@@ -15,6 +31,32 @@ class DashboardScreen extends StatelessWidget {
         .get();
 
     return userDoc.exists ? userDoc["username"] ?? "User" : "User";
+  }
+
+  Future<void> fetchQuote() async {
+    try {
+      final response =
+          await http.get(Uri.parse("https://zenquotes.io/api/random"));
+
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        setState(() {
+          quote = data[0]['q'] ?? "No quote available.";
+          author = data[0]['a'] ?? "Unknown";
+        });
+      } else {
+        setState(() {
+          quote = "Failed to load quote.";
+          author = "Unknown";
+        });
+      }
+    } catch (e) {
+      print("Error fetching quote: $e");
+      setState(() {
+        quote = "Failed to load quote.";
+        author = "Unknown";
+      });
+    }
   }
 
   @override
@@ -29,9 +71,7 @@ class DashboardScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () {
-              Navigator.pushNamed(context, "/profile");
-            },
+            onPressed: () => Navigator.pushNamed(context, "/profile"),
           ),
         ],
       ),
@@ -56,8 +96,7 @@ class DashboardScreen extends StatelessWidget {
             ),
             SizedBox(height: 20),
             _buildSectionTitle("Quote of the Day"),
-            _buildCardContainer(
-                height: 100, content: "Your daily inspiration..."),
+            _buildCardContainer(height: 100, content: "\"$quote\" - $author"),
             SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
