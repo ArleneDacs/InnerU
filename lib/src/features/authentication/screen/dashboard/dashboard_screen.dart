@@ -256,6 +256,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
             SizedBox(height: 10),
+            _buildSectionTitle("How do you feel today?"),
+            SizedBox(height: 10),
             currentUserEmotion == null
                 ? Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
