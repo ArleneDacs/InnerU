@@ -1,6 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 
 class EmotionTrackerPage extends StatefulWidget {
   @override
@@ -8,40 +8,52 @@ class EmotionTrackerPage extends StatefulWidget {
 }
 
 class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   @override
   Widget build(BuildContext context) {
-    // Get the current user's UID
-    String userId = FirebaseAuth.instance.currentUser?.uid ?? "";
+    User? user = _auth.currentUser;
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(title: Text('Emotion Tracker')),
+        body: Center(child: Text('User not logged in.')),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Emotion Tracker"),
+        title: Text('Emotion Tracker'),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection("emotions")
-            .where("userId", isEqualTo: userId) // Fetch based on userId
-            .orderBy("date",
-                descending: true) // Order by date, most recent first
+        stream: _firestore
+            .collection('emotions')
+            .where('userId', isEqualTo: user.uid)
+            // Remove orderBy temporarily if error persists
+            .orderBy('date', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(
+                child: Text('Error fetching emotions: ${snapshot.error}'));
+          } else if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(child: Text('No emotions recorded.'));
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(child: Text("No emotions tracked yet."));
-          }
+          List<Map<String, dynamic>> emotions = snapshot.data!.docs
+              .map((doc) => doc.data() as Map<String, dynamic>)
+              .toList();
 
           return ListView.builder(
-            itemCount: snapshot.data!.docs.length,
+            itemCount: emotions.length,
             itemBuilder: (context, index) {
-              var emotionData =
-                  snapshot.data!.docs[index].data() as Map<String, dynamic>;
+              var emotion = emotions[index];
               return ListTile(
-                title: Text("Emotion: ${emotionData['emotion']}"),
-                subtitle: Text("Date: ${emotionData['date']}"),
-                leading: Icon(Icons.emoji_emotions),
+                leading: Icon(Icons.mood),
+                title: Text(emotion['emotion']),
+                subtitle: Text("Date: ${emotion['date']}"),
               );
             },
           );

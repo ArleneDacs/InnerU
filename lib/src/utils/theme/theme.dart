@@ -33,9 +33,14 @@ class TAppTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: customTeal,
-        foregroundColor: Colors.white,
+        backgroundColor: customTeal, // teal button background
+        foregroundColor: Colors.white, // white text
       ),
+    ),
+    textTheme: const TextTheme(
+      bodyLarge: TextStyle(color: Colors.black),
+      bodyMedium: TextStyle(color: Colors.black),
+      titleLarge: TextStyle(color: Colors.black),
     ),
   );
 
@@ -46,9 +51,14 @@ class TAppTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.tealAccent,
-        foregroundColor: Colors.black,
+        backgroundColor: customTeal, // teal button background
+        foregroundColor: Colors.white, // white text
       ),
+    ),
+    textTheme: const TextTheme(
+      bodyLarge: TextStyle(color: Colors.white),
+      bodyMedium: TextStyle(color: Colors.white),
+      titleLarge: TextStyle(color: Colors.white),
     ),
   );
 }

@@ -208,13 +208,30 @@ class _SignupScreenState extends State<SignupScreen> {
                     const SizedBox(height: 25),
                     SizedBox(
                       width: double.infinity,
-                      height: 45,
+                      height: 50,
                       child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          backgroundColor:
+                              const Color.fromARGB(255, 89, 189, 179),
+                        ),
                         onPressed: _isLoading ? null : _handleSignup,
                         child: _isLoading
                             ? const CircularProgressIndicator(
                                 color: Colors.white)
-                            : const Text("Register"),
+                            : Text(
+                                "Register",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Colors.black,
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -226,13 +243,17 @@ class _SignupScreenState extends State<SignupScreen> {
                     Row(
                       children: [
                         Expanded(
-                            child: Divider(color: Colors.brown, thickness: 1)),
+                            child: Divider(
+                                color: const Color.fromARGB(255, 91, 195, 183),
+                                thickness: 1)),
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 10),
                           child: Text("OR"),
                         ),
                         Expanded(
-                            child: Divider(color: Colors.brown, thickness: 1)),
+                            child: Divider(
+                                color: const Color.fromARGB(255, 91, 195, 183),
+                                thickness: 1)),
                       ],
                     ),
                     const SizedBox(height: 10),

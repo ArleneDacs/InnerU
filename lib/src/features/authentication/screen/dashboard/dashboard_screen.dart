@@ -31,13 +31,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadTodayEmotion(); // Load the emotion for the current user when the app starts
   }
 
-  void selectEmotion(String emotion) {
+  selectEmotion(String emotion) async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    String username = await _getUsername(); // Fetch username before saving
+
     setState(() {
       selectedEmotion = emotion;
     });
-    _saveEmotionToDatabase(emotion);
-    _saveEmotionToSharedPreferences(
-        emotion); // Save the emotion to SharedPreferences
+
+    _saveEmotionToDatabase(context, emotion, username); // Pass username
+    _saveEmotionToSharedPreferences(emotion);
   }
 
   Future<void> _saveEmotionToSharedPreferences(String emotion) async {
@@ -154,15 +159,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _saveEmotionToDatabase(String emotion) async {
+  Future<void> _saveEmotionToDatabase(
+      BuildContext context, String emotion, String username) async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     String today = DateTime.now().toString().split(' ')[0];
+
     try {
       QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection("emotions")
           .where("userId", isEqualTo: user.uid)
+          .where("username", isEqualTo: username)
           .where("date", isEqualTo: today)
           .get();
 
@@ -175,19 +183,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       await FirebaseFirestore.instance.collection("emotions").add({
-        "userId": user.uid, // Store user ID for easy retrieval
-        "username": user.displayName ?? "Unknown",
+        "userId": user.uid,
+        "username": username.isNotEmpty ? username : "Unknown",
         "emotion": emotion,
         "date": today,
       });
 
-      setState(() {
-        selectedEmotion = emotion;
-      });
+      if (mounted) {
+        setState(() {
+          selectedEmotion = emotion;
+        });
+      }
 
       print("Emotion saved successfully.");
     } catch (e) {
       print("Error saving emotion: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to save emotion. Please try again.")),
+      );
     }
   }
 

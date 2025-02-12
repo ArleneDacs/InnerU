@@ -4,7 +4,6 @@ import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgetpassword_otp/forgotpasswordotp.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgotpassword_mail/forgotpasswordmail.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:flutter/cupertino.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -107,7 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Show Forgot Password Options
   void _showForgotPasswordOptions() {
     showModalBottomSheet(
       context: context,
@@ -131,7 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 leading: Icon(Icons.email, color: Colors.blue),
                 title: const Text("Reset via Email"),
                 onTap: () {
-                  Navigator.pop(context); // Close modal
+                  Navigator.pop(context);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -143,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 leading: Icon(Icons.phone, color: Colors.green),
                 title: const Text("Reset via Phone"),
                 onTap: () {
-                  Navigator.pop(context); // Close modal
+                  Navigator.pop(context);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -160,6 +158,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Stack(
@@ -227,7 +227,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: _showForgotPasswordOptions, // Open reset modal
+                      onPressed: _showForgotPasswordOptions,
                       child: const Text("Forgot Password?"),
                     ),
                   ),
@@ -240,14 +240,20 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
                         ),
-                        backgroundColor: const Color.fromARGB(255, 1, 142, 121),
+                        backgroundColor:
+                            const Color.fromARGB(255, 89, 189, 179),
                       ),
                       onPressed: _isLoading ? null : _handleLogin,
                       child: _isLoading
                           ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text("Log-in",
+                          : Text(
+                              "Log-in",
                               style: TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.bold)),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isDarkMode ? Colors.white : Colors.black,
+                              ),
+                            ),
                     ),
                   ),
                   const SizedBox(height: 15),
