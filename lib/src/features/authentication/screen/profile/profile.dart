@@ -1,9 +1,11 @@
 import 'dart:convert';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
 
 // Dummy screens (Replace with your actual screens)
 class EditProfileScreen extends StatelessWidget {
@@ -17,10 +19,6 @@ class ChangeMeditationScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Change Meditation Song")));
 }
 
-class PrivacyScreen extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text("Privacy")));
-}
 
 class SubscriptionScreen extends StatelessWidget {
   @override
@@ -35,12 +33,14 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
+
 class _ProfilePageState extends State<ProfilePage> {
   bool _isPressed = false;
   String username = "Loading...";
   String email = "Loading...";
-   String? _base64Image;
- @override
+  String? _base64Image;
+
+  @override
   void initState() {
     super.initState();
     UserService.getUserData().then((data) => setState(() {
@@ -49,7 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
           _base64Image = data["profilePic"];
         }));
   }
-  // Logout confirmation dialog
+
   Future<void> _showLogOutDialog(BuildContext context) async {
     setState(() => _isPressed = true);
     await Future.delayed(Duration(milliseconds: 300));
@@ -58,16 +58,29 @@ class _ProfilePageState extends State<ProfilePage> {
     showDialog(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Log out'),
-        content: Text('Are you sure you want to log out?'),
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
           TextButton(
-            onPressed: () {
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Sign out the user from Firebase
+              await FirebaseAuth.instance.signOut();
+
+              // Close the dialog
               Navigator.pop(context);
-              Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
+
+              // Navigate to LoginScreen and remove all previous routes
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => LoginScreen()),
+                (route) => false, // Removes all previous routes from the stack
+              );
             },
-            child: Text('Yes'),
+            child: const Text('Yes'),
           ),
         ],
       ),
@@ -79,84 +92,93 @@ class _ProfilePageState extends State<ProfilePage> {
     double screenWidth = MediaQuery.of(context).size.width;
     double containerWidth = screenWidth * 0.85;
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: SingleChildScrollView(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-            child: Column(
-              children: [
-                _base64Image == null
-                    ? Image.asset(
-                        'assets/images/avatar.png', // Default image if no profilePic is available
-                        width: screenWidth * 0.35,
-                        height: screenWidth * 0.35,
-                      )
-                    : ClipOval(
-                        child: Image.memory(
-                          base64Decode(_base64Image!), // Decode the base64 string to display the image
+    return WillPopScope(
+      onWillPop: () async {
+        // When back button is pressed, navigate to CurvedNavBar
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => CurvedNavBar()), // Replace with your actual CurvedNavBar widget
+          (route) => false, // Removes all previous routes from the stack
+        );
+        return false; // Prevent the default back navigation
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.title)),
+        body: SingleChildScrollView(
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              child: Column(
+                children: [
+                  _base64Image == null
+                      ? Image.asset(
+                          'assets/images/avatar.png', // Default image if no profilePic is available
                           width: screenWidth * 0.35,
                           height: screenWidth * 0.35,
-                          fit: BoxFit.cover,
+                        )
+                      : ClipOval(
+                          child: Image.memory(
+                            base64Decode(_base64Image!), // Decode the base64 string to display the image
+                            width: screenWidth * 0.35,
+                            height: screenWidth * 0.35,
+                            fit: BoxFit.cover,
+                          ),
                         ),
+                  SizedBox(height: 10),
+
+                  // Fetch and Display User Data
+                  Column(
+                    children: [
+                      Text(
+                        "$username",
+                        style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
                       ),
-                SizedBox(height: 10),
-
-                // Fetch and Display User Data
-                Column(
-                      children: [
-                        Text(
-                         "$username",
-                          style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          "$email",
-                          style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-                        ),
-                      ],
-                    ),
-                
-
-                SizedBox(height: 20),
-
-                // Section Titles & Buttons with Navigation
-                _buildSectionTitle("General"),
-                _buildButton(context, "Edit Profile", EditProfile(title: 'Edit Profile',)),
-
-                _buildSectionTitle("Audio Settings"),
-                _buildButton(context, "Change Meditation Song", ChangeMeditationScreen()),
-
-                _buildSectionTitle("Account Settings"),
-                _buildButton(context, "Privacy", PrivacyScreen()),
-
-                _buildSectionTitle("Subscription"),
-                _buildButton(context, "Manage Subscription", SubscriptionScreen()),
-
-                SizedBox(height: 10),
-
-                // Logout Button
-                ElevatedButton(
-                  onPressed: () => _showLogOutDialog(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isPressed ? Color(0xFFCE8F5A) : Colors.transparent,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Color(0xFFCE8F5A), width: 2),
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 50, vertical: 10),
+                      Text(
+                        "$email",
+                        style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                      ),
+                    ],
                   ),
-                  child: Text(
-                    'Log-out',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: _isPressed ? Colors.white : Color(0xFFCE8F5A),
+                  SizedBox(height: 20),
+
+                  // Section Titles & Buttons with Navigation
+                  _buildSectionTitle("General"),
+                  _buildButton(context, "Edit Profile", EditProfile(title: 'Edit Profile',)),
+
+                  _buildSectionTitle("Audio Settings"),
+                  _buildButton(context, "Change Meditation Song", ChangeMeditationScreen()),
+
+                  _buildSectionTitle("Account Settings"),
+                  _buildButton(context, "Privacy", PrivacyScreen(title: 'Privacy',)),
+
+                  _buildSectionTitle("Subscription"),
+                  _buildButton(context, "Manage Subscription", SubscriptionScreen()),
+
+                  SizedBox(height: 10),
+
+                  // Logout Button
+                  ElevatedButton(
+                    onPressed: () => _showLogOutDialog(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isPressed ? Color(0xFFCE8F5A) : Colors.transparent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Color(0xFFCE8F5A), width: 2),
+                      ),
+                      padding: EdgeInsets.symmetric(horizontal: 50, vertical: 10),
+                    ),
+                    child: Text(
+                      'Log-out',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: _isPressed ? Colors.white : Color(0xFFCE8F5A),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -176,12 +198,18 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // Button Widget with Navigation
-  Widget _buildButton(BuildContext context, String label, Widget targetScreen) {
+Widget _buildButton(BuildContext context, String label, Widget targetScreen) {
     return Container(
       margin: EdgeInsets.only(bottom: 10),
       width: double.infinity,
       child: TextButton(
-        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen)),
+        onPressed: () {
+          print("Navigating to: $label");
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => targetScreen),
+          );
+        },
         style: ButtonStyle(
           padding: MaterialStateProperty.all(EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
           overlayColor: MaterialStateProperty.all(Colors.grey.shade200),
