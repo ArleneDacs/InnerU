@@ -42,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (user!.emailVerified) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => CurvedNavBar()),
+            MaterialPageRoute(builder: (context) => Setuppage()),
           );
         } else {
           _showEmailNotVerifiedDialog(user);
