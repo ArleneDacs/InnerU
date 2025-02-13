@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -247,6 +248,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // FutureBuilder for the username
               future: _getUsername(),
               builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done &&
+                    snapshot.hasData) {
+                  UserPreferences.saveUsername(snapshot.data!);
+                }
                 return Text(
                   snapshot.connectionState == ConnectionState.waiting
                       ? "Loading..."

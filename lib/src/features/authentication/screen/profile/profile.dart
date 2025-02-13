@@ -6,6 +6,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/UsersData/U
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
+import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 
 // Dummy screens (Replace with your actual screens)
 class EditProfileScreen extends StatelessWidget {
@@ -155,8 +156,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       )),
 
                   _buildSectionTitle("Audio Settings"),
-                  _buildButton(context, "Change Meditation Song",
-                      ChangeMeditationScreen()),
+                  _buildButton(
+                      context, "Change Meditation Song", MeditationSong()),
 
                   _buildSectionTitle("Account Settings"),
                   _buildButton(
