@@ -91,7 +91,7 @@ class _ChangePass extends State<ChangePass> {
           padding: EdgeInsets.all(20),
           child: Column(
             children: [
-              SizedBox(height: 30.0),
+              SizedBox(height: 225.0),
               Padding(
                 padding: const EdgeInsets.only(bottom: 20),
                 child: TextField(
@@ -122,6 +122,7 @@ class _ChangePass extends State<ChangePass> {
                   ),
                 ),
               ),
+               SizedBox(height: 70.0),
               ElevatedButton(
                 onPressed: _isButtonEnabled ? _sendPasswordResetEmail : null,
                 style: ElevatedButton.styleFrom(

@@ -51,42 +51,7 @@ class _ProfilePageState extends State<ProfilePage> {
         }));
   }
 
-  Future<void> _showLogOutDialog(BuildContext context) async {
-    setState(() => _isPressed = true);
-    await Future.delayed(Duration(milliseconds: 300));
-    setState(() => _isPressed = false);
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Log out'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Sign out the user from Firebase
-              await FirebaseAuth.instance.signOut();
-
-              // Close the dialog
-              Navigator.pop(context);
-
-              // Navigate to LoginScreen and remove all previous routes
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (context) => LoginScreen()),
-                (route) => false, // Removes all previous routes from the stack
-              );
-            },
-            child: const Text('Yes'),
-          ),
-        ],
-      ),
-    );
-  }
+  
 
   @override
   Widget build(BuildContext context) {
@@ -173,29 +138,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
                   SizedBox(height: 10),
 
-                  // Logout Button
-                  ElevatedButton(
-                    onPressed: () => _showLogOutDialog(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          _isPressed ? Color(0xFFCE8F5A) : Colors.transparent,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Color(0xFFCE8F5A), width: 2),
-                      ),
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 50, vertical: 10),
-                    ),
-                    child: Text(
-                      'Log-out',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: _isPressed ? Colors.white : Color(0xFFCE8F5A),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -212,7 +154,7 @@ class _ProfilePageState extends State<ProfilePage> {
       margin: EdgeInsets.only(top: 10, bottom: 10),
       padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-          color: Color(0xFFc4f0d9), borderRadius: BorderRadius.circular(5)),
+          color: Color(0xFFF3DDB3), borderRadius: BorderRadius.circular(5)),
       child: Text(title,
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     );

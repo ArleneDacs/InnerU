@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+
 
 class BottomSheetWidget {
   static void show(BuildContext context) {
@@ -45,7 +48,7 @@ class BottomSheetWidget {
                   ),
                   title: Text("Log out"),
                   onTap: () {
-                    Navigator.pop(context);
+                    _showLogOutDialog(context); // Show log out dialog
                   },
                 ),
               ],
@@ -53,6 +56,40 @@ class BottomSheetWidget {
           ),
         );
       },
+    );
+  }
+
+  // Log out dialog
+  static Future<void> _showLogOutDialog(BuildContext context) async {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Sign out the user from Firebase
+              await FirebaseAuth.instance.signOut();
+
+              // Close the dialog
+              Navigator.pop(context);
+
+              // Navigate to LoginScreen and remove all previous routes
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => LoginScreen()),
+                (route) => false, // Removes all previous routes from the stack
+              );
+            },
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
     );
   }
 }
