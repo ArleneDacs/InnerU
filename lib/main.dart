@@ -36,11 +36,19 @@ class App extends StatelessWidget {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-            textTheme: TextTheme(
-                titleLarge: GoogleFonts.parisienne(fontSize: 40),
-                bodyMedium: GoogleFonts.puritan(
-                    color: const Color.fromARGB(255, 60, 60, 60)))),
-        darkTheme: TAppTheme.darkTheme,
+          textTheme: TextTheme(
+            titleLarge: GoogleFonts.parisienne(fontSize: 40),
+            bodyMedium: GoogleFonts.puritan(color: Colors.black87),
+          ),
+        ),
+        darkTheme: ThemeData(
+          brightness: Brightness.dark,
+          textTheme: TextTheme(
+            titleLarge:
+                GoogleFonts.parisienne(fontSize: 40, color: Colors.white),
+            bodyMedium: GoogleFonts.puritan(color: Colors.white70),
+          ),
+        ),
         themeMode: ThemeMode.system,
         home: GlobalPaddingWrapper(
           child: SplashScreen(),
