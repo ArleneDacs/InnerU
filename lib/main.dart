@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
@@ -65,6 +66,7 @@ class App extends StatelessWidget {
           '/stepTracker': (context) => StepTracker(),
           '/noteGallery': (context) => NotesGallery(),
           '/sleepTracker': (context) => SleepTracker(),
+          '/coachesScreen': (context) => CoachesScreen(),
           'notesType': (context) => NotesType(
               note: Note(
                   username: '',

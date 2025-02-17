@@ -1,7 +1,7 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
-
 
 class BottomSheetWidget {
   static void show(BuildContext context) {
@@ -38,6 +38,15 @@ class BottomSheetWidget {
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/leaderboard');
+                  },
+                ),
+                Divider(),
+                ListTile(
+                  leading: Icon(CupertinoIcons.rosette),
+                  title: Text("Coaches"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/coachesScreen');
                   },
                 ),
                 Divider(),
