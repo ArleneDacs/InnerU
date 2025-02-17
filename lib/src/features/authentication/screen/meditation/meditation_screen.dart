@@ -52,17 +52,6 @@ class _MeditationState extends State<Meditation> {
   Widget build(BuildContext context) {
     final timeProvider = Provider.of<TimeProvider>(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Meditation"),
-        actions: [
-          IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () {
-              Navigator.pushNamed(context, "/profile");
-            },
-          ),
-        ],
-      ),
       body: Center(
         child: Container(
           margin: EdgeInsets.all(0),

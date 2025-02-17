@@ -36,6 +36,10 @@ class App extends StatelessWidget {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
+          scaffoldBackgroundColor: const Color(0xFFFFFFFF),
+          appBarTheme: AppBarTheme(
+            backgroundColor: Color(0xFFFFFFFF),
+          ),
           textTheme: TextTheme(
             titleLarge: GoogleFonts.parisienne(fontSize: 40),
             bodyMedium: GoogleFonts.puritan(color: Colors.black87),

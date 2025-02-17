@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
+import 'package:selfcare_projects/src/models/customSnackbar.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 
 class NotesType extends StatefulWidget {
@@ -20,6 +21,9 @@ class _NotesTypeState extends State<NotesType> {
   String titleString = '';
   String noteString = '';
   late int color;
+  bool _isSaving = false;
+  bool _mounted = true;
+  late SnackBar alertContent;
 
   late TextEditingController titleController;
   late TextEditingController contentController;
@@ -37,6 +41,12 @@ class _NotesTypeState extends State<NotesType> {
     UserService.getUserData().then((data) => setState(() {
           username = data["username"]!;
         }));
+  }
+
+  @override
+  void dispose() {
+    _mounted = false; // Mark the widget as unmounted when disposed
+    super.dispose();
   }
 
   @override
@@ -99,24 +109,55 @@ class _NotesTypeState extends State<NotesType> {
     );
   }
 
-  void saveNotes() async {
+  Future<void> saveNotes() async {
+    if (_isSaving) return; // Prevent multiple clicks
+    _isSaving = true;
+
     DateTime now = DateTime.now();
-    if (note.id.isEmpty) {
-      await myNotes.add({
-        'username': username,
-        'title': titleString,
-        'note': noteString,
-        'color': color,
-        'createdAt': now
-      });
-    } else {
-      await myNotes.doc(note.id).update({
-        'username': username,
-        'title': titleString,
-        'note': noteString,
-        'color': color,
-        'updatedAt': now
-      });
+
+    try {
+      if (note.id.isEmpty) {
+        final querySnapshot = await myNotes
+            .where('username', isEqualTo: username)
+            .where('title', isEqualTo: titleString)
+            .where('note', isEqualTo: noteString)
+            .get();
+
+        if (querySnapshot.docs.isEmpty) {
+          await myNotes.add({
+            'username': username,
+            'title': titleString,
+            'note': noteString,
+            'color': color,
+            'createdAt': now,
+          });
+
+          if (_mounted) {
+            CustomSnackBar.showCustomSnackBar(
+                context, "Note saved successfully.", Colors.white);
+          }
+        } else {
+          if (_mounted) {
+            CustomSnackBar.showCustomSnackBar(
+                context, "This note is already saved.", Colors.white);
+          }
+        }
+      } else {
+        await myNotes.doc(note.id).update({
+          'username': username,
+          'title': titleString,
+          'note': noteString,
+          'color': color,
+          'updatedAt': now,
+        });
+      }
+    } catch (e) {
+      if (_mounted) {
+        CustomSnackBar.showCustomSnackBar(
+            context, "You have an error.", Colors.white);
+      }
     }
+
+    _isSaving = false; // Reset flag after saving
   }
 }

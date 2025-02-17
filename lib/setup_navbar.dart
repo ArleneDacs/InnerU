@@ -7,10 +7,10 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 
 class Setuppage extends StatefulWidget {
   const Setuppage({super.key});
-
   @override
   State<Setuppage> createState() => _SetuppageState();
 }
@@ -24,6 +24,14 @@ class _SetuppageState extends State<Setuppage> {
     DashboardScreen(),
     SleepTracker(),
     Notes()
+  ];
+
+  final _titles = [
+    "Meditation",
+    "Step Tracker",
+    "",
+    "Sleep Tracker",
+    "Journal"
   ];
 
   // Default (unselected) icons
@@ -53,6 +61,22 @@ class _SetuppageState extends State<Setuppage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: index == 2
+          ? null
+          : AppBar(
+              title: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(_titles[index]),
+              ),
+              actions: [
+                IconButton(
+                  icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
+                  onPressed: () {
+                    BottomSheetWidget.show(context);
+                  },
+                ),
+              ],
+            ),
       body: _screens[index],
       bottomNavigationBar: CurvedNavigationBar(
         animationDuration: Duration(milliseconds: 300),

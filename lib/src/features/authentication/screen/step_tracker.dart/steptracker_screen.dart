@@ -40,17 +40,6 @@ class _TrackingStepsState extends State<StepTracker>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Step Tracker"),
-        actions: [
-          IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () {
-              Navigator.pushNamed(context, "/profile");
-            },
-          ),
-        ],
-      ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

@@ -10,10 +10,6 @@ class SleepTracker extends StatefulWidget {
 class _SleepTrackerState extends State<SleepTracker> {
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Sleep Tracker"),
-      ),
-    );
+    return Scaffold();
   }
 }

@@ -13,17 +13,6 @@ class _NotesState extends State<Notes> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Journal"),
-        actions: [
-          IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () {
-              Navigator.pushNamed(context, "/profile");
-            },
-          ),
-        ],
-      ),
       body: Center(
         child: Container(
           margin: EdgeInsets.all(20),
