@@ -85,6 +85,7 @@ class App extends StatelessWidget {
 class GlobalPaddingWrapper extends StatelessWidget {
   final Widget child;
   const GlobalPaddingWrapper({required this.child});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -96,10 +97,7 @@ class GlobalPaddingWrapper extends StatelessWidget {
         if (snapshot.hasData && snapshot.data != null) {
           return Setuppage();
         }
-        return Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: SplashScreen(),
-        );
+        return child; // Directly return the child without padding
       },
     );
   }
