@@ -47,9 +47,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      
       body: SafeArea(
-        
         child: Column(
           children: [
             
@@ -57,10 +55,9 @@ class _CoachesScreenState extends State<CoachesScreen> {
               padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  
                   IconButton(
                     icon: const Icon(Icons.arrow_back),
-                    onPressed: () =>  Navigator.pushNamed(context, "/home")
+                    onPressed: () => Navigator.pop(context),
                   ),
                   const Text(
                     'Our Coaches',
