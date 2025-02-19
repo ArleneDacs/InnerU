@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:google_sign_in/google_sign_in.dart'; // For Google Sign-In
+import 'package:firebase_auth/firebase_auth.dart'; // Firebase Authentication
+/*import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // For Apple Sign-In*/
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -20,23 +23,27 @@ class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController _numberController = TextEditingController();
   final TextEditingController _retypepassController = TextEditingController();
 
+  // Email Validation
   bool _isValidEmail(String email) {
     final RegExp emailRegex = RegExp(
         r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]+");
     return emailRegex.hasMatch(email);
   }
 
+  // Phone Number Validation
   bool _isValidPhoneNumber(String number) {
     final RegExp phoneRegex = RegExp(r'^[0-9]{10,15}$');
     return phoneRegex.hasMatch(number);
   }
 
+  // Password Validation
   bool _isValidPassword(String password) {
     final RegExp passwordRegex = RegExp(
         r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$');
     return passwordRegex.hasMatch(password);
   }
 
+  // Function to handle Email Signup
   void _handleSignup() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -85,6 +92,96 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
+  // Function to handle Google Sign-In
+  Future<void> _handleGoogleSignIn() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+
+      // Ensure the account picker appears by signing out first
+      await googleSignIn.signOut();
+
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        return; // User canceled the sign-in process
+      }
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      if (!userCredential.user!.emailVerified) {
+        await userCredential.user!.sendEmailVerification();
+      }
+
+      Navigator.pushReplacementNamed(context, '/home');
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Google sign-in failed: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  // Function to handle Apple Sign-In
+  /*Future<void> _handleAppleSignIn() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      final oAuthProvider = OAuthProvider("apple.com");
+      final credential = oAuthProvider.credential(
+        idToken: appleCredential.identityToken,
+        accessToken: appleCredential.authorizationCode,
+      );
+
+      // Sign in with Firebase using Apple credentials
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      // Navigate to dashboard after Apple sign-in
+      Navigator.pushReplacementNamed(context, '/dashboard');
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Apple sign-in failed: $error'),
+            backgroundColor: Colors.red),
+      );
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }*/
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -118,6 +215,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                     ),
                     const SizedBox(height: 13),
+                    // Username Field
                     TextFormField(
                       controller: _usernameController,
                       decoration: const InputDecoration(labelText: "Username"),
@@ -125,6 +223,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           value!.isEmpty ? "Username cannot be empty" : null,
                     ),
                     const SizedBox(height: 10),
+                    // Email Field
                     TextFormField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
@@ -137,6 +236,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       },
                     ),
                     const SizedBox(height: 10),
+                    // Phone Number Field
                     TextFormField(
                       controller: _numberController,
                       keyboardType: TextInputType.phone,
@@ -151,7 +251,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       },
                     ),
                     const SizedBox(height: 10),
-                    const SizedBox(height: 10),
+                    // Password Field
                     TextFormField(
                       controller: _passwordController,
                       obscureText: !_isPasswordVisible,
@@ -169,7 +269,6 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
                       ),
                       validator: (value) {
-                        // Added `validator` key
                         if (value == null || value.isEmpty) {
                           return "Password cannot be empty.";
                         }
@@ -185,6 +284,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       },
                     ),
                     const SizedBox(height: 10),
+                    // Re-type Password Field
                     TextFormField(
                       controller: _retypepassController,
                       obscureText: !_isPasswordVisible,
@@ -206,6 +306,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           : null,
                     ),
                     const SizedBox(height: 25),
+                    // Register Button
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -240,6 +341,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       child: const Text("Already have an account? Login"),
                     ),
                     const SizedBox(height: 10),
+                    // Divider with OR
                     Row(
                       children: [
                         Expanded(
@@ -257,14 +359,37 @@ class _SignupScreenState extends State<SignupScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
+                    // Google Sign-In Button
+                    // Google & Apple Sign-In Buttons in the same row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Image.asset("assets/logo/google.png", width: 60),
-                        const SizedBox(width: 15),
-                        Image.asset("assets/logo/ios.png", width: 35),
+                        GestureDetector(
+                          onTap: _isLoading ? null : _handleGoogleSignIn,
+                          child: Row(
+                            children: [
+                              Image.asset("assets/logo/google.png", width: 50),
+                              const SizedBox(width: 10),
+                              const Text("Google",
+                                  style: TextStyle(fontSize: 16)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 20), // Space between buttons
+                        GestureDetector(
+                          /* onTap: _isLoading ? null : _handleAppleSignIn, */
+                          child: Row(
+                            children: [
+                              Image.asset("assets/logo/ios.png", width: 30),
+                              const SizedBox(width: 10),
+                              const Text("Apple",
+                                  style: TextStyle(fontSize: 16)),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
+
                     const SizedBox(height: 15),
                   ],
                 ),
