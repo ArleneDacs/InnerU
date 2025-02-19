@@ -45,6 +45,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     setState(() {
       selectedEmotion = emotion;
+      currentUserEmotion = emotion; // Immediately update the current emotion
     });
 
     _saveEmotionToDatabase(context, emotion, username);
@@ -109,7 +110,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .doc(user.uid)
         .get();
 
-    return userDoc.exists ? userDoc["username"] ?? "User" : "User";
+    // Check if the username exists, if not, extract the first part of the email
+    if (userDoc.exists && userDoc["username"] != null) {
+      return userDoc["username"];
+    } else if (user.email != null) {
+      String email = user.email!;
+      String fallbackName = email.split('@')[0]; // Get the part before '@'
+      return fallbackName;
+    }
+
+    return "User";
   }
 
   Future<void> fetchQuote() async {
@@ -398,7 +408,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : Column(
                               children: [
                                 Text(
-                                  "Today I'm feeling $currentUserEmotion",
+                                  "Today I'm feeling $currentUserEmotion", // Display the selected emotion
                                   style: TextStyle(
                                       fontSize: 24,
                                       fontWeight: FontWeight.bold),
@@ -426,9 +436,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           size: 14, color: Colors.blue),
                                     ],
                                   ),
-                                )
+                                ),
                               ],
                             ),
+
                       SizedBox(height: 20),
                     ],
                   ),

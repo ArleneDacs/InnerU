@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class Coach {
   final String name;
-  
+
   Coach({required this.name});
 }
 
@@ -47,20 +47,16 @@ class _CoachesScreenState extends State<CoachesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      
       body: SafeArea(
-        
         child: Column(
           children: [
-            
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  
                   IconButton(
                     icon: const Icon(Icons.arrow_back),
-                    onPressed: () =>  Navigator.pushNamed(context, "/home")
+                    onPressed: () => Navigator.pop(context),
                   ),
                   const Text(
                     'Our Coaches',
@@ -71,22 +67,21 @@ class _CoachesScreenState extends State<CoachesScreen> {
                 ],
               ),
             ),
-            
+
             // Illustration
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20.0),
-              child: SizedBox(
-                height: 280,  
-                child: FittedBox(  
-                fit: BoxFit.contain,
-                child: Image.asset(
-                  'assets/images/coachpic.png',
-                  width: 400,  
-                  height: 300, 
+                padding: const EdgeInsets.symmetric(vertical: 20.0),
+                child: SizedBox(
+                  height: 280,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: Image.asset(
+                      'assets/images/coachpic.png',
+                      width: 400,
+                      height: 300,
+                    ),
                   ),
-                  ),
-                  )
-                  ),
+                )),
 
             // Search Bar
             Padding(
@@ -117,7 +112,9 @@ class _CoachesScreenState extends State<CoachesScreen> {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8.0),
                     decoration: BoxDecoration(
-                      color: index.isEven ? const Color(0xFF90A17D) : const Color(0xFF6D849A),
+                      color: index.isEven
+                          ? const Color(0xFF90A17D)
+                          : const Color(0xFF6D849A),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: ListTile(
@@ -128,7 +125,8 @@ class _CoachesScreenState extends State<CoachesScreen> {
                       title: Text(
                         coach.name,
                         style: const TextStyle(
-                          color: Colors.white,  // Changed from Colors.black87 to Colors.white
+                          color: Colors
+                              .white, // Changed from Colors.black87 to Colors.white
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -141,18 +139,18 @@ class _CoachesScreenState extends State<CoachesScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-          onPressed: () {
-    showDialog(
-      context: context,
-      builder: (context) => AddCoachDialog(
-        onCoachAdded: (coach) {
-          setState(() {
-            coaches.add(coach);
-          });
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) => AddCoachDialog(
+              onCoachAdded: (coach) {
+                setState(() {
+                  coaches.add(coach);
+                });
+              },
+            ),
+          );
         },
-      ),
-    );
-  },
         backgroundColor: const Color(0xFFEFD199),
         shape: const CircleBorder(),
         child: const Icon(Icons.add),
@@ -196,7 +194,6 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -216,7 +213,7 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
               ],
             ),
             const SizedBox(height: 20),
-            
+
             // Full Name
             TextField(
               controller: _nameController,
@@ -231,7 +228,7 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
               ),
             ),
             const SizedBox(height: 12),
-            
+
             // Description
             TextField(
               controller: _descriptionController,
@@ -247,7 +244,7 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Gender Toggle
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -262,44 +259,44 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
               ],
             ),
             const SizedBox(height: 20),
-            
+
             // Buttons
-         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-          ElevatedButton(
-          onPressed: () {
-        if (_nameController.text.isNotEmpty) {
-          widget.onCoachAdded(Coach(
-            name: _nameController.text,
-          ));
-          Navigator.of(context).pop();
-        }
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color.fromARGB(255, 255, 255, 255),
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-      ),
-      child: const Text(
-        'ADD',
-        style: TextStyle(color: Color(0xFFCE8F5A)),
-      ),
-    ),
-    ElevatedButton(
-      onPressed: () {
-        Navigator.of(context).pop();
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFCE8F5A),
-        padding: const EdgeInsets.symmetric(horizontal: 30),
-      ),
-      child: const Text(
-        'CANCEL',
-        style: TextStyle(color: Colors.white),
-      ),
-    ),
-  ],
-),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    if (_nameController.text.isNotEmpty) {
+                      widget.onCoachAdded(Coach(
+                        name: _nameController.text,
+                      ));
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color.fromARGB(255, 255, 255, 255),
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                  ),
+                  child: const Text(
+                    'ADD',
+                    style: TextStyle(color: Color(0xFFCE8F5A)),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFCE8F5A),
+                    padding: const EdgeInsets.symmetric(horizontal: 30),
+                  ),
+                  child: const Text(
+                    'CANCEL',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
