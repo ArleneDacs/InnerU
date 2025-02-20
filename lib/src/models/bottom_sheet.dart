@@ -30,6 +30,15 @@ class BottomSheetWidget {
                 ),
                 Divider(),
                 ListTile(
+                  leading: Icon(Icons.face),
+                  title: Text("Mood Tracker"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/emotionScreen');
+                  },
+                ),
+                Divider(),
+                ListTile(
                   leading: Icon(
                     Icons.star,
                     color: const Color(0xFFF3DDB3),
