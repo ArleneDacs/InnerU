@@ -76,6 +76,10 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final Color textColor = isDarkMode ? Colors.white : Colors.black;
+    final Color labelColor = isDarkMode ? Colors.grey[300]! : Colors.brown;
+
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Stack(
@@ -84,9 +88,12 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 150),
-              const Text(
+              Text(
                 "Reset Password",
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: textColor),
               ),
               const SizedBox(height: 40),
               SingleChildScrollView(
@@ -95,19 +102,19 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
                   children: [
                     TextFormField(
                       controller: _emailController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: "Email",
-                        labelStyle: TextStyle(color: Colors.brown),
+                        labelStyle: TextStyle(color: labelColor),
                         enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.brown),
+                          borderSide: BorderSide(color: labelColor),
                         ),
                         focusedBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.brown, width: 2),
+                          borderSide: BorderSide(color: labelColor, width: 2),
                         ),
                         prefixIcon: Icon(
                           CupertinoIcons.mail,
                           size: 28,
-                          color: Colors.brown,
+                          color: labelColor,
                         ),
                       ),
                     ),
@@ -126,7 +133,8 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
                       height: 50,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.brown.shade400,
+                          backgroundColor:
+                              const Color.fromARGB(255, 89, 189, 179),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
