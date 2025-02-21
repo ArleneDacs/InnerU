@@ -21,40 +21,48 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
   }
 
   /// Fetch emotions from Firestore and update calendar
-  void _fetchEmotions() {
+  void _fetchEmotions() async {
     User? user = _auth.currentUser;
     if (user == null) {
       print("❌ User not logged in.");
       return;
     }
 
-    _firestore
-        .collection('emotions')
-        .where('userId', isEqualTo: user.uid)
-        .snapshots()
-        .listen((snapshot) {
+    try {
+      // Query Firestore for the user's emotions
+      final querySnapshot = await _firestore
+          .collection('emotions')
+          .where('userId', isEqualTo: user.uid)
+          .get();
+
+      // Check if any records were found
+      print("📊 Found ${querySnapshot.docs.length} records in Firestore");
+
       Map<DateTime, String> emotionsData = {};
       DateTime today = _normalizeDate(DateTime.now());
       String? todayEmotion;
 
-      print("🔥 Checking Firestore Data for user: ${user.uid}");
-      print("📆 Today's normalized date: $today");
-
-      for (var doc in snapshot.docs) {
+      for (var doc in querySnapshot.docs) {
         var data = doc.data();
-        DateTime normalizedDate = _parseFirestoreDate(data['date']);
-        String emotionType =
-            data['emotion'] != null ? data['emotion'] as String : 'Unknown';
+        String? firestoreDate = data['date'];
+        String emotionType = data['emotion'] ?? 'Unknown';
 
-        print(
-            "📅 Firestore Record: ${data['date']} → Normalized: $normalizedDate, Emotion: $emotionType");
+        // Ensure the date from Firestore is parsed correctly
+        if (firestoreDate != null) {
+          DateTime normalizedDate = _parseFirestoreDate(firestoreDate);
 
-        emotionsData[normalizedDate] = emotionType;
+          print(
+              "📅 Firestore Record: ${firestoreDate} → Normalized: $normalizedDate, Emotion: $emotionType");
 
-        // Check if today's emotion exists
-        if (normalizedDate.isAtSameMomentAs(today)) {
-          todayEmotion = emotionType;
-          print("✅ Found Emotion for Today: $todayEmotion");
+          emotionsData[normalizedDate] = emotionType;
+
+          // Check if the emotion is for today
+          if (normalizedDate.isAtSameMomentAs(today)) {
+            todayEmotion = emotionType;
+            print("✅ Found Emotion for Today: $todayEmotion");
+          }
+        } else {
+          print("⚠️ Firestore record has no 'date' field");
         }
       }
 
@@ -65,17 +73,20 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
 
       print("🔵 Final Today's Emotion: $_todayEmotion");
       print("📌 All Emotions in Calendar: $_emotionsByDay");
-    });
+    } catch (e) {
+      print("❌ Error fetching emotions from Firestore: $e");
+    }
   }
 
-  /// Convert Firestore string date to DateTime
+  /// Convert Firestore string date (e.g. '2025-02-20') to DateTime
   DateTime _parseFirestoreDate(String dateString) {
     try {
+      // Assumes Firestore date is in 'YYYY-MM-DD' format
       DateTime parsedDate = DateTime.parse(dateString);
-      return DateTime(parsedDate.year, parsedDate.month, parsedDate.day);
+      return _normalizeDate(parsedDate);
     } catch (e) {
-      print("❌ Error parsing date: $dateString");
-      return DateTime.now();
+      print("❌ Error parsing date: $dateString, $e");
+      return DateTime.now(); // Fallback to today's date
     }
   }
 
@@ -154,7 +165,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
             Padding(
               padding: const EdgeInsets.all(10.0),
               child: Text(
-                "No log emotion for today",
+                "No emotion logged for today",
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
