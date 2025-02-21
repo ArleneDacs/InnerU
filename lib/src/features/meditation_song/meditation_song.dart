@@ -79,16 +79,14 @@ class _MeditationSongState extends State<MeditationSong> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Music Player"),
-        actions: [
-          IconButton(
-            onPressed: () => Navigator.pushNamed(context, '/meditationPage'),
-            icon: const Icon(Icons.arrow_right, size: 50),
-          ),
-        ],
       ),
       body: Column(
         children: [
           Image.asset('assets/images/naive-dance-sticker-set.png'),
+          Text(
+            "SONG PREVIEWS",
+            style: TextStyle(fontSize: 20),
+          ),
           Expanded(
             child: ListView.builder(
               itemCount: songs.length,
