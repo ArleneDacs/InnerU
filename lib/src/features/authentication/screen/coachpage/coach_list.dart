@@ -158,6 +158,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
   }
 }
 
+// Coach Dialog
 class AddCoachDialog extends StatefulWidget {
   final Function(Coach) onCoachAdded;
 
