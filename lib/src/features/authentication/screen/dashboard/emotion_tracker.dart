@@ -78,6 +78,25 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
     }
   }
 
+  void _showEmotionMessage(BuildContext context, String emotion) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Emotion of the Day"),
+        content: Text(
+          "You felt $emotion on this day! ${_getEmojiForEmotion(emotion)}",
+          style: TextStyle(fontSize: 18),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Convert Firestore string date (e.g. '2025-02-20') to DateTime
   DateTime _parseFirestoreDate(String dateString) {
     try {
@@ -178,43 +197,63 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(8.0),
-              child: TableCalendar(
-                focusedDay: DateTime.now(),
-                firstDay: DateTime.utc(2020, 1, 1),
-                lastDay: DateTime.utc(2030, 12, 31),
-                calendarBuilders: CalendarBuilders(
-                  defaultBuilder: (context, date, _) {
-                    DateTime normalizedDate =
-                        DateTime(date.year, date.month, date.day);
-                    if (_emotionsByDay.containsKey(normalizedDate)) {
-                      String emotion = _emotionsByDay[normalizedDate]!;
+              child: Container(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical:
+                          10.0), // Adjust vertical space (height) inside the border
+                  child: TableCalendar(
+                    focusedDay: DateTime.now(),
+                    firstDay: DateTime.utc(2020, 1, 1),
+                    lastDay: DateTime.utc(2030, 12, 31),
+                    availableCalendarFormats: const {
+                      CalendarFormat.month: 'Month',
+                    },
+                    calendarStyle: CalendarStyle(
+                      markersMaxCount: 0,
+                      todayDecoration: BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    calendarBuilders: CalendarBuilders(
+                      defaultBuilder: (context, date, _) {
+                        DateTime normalizedDate =
+                            DateTime(date.year, date.month, date.day);
+                        if (_emotionsByDay.containsKey(normalizedDate)) {
+                          String emotion = _emotionsByDay[normalizedDate]!;
 
-                      return Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: _getColorForEmotion(emotion),
-                              shape: BoxShape.circle,
-                            ),
-                            width: 35,
-                            height: 35,
-                          ),
-                          Text(
-                            _getEmojiForEmotion(emotion),
-                            style: TextStyle(fontSize: 18),
-                          ),
-                        ],
-                      );
-                    }
-                    return null;
-                  },
-                ),
-                calendarStyle: CalendarStyle(
-                  markersMaxCount: 0, // Disable default gray markers
-                  todayDecoration: BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
+                          return Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: _getColorForEmotion(emotion),
+                                  shape: BoxShape.circle,
+                                ),
+                                width: 35,
+                                height: 35,
+                              ),
+                              Text(
+                                _getEmojiForEmotion(emotion),
+                                style: TextStyle(fontSize: 18),
+                              ),
+                            ],
+                          );
+                        }
+                        return null;
+                      },
+                    ),
+                    onDaySelected: (selectedDay, focusedDay) {
+                      DateTime normalizedDate = _normalizeDate(selectedDay);
+                      if (_emotionsByDay.containsKey(normalizedDate)) {
+                        String emotion = _emotionsByDay[normalizedDate]!;
+                        _showEmotionMessage(context, emotion);
+                      } else {
+                        _showEmotionMessage(
+                            context, "No emotion recorded for this day.");
+                      }
+                    },
                   ),
                 ),
               ),

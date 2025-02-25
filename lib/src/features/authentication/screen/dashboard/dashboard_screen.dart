@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
@@ -307,6 +308,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             fontSize: 16,
                             fontStyle: FontStyle.italic,
                             fontWeight: FontWeight.w700,
+                            color: const Color.fromARGB(255, 0, 0, 0),
                           ),
                         ),
                         SizedBox(height: 4),
@@ -316,6 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             fontSize: 14,
                             fontStyle: FontStyle.italic,
                             fontWeight: FontWeight.w700,
+                            color: const Color.fromARGB(255, 0, 0, 0),
                           ),
                         ),
                       ],
@@ -358,47 +361,126 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                       SizedBox(height: 20),
                       _buildSectionTitle("Today's Coach"),
-                      Container(
-                        padding: EdgeInsets.all(12.0),
-                        decoration: BoxDecoration(
-                          color: Colors.white, // Background color
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black12,
-                              blurRadius: 8,
-                              spreadRadius: 2,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            _buildCoachCard(
-                              context,
-                              "Maychell Alcorin",
-                              "CEO of Valenin, Life Coach",
-                            ),
+                      SizedBox(height: 10),
+                      _buildCardContainer(
+                        context: context,
+                        height: 200, // Adjust height as needed
+                        content: Padding(
+                          padding: const EdgeInsets.all(
+                              12.0), // Add padding for proper spacing
+                          child: Column(
+                            mainAxisSize:
+                                MainAxisSize.min, // Minimize space usage
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: FutureBuilder<QuerySnapshot>(
+                                  future: FirebaseFirestore.instance
+                                      .collection('coaches')
+                                      .limit(1)
+                                      .get(),
+                                  builder: (context, snapshot) {
+                                    if (snapshot.connectionState ==
+                                        ConnectionState.waiting) {
+                                      return const Center(
+                                          child: CircularProgressIndicator());
+                                    }
 
-                            // Top Left Star
-                            Positioned(
-                              top: -10,
-                              left: -10,
-                              child: Icon(Icons.star,
-                                  size: 24, color: Colors.lightBlueAccent),
-                            ),
+                                    if (!snapshot.hasData ||
+                                        snapshot.data!.docs.isEmpty) {
+                                      return const Center(
+                                          child: Text("No coach available"));
+                                    }
 
-                            // Bottom Right Star
-                            Positioned(
-                              bottom: -10,
-                              right: -10,
-                              child: Icon(Icons.star,
-                                  size: 24, color: Colors.orangeAccent),
-                            ),
-                          ],
+                                    // Get first coach document
+                                    var coachDoc = snapshot.data!.docs.first;
+                                    String coachId =
+                                        coachDoc.id; // Dynamic coach ID
+
+                                    return FutureBuilder<DocumentSnapshot>(
+                                      future: FirebaseFirestore.instance
+                                          .collection('coaches')
+                                          .doc(coachId)
+                                          .get(),
+                                      builder: (context, coachSnapshot) {
+                                        if (coachSnapshot.connectionState ==
+                                            ConnectionState.waiting) {
+                                          return const Center(
+                                              child:
+                                                  CircularProgressIndicator());
+                                        }
+
+                                        if (!coachSnapshot.hasData ||
+                                            !coachSnapshot.data!.exists) {
+                                          return const Center(
+                                              child:
+                                                  Text("No coach available"));
+                                        }
+
+                                        var data = coachSnapshot.data!.data()
+                                            as Map<String, dynamic>;
+                                        String coachName =
+                                            data['name'] ?? 'Unknown Coach';
+                                        String coachTitle =
+                                            data['bio'] ?? 'Unknown Title';
+
+                                        return Stack(
+                                          clipBehavior: Clip.none,
+                                          alignment: Alignment
+                                              .center, // Ensures items align properly
+                                          children: [
+                                            _buildCoachCard(
+                                                context, coachName, coachTitle),
+                                            Positioned(
+                                              top: -10,
+                                              left: -10,
+                                              child: Icon(Icons.star,
+                                                  size: 24,
+                                                  color:
+                                                      Colors.lightBlueAccent),
+                                            ),
+                                            Positioned(
+                                              bottom:
+                                                  -16, // Adjust as necessary
+                                              right: -16, // Adjust as necessary
+                                              child: Icon(Icons.star,
+                                                  size: 24,
+                                                  color: Colors.orangeAccent),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+
+                              // "See All Coach" Button with proper alignment
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (context) =>
+                                              CoachesScreen()),
+                                    );
+                                  },
+                                  child: const Text(
+                                    "See All Coach",
+                                    style: TextStyle(
+                                        color: Colors.blue,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
+
                       SizedBox(height: 10),
                       _buildSectionTitle("How do you feel today?"),
                       SizedBox(height: 10),
@@ -536,69 +618,96 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildCoachCard(
       BuildContext context, String coachName, String coachTitle) {
-    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Container(
-      padding: EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[800] : Colors.white,
+        color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          if (!isDarkMode)
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.2),
+              spreadRadius: 2,
+              blurRadius: 5,
+              offset: const Offset(0, 3),
+            ),
+        ],
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Profile Image
           CircleAvatar(
             radius: 30,
-            backgroundColor: Colors.black,
-            child: Icon(Icons.person, size: 40, color: Colors.white),
+            backgroundColor: theme.colorScheme.primary,
+            child: Icon(Icons.person,
+                size: 40, color: theme.colorScheme.onPrimary),
           ),
-          SizedBox(width: 12),
+
+          // Spacing
+          const SizedBox(width: 12),
+
           // Name and Title
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                coachName,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, // Ensures compact height
+              children: [
+                Text(
+                  coachName,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
-              ),
-              SizedBox(height: 4),
-              Text(
-                coachTitle,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[700],
+                const SizedBox(height: 4),
+                Text(
+                  coachTitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDarkMode ? Colors.grey[400] : Colors.grey[700],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCardContainer(
-      {required BuildContext context,
-      required double height,
-      required Widget content}) {
-    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+  Widget _buildCardContainer({
+    required BuildContext context,
+    required double height,
+    required Widget content,
+  }) {
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Container(
       height: height,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: isDarkMode
-            ? Colors.grey[800]
-            : const Color.fromARGB(255, 240, 247, 237),
+        color: theme.colorScheme.background, // Adaptive background color
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          if (!isDarkMode)
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              spreadRadius: 2,
+              blurRadius: 4,
+              offset: const Offset(0, 2), // Light mode shadow effect
+            ),
+        ],
       ),
       child: Center(
         child: DefaultTextStyle(
           style: TextStyle(
-            color: isDarkMode ? Colors.white : Colors.black, // Adapt text color
-          ),
+              color: theme.colorScheme.onBackground), // Adapt text color
           child: content,
         ),
       ),

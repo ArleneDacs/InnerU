@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:google_sign_in/google_sign_in.dart'; // For Google Sign-In
 import 'package:firebase_auth/firebase_auth.dart'; // Firebase Authentication
@@ -128,7 +130,10 @@ class _SignupScreenState extends State<SignupScreen> {
         await userCredential.user!.sendEmailVerification();
       }
 
-      Navigator.pushReplacementNamed(context, '/home');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => Setuppage()),
+      );
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
