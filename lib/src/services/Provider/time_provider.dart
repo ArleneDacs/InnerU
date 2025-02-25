@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/services/audio_helper.dart';
 
 class TimeProvider extends ChangeNotifier {
   int _remainingTime = 60;
@@ -26,6 +27,7 @@ class TimeProvider extends ChangeNotifier {
           _timer = null;
           _remainingTime = _initialTime;
           _isRunning = false;
+          AudioHelper.stopAudio();
           notifyListeners();
         }
       },
@@ -45,6 +47,7 @@ class TimeProvider extends ChangeNotifier {
     _remainingTime = _initialTime;
     _isRunning = false;
     notifyListeners();
+    AudioHelper.stopAudio();
   }
 
   void setTime(int seconds) {

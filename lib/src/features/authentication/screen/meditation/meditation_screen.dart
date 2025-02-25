@@ -93,21 +93,19 @@ class _MeditationState extends State<Meditation> {
                         size: 40,
                       )),
                   IconButton(
-                      onPressed: () {
-                        timeProvider.stopTimer();
-                        AudioHelper.togglePlayPause(
-                          favoriteSong,
-                          favoriteSongPath!,
-                          (newPlayingSong) {
-                            setState(() => playingSong = null);
-                          },
-                        );
-                      },
-                      icon: Icon(
-                        color: Color(0xFFCE8F5A),
-                        Icons.stop,
-                        size: 40,
-                      )),
+                    onPressed: () {
+                      timeProvider.stopTimer();
+                      AudioHelper.stopAudio(); // ✅ Correctly stops the audio
+                      setState(() {
+                        playingSong = null; // ✅ Ensure UI updates
+                      });
+                    },
+                    icon: Icon(
+                      color: Color(0xFFCE8F5A),
+                      Icons.stop,
+                      size: 40,
+                    ),
+                  ),
                 ],
               ),
               Row(

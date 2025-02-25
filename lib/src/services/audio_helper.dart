@@ -2,7 +2,7 @@ import 'package:audioplayers/audioplayers.dart';
 
 class AudioHelper {
   static final AudioPlayer _audioPlayer = AudioPlayer();
-  static String? playingSong; // Track currently playing song
+  static String? playingSong;
 
   static Future<void> togglePlayPause(String songTitle, String assetPath,
       Function(String?) onStateChange) async {
@@ -15,5 +15,10 @@ class AudioHelper {
       playingSong = songTitle;
     }
     onStateChange(playingSong);
+  }
+
+  static Future<void> stopAudio() async {
+    await _audioPlayer.stop();
+    playingSong = null;
   }
 }
