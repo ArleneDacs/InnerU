@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -215,6 +216,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<String?> getRandomCoachId() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? storedCoachId = prefs.getString('random_coach_id');
+    String? storedDate = prefs.getString('random_coach_date');
+    String today = DateTime.now().toIso8601String().split('T')[0];
+
+    if (storedCoachId != null && storedDate == today) {
+      return storedCoachId; // Use cached coach ID if it's still today's date
+    }
+
+    QuerySnapshot snapshot =
+        await FirebaseFirestore.instance.collection('coaches').get();
+
+    if (snapshot.docs.isEmpty) return null;
+
+    var randomCoach = snapshot.docs[Random().nextInt(snapshot.docs.length)];
+    await prefs.setString('random_coach_id', randomCoach.id);
+    await prefs.setString('random_coach_date', today);
+
+    return randomCoach.id;
+  }
+
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
@@ -366,19 +389,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         context: context,
                         height: 200, // Adjust height as needed
                         content: Padding(
-                          padding: const EdgeInsets.all(
-                              12.0), // Add padding for proper spacing
+                          padding: const EdgeInsets.all(12.0),
                           child: Column(
-                            mainAxisSize:
-                                MainAxisSize.min, // Minimize space usage
+                            mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
-                                child: FutureBuilder<QuerySnapshot>(
-                                  future: FirebaseFirestore.instance
-                                      .collection('coaches')
-                                      .limit(1)
-                                      .get(),
+                                child: FutureBuilder<String?>(
+                                  future: getRandomCoachId(),
                                   builder: (context, snapshot) {
                                     if (snapshot.connectionState ==
                                         ConnectionState.waiting) {
@@ -387,20 +405,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     }
 
                                     if (!snapshot.hasData ||
-                                        snapshot.data!.docs.isEmpty) {
+                                        snapshot.data == null) {
                                       return const Center(
                                           child: Text("No coach available"));
                                     }
 
-                                    // Get first coach document
-                                    var coachDoc = snapshot.data!.docs.first;
-                                    String coachId =
-                                        coachDoc.id; // Dynamic coach ID
-
                                     return FutureBuilder<DocumentSnapshot>(
                                       future: FirebaseFirestore.instance
                                           .collection('coaches')
-                                          .doc(coachId)
+                                          .doc(snapshot.data)
                                           .get(),
                                       builder: (context, coachSnapshot) {
                                         if (coachSnapshot.connectionState ==
@@ -426,8 +439,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                                         return Stack(
                                           clipBehavior: Clip.none,
-                                          alignment: Alignment
-                                              .center, // Ensures items align properly
+                                          alignment: Alignment.center,
                                           children: [
                                             _buildCoachCard(
                                                 context, coachName, coachTitle),
@@ -440,9 +452,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                       Colors.lightBlueAccent),
                                             ),
                                             Positioned(
-                                              bottom:
-                                                  -16, // Adjust as necessary
-                                              right: -16, // Adjust as necessary
+                                              bottom: -16,
+                                              right: -16,
                                               child: Icon(Icons.star,
                                                   size: 24,
                                                   color: Colors.orangeAccent),
@@ -455,7 +466,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                               ),
 
-                              // "See All Coach" Button with proper alignment
+                              // "See All Coach" Button
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
