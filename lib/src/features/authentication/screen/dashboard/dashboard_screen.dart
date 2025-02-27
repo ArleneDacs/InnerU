@@ -382,117 +382,133 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
 
-                      SizedBox(height: 20),
-                      _buildSectionTitle("Today's Coach"),
-                      SizedBox(height: 10),
-                      _buildCardContainer(
-                        context: context,
-                        height: 200, // Adjust height as needed
-                        content: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: FutureBuilder<String?>(
-                                  future: getRandomCoachId(),
-                                  builder: (context, snapshot) {
-                                    if (snapshot.connectionState ==
+                      SizedBox(height: 30),
+                      Row(
+                        children: [
+                          // Left Section: "Today's Coach" label
+                          Expanded(
+                            flex: 1,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Today's Coach",
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                // Horizontal divider that stretches to the left side
+                                Divider(
+                                  thickness: 1,
+
+                                  height: 5,
+                                  indent: 0, // Ensure no indentation
+                                  endIndent:
+                                      0, // Ensure no right-side indentation
+                                ),
+                                const SizedBox(height: 8),
+                                InkWell(
+                                  onTap: () {
+                                    // Navigate to "See All" screen
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => CoachesScreen(),
+                                      ),
+                                    );
+                                  },
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: const [
+                                      Text(
+                                        "SEE ALL",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w200,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.chevron_right,
+                                        size: 15,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: FutureBuilder<String?>(
+                              future: getRandomCoachId(),
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return const Center(
+                                      child: CircularProgressIndicator());
+                                }
+                                if (!snapshot.hasData ||
+                                    snapshot.data == null) {
+                                  return const Center(
+                                      child: Text("No coach available"));
+                                }
+                                return FutureBuilder<DocumentSnapshot>(
+                                  future: FirebaseFirestore.instance
+                                      .collection('coaches')
+                                      .doc(snapshot.data)
+                                      .get(),
+                                  builder: (context, coachSnapshot) {
+                                    if (coachSnapshot.connectionState ==
                                         ConnectionState.waiting) {
                                       return const Center(
                                           child: CircularProgressIndicator());
                                     }
-
-                                    if (!snapshot.hasData ||
-                                        snapshot.data == null) {
+                                    if (!coachSnapshot.hasData ||
+                                        !coachSnapshot.data!.exists) {
                                       return const Center(
                                           child: Text("No coach available"));
                                     }
+                                    var data = coachSnapshot.data!.data()
+                                        as Map<String, dynamic>;
+                                    String coachName =
+                                        data['name'] ?? 'Unknown Coach';
 
-                                    return FutureBuilder<DocumentSnapshot>(
-                                      future: FirebaseFirestore.instance
-                                          .collection('coaches')
-                                          .doc(snapshot.data)
-                                          .get(),
-                                      builder: (context, coachSnapshot) {
-                                        if (coachSnapshot.connectionState ==
-                                            ConnectionState.waiting) {
-                                          return const Center(
-                                              child:
-                                                  CircularProgressIndicator());
-                                        }
+                                    String coachTitle =
+                                        data['bio'] ?? 'Unknown Title';
 
-                                        if (!coachSnapshot.hasData ||
-                                            !coachSnapshot.data!.exists) {
-                                          return const Center(
-                                              child:
-                                                  Text("No coach available"));
-                                        }
-
-                                        var data = coachSnapshot.data!.data()
-                                            as Map<String, dynamic>;
-                                        String coachName =
-                                            data['name'] ?? 'Unknown Coach';
-                                        String coachTitle =
-                                            data['bio'] ?? 'Unknown Title';
-
-                                        return Stack(
-                                          clipBehavior: Clip.none,
-                                          alignment: Alignment.center,
-                                          children: [
-                                            _buildCoachCard(
-                                                context, coachName, coachTitle),
-                                            Positioned(
-                                              top: -10,
-                                              left: -10,
-                                              child: Icon(Icons.star,
-                                                  size: 24,
-                                                  color:
-                                                      Colors.lightBlueAccent),
-                                            ),
-                                            Positioned(
-                                              bottom: -16,
-                                              right: -16,
-                                              child: Icon(Icons.star,
-                                                  size: 24,
-                                                  color: Colors.orangeAccent),
-                                            ),
-                                          ],
-                                        );
-                                      },
+                                    return Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        _buildCoachCard(
+                                            context, coachName, coachTitle),
+                                        Positioned(
+                                          top: -12,
+                                          left: -12,
+                                          child: Icon(Icons.star,
+                                              size: 24,
+                                              color: Colors.lightBlue),
+                                        ),
+                                        Positioned(
+                                          bottom: -12,
+                                          right: -12,
+                                          child: Icon(Icons.star,
+                                              size: 24, color: Colors.orange),
+                                        ),
+                                      ],
                                     );
                                   },
-                                ),
-                              ),
-
-                              // "See All Coach" Button
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (context) =>
-                                              CoachesScreen()),
-                                    );
-                                  },
-                                  child: const Text(
-                                    "See All Coach",
-                                    style: TextStyle(
-                                        color: Colors.blue,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ),
-                            ],
+                                );
+                              },
+                            ),
                           ),
-                        ),
+                        ],
                       ),
 
-                      SizedBox(height: 10),
+                      SizedBox(height: 20),
                       _buildSectionTitle("How do you feel today?"),
                       SizedBox(height: 10),
                       currentUserEmotion == null
@@ -635,7 +651,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: Colors
+            .white, // Set container color to white in both light and dark mode
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           if (!isDarkMode)
@@ -654,25 +671,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
           CircleAvatar(
             radius: 30,
             backgroundColor: theme.colorScheme.primary,
-            child: Icon(Icons.person,
-                size: 40, color: theme.colorScheme.onPrimary),
+            child: Icon(
+              Icons.person,
+              size: 40,
+              color: theme.colorScheme.onPrimary,
+            ),
           ),
-
-          // Spacing
           const SizedBox(width: 12),
 
           // Name and Title
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min, // Ensures compact height
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   coachName,
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
+                    color: isDarkMode
+                        ? const Color.fromARGB(255, 0, 0, 0)
+                        : const Color.fromARGB(255, 0, 0, 0),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -680,7 +700,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   coachTitle,
                   style: TextStyle(
                     fontSize: 12,
-                    color: isDarkMode ? Colors.grey[400] : Colors.grey[700],
+                    color: isDarkMode
+                        ? const Color.fromARGB(255, 26, 26, 26)
+                        : const Color.fromARGB(255, 42, 42, 42),
                   ),
                 ),
               ],
