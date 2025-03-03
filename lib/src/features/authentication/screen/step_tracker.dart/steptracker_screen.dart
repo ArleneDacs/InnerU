@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:lottie/lottie.dart';
 import 'package:pedometer/pedometer.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:lottie/lottie.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
-import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 
 class StepTracker extends StatefulWidget {
   const StepTracker({super.key});
@@ -19,104 +22,138 @@ class _StepTrackerState extends State<StepTracker>
     with SingleTickerProviderStateMixin {
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
-  StreamSubscription<StepCount>? _stepSubscription;
+  StreamSubscription<StepCount>? _stepCountStream;
 
   int _steps = 0;
-  int _lastRecordedSteps = 0;
-  DateTime? _lastStepTime;
+  int _initialSteps = -1;
+  int _lastSteps = 0;
+  bool _isWalking = false;
+  Timer? _checkTimer;
 
   @override
   void initState() {
     super.initState();
     _lottieController = AnimationController(vsync: this);
     _stepStreamController = StreamController<int>.broadcast();
-
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
     await _loadSteps();
-    await _requestPermission();
+    _initStepCounter();
   }
 
-  Future<void> _loadSteps() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _steps = prefs.getInt('saved_steps') ?? 0;
-        _lastRecordedSteps = _steps;
-      });
-    } catch (e) {
-      debugPrint("Error loading steps: $e");
-    }
+Future<void> _loadSteps() async {
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  _initialSteps = prefs.getInt('initial_steps') ?? -1;
+
+  String? lastSavedDate = prefs.getString('last_saved_date');
+
+  if (lastSavedDate == today) {
+    _steps = prefs.getInt('saved_steps') ?? 0; // Load today's saved steps
+  } else {
+    // Save yesterday's steps before resetting
+    int previousSteps = prefs.getInt('saved_steps') ?? 0;
+    await _saveDailyStepsToHistory(previousSteps, lastSavedDate);
+
+    // Reset steps for today
+    await prefs.setInt('saved_steps', 0);
+    await prefs.setString('last_saved_date', today);
+    _steps = 0;
   }
 
-  Future<void> _requestPermission() async {
-    var status = await Permission.activityRecognition.request();
-    if (status.isGranted) {
-      _initPedometer();
-    } else {
-      debugPrint("Activity Recognition Permission Denied.");
-    }
-  }
+  _updateStepCount(_steps);
+}
 
-  void _initPedometer() {
-    try {
-      _stepSubscription = Pedometer.stepCountStream.listen(
-        _onStepCount,
-        onError: _onStepError,
-        cancelOnError: true,
-      );
-    } catch (e) {
-      debugPrint("Pedometer Initialization Error: $e");
-    }
-  }
 
-  void _onStepCount(StepCount event) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      DateTime now = DateTime.now();
-      int newSteps = event.steps;
 
-      if (newSteps > _lastRecordedSteps) {
-        int stepDiff = newSteps - _lastRecordedSteps;
-        setState(() {
-          _steps += stepDiff;
-          _lastRecordedSteps = newSteps;
-          _lastStepTime = now;
-        });
 
-        _stepStreamController.add(_steps);
-        await prefs.setInt('saved_steps', _steps);
+Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
+  if (date == null) return;
 
-        _startWalkingAnimation();
+  String userId = FirebaseAuth.instance.currentUser!.uid; 
+  FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+  await firestore.collection('steps').doc(userId).collection('tracking').doc(date).set({
+    'steps': steps,
+    'timestamp': DateTime.parse(date).millisecondsSinceEpoch, 
+  });
+
+  print("Saved $steps steps for $date");
+}
+
+
+void _initStepCounter() async {
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  _initialSteps = prefs.getInt('initial_steps') ?? -1;
+
+  _stepCountStream = Pedometer.stepCountStream.listen(
+    (StepCount event) {
+      int currentSteps = event.steps;
+
+      if (_initialSteps == -1) {
+        _initialSteps = currentSteps;
+        prefs.setInt('initial_steps', _initialSteps); 
       }
-    } catch (e) {
-      debugPrint("Step Count Processing Error: $e");
-    }
-  }
 
-  void _startWalkingAnimation() {
-    if (!_lottieController.isAnimating) {
-      _lottieController.repeat();
-    }
-  }
+      int newSteps = currentSteps - _initialSteps;
 
-  void _stopWalkingAnimation() {
-    if (_lottieController.isAnimating) {
+      if (newSteps != _steps) {
+        _updateStepCount(newSteps);
+      }
+    },
+    onError: (error) {
+      debugPrint("Step counter error: $error");
+    },
+  );
+
+  _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    if (_steps == _lastSteps) {
+      _setWalkingState(false);
+    }
+    _lastSteps = _steps;
+  });
+}
+
+void _updateStepCount(int newSteps) async {
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+
+  setState(() {
+    _isWalking = newSteps > _steps;
+    _steps = newSteps;
+  });
+
+  // Save steps to SharedPreferences
+  await prefs.setInt('saved_steps', _steps);
+  await prefs.setInt('initial_steps', _initialSteps);
+
+  _stepStreamController.add(_steps);
+
+  if (_isWalking) {
+    _lottieController.repeat();
+  } else {
+    _lottieController.stop();
+    _lottieController.animateTo(0, duration: const Duration(milliseconds: 500));
+  }
+}
+
+
+  void _setWalkingState(bool isWalking) {
+    if (isWalking) {
+      _lottieController.forward(); // Start animation smoothly
+    } else {
       _lottieController.stop();
     }
-  }
-
-  void _onStepError(error) {
-    debugPrint("Step Count Error: $error");
   }
 
   @override
   void dispose() {
     _lottieController.dispose();
-    _stepSubscription?.cancel();
+    _stepCountStream?.cancel();
     _stepStreamController.close();
+    _checkTimer?.cancel();
     super.dispose();
   }
 
@@ -127,15 +164,18 @@ class _StepTrackerState extends State<StepTracker>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Lottie.asset(
-              'assets/images/walking.json',
-              width: 300,
-              height: 300,
-              controller: _lottieController,
-              onLoaded: (composition) {
-                _lottieController.duration = composition.duration;
-              },
-            ),
+                    Lottie.asset(
+          'assets/images/walking.json',
+          width: 300,
+          height: 300,
+          controller: _lottieController,
+          repeat: false,
+          onLoaded: (composition) {
+            _lottieController.duration = composition.duration;
+            _lottieController.value = 0; // Ensures it starts from frame 0 (idle)
+          },
+        ),
+
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -169,19 +209,13 @@ class _StepTrackerState extends State<StepTracker>
                     crossAxisAlignment: CrossAxisAlignment.baseline,
                     textBaseline: TextBaseline.alphabetic,
                     children: [
-                      TweenAnimationBuilder<int>(
-                        duration: const Duration(milliseconds: 500),
-                        tween: IntTween(begin: 0, end: snapshot.data ?? 0),
-                        builder: (context, value, child) {
-                          return Text(
-                            '$value',
-                            style: const TextStyle(
-                              fontSize: 60,
-                              fontFamily: 'ralemed',
-                              color: Colors.white,
-                            ),
-                          );
-                        },
+                      Text(
+                        '${snapshot.data ?? 0}',
+                        style: const TextStyle(
+                          fontSize: 60,
+                          fontFamily: 'ralemed',
+                          color: Colors.white,
+                        ),
                       ),
                       const SizedBox(width: 5),
                       const Text(
@@ -204,7 +238,8 @@ class _StepTrackerState extends State<StepTracker>
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (context) => TrackingScreen(title: '',)),
+                    builder: (context) => const TrackingScreen(title:''),
+                  ),
                 );
               },
               style: ElevatedButton.styleFrom(

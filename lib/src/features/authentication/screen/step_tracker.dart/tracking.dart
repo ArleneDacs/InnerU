@@ -1,15 +1,67 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key, required this.title});
   final String title;
 
   @override
-  State<TrackingScreen> createState() => _TrackingScreen();
+  State<TrackingScreen> createState() => _TrackingScreenState();
 }
 
-class _TrackingScreen extends State<TrackingScreen> {
+class _TrackingScreenState extends State<TrackingScreen> {
+  final FirebaseFirestore firestore = FirebaseFirestore.instance;
+  final FirebaseAuth auth = FirebaseAuth.instance;
+  
+  List<double> weeklySteps = List.filled(7, 0); // Holds step counts for each day
+  int totalSteps = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchWeeklySteps();
+  }
+
+Future<void> fetchWeeklySteps() async {
+  String userId = auth.currentUser?.uid ?? "";
+  if (userId.isEmpty) return;
+
+  DateTime now = DateTime.now();
+  DateFormat formatter = DateFormat('yyyy-MM-dd');
+
+  for (int i = 0; i < 7; i++) {
+    DateTime date = now.subtract(Duration(days: now.weekday - i - 1));
+    String dateStr = formatter.format(date);
+
+    DocumentSnapshot stepDoc = await firestore
+        .collection('steps')
+        .doc(userId)
+        .collection('tracking')
+        .doc(dateStr)
+        .get();
+
+    if (stepDoc.exists) {
+      int steps = (stepDoc.data() as Map<String, dynamic>)['steps'] ?? 0;
+
+      if (mounted) { // Check if the widget is still in the tree
+        setState(() {
+          weeklySteps[i] = steps.toDouble();
+        });
+      }
+    }
+  }
+
+  if (mounted) {
+    setState(() {
+      totalSteps = weeklySteps.reduce((a, b) => a + b).toInt();
+    });
+  }
+}
+
+
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
@@ -62,16 +114,8 @@ class _TrackingScreen extends State<TrackingScreen> {
                 child: BarChart(
                   BarChartData(
                     alignment: BarChartAlignment.spaceAround,
-                    maxY: 10,
-                    barGroups: [
-                      makeGroupData(0, 7),
-                      makeGroupData(1, 5),
-                      makeGroupData(2, 6),
-                      makeGroupData(3, 9),
-                      makeGroupData(4, 8),
-                      makeGroupData(5, 5),
-                      makeGroupData(6, 4),
-                    ],
+                    maxY: weeklySteps.reduce((a, b) => a > b ? a : b) + 20000, // Adjust max Y
+                    barGroups: List.generate(7, (index) => makeGroupData(index, weeklySteps[index])),
                     titlesData: FlTitlesData(
                       leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
                       bottomTitles: AxisTitles(
@@ -96,7 +140,6 @@ class _TrackingScreen extends State<TrackingScreen> {
               ),
               SizedBox(height: 20),
 
-              // Total Steps Card
               Card(
                 color: Color(0xFFFCF9F6),
                 elevation: 5,
@@ -111,12 +154,16 @@ class _TrackingScreen extends State<TrackingScreen> {
                       ),
                       SizedBox(height: 8),
                       Text(
-                        '0',
+                        '$totalSteps', 
                         style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                       ),
                       SizedBox(height: 8),
                       Text(
-                        'Congratulations in reaching your goal!',
+                        totalSteps >= 50000
+                            ? 'Amazing! You’ve surpassed your goal!'
+                            : totalSteps >= 30000
+                                ? 'Great job! Keep going!'
+                                : 'Keep moving!',
                         style: TextStyle(fontSize: 14, color: Colors.orange[700]),
                       ),
                     ],
@@ -125,7 +172,6 @@ class _TrackingScreen extends State<TrackingScreen> {
               ),
               SizedBox(height: 20),
 
-              // Milestones Section
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -143,7 +189,6 @@ class _TrackingScreen extends State<TrackingScreen> {
                     milestoneCard('10k', 'assets/images/milestone2.jpg'),
                     milestoneCard('15k', 'assets/images/milestone3.jpg'),
                     milestoneCard('20k', 'assets/images/milestone4.jpg'),
-                    milestoneCard('30k', 'assets/images/milestone4.jpg'),
                   ],
                 ),
               ),
@@ -154,7 +199,6 @@ class _TrackingScreen extends State<TrackingScreen> {
     );
   }
 
-  // Function to generate bar chart data
   BarChartGroupData makeGroupData(int x, double y) {
     return BarChartGroupData(
       x: x,
@@ -169,7 +213,6 @@ class _TrackingScreen extends State<TrackingScreen> {
     );
   }
 
-
 Widget milestoneCard(String steps, String imagePath) {
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -180,12 +223,12 @@ Widget milestoneCard(String steps, String imagePath) {
           height: 100,
            decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            color: Colors.grey[300], // Default gray background
+            color: Colors.grey[300],
             image: DecorationImage(
               image: AssetImage(imagePath),
               fit: BoxFit.cover,
               colorFilter: ColorFilter.mode(
-                Colors.grey.withOpacity(0.5), // Apply gray overlay
+                Colors.grey.withOpacity(0.5),
                 BlendMode.darken,
               ),
             ),
@@ -196,7 +239,7 @@ Widget milestoneCard(String steps, String imagePath) {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.grey[200], // Light gray background for text box
+                  color: Colors.grey[200], 
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -218,7 +261,7 @@ Widget milestoneCard(String steps, String imagePath) {
             width: 25,
             height: 25,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.8), // Light background for contrast
+              color: Colors.white.withOpacity(0.8),
               shape: BoxShape.circle,
             ),
             child: Icon(Icons.star, color: Colors.amber, size: 20),
@@ -228,6 +271,4 @@ Widget milestoneCard(String steps, String imagePath) {
     ),
   );
 }
-
-
 }

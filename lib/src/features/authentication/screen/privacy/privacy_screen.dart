@@ -22,7 +22,6 @@ class _PrivacyScreen extends State<PrivacyScreen> {
           padding: EdgeInsets.all(20),
           child: Column(
             children: [
-              _buildButton(context, "Change Password", ChangePass(title: 'Change Password',)),
               _buildButtons(context, "Delete Account"),
             ],
           ),
