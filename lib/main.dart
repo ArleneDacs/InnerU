@@ -7,6 +7,7 @@ import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
@@ -71,6 +72,7 @@ class App extends StatelessWidget {
           '/sleepTracker': (context) => SleepTracker(),
           '/coachesScreen': (context) => CoachesScreen(),
           '/emotionScreen': (context) => EmotionTrackerPage(),
+          '/dailytracker': (context) => DailyTrackerPage(),
           '/communityScreen': (context) => CommunityScreen(),
           '/profileSettings': (context) => ProfileSettings(),
           'notesType': (context) => NotesType(

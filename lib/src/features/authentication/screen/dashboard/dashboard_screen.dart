@@ -7,6 +7,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
