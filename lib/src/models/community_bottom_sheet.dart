@@ -1,0 +1,39 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+
+class CommunityBottomSheet {
+  static void show(BuildContext context) {
+    showModalBottomSheet(
+        backgroundColor: Color(0xFFCE8F5A),
+        context: context,
+        builder: (context) {
+          return ListTileTheme(
+            iconColor: Color(0xFFFFFFFF),
+            textColor: Color(0xFFFFFFFF),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                      leading: Icon(Icons.people),
+                      title: Text("View Community"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/communityScreen');
+                      }),
+                  Divider(),
+                  ListTile(
+                      leading: Icon(Icons.settings),
+                      title: Text("Account Settings"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/profileSettings');
+                      }),
+                ],
+              ),
+            ),
+          );
+        });
+  }
+}
