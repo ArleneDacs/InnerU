@@ -16,19 +16,19 @@ class CommunityBottomSheet {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ListTile(
-                      leading: Icon(Icons.people),
-                      title: Text("View Community"),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.pushNamed(context, '/communityScreen');
-                      }),
-                  Divider(),
-                  ListTile(
                       leading: Icon(Icons.settings),
                       title: Text("Account Settings"),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.pushNamed(context, '/profileSettings');
+                      }),
+                  Divider(),
+                  ListTile(
+                      leading: Icon(Icons.note),
+                      title: Text("Write"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, 'notesType');
                       }),
                 ],
               ),

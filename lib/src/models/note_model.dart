@@ -1,13 +1,15 @@
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Note {
   String username;
   String id;
   String title;
-  String note;
+  List<dynamic> note;
   int color;
+  final List<String> images;
   final DateTime createdAt;
-  final DateTime updatedAt;
 
   Note({
     required this.username,
@@ -15,9 +17,34 @@ class Note {
     required this.title,
     required this.note,
     this.color = 0xFFFFFFFF,
+    required this.images,
     required this.createdAt,
-    required this.updatedAt,
   });
+
+  factory Note.fromMap(Map<String, dynamic> map) {
+    return Note(
+      id: map['id'] ?? '',
+      title: map['title'] ?? '',
+      note: map['note'] ?? [],
+      images: List<String>.from(map['images'] ?? []),
+      createdAt: map['createdAt'] != null
+          ? (map['createdAt'] as Timestamp).toDate()
+          : DateTime.now(), // Default to now if no timestamp exists
+
+      color: map['color'] ?? 0xFFFFFFFF,
+      username: map['username'] ?? 'Anonymous', //
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      "username": username,
+      "title": title,
+      "note": note,
+      "color": color,
+      "createdAt": createdAt,
+    };
+  }
 }
 
 int generateRandomLightShade() {

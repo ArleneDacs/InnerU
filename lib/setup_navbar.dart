@@ -1,6 +1,7 @@
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
@@ -23,7 +24,7 @@ class _SetuppageState extends State<Setuppage> {
     StepTracker(),
     DashboardScreen(),
     SleepTracker(),
-    Notes()
+    CommunityScreen()
   ];
 
   final _titles = [
@@ -31,7 +32,7 @@ class _SetuppageState extends State<Setuppage> {
     "Step Tracker",
     "",
     "Sleep Tracker",
-    "Journal"
+    "Community"
   ];
 
   // Default (unselected) icons
@@ -64,6 +65,8 @@ class _SetuppageState extends State<Setuppage> {
       appBar: index == 2
           ? null
           : AppBar(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
               title: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(_titles[index]),
@@ -79,6 +82,7 @@ class _SetuppageState extends State<Setuppage> {
             ),
       body: _screens[index],
       bottomNavigationBar: CurvedNavigationBar(
+        height: 60,
         animationDuration: Duration(milliseconds: 300),
         backgroundColor: Colors.transparent,
         buttonBackgroundColor: const Color(0xFFEFD199),

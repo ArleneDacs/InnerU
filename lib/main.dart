@@ -68,7 +68,7 @@ class App extends StatelessWidget {
           '/meditation': (context) => Meditation(),
           '/notes': (context) => Notes(),
           '/stepTracker': (context) => StepTracker(),
-          '/noteGallery': (context) => NotesGallery(),
+          // '/noteGallery': (context) => NotesGallery(),
           '/sleepTracker': (context) => SleepTracker(),
           '/coachesScreen': (context) => CoachesScreen(),
           '/emotionScreen': (context) => EmotionTrackerPage(),
@@ -80,9 +80,9 @@ class App extends StatelessWidget {
                   username: '',
                   id: '',
                   title: '',
-                  note: '',
+                  note: [],
                   createdAt: DateTime.now(),
-                  updatedAt: DateTime.now())),
+                  images: [])),
           '/profile': (context) => ProfilePage(
                 title: '',
               )
