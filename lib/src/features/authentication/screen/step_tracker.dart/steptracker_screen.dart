@@ -43,102 +43,141 @@ class _StepTrackerState extends State<StepTracker>
     _initStepCounter();
   }
 
-Future<void> _loadSteps() async {
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-  String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  Future<void> _loadSteps() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    String? lastSavedDate = prefs.getString('last_saved_date');
 
-  _initialSteps = prefs.getInt('initial_steps') ?? -1;
+    // If the last saved date is not today, reset steps
+    if (lastSavedDate != today) {
+      int previousSteps = prefs.getInt('saved_steps') ?? 0;
 
-  String? lastSavedDate = prefs.getString('last_saved_date');
+      // Save yesterday's steps to Firestore before resetting
+      await _saveDailyStepsToHistory(previousSteps, lastSavedDate);
 
-  if (lastSavedDate == today) {
-    _steps = prefs.getInt('saved_steps') ?? 0; // Load today's saved steps
-  } else {
-    // Save yesterday's steps before resetting
-    int previousSteps = prefs.getInt('saved_steps') ?? 0;
-    await _saveDailyStepsToHistory(previousSteps, lastSavedDate);
+      // Reset steps and update last saved date
+      await prefs.setInt('saved_steps', 0);
+      await prefs.setInt('initial_steps', -1); // Reset initial steps
+      await prefs.setString('last_saved_date', today);
 
-    // Reset steps for today
-    await prefs.setInt('saved_steps', 0);
-    await prefs.setString('last_saved_date', today);
-    _steps = 0;
-  }
-
-  _updateStepCount(_steps);
-}
-
-
-
-
-Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
-  if (date == null) return;
-
-  String userId = FirebaseAuth.instance.currentUser!.uid; 
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
-
-  await firestore.collection('steps').doc(userId).collection('tracking').doc(date).set({
-    'steps': steps,
-    'timestamp': DateTime.parse(date).millisecondsSinceEpoch, 
-  });
-
-  print("Saved $steps steps for $date");
-}
-
-
-void _initStepCounter() async {
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-  _initialSteps = prefs.getInt('initial_steps') ?? -1;
-
-  _stepCountStream = Pedometer.stepCountStream.listen(
-    (StepCount event) {
-      int currentSteps = event.steps;
-
-      if (_initialSteps == -1) {
-        _initialSteps = currentSteps;
-        prefs.setInt('initial_steps', _initialSteps); 
-      }
-
-      int newSteps = currentSteps - _initialSteps;
-
-      if (newSteps != _steps) {
-        _updateStepCount(newSteps);
-      }
-    },
-    onError: (error) {
-      debugPrint("Step counter error: $error");
-    },
-  );
-
-  _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-    if (_steps == _lastSteps) {
-      _setWalkingState(false);
+      _steps = 0;
+      _initialSteps = -1;
+    } else {
+      _steps = prefs.getInt('saved_steps') ?? 0; // Load today's saved steps
     }
-    _lastSteps = _steps;
-  });
-}
 
-void _updateStepCount(int newSteps) async {
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-
-  setState(() {
-    _isWalking = newSteps > _steps;
-    _steps = newSteps;
-  });
-
-  // Save steps to SharedPreferences
-  await prefs.setInt('saved_steps', _steps);
-  await prefs.setInt('initial_steps', _initialSteps);
-
-  _stepStreamController.add(_steps);
-
-  if (_isWalking) {
-    _lottieController.repeat();
-  } else {
-    _lottieController.stop();
-    _lottieController.animateTo(0, duration: const Duration(milliseconds: 500));
+    _updateStepCount(_steps);
   }
-}
 
+  Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
+    if (date == null) return;
+
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+    FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+    await firestore
+        .collection('steps')
+        .doc(userId)
+        .collection('tracking')
+        .doc(date)
+        .set({
+      'steps': steps,
+      'timestamp': DateTime.parse(date).millisecondsSinceEpoch,
+    });
+
+    print("Saved $steps steps for $date");
+  }
+
+  void _initStepCounter() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    _initialSteps = prefs.getInt('initial_steps') ?? -1;
+
+    _stepCountStream = Pedometer.stepCountStream.listen(
+      (StepCount event) {
+        int currentSteps = event.steps;
+
+        if (_initialSteps == -1) {
+          _initialSteps = currentSteps;
+          prefs.setInt('initial_steps', _initialSteps);
+        }
+
+        int newSteps = currentSteps - _initialSteps;
+
+        if (newSteps != _steps) {
+          _updateStepCount(newSteps);
+        }
+      },
+      onError: (error) {
+        debugPrint("Step counter error: $error");
+      },
+    );
+
+    _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (_steps == _lastSteps) {
+        _setWalkingState(false);
+      }
+      _lastSteps = _steps;
+    });
+  }
+
+  void _updateStepCount(int newSteps) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    setState(() {
+      _isWalking = newSteps > _steps;
+      _steps = newSteps;
+    });
+
+    await prefs.setInt('saved_steps', _steps);
+    await prefs.setInt('initial_steps', _initialSteps);
+
+    _stepStreamController.add(_steps);
+
+    // 🔥 Save to Firestore when 300 steps are reached
+    if (_steps >= 300) {
+      await _saveDailyActivity(steps: true);
+    }
+
+    if (_isWalking) {
+      _lottieController.repeat();
+    } else {
+      _lottieController.stop();
+      _lottieController.animateTo(0,
+          duration: const Duration(milliseconds: 500));
+    }
+  }
+
+  Future<void> _saveDailyActivity(
+      {bool meditation = false, bool steps = false}) async {
+    String? userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+    // Fetch username from Firestore user document
+    DocumentSnapshot userDoc =
+        await firestore.collection('users').doc(userId).get();
+    String? username = userDoc.get('username');
+
+    if (username != null) {
+      String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      DocumentReference docRef =
+          firestore.collection('dailytracker').doc('$username-$formattedDate');
+
+      // Use Firestore's FieldValue.merge to update without overwriting other fields
+      await docRef.set({
+        'username': username,
+        'date': formattedDate,
+        if (meditation) 'meditation': true,
+        if (steps) 'steps': true,
+      }, SetOptions(merge: true));
+
+      print(
+          "Updated Firestore: Meditation = $meditation, Steps = $steps, for username: $username");
+    } else {
+      print("Error: Username not found for userId: $userId");
+    }
+  }
 
   void _setWalkingState(bool isWalking) {
     if (isWalking) {
@@ -146,6 +185,10 @@ void _updateStepCount(int newSteps) async {
     } else {
       _lottieController.stop();
     }
+  }
+
+  Future<void> _saveStepCompletion() async {
+    await _saveDailyActivity(steps: true);
   }
 
   @override
@@ -164,18 +207,18 @@ void _updateStepCount(int newSteps) async {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-                    Lottie.asset(
-          'assets/images/walking.json',
-          width: 300,
-          height: 300,
-          controller: _lottieController,
-          repeat: false,
-          onLoaded: (composition) {
-            _lottieController.duration = composition.duration;
-            _lottieController.value = 0; // Ensures it starts from frame 0 (idle)
-          },
-        ),
-
+            Lottie.asset(
+              'assets/images/walking.json',
+              width: 300,
+              height: 300,
+              controller: _lottieController,
+              repeat: false,
+              onLoaded: (composition) {
+                _lottieController.duration = composition.duration;
+                _lottieController.value =
+                    0; // Ensures it starts from frame 0 (idle)
+              },
+            ),
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -238,7 +281,7 @@ void _updateStepCount(int newSteps) async {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const TrackingScreen(title:''),
+                    builder: (context) => const TrackingScreen(title: ''),
                   ),
                 );
               },

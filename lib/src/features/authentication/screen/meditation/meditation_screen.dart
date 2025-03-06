@@ -1,11 +1,14 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore Import
+import 'package:intl/intl.dart'; // For date formatting
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/src/constants/image_strings.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
-import 'package:selfcare_projects/src/services/audio_helper.dart'; // Import AudioHelper
+import 'package:selfcare_projects/src/services/audio_helper.dart'; // AudioHelper for music
 
 class Meditation extends StatefulWidget {
   const Meditation({super.key});
@@ -25,6 +28,7 @@ class _MeditationState extends State<Meditation> {
     loadFavorite();
   }
 
+  /// Load favorite song from user preferences
   Future<void> loadFavorite() async {
     String? username = await UserPreferences.loadUsername();
     if (username != null) {
@@ -32,12 +36,49 @@ class _MeditationState extends State<Meditation> {
       if (mounted) {
         setState(() {
           favoriteSong = song ?? "No favorite selected";
-          favoriteSongPath = _getSongPath(favoriteSong); // Get the file path
+          favoriteSongPath = _getSongPath(favoriteSong); // Get file path
         });
       }
     }
   }
 
+  Future<void> _saveDailyActivity(
+      {bool meditation = false, bool steps = false}) async {
+    String? userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+    // Fetch username from Firestore user document
+    DocumentSnapshot userDoc =
+        await firestore.collection('users').doc(userId).get();
+    String? username = userDoc.get('username');
+
+    if (username != null) {
+      String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      DocumentReference docRef =
+          firestore.collection('dailytracker').doc('$username-$formattedDate');
+
+      // Use Firestore's FieldValue.merge to update without overwriting other fields
+      await docRef.set({
+        'username': username,
+        'date': formattedDate,
+        if (meditation) 'meditation': true,
+        if (steps) 'steps': true,
+      }, SetOptions(merge: true));
+
+      print(
+          "Updated Firestore: Meditation = $meditation, Steps = $steps, for username: $username");
+    } else {
+      print("Error: Username not found for userId: $userId");
+    }
+  }
+
+  void _onMeditationComplete() async {
+    await _saveDailyActivity(meditation: true);
+  }
+
+  /// Get file path based on song title
   String? _getSongPath(String songTitle) {
     final songMap = {
       "Under the Shining Sun": "audio/Forest_Birds.mp3",
@@ -48,9 +89,18 @@ class _MeditationState extends State<Meditation> {
     return songMap[songTitle];
   }
 
+  /// Save meditation session to Firestore in "dailytracker" collection
+
   @override
   Widget build(BuildContext context) {
     final timeProvider = Provider.of<TimeProvider>(context);
+
+    /// Auto-save when time reaches 0
+    if (timeProvider.remainingTime == 0 && timeProvider.isRunning) {
+      timeProvider.stopTimer();
+      _onMeditationComplete();
+    }
+
     return Scaffold(
       body: Center(
         child: Container(
@@ -95,10 +145,13 @@ class _MeditationState extends State<Meditation> {
                   IconButton(
                     onPressed: () {
                       timeProvider.stopTimer();
-                      AudioHelper.stopAudio(); // ✅ Correctly stops the audio
+                      AudioHelper.stopAudio();
                       setState(() {
-                        playingSong = null; // ✅ Ensure UI updates
+                        playingSong = null;
                       });
+
+                      // Save session when the timer stops
+                      _onMeditationComplete;
                     },
                     icon: Icon(
                       color: Color(0xFFCE8F5A),
@@ -127,6 +180,7 @@ class _MeditationState extends State<Meditation> {
     );
   }
 
+  /// Show Timer Picker for user to set meditation time
   void _showTimePicker(BuildContext context, TimeProvider timeProvider) {
     showModalBottomSheet(
         context: context,
@@ -147,6 +201,7 @@ class _MeditationState extends State<Meditation> {
         });
   }
 
+  /// Format time in HH:MM:SS format
   String _formatTime(int totalSecond) {
     int hours = totalSecond ~/ 3600;
     int minutes = (totalSecond % 3600) ~/ 60;

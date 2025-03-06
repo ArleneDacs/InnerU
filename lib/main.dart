@@ -72,9 +72,10 @@ class App extends StatelessWidget {
           '/sleepTracker': (context) => SleepTracker(),
           '/coachesScreen': (context) => CoachesScreen(),
           '/emotionScreen': (context) => EmotionTrackerPage(),
-          '/dailytracker': (context) => DailyTrackerPage(),
+          '/userprogress': (context) => UserProgressPage(),
           '/communityScreen': (context) => CommunityScreen(),
           '/profileSettings': (context) => ProfileSettings(),
+
           'notesType': (context) => NotesType(
               note: Note(
                   username: '',

@@ -30,6 +30,14 @@ class CommunityBottomSheet {
                         Navigator.pop(context);
                         Navigator.pushNamed(context, 'notesType');
                       }),
+                  Divider(),
+                  ListTile(
+                      leading: Icon(Icons.list),
+                      title: Text("View Other User Progress"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/userprogress');
+                      }),
                 ],
               ),
             ),
