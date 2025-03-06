@@ -1,30 +1,141 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+class UserActivity {
+  final int meditationMinutes;
+  final int stepsTaken;
+  final int journalEntries;
+
+  const UserActivity({
+    this.meditationMinutes = 0,
+    this.stepsTaken = 0,
+    this.journalEntries = 0,
+  });
+
+  int calculatePoints() {
+    // Meditation: 1pt per minute
+    int meditationPoints = meditationMinutes;
+    
+    // Step Tracker: 1pt per 200 steps
+    int stepPoints = (stepsTaken / 200).floor();
+    
+    // Journal: 1pt per entry
+    int journalPoints = journalEntries;
+    
+    return meditationPoints + stepPoints + journalPoints;
+  }
+}
+
+class LeaderboardService {
+  List<LeaderboardEntry> _entries = [];
+
+  void addUserActivity(String userName, UserActivity activity) {
+    int existingIndex = _entries.indexWhere((entry) => entry.name == userName);
+    
+    if (existingIndex != -1) {
+      _entries.removeAt(existingIndex);
+    }
+    
+    _entries.add(LeaderboardEntry(
+      name: userName, 
+      score: activity.calculatePoints(),
+      rank: 0,
+      activity: activity,
+    ));
+    
+    // Sort and update ranks
+    _entries.sort((a, b) => b.score.compareTo(a.score));
+    
+    for (int i = 0; i < _entries.length; i++) {
+      _entries[i] = LeaderboardEntry(
+        name: _entries[i].name,
+        score: _entries[i].score,
+        rank: i + 1,
+        activity: _entries[i].activity,
+      );
+    }
+  }
+
+  List<LeaderboardEntry> getLeaderboard() {
+    return List.from(_entries);
+  }
+}
+
 class LeaderboardEntry {
   final String name;
   final int score;
   final int rank;
+  final UserActivity activity;
 
-  LeaderboardEntry({
+  const LeaderboardEntry({
     required this.name,
     required this.score,
     required this.rank,
+    this.activity = const UserActivity(),
   });
 }
 
-class Leaderboard extends StatelessWidget {
-
+class Leaderboard extends StatefulWidget {
   final bool isLoading;
-  final List<LeaderboardEntry> entries = [ // Add placeholder entries
-    LeaderboardEntry(name: 'John Angel', score: 2500, rank: 1),
-    LeaderboardEntry(name: 'Rose Anne', score: 2300, rank: 2),
-    LeaderboardEntry(name: 'Arlene Mae', score: 2100, rank: 3),
-    LeaderboardEntry(name: 'Trixie Nicole', score: 2000, rank: 4),
-    LeaderboardEntry(name: 'Craig Euwan', score: 1900, rank: 5),
-  ];
-
+  
   Leaderboard({this.isLoading = true});
+
+  @override
+  _LeaderboardState createState() => _LeaderboardState();
+}
+
+class _LeaderboardState extends State<Leaderboard> {
+  final LeaderboardService _leaderboardService = LeaderboardService();
+  late List<LeaderboardEntry> entries;
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    isLoading = widget.isLoading;
+    _loadSampleData();
+    
+    // Simulate loading for demo
+    if (isLoading) {
+      Future.delayed(Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+        }
+      });
+    }
+  }
+
+  void _loadSampleData() {
+    // Add sample users with activities
+    _leaderboardService.addUserActivity(
+      'John Angel', 
+      const UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50)
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Rose Anne', 
+      const UserActivity(meditationMinutes: 1000, stepsTaken: 220000, journalEntries: 45)
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Arlene Mae', 
+      const UserActivity(meditationMinutes: 900, stepsTaken: 200000, journalEntries: 40)
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Trixie Nicole', 
+      const UserActivity(meditationMinutes: 850, stepsTaken: 190000, journalEntries: 35)
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Craig Euwan', 
+      const UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30)
+    );
+    
+    entries = _leaderboardService.getLeaderboard();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +178,7 @@ class Leaderboard extends StatelessWidget {
             ),
           ),
           Container(
-            height: 200,
+            height: 220,
             child: isLoading 
               ? _buildSkeletonPodium()
               : _buildPodium(),
@@ -91,7 +202,7 @@ class Leaderboard extends StatelessWidget {
     );
   }
 
-// skeleton loading function
+// Skeleton loading
 
   Widget _buildSkeletonPodium() {
     return Row(
@@ -165,7 +276,6 @@ class Leaderboard extends StatelessWidget {
     );
   }
 
-  // Add podium builder
   Widget _buildPodium() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -189,16 +299,16 @@ class Leaderboard extends StatelessWidget {
             Icons.person,
             size: 30,
             color: Colors.grey[600],
-            ),
-            ),
+          ),
+        ),
         SizedBox(height: 8),
         Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
         Container(
           width: 80,
           height: height,
-          margin: EdgeInsets.symmetric(horizontal: 4),
+          margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2), // Added vertical margin
           decoration: BoxDecoration(
-            color: Colors.orange[100],
+            color: Colors.cyan, // Changed color to match your screenshot
             borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
           ),
           child: Center(child: Text(entry.score.toString())),
@@ -207,53 +317,133 @@ class Leaderboard extends StatelessWidget {
     );
   }
 
-  // Add leaderboard item builder
   Widget _buildLeaderboardItem(LeaderboardEntry entry) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFFE5D3),
-          width: 1.5,
+    return GestureDetector(
+      onTap: () {
+        // Show detailed breakdown of points
+        _showPointsBreakdown(context, entry);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Color(0xFFFFE5D3),
+            width: 1.5,
+          ),
         ),
-      ),
-      padding: EdgeInsets.all(12),
-      child: Row(
-        children: [
-          Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
-          SizedBox(width: 12),
-         CircleAvatar(
-          radius: 24,
-          backgroundColor: Colors.grey[200],
-          child: Icon(
-            Icons.person,
-            size: 30,
-            color: Colors.grey[600],
+        padding: EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
+            SizedBox(width: 12),
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: Colors.grey[200],
+              child: Icon(
+                Icons.person,
+                size: 30,
+                color: Colors.grey[600],
+              ),
             ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: entry.score / 3000,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange), // Match progress color to screenshot
+                  ),
+                ],
+              ),
             ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 4),
-                LinearProgressIndicator(
-                  value: entry.score / 3000,
-                  backgroundColor: Colors.grey[200],
-                  color: Colors.orange,
-                ),
+                Text(entry.score.toString(), style: TextStyle(fontSize: 18)),
+                Text('points', style: TextStyle(color: Colors.grey)),
               ],
             ),
-          ),
-          SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(entry.score.toString(), style: TextStyle(fontSize: 18)),
-              Text('points', style: TextStyle(color: Colors.grey)),
+              Text(
+                '${entry.name}\'s Points',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              _buildPointsRow('Meditation', entry.activity.meditationMinutes, 
+                  '1 pt/minute', entry.activity.meditationMinutes),
+              Divider(),
+              _buildPointsRow('Steps', entry.activity.stepsTaken, 
+                  '1 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),
+              Divider(),
+              _buildPointsRow('Journal', entry.activity.journalEntries, 
+                  '1 pt/entry', entry.activity.journalEntries),
+              Divider(),
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total Points', 
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('${entry.score}', 
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.orange)),
+                  ],
+                ),
+              ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPointsRow(String title, int value, String rate, int points) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(title, style: TextStyle(fontSize: 16)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text('$value', style: TextStyle(fontSize: 16)),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(rate, style: TextStyle(fontSize: 14, color: Colors.grey)),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('$points pts', 
+              style: TextStyle(fontSize: 16, color: Colors.orange),
+              textAlign: TextAlign.right,
+            ),
           ),
         ],
       ),
@@ -261,8 +451,7 @@ class Leaderboard extends StatelessWidget {
   }
 }
 
-// Loading leaderboard shimmer effect
-
+// ShimmerWidget
 class ShimmerWidget extends StatefulWidget {
   final double width;
   final double height;
@@ -271,13 +460,11 @@ class ShimmerWidget extends StatefulWidget {
   const ShimmerWidget.rectangular({
     required this.width,
     required this.height,
-  }
-  ) : isCircular = false;
+  }) : isCircular = false;
 
   const ShimmerWidget.circular({
     required double size,
-  }
-  ) : width = size,
+  }) : width = size,
        height = size,
        isCircular = true;
 

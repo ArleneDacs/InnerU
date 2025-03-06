@@ -2,6 +2,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'chat_room.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,9 +66,22 @@ class CoachProfileDialog extends StatelessWidget {
                 IconButton(
                   icon: Icon(CupertinoIcons.chat_bubble_2_fill,
                       size: 30, color: Colors.white),
-                  onPressed: () {
-                    // Implement messaging functionality
-                  },
+                 onPressed: () {
+  // Close the profile dialog
+  Navigator.pop(context);
+  
+  // Open the chat room
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => ChatRoomScreen(
+        coach: coach,
+        userId: 'user_123', //user ID
+        userName: 'Current User', //username
+      ),
+    ),
+  );
+},
                 ),
               ],
             ),
