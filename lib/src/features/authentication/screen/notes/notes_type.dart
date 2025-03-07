@@ -10,7 +10,7 @@ import 'package:selfcare_projects/src/models/note_model.dart';
 
 class NotesType extends StatefulWidget {
   final Note note;
-  final String? postId; // Nullable para optional
+  final String? postId; // Nullable
   const NotesType({super.key, required this.note, this.postId});
 
   @override
