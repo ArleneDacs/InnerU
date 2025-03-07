@@ -263,7 +263,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   _buildTaskRow('Call', todayTasks),
                   _buildTaskRow('Steps', todayTasks),
                   _buildTaskRow('Meditation', todayTasks),
-                  _buildTaskRow('Learning', todayTasks),
+                  GestureDetector(
+                      onTap: () => Navigator.pushNamed(context, 'notesType'),
+                      child: _buildTaskRow('Learning', todayTasks)),
                   _buildTaskRow('Add Value', todayTasks),
 
                   SizedBox(height: 16),

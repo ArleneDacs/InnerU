@@ -1,7 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 
 class NoteCard extends StatelessWidget {
@@ -9,6 +13,26 @@ class NoteCard extends StatelessWidget {
   final VoidCallback onPressed;
 
   const NoteCard({super.key, required this.note, required this.onPressed});
+
+  Future<int> getCommentCount() async {
+    QuerySnapshot comments = await FirebaseFirestore.instance
+        .collection('notes')
+        .doc(note.id)
+        .collection('comments')
+        .get();
+
+    return comments.docs.length;
+  }
+
+  void openCommentSection(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => CommentWidget(
+        postId: note.id,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +56,7 @@ class NoteCard extends StatelessWidget {
               // Title
               Text(
                 note.title,
-                style: TextStyle(
+                style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
                   color: Colors.black87,
@@ -47,7 +71,7 @@ class NoteCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 5.0),
                     child: Text(
                       item["value"],
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 16,
                         color: Colors.black87,
                         height: 1.5,
@@ -55,39 +79,21 @@ class NoteCard extends StatelessWidget {
                     ),
                   );
                 } else if (item["type"] == "image") {
-                  String imagePath = item["value"]
-                      .toString()
-                      .replaceAll('"', '')
-                      .replaceAll('%22', '');
-                  bool isLocalFile = imagePath.contains("/data/user/0");
-                  if (imagePath.contains("FileImage(")) {
-                    imagePath = imagePath.split("(")[1].split(",")[0];
-                  }
-
+                  String imageValue = item["value"];
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(15),
-                      child: isLocalFile
-                          ? Image.file(
-                              File(imagePath
-                                  .trim()
-                                  .replaceAll("file://", "")
-                                  .replaceAll('"', '')),
-                              width: double.infinity,
-                              height: 200,
-                              fit: BoxFit.cover,
-                            )
-                          : Image.network(
-                              imagePath,
-                              width: double.infinity,
-                              height: 200,
-                              fit: BoxFit.cover,
-                            ),
+                      child: Image.network(
+                        imageValue,
+                        width: double.infinity,
+                        height: 200,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   );
                 }
-                return SizedBox();
+                return const SizedBox();
               }),
 
               const SizedBox(height: 10),
@@ -102,7 +108,7 @@ class NoteCard extends StatelessWidget {
                       color: Colors.grey[800],
                     ),
                   ),
-                  Spacer(),
+                  const Spacer(),
                   Text(
                     formattedDateTime,
                     style: TextStyle(
@@ -110,17 +116,36 @@ class NoteCard extends StatelessWidget {
                       color: Colors.grey[500],
                     ),
                   ),
-
-                  // Placeholder Buttons
                   IconButton(
-                    onPressed: () {}, // Future Like Function
-                    icon: Icon(Icons.favorite_border_rounded),
+                    onPressed: () {}, // Like Function Placeholder
+                    icon: const Icon(Icons.favorite_border_rounded),
                     color: Colors.black54,
                   ),
-                  IconButton(
-                    onPressed: () {}, // Future Comment Function
-                    icon: Icon(Icons.chat_bubble_outline_rounded),
-                    color: Colors.black54,
+                  StreamBuilder(
+                    stream: FirebaseFirestore.instance
+                        .collection('notes')
+                        .doc(note.id)
+                        .collection('comments')
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return IconButton(
+                          onPressed: () => openCommentSection(context),
+                          icon: const Icon(Icons.chat_bubble_outline_rounded),
+                          color: Colors.black54,
+                        );
+                      }
+                      int commentCount = snapshot.data!.docs.length;
+
+                      return IconButton(
+                        onPressed: () => openCommentSection(context),
+                        icon: Badge(
+                          label: Text('$commentCount'),
+                          child: const Icon(Icons.chat_bubble_outline_rounded),
+                        ),
+                        color: Colors.black54,
+                      );
+                    },
                   ),
                 ],
               ),

@@ -170,7 +170,10 @@ class _MeditationState extends State<Meditation> {
                         Icons.music_note,
                         size: 20,
                       )),
-                  Text(favoriteSong)
+                  GestureDetector(
+                      onTap: () =>
+                          Navigator.pushNamed(context, '/meditationSong'),
+                      child: Text(favoriteSong))
                 ],
               )
             ],

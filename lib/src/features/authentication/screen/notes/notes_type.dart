@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert'; // Add this for Base64 encoding
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +10,8 @@ import 'package:selfcare_projects/src/models/note_model.dart';
 
 class NotesType extends StatefulWidget {
   final Note note;
-  const NotesType({super.key, required this.note});
+  final String? postId; // Nullable para optional
+  const NotesType({super.key, required this.note, this.postId});
 
   @override
   State<NotesType> createState() => _NotesTypeState();
@@ -35,7 +37,8 @@ class _NotesTypeState extends State<NotesType> {
   late TextEditingController titleController;
   late TextEditingController contentController = TextEditingController();
 
-  @override
+  get todayTasks => null;
+
   @override
   void initState() {
     super.initState();
@@ -75,11 +78,12 @@ class _NotesTypeState extends State<NotesType> {
             ),
           );
         } else if (item["type"] == "image") {
+          // Here we can use Image.network directly for both URLs and Base64
           contentWidgets.add(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Image.network(
-                item["value"],
+                item["value"], // Works with both http URLs and data URLs
                 width: 200,
                 height: 200,
                 fit: BoxFit.cover,
@@ -132,6 +136,12 @@ class _NotesTypeState extends State<NotesType> {
                       TextButton(
                         onPressed: () {
                           saveNotes(); // Save the note
+                          if (widget.postId == 'Learning') {
+                            setState(() {
+                              todayTasks['Learning'] = true; // Auto-check
+                              print('Learning task is now checked ✅');
+                            });
+                          }
                           Navigator.pop(context);
                           Navigator.pop(context);
                         },
@@ -201,16 +211,41 @@ class _NotesTypeState extends State<NotesType> {
 
     for (var content in contentWidgets) {
       if (content is TextField) {
-        contentList.add({
-          "type": "text",
-          "value": content.controller?.text ?? "",
-        });
+        if (content.controller?.text.isNotEmpty ?? false) {
+          contentList.add({
+            "type": "text",
+            "value": content.controller?.text ?? "",
+          });
+        }
       } else if (content is Padding) {
-        Image imageWidget = (content.child as Stack).children[0] as Image;
-        contentList.add({
-          "type": "image",
-          "value": imageWidget.image.toString(),
-        });
+        // For image widgets
+        if (content.child is Stack) {
+          final stackWidget = content.child as Stack;
+          if (stackWidget.children.isNotEmpty &&
+              stackWidget.children[0] is Image) {
+            final imageWidget = stackWidget.children[0] as Image;
+
+            if (imageWidget.image is FileImage) {
+              // This is a local file image that needs to be converted to Base64
+              final fileImage = imageWidget.image as FileImage;
+              final File imageFile = fileImage.file;
+              final bytes = await imageFile.readAsBytes();
+              final base64Image =
+                  'data:image/jpeg;base64,${base64Encode(bytes)}';
+
+              contentList.add({
+                "type": "image",
+                "value": base64Image,
+              });
+            } else {
+              // Handle other image types (should not happen in this flow)
+              contentList.add({
+                "type": "image",
+                "value": imageWidget.image.toString(),
+              });
+            }
+          }
+        }
       }
     }
 
@@ -219,7 +254,6 @@ class _NotesTypeState extends State<NotesType> {
         final querySnapshot = await myNotes
             .where('username', isEqualTo: username)
             .where('title', isEqualTo: titleString)
-            .where('note', isEqualTo: contentList)
             .get();
 
         if (querySnapshot.docs.isEmpty) {
