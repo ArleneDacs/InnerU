@@ -23,7 +23,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
           Directory('/data/user/0/com.example.selfcare_projects/cache');
       if (await cacheDir.exists()) {
         cacheDir.deleteSync(recursive: true);
-        print("Cache Cleared! 🌱");
+        print("Cache Cleared!");
       }
     }
   }
