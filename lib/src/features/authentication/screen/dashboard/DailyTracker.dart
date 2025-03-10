@@ -42,36 +42,41 @@ class _UserProgressPageState extends State<UserProgressPage> {
       QuerySnapshot trackerSnapshot =
           await FirebaseFirestore.instance.collection('dailytracker').get();
 
+      Set<String> uniqueUsernames = {}; // Ensure unique usernames
       Map<String, Map<String, Map<String, bool>>> progressData = {};
-      Map<String, String> usersData = {};
+      List<Map<String, dynamic>> tempUsers = [];
 
-      trackerSnapshot.docs.forEach((doc) {
-        String docId = doc.id;
-        String userId = docId.split('-')[0];
+      for (var doc in trackerSnapshot.docs) {
+        Map<String, dynamic> userData = doc.data() as Map<String, dynamic>;
 
-        if (userId != currentUserId) {
-          Map<String, dynamic> userData = doc.data() as Map<String, dynamic>;
-          String lastUpdated = userData['lastUpdated'];
+        // Extract username without the date
+        String username = userData['username'] ?? doc.id.split('-').first;
 
-          if (!usersData.containsKey(userId)) {
-            usersData[userId] = userData['username'];
-          }
-
-          progressData.putIfAbsent(userId, () => {});
-          progressData[userId]![lastUpdated] = {
-            'Call': userData['call'] ?? false,
-            'Steps': userData['steps'] ?? false,
-            'Meditation': userData['meditation'] ?? false,
-            'Learning': userData['learning'] ?? false,
-            'Add Value': userData['addValue'] ?? false,
-          };
+        if (!uniqueUsernames.contains(username)) {
+          uniqueUsernames.add(username);
+          tempUsers.add({'userId': username, 'username': username});
         }
-      });
+
+        String lastUpdated = userData['lastUpdated'] ??
+            DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+        progressData.putIfAbsent(username, () => {});
+        progressData[username]![lastUpdated] = {
+          'Call': userData['call'] ?? false,
+          'Steps': userData['steps'] ?? false,
+          'Meditation': userData['meditation'] ?? false,
+          'Learning': userData['learning'] ?? false,
+          'Add Value': userData['addValue'] ?? false,
+        };
+      }
+
+      // ✅ Debugging: Print user list before setting state
+      print("Usernames before setState:");
+      tempUsers.forEach((user) => print(user['username']));
 
       setState(() {
-        users = usersData.entries
-            .map((entry) => {'userId': entry.key, 'username': entry.value})
-            .toList();
+        users = tempUsers
+          ..sort((a, b) => a['username'].compareTo(b['username']));
         userProgressData = progressData;
       });
     } catch (e) {
@@ -92,85 +97,20 @@ class _UserProgressPageState extends State<UserProgressPage> {
                 String username = users[index]['username'];
 
                 return ExpansionTile(
-                  title: Text(username ?? userId),
+                  title: Text(username),
                   children: [
-                    if (userProgressData.containsKey(userId))
-                      _buildUserTracker(userId)
-                    else
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text("No progress data available"),
-                      ),
+                    _buildDailyTracker(userId, DateTime.now()),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Text('Previous Progress',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                    _buildCalendar(userId),
                   ],
                 );
               },
             ),
-    );
-  }
-
-  Widget _buildUserTracker(String userId) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Text(
-            'Current Day Tracker',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ),
-        _buildDailyTracker(userId, DateTime.now()),
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Text(
-            'Previous Progress',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ),
-        _buildMonthYearSelector(),
-        _buildCalendar(userId),
-      ],
-    );
-  }
-
-  Widget _buildMonthYearSelector() {
-    List<String> months = List.generate(12, (index) {
-      return DateFormat.MMMM().format(DateTime(0, index + 1));
-    });
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        DropdownButton<int>(
-          value: selectedMonth,
-          onChanged: (newMonth) {
-            setState(() {
-              selectedMonth = newMonth!;
-            });
-          },
-          items: List.generate(12, (index) {
-            return DropdownMenuItem<int>(
-              value: index + 1,
-              child: Text(months[index]),
-            );
-          }),
-        ),
-        SizedBox(width: 20),
-        DropdownButton<int>(
-          value: selectedYear,
-          onChanged: (newYear) {
-            setState(() {
-              selectedYear = newYear!;
-            });
-          },
-          items: List.generate(10, (index) {
-            int year = DateTime.now().year - index;
-            return DropdownMenuItem<int>(
-              value: year,
-              child: Text(year.toString()),
-            );
-          }),
-        ),
-      ],
     );
   }
 
@@ -223,7 +163,6 @@ class _UserProgressPageState extends State<UserProgressPage> {
       child: Column(
         children: [
           _buildMonthYearSelector(),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: weekdays.map((day) {
@@ -238,8 +177,6 @@ class _UserProgressPageState extends State<UserProgressPage> {
             }).toList(),
           ),
           SizedBox(height: 8),
-
-          // Calendar grid
           GridView.builder(
             physics: NeverScrollableScrollPhysics(),
             shrinkWrap: true,
@@ -250,9 +187,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
             ),
             itemCount: daysInMonth + firstDayOfWeek,
             itemBuilder: (context, index) {
-              if (index < firstDayOfWeek) {
-                return Container();
-              }
+              if (index < firstDayOfWeek) return Container();
               int day = index - firstDayOfWeek + 1;
               String dateKey =
                   '$selectedYear-${selectedMonth.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
@@ -280,6 +215,43 @@ class _UserProgressPageState extends State<UserProgressPage> {
     );
   }
 
+  Widget _buildMonthYearSelector() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        IconButton(
+          icon: Icon(Icons.arrow_left),
+          onPressed: () {
+            setState(() {
+              if (selectedMonth == 1) {
+                selectedMonth = 12;
+                selectedYear--;
+              } else {
+                selectedMonth--;
+              }
+            });
+          },
+        ),
+        Text(
+            '${DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth))}',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        IconButton(
+          icon: Icon(Icons.arrow_right),
+          onPressed: () {
+            setState(() {
+              if (selectedMonth == 12) {
+                selectedMonth = 1;
+                selectedYear++;
+              } else {
+                selectedMonth++;
+              }
+            });
+          },
+        ),
+      ],
+    );
+  }
+
   void _showDailyTrackerDialog(String userId, String dateKey) {
     Map<String, bool> tasks = userProgressData[userId]?[dateKey] ??
         {
@@ -294,7 +266,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text("Daily Tracker - $dateKey"),
+          title: Text("Daily Tracker"),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: tasks.keys.map((task) {
