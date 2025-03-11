@@ -6,11 +6,13 @@ import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/community_bottom_sheet.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:selfcare_projects/src/models/note_model.dart';
 
 class EditProfileScreen extends StatelessWidget {
   @override
@@ -39,6 +41,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  String selectedCategory = '';
   bool isLoading = true;
   String username = "Loading...";
   String email = "Loading...";
@@ -263,9 +266,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   _buildTaskRow('Call', todayTasks),
                   _buildTaskRow('Steps', todayTasks),
                   _buildTaskRow('Meditation', todayTasks),
-                  GestureDetector(
-                      onTap: () => Navigator.pushNamed(context, 'notesType'),
-                      child: _buildTaskRow('Learning', todayTasks)),
+                  _buildTaskRow('Learning', todayTasks),
                   _buildTaskRow('Add Value', todayTasks),
 
                   SizedBox(height: 16),

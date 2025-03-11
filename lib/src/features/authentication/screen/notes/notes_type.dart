@@ -2,8 +2,10 @@ import 'dart:io';
 import 'dart:convert'; // Add this for Base64 encoding
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/models/customSnackbar.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
@@ -18,6 +20,7 @@ class NotesType extends StatefulWidget {
 }
 
 class _NotesTypeState extends State<NotesType> {
+  String? selectedCategory;
   List<Widget> contentWidgets = []; // This will store text and image widgets
   final ImagePicker _picker = ImagePicker();
   XFile? _selectedImage;
@@ -136,12 +139,7 @@ class _NotesTypeState extends State<NotesType> {
                       TextButton(
                         onPressed: () {
                           saveNotes(); // Save the note
-                          if (widget.postId == 'Learning') {
-                            setState(() {
-                              todayTasks['Learning'] = true; // Auto-check
-                              print('Learning task is now checked ✅');
-                            });
-                          }
+                          _finishedWriting();
                           Navigator.pop(context);
                           Navigator.pop(context);
                         },
@@ -163,6 +161,29 @@ class _NotesTypeState extends State<NotesType> {
         padding: EdgeInsets.all(20),
         child: Column(
           children: [
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 5),
+              color: Colors.grey.shade100,
+              child: DropdownButton<String>(
+                value: selectedCategory,
+                hint: Text("Select Category"),
+                isExpanded: true, // Makes it full-width
+                items: ["Add Value", "Learning"].map((String category) {
+                  return DropdownMenuItem<String>(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    selectedCategory = newValue;
+                  });
+                },
+              ),
+            ),
+            SizedBox(
+              height: 20,
+            ),
             TextField(
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               controller: titleController,
@@ -203,6 +224,50 @@ class _NotesTypeState extends State<NotesType> {
     );
   }
 
+  Future<void> _saveDailyActivity(
+      {bool meditation = false,
+      bool steps = false,
+      bool learning = false,
+      bool addValue = false}) async {
+    String? userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+    // Fetch username from Firestore user document
+    DocumentSnapshot userDoc =
+        await firestore.collection('users').doc(userId).get();
+    String? username = userDoc.get('username');
+
+    if (username != null) {
+      String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      DocumentReference docRef =
+          firestore.collection('dailytracker').doc('$username-$formattedDate');
+
+      // Use Firestore's FieldValue.merge to update without overwriting other fields
+      await docRef.set({
+        'username': username,
+        'date': formattedDate,
+        if (meditation) 'meditation': true,
+        if (steps) 'steps': true,
+        if (learning) 'learning': true,
+        if (addValue) 'addValue': true
+      }, SetOptions(merge: true));
+
+      print("Successfully updated the daily tracker.");
+    } else {
+      print("Error: Username not found for userId: $userId");
+    }
+  }
+
+  void _finishedWriting() async {
+    if (selectedCategory == "Learning") {
+      await _saveDailyActivity(learning: true);
+    } else if (selectedCategory == "Add Value") {
+      await _saveDailyActivity(addValue: true);
+    }
+  }
+
   Future<void> saveNotes() async {
     if (_isSaving) return; // Prevent multiple clicks
     _isSaving = true;
@@ -238,7 +303,6 @@ class _NotesTypeState extends State<NotesType> {
                 "value": base64Image,
               });
             } else {
-              // Handle other image types (should not happen in this flow)
               contentList.add({
                 "type": "image",
                 "value": imageWidget.image.toString(),
@@ -263,6 +327,7 @@ class _NotesTypeState extends State<NotesType> {
             'note': contentList,
             'color': color,
             'createdAt': now,
+            'category': selectedCategory
           });
 
           if (_mounted) {

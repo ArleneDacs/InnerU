@@ -10,30 +10,30 @@ class Note {
   int color;
   final List<String> images;
   final DateTime createdAt;
+  final String category;
 
-  Note({
-    required this.username,
-    required this.id,
-    required this.title,
-    required this.note,
-    this.color = 0xFFFFFFFF,
-    required this.images,
-    required this.createdAt,
-  });
+  Note(
+      {required this.username,
+      required this.id,
+      required this.title,
+      required this.note,
+      this.color = 0xFFFFFFFF,
+      required this.images,
+      required this.createdAt,
+      required this.category});
 
   factory Note.fromMap(Map<String, dynamic> map) {
     return Note(
-      id: map['id'] ?? '',
-      title: map['title'] ?? '',
-      note: map['note'] ?? [],
-      images: List<String>.from(map['images'] ?? []),
-      createdAt: map['createdAt'] != null
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(), // Default to now if no timestamp exists
-
-      color: map['color'] ?? 0xFFFFFFFF,
-      username: map['username'] ?? 'Anonymous', //
-    );
+        id: map['id'] ?? '',
+        title: map['title'] ?? '',
+        note: map['note'] ?? [],
+        images: List<String>.from(map['images'] ?? []),
+        createdAt: map['createdAt'] != null
+            ? (map['createdAt'] as Timestamp).toDate()
+            : DateTime.now(),
+        color: map['color'] ?? 0xFFFFFFFF,
+        username: map['username'] ?? 'Anonymous', //
+        category: map['category']);
   }
 
   Map<String, dynamic> toJson() {
@@ -43,6 +43,7 @@ class Note {
       "note": note,
       "color": color,
       "createdAt": createdAt,
+      'category': category
     };
   }
 }

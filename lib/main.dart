@@ -78,13 +78,15 @@ class App extends StatelessWidget {
           '/profileSettings': (context) => ProfileSettings(),
           '/meditationSong': (context) => MeditationSong(),
           'notesType': (context) => NotesType(
-              note: Note(
-                  username: '',
-                  id: '',
-                  title: '',
-                  note: [],
-                  createdAt: DateTime.now(),
-                  images: [])),
+                  note: Note(
+                username: '',
+                id: '',
+                title: '',
+                note: [],
+                createdAt: DateTime.now(),
+                images: [],
+                category: '',
+              )),
           '/profile': (context) => ProfilePage(
                 title: '',
               )

@@ -46,7 +46,6 @@ class TimeProvider extends ChangeNotifier {
     _timer = null;
     _remainingTime = _initialTime;
     _isRunning = false;
-    notifyListeners();
     AudioHelper.stopAudio();
   }
 
