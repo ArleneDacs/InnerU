@@ -52,6 +52,9 @@ class _UserProgressPageState extends State<UserProgressPage> {
         // Extract username without the date
         String username = userData['username'] ?? doc.id.split('-').first;
 
+        // Skip the current user
+        if (username == currentUserId) continue;
+
         if (!uniqueUsernames.contains(username)) {
           uniqueUsernames.add(username);
           tempUsers.add({'userId': username, 'username': username});
