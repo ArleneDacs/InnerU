@@ -51,6 +51,9 @@
 		<string>Camera Usage</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Microphone Usage</string>
-
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>tel</string>
+    </array>
 </dict>
 </plist>

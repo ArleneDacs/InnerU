@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'chat_room.dart';
 
 
@@ -23,11 +24,13 @@ class MyApp extends StatelessWidget {
 
 class Coach {
   final String name;
+  final String phone;
   final String bio;
   final Color backgroundColor;
 
   Coach({
     required this.name,
+    this.phone = '',
     this.bio = '',
     required this.backgroundColor,
   });
@@ -40,6 +43,15 @@ class CoachProfileDialog extends StatelessWidget {
     super.key,
     required this.coach,
   });
+
+  void _launchDialer(String phoneNumber) async {
+    final Uri url = Uri(scheme: 'tel', path: phoneNumber);
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url);
+    } else {
+      debugPrint("Could not launch dialer");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,24 +76,24 @@ class CoachProfileDialog extends StatelessWidget {
                   onPressed: () => Navigator.pop(context),
                 ),
                 IconButton(
-                  icon: Icon(CupertinoIcons.chat_bubble_2_fill,
-                      size: 30, color: Colors.white),
-                 onPressed: () {
-  // Close the profile dialog
-  Navigator.pop(context);
-  
-  // Open the chat room
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (context) => ChatRoomScreen(
-        coach: coach,
-        userId: 'user_123', //user ID
-        userName: 'Current User', //username
-      ),
-    ),
-  );
-},
+                  icon: const Icon(
+                    CupertinoIcons.chat_bubble_2_fill,
+                    size: 30,
+                    color: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ChatRoomScreen(
+                          coach: coach,
+                          userId: 'user_123', // Replace with dynamic user ID
+                          userName: 'Current User', // Replace with dynamic username
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -103,6 +115,19 @@ class CoachProfileDialog extends StatelessWidget {
                 color: Colors.white,
               ),
               textAlign: TextAlign.center,
+            ),
+            GestureDetector(
+              onTap: () => _launchDialer(coach.phone),
+              child: Text(
+                coach.phone.isNotEmpty ? coach.phone : 'No phone available',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  decoration: TextDecoration.underline,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(height: 32),
             const Align(
@@ -138,6 +163,7 @@ class CoachProfileDialog extends StatelessWidget {
   }
 }
 
+
 class CoachesScreen extends StatefulWidget {
   const CoachesScreen({super.key});
 
@@ -169,6 +195,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
         final data = doc.data();
         return Coach(
           name: data['name'] ?? '',
+          phone: data['phone'] ?? '',
           bio: data['bio'] ?? '',
           backgroundColor: data['backgroundColor'] == 'green'
               ? Color(0xFF90A17D)
