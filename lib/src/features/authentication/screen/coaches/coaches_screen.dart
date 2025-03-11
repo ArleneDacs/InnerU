@@ -2,9 +2,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'chat_room.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,10 +47,60 @@ class CoachProfileDialog extends StatelessWidget {
 
   void _launchDialer(String phoneNumber) async {
     final Uri url = Uri(scheme: 'tel', path: phoneNumber);
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url);
+
+    // Get current date dynamically in the format 'yyyy-MM-dd'
+    String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    // Get the current logged-in user from FirebaseAuth
+    User? currentUser = FirebaseAuth.instance.currentUser;
+
+    if (currentUser != null) {
+      String userId = currentUser.uid; // Get the userId from the Firebase user
+
+      try {
+        // Fetch username from Firestore user document
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .get();
+        String? username = userDoc.get('username');
+
+        if (username != null) {
+          String documentId =
+              '$username-$formattedDate'; // Firestore document ID
+
+          // Try to launch the phone dialer
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url);
+            debugPrint("Dialer launched successfully");
+
+            // Update or create Firestore document for the current user and date
+            try {
+              await FirebaseFirestore.instance
+                  .collection('dailytracker')
+                  .doc(documentId)
+                  .set({
+                'username': username,
+                'date': formattedDate,
+                'call': true, // Set 'call' field to true
+              }, SetOptions(merge: true));
+
+              debugPrint(
+                  "Firestore updated successfully: 'call' field set to true");
+            } catch (e) {
+              debugPrint("Error updating Firestore: $e");
+            }
+          } else {
+            debugPrint("Could not launch dialer");
+          }
+        } else {
+          debugPrint("Error: Username not found for userId: $userId");
+        }
+      } catch (e) {
+        debugPrint("Error fetching user data: $e");
+      }
     } else {
-      debugPrint("Could not launch dialer");
+      debugPrint("No user logged in");
     }
   }
 
@@ -89,7 +140,8 @@ class CoachProfileDialog extends StatelessWidget {
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
                           userId: 'user_123', // Replace with dynamic user ID
-                          userName: 'Current User', // Replace with dynamic username
+                          userName:
+                              'Current User', // Replace with dynamic username
                         ),
                       ),
                     );
@@ -117,7 +169,10 @@ class CoachProfileDialog extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             GestureDetector(
-              onTap: () => _launchDialer(coach.phone),
+              onTap: () {
+                _launchDialer(coach
+                    .phone); // Call the launcher with the coach's phone number
+              },
               child: Text(
                 coach.phone.isNotEmpty ? coach.phone : 'No phone available',
                 style: const TextStyle(
@@ -162,7 +217,6 @@ class CoachProfileDialog extends StatelessWidget {
     );
   }
 }
-
 
 class CoachesScreen extends StatefulWidget {
   const CoachesScreen({super.key});
