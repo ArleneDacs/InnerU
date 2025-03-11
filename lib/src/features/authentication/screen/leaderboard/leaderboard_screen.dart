@@ -5,11 +5,13 @@ class UserActivity {
   final int meditationMinutes;
   final int stepsTaken;
   final int journalEntries;
+  final String server; // Added server field
 
   const UserActivity({
     this.meditationMinutes = 0,
     this.stepsTaken = 0,
     this.journalEntries = 0,
+    this.server = "", // Default empty server
   });
 
   int calculatePoints() {
@@ -59,6 +61,17 @@ class LeaderboardService {
   List<LeaderboardEntry> getLeaderboard() {
     return List.from(_entries);
   }
+  
+  // New method to get filtered leaderboard
+  List<LeaderboardEntry> getFilteredLeaderboard(String server) {
+    if (server.isEmpty) {
+      return List.from(_entries);
+    }
+    
+    return _entries
+        .where((entry) => entry.activity.server == server)
+        .toList();
+  }
 }
 
 class LeaderboardEntry {
@@ -87,7 +100,11 @@ class Leaderboard extends StatefulWidget {
 class _LeaderboardState extends State<Leaderboard> {
   final LeaderboardService _leaderboardService = LeaderboardService();
   late List<LeaderboardEntry> entries;
+  late List<LeaderboardEntry> displayedEntries; // New variable for displayed entries
   bool isLoading = true;
+  String selectedServer = "Server"; // Default selected server
+  String username = "Valenin"; // Default username
+  bool isFilteredByUser = false; // Track if we're filtering by user
 
   @override
   void initState() {
@@ -108,33 +125,100 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   void _loadSampleData() {
-    // Add sample users with activities
+    // Add sample users with activities for Valenin server - with correct names and varied points
+    _leaderboardService.addUserActivity(
+      'Aina Mae', 
+      UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50, server: "Valenin")
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Karlo', 
+      UserActivity(meditationMinutes: 1050, stepsTaken: 210000, journalEntries: 45, server: "Valenin")
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Jenealle', 
+      UserActivity(meditationMinutes: 990, stepsTaken: 205000, journalEntries: 43, server: "Valenin")
+    );
+    
+    // Add more users for Valenin to show below podium
+    _leaderboardService.addUserActivity(
+      'Maychell', 
+      UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30, server: "Valenin")
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Lucky', 
+      UserActivity(meditationMinutes: 750, stepsTaken: 170000, journalEntries: 25, server: "Valenin")
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Vesanie', 
+      UserActivity(meditationMinutes: 700, stepsTaken: 160000, journalEntries: 20, server: "Valenin")
+    );
+    
+    // Add sample users for other servers
     _leaderboardService.addUserActivity(
       'John Angel', 
-      const UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50)
+      UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50, server: "Server2")
     );
     
     _leaderboardService.addUserActivity(
       'Rose Anne', 
-      const UserActivity(meditationMinutes: 1000, stepsTaken: 220000, journalEntries: 45)
+      UserActivity(meditationMinutes: 1000, stepsTaken: 220000, journalEntries: 45, server: "Server2")
+    );
+    
+    _leaderboardService.addUserActivity(
+      'Kurt', 
+      UserActivity(meditationMinutes: 980, stepsTaken: 210000, journalEntries: 48, server: "Server3")
     );
     
     _leaderboardService.addUserActivity(
       'Arlene Mae', 
-      const UserActivity(meditationMinutes: 900, stepsTaken: 200000, journalEntries: 40)
+      UserActivity(meditationMinutes: 900, stepsTaken: 200000, journalEntries: 40, server: "Server2")
     );
     
     _leaderboardService.addUserActivity(
       'Trixie Nicole', 
-      const UserActivity(meditationMinutes: 850, stepsTaken: 190000, journalEntries: 35)
+      UserActivity(meditationMinutes: 850, stepsTaken: 190000, journalEntries: 35, server: "Server2")
     );
     
     _leaderboardService.addUserActivity(
       'Craig Euwan', 
-      const UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30)
+      UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30, server: "Server3")
     );
     
     entries = _leaderboardService.getLeaderboard();
+    displayedEntries = List.from(entries); // Initialize displayed entries with all entries
+  }
+
+  // Function to filter entries by server - FIXED VERSION
+  void _filterByServer(String server) {
+    setState(() {
+      if (server == "Server") {
+        // Show all servers
+        displayedEntries = List.from(entries);
+        isFilteredByUser = false;
+        selectedServer = "Server";
+      } else {
+        // Filter by specific server
+        List<LeaderboardEntry> filtered = entries.where((entry) => entry.activity.server == server).toList();
+        
+        // Re-rank the filtered entries from 1 to N
+        for (int i = 0; i < filtered.length; i++) {
+          filtered[i] = LeaderboardEntry(
+            name: filtered[i].name,
+            score: filtered[i].score,
+            rank: i + 1,  // Reassign ranks starting from 1
+            activity: filtered[i].activity,
+          );
+        }
+        
+        displayedEntries = filtered;
+        isFilteredByUser = true;
+        selectedServer = server; // Store the actual server name
+      }
+    });
   }
 
   @override
@@ -154,27 +238,71 @@ class _LeaderboardState extends State<Leaderboard> {
       ),
       body: Column(
         children: [
+          // Server/User selector with tappable areas
           Padding(
             padding: EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'Enter your code',
-                      border: OutlineInputBorder(),
+            child: Container(
+              height: 36, // Reduced height
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18), // Adjusted to match half of height
+                border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        // Filter by Valenin server
+                        _filterByServer("Valenin");
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: isFilteredByUser ? Color(0xFFCEA47E) : Colors.white,
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(17),
+                            bottomLeft: Radius.circular(17),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          username,
+                          style: TextStyle(
+                            color: isFilteredByUser ? Colors.white : Color(0xFFCEA47E),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 15, // Slightly smaller text
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: () {},
-                  child: Text('Generate a code'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF5E7582),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        // Show all servers
+                        _filterByServer("Server");
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: !isFilteredByUser ? Color(0xFFCEA47E) : Colors.white,
+                          borderRadius: BorderRadius.only(
+                            topRight: Radius.circular(17),
+                            bottomRight: Radius.circular(17),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          "Server",
+                          style: TextStyle(
+                            color: !isFilteredByUser ? Colors.white : Color(0xFFCEA47E),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 15, // Slightly smaller text
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           Container(
@@ -186,13 +314,15 @@ class _LeaderboardState extends State<Leaderboard> {
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: isLoading ? 5 : entries.length - 3,
+              itemCount: isLoading ? 5 : 
+                (displayedEntries.length <= 3 ? 0 : displayedEntries.length - 3),
               itemBuilder: (context, index) {
+                // Use actual rank from entry rather than calculating from index
                 return Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: isLoading 
                     ? _buildSkeletonItem()
-                    : _buildLeaderboardItem(entries[index + 3]),
+                    : _buildLeaderboardItem(displayedEntries[index + 3]),
                 );
               },
             ),
@@ -202,8 +332,7 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
-// Skeleton loading
-
+  // Skeleton loading methods
   Widget _buildSkeletonPodium() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -277,43 +406,119 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   Widget _buildPodium() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        _buildPodiumItem(entries[1], 120),
-        _buildPodiumItem(entries[0], 140),
-        _buildPodiumItem(entries[2], 100),
-      ],
+  // Check if we have enough entries to show in podium
+  if (displayedEntries.length < 3) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          "Not enough entries to display podium",
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+        ),
+      ),
     );
   }
+  
+  return Stack(
+    alignment: Alignment.center,
+    children: [
+      // Left confetti
+      Positioned(
+        left: 0,
+        top: 20,
+        child: SizedBox(
+          width: 100,
+          height: 180,
+          child: Image.asset(
+            'assets/images/confetti_left.gif',
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+      
+      // Right confetti
+      Positioned(
+        right: 0,
+        top: 20,
+        child: SizedBox(
+          width: 100,
+          height: 180,
+          child: Image.asset(
+            'assets/images/confetti_right.gif',
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+      
+      // Podium content
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _buildPodiumItem(displayedEntries[1], 120, 2),
+          _buildPodiumItem(displayedEntries[0], 140, 1),
+          _buildPodiumItem(displayedEntries[2], 100, 3),
+        ],
+      ),
+    ],
+  );
+}
 
-  Widget _buildPodiumItem(LeaderboardEntry entry, double height) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundColor: Colors.grey[200],
-          child: Icon(
-            Icons.person,
-            size: 30,
-            color: Colors.grey[600],
+  Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
+    return GestureDetector(
+      onTap: () {
+        // Show detailed breakdown of points when tapping on podium item
+        _showPointsBreakdown(context, entry);
+      },
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Stack(
+            alignment: Alignment.topCenter,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: Colors.grey[200],
+                child: Icon(
+                  Icons.person,
+                  size: 30,
+                  color: Colors.grey[600],
+                ),
+              ),
+              // Add crown to first place
+              if (position == 1)
+                Positioned(
+                  top: -20,
+                  child: Image.asset(
+                    'assets/images/crown.png',
+                    height: 30,
+                    width: 30,
+                  ),
+                ),
+            ],
           ),
-        ),
-        SizedBox(height: 8),
-        Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
-        Container(
-          width: 80,
-          height: height,
-          margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2), // Added vertical margin
-          decoration: BoxDecoration(
-            color: Colors.cyan, // Changed color to match your screenshot
-            borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+          SizedBox(height: 8),
+          Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
+          Container(
+            width: 80,
+            height: height,
+            margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.cyan,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Center(
+              child: Text(
+                entry.score.toString(),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
-          child: Center(child: Text(entry.score.toString())),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -353,10 +558,15 @@ class _LeaderboardState extends State<Leaderboard> {
                 children: [
                   Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
                   SizedBox(height: 4),
+                  Text(
+                    entry.activity.server,
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  SizedBox(height: 4),
                   LinearProgressIndicator(
                     value: entry.score / 3000,
                     backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange), // Match progress color to screenshot
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange), 
                   ),
                 ],
               ),
@@ -391,6 +601,11 @@ class _LeaderboardState extends State<Leaderboard> {
               Text(
                 '${entry.name}\'s Points',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Server: ${entry.activity.server}',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
               SizedBox(height: 16),
               _buildPointsRow('Meditation', entry.activity.meditationMinutes, 
@@ -451,7 +666,7 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 }
 
-// ShimmerWidget
+// ShimmerWidget class
 class ShimmerWidget extends StatefulWidget {
   final double width;
   final double height;
