@@ -20,6 +20,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/profile/pro
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/splash_screen/splash_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
@@ -76,6 +77,7 @@ class App extends StatelessWidget {
           '/userprogress': (context) => UserProgressPage(),
           '/communityScreen': (context) => CommunityScreen(),
           '/profileSettings': (context) => ProfileSettings(),
+          '/todolist': (context) => TodoList(),
           '/meditationSong': (context) => MeditationSong(),
           'notesType': (context) => NotesType(
                   note: Note(

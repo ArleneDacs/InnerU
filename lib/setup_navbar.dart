@@ -8,6 +8,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 
 class Setuppage extends StatefulWidget {
@@ -23,24 +24,18 @@ class _SetuppageState extends State<Setuppage> {
     Meditation(),
     StepTracker(),
     DashboardScreen(),
-    SleepTracker(),
+    TodoList(),
     CommunityScreen()
   ];
 
-  final _titles = [
-    "Meditation",
-    "Step Tracker",
-    "",
-    "Sleep Tracker",
-    "Community"
-  ];
+  final _titles = ["Meditation", "Step Tracker", "", "To Do List", "Community"];
 
   // Default (unselected) icons
   final List<Widget> _defaultIcons = [
     Icon(CupertinoIcons.suit_heart, size: 30),
     Icon(Icons.directions_walk_outlined, size: 30),
     Icon(Icons.dashboard_outlined, size: 30),
-    Icon(CupertinoIcons.moon_zzz, size: 30),
+    Icon(CupertinoIcons.lightbulb, size: 30),
     Icon(Icons.edit_outlined, size: 30)
   ];
 
@@ -55,7 +50,7 @@ class _SetuppageState extends State<Setuppage> {
       Icons.dashboard,
       size: 30,
     ),
-    Icon(CupertinoIcons.moon_zzz_fill, size: 30),
+    Icon(CupertinoIcons.lightbulb_fill, size: 30),
     Icon(Icons.edit, size: 30),
   ];
 
