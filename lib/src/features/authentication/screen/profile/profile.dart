@@ -45,7 +45,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isLoading = true;
   String username = "Loading...";
   String email = "Loading...";
-  String? _base64Image;
+  String? _profilePicUrl;
 
   // Daily Tracker related variables
   int selectedMonth = DateTime.now().month;
@@ -66,13 +66,30 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         username = data["username"]!;
         email = data["email"]!;
-        _base64Image = data["profilePic"];
       });
     });
-
+ _fetchProfilePic();
     fetchDailyTrackerData(); // Fetch Firestore data
   }
+Future<void> _fetchProfilePic() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
 
+  try {
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .get();
+
+    if (userDoc.exists) {
+      setState(() {
+        _profilePicUrl = userDoc["profilePic"]; // URL from Firestore
+      });
+    }
+  } catch (e) {
+    print("Error fetching profile picture: $e");
+  }
+}
   void fetchDailyTrackerData() async {
     String userId = FirebaseAuth.instance.currentUser!.uid;
     String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -225,21 +242,36 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
               child: Column(
                 children: [
-                  _base64Image == null
-                      ? Image.asset(
-                          'assets/images/avatar.png', // Default image if no profilePic is available
-                          width: screenWidth * 0.35,
-                          height: screenWidth * 0.35,
-                        )
-                      : ClipOval(
-                          child: Image.memory(
-                            base64Decode(
-                                _base64Image!), // Decode the base64 string to display the image
-                            width: screenWidth * 0.35,
-                            height: screenWidth * 0.35,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
+                _profilePicUrl == null
+    ? Image.asset(
+        'assets/images/avatar.png', // Default image if no profilePic is available
+        width: screenWidth * 0.35,
+        height: screenWidth * 0.35,
+      )
+    : ClipOval(
+        child: Image.network(
+          _profilePicUrl!,
+          width: screenWidth * 0.35,
+          height: screenWidth * 0.35,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return SizedBox(
+              width: screenWidth * 0.35,
+              height: screenWidth * 0.35,
+              child: CircularProgressIndicator(), // Loading indicator
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            return Image.asset(
+              'assets/images/avatar.png', // Fallback image on error
+              width: screenWidth * 0.35,
+              height: screenWidth * 0.35,
+            );
+          },
+        ),
+      ),
+
                   SizedBox(height: 10),
                   Column(
                     children: [

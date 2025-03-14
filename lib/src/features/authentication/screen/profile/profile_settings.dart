@@ -21,6 +21,8 @@ class ProfileSettings extends StatelessWidget {
                 "Profile Settings",
                 style: TextStyle(fontSize: 35),
               ),
+
+                SizedBox(height: 40),
               _buildSectionTitle("General"),
               _buildButton(
                   context,
