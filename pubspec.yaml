@@ -60,6 +60,7 @@ dependencies:
   flutter_background_service: ^5.1.0
   path_provider: ^2.1.5
   url_launcher: ^6.1.14
+  video_player: ^2.5.0
 
 
 
