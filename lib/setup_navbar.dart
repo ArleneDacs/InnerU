@@ -81,7 +81,7 @@ class _SetuppageState extends State<Setuppage> {
         animationDuration: Duration(milliseconds: 300),
         backgroundColor: Colors.transparent,
         buttonBackgroundColor: const Color(0xFFEFD199),
-        color: const Color(0xFF80C8BC),
+        color: const Color(0xFF90A17D),
         index: index,
         items: List.generate(_defaultIcons.length,
             (i) => i == index ? _selectedIcons[i] : _defaultIcons[i]),

@@ -87,6 +87,7 @@ class _StepTrackerState extends State<StepTracker>
 
     print("Saved $steps steps for $date");
   }
+  
 
   void _initStepCounter() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();

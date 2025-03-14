@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
@@ -28,18 +29,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String author = "Unknown";
   String? selectedEmotion;
   String? currentUserEmotion;
-  String? _base64Image;
+  String? _profilePicUrl;
 
   @override
   void initState() {
-    UserService.getUserData().then((data) => setState(() {
-          _base64Image = data["profilePic"];
-        }));
+   _fetchProfilePic();
     super.initState();
     fetchQuote();
     _loadTodayEmotion();
   }
+Future<void> _fetchProfilePic() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
 
+  try {
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .get();
+
+    if (userDoc.exists) {
+      setState(() {
+        _profilePicUrl = userDoc["profilePic"]; // Get the profile picture URL
+      });
+    }
+  } catch (e) {
+    print("Error fetching profile picture: $e");
+  }
+}
   selectEmotion(String emotion) async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -247,21 +264,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         elevation: 0,
         leading: IconButton(
-          icon: _base64Image == null
+        icon: _profilePicUrl == null
               ? Image.asset(
                   'assets/images/avatar.png', // Default image if no profilePic is available
                   width: screenWidth * 0.08,
                   height: screenWidth * 0.08,
                 )
-              : ClipOval(
-                  child: Image.memory(
-                    base64Decode(
-                        _base64Image!), // Decode the base64 string to display the image
-                    width: screenWidth * 0.08,
-                    height: screenWidth * 0.08,
-                    fit: BoxFit.cover,
-                  ),
-                ),
+              :ClipOval(
+  child: _profilePicUrl != null
+      ? Image.network(
+          _profilePicUrl!,
+          width: screenWidth * 0.08,
+          height: screenWidth * 0.08,
+          fit: BoxFit.cover,
+        )
+      : Icon(Icons.person, size: screenWidth * 0.08), // Default icon if no image
+),
+
           onPressed: () => Navigator.pushNamed(context, '/profile'),
         ),
         actions: [

@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
@@ -9,6 +11,7 @@ import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 
 class EditProfile extends StatefulWidget {
   const EditProfile({super.key, required this.title});
@@ -21,6 +24,7 @@ class EditProfile extends StatefulWidget {
 class MyEditProfileState extends State<EditProfile> {
   String? _base64Image;
   String? _selectedImage;
+  String? _selectedImageTemp;
   final TextEditingController _dobController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
@@ -33,69 +37,133 @@ class MyEditProfileState extends State<EditProfile> {
   bool _isButtonEnabled = false;
   Future<Map<String, dynamic>>? _userDataFuture;
 
-  @override
-  void initState() {
-    super.initState();
-    _userDataFuture = UserService.getUserData().then((userData) {
-      setState(() {
-        _usernameController.text = userData["username"] ?? "";
-        _emailController.text = userData["email"] ?? "";
-        _phoneController.text = userData["number"] ?? "";
-        _currentBirthdate = userData["birthdate"] ?? "";
-        _dobController.text = _currentBirthdate;
-        _base64Image = userData["profilePic"] ?? null;
-      });
-      return userData;
+@override
+void initState() {
+  super.initState();
+  _userDataFuture = UserService.getUserData().then((userData) {
+    setState(() {
+      _usernameController.text = userData["username"] ?? "";
+      _emailController.text = userData["email"] ?? "";
+      _phoneController.text = userData["number"] ?? "";
+      _currentBirthdate = userData["birthdate"] ?? "";
+      _dobController.text = _currentBirthdate;
+      _selectedImage = userData["profilePic"] ?? null; // Use URL instead of base64
     });
-  }
+    return userData;
+  });
+}
+Future<void> pickImage() async {
+  try {
+    final XFile? image = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (image == null) return;
 
-  Future<void> pickImage() async {
-    try {
-      final XFile? image = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (image != null) {
-        Uint8List bytes = await image.readAsBytes();
-        img.Image? originalImage = img.decodeImage(Uint8List.fromList(bytes));
+    Uint8List bytes = await File(image.path).readAsBytes();
+    img.Image? originalImage = img.decodeImage(bytes);
 
-        if (originalImage != null) {
-          img.Image resizedImage = img.copyResize(originalImage, width: 600, height: 600);
-          Uint8List resizedBytes = Uint8List.fromList(img.encodeJpg(resizedImage));
-          String base64String = base64Encode(resizedBytes);
-
-          setState(() {
-            _selectedImage = base64String;
-            _isButtonEnabled = true;
-          });
-        }
-      }
-    } catch (e) {
-      print("Error picking image: $e");
+    if (originalImage == null) {
+      print("Error decoding image.");
+      return;
     }
+
+    img.Image resizedImage = img.copyResize(originalImage, width: 600, height: 600);
+    Uint8List resizedBytes = Uint8List.fromList(img.encodeJpg(resizedImage));
+
+    setState(() {
+      _selectedImageTemp = image.path; // Temporarily store selected image
+      _isButtonEnabled = true; // Enable update button
+    });
+
+  } catch (e) {
+    print("Error picking image: $e");
+  }
+}
+
+Future<String?> _uploadImageToFirebaseStorage(Uint8List imageBytes) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return null;
+
+  try {
+    Reference storageRef = FirebaseStorage.instance.ref().child("profile_pictures/${user.uid}.jpg");
+    UploadTask uploadTask = storageRef.putData(imageBytes, SettableMetadata(contentType: "image/jpeg"));
+
+    // Show loading animation while uploading
+    TaskSnapshot snapshot = await uploadTask;
+    String downloadUrl = await snapshot.ref.getDownloadURL();
+
+    await FirebaseFirestore.instance.collection("users").doc(user.uid).update({
+      "profilePic": downloadUrl,
+    });
+
+    print("Image uploaded successfully: $downloadUrl");
+    return downloadUrl;
+  } catch (e) {
+    print("Error uploading image: $e");
+    return null;
+  }
+}
+
+Future<void> _updateUserData() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+
+  setState(() {
+    _isButtonEnabled = false; // Disable button while updating
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(child: CircularProgressIndicator()),
+    );
+  });
+
+  Map<String, dynamic> updatedData = {
+    "username": _usernameController.text.trim(),
+    "email": _emailController.text.trim(),
+    "number": _phoneController.text.trim(),
+  };
+
+  if (_isBirthdateChanged) {
+    updatedData["birthdate"] = _dobController.text.trim();
   }
 
-  Future<void> _updateUserData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      Map<String, dynamic> updatedData = {
-        "username": _usernameController.text.trim(),
-        "email": _emailController.text.trim(),
-        "number": _phoneController.text.trim(),
-      };
+  try {
+    // If a new image is selected, upload it
+    if (_selectedImageTemp != null) {
+      Uint8List imageBytes = await File(_selectedImageTemp!).readAsBytes();
+      String? downloadUrl = await _uploadImageToFirebaseStorage(imageBytes);
 
-      if (_isBirthdateChanged) {
-        updatedData["birthdate"] = _dobController.text.trim();
+      if (downloadUrl != null) {
+        updatedData["profilePic"] = downloadUrl;
       }
-
-      if (_selectedImage != null) {
-        updatedData["profilePic"] = _selectedImage;
-      }
-
-      await FirebaseFirestore.instance.collection("users").doc(user.uid).update(updatedData).then((_) {
-        print("User data updated successfully!");
-      }).catchError((error) {
-        print("Error updating user data: $error");
-      });
     }
+
+    await FirebaseFirestore.instance.collection("users").doc(user.uid).update(updatedData);
+
+    setState(() {
+      _selectedImage = updatedData["profilePic"];
+      _selectedImageTemp = null; // Clear temp image
+    });
+
+    Navigator.pop(context); // Close loading dialog
+
+    // Redirect to the profile screen
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => ProfileSettings()),
+    );
+
+    print("User data updated successfully!");
+  } catch (error) {
+    Navigator.pop(context); // Close loading dialog if error occurs
+    print("Error updating user data: $error");
+
+    // Show error message
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text("Failed to update profile. Please try again."),
+      backgroundColor: Colors.red,
+    ));
   }
+}
+
 
 Future<void> _checkUsernameAvailability(String username) async {
   final user = FirebaseAuth.instance.currentUser;
@@ -185,29 +253,41 @@ void _checkEmailAvailability(String email) async {
                 Center(
                   child: Stack(
                     children: [
-                      _selectedImage != null
-                          ? ClipOval(
-                              child: Image.memory(
-                                base64Decode(_selectedImage!),
-                                width: MediaQuery.of(context).size.width * 0.35,
-                                height: MediaQuery.of(context).size.width * 0.35,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          : _base64Image == null
-                              ? Image.asset(
-                                  'assets/images/avatar.png',
-                                  width: MediaQuery.of(context).size.width * 0.35,
-                                  height: MediaQuery.of(context).size.width * 0.35,
-                                )
-                              : ClipOval(
-                                  child: Image.memory(
-                                    base64Decode(_base64Image!),
-                                    width: MediaQuery.of(context).size.width * 0.35,
-                                    height: MediaQuery.of(context).size.width * 0.35,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
+                     _selectedImageTemp != null
+  ? ClipOval(
+      child: Image.file(
+        File(_selectedImageTemp!), // Show selected image immediately
+        width: MediaQuery.of(context).size.width * 0.35,
+        height: MediaQuery.of(context).size.width * 0.35,
+        fit: BoxFit.cover,
+      ),
+    )
+  :  _selectedImage != null
+  ? ClipOval(
+      child: Image.network(
+        _selectedImage!,
+        width: MediaQuery.of(context).size.width * 0.35,
+        height: MediaQuery.of(context).size.width * 0.35,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Center(child: CircularProgressIndicator());
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return Image.asset(
+            'assets/images/avatar.png',
+            width: MediaQuery.of(context).size.width * 0.35,
+            height: MediaQuery.of(context).size.width * 0.35,
+          );
+        },
+      ),
+    )
+  : Image.asset(
+      'assets/images/avatar.png',
+      width: MediaQuery.of(context).size.width * 0.35,
+      height: MediaQuery.of(context).size.width * 0.35,
+    ),
+
                       Positioned(
                         bottom: 0,
                         right: 10,
@@ -286,24 +366,38 @@ void _checkEmailAvailability(String email) async {
                 ),
               ),
                 SizedBox(height: 30.0),
-              ElevatedButton(
-                onPressed: _isButtonEnabled ? () async {
-                  await _updateUserData();
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => ProfilePage(title: 'Profile')),
-                  );
-                } : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isButtonEnabled ? Color(0xFFce8f5a) : Colors.grey,
-                  elevation: 0,
-                  padding: EdgeInsets.symmetric(horizontal: 25, vertical: 8),
-                ),
-                child: Text(
-                  'Update',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-              ),
+     ElevatedButton(
+  onPressed: _isButtonEnabled
+      ? () async {
+          setState(() {
+            _isButtonEnabled = false; // Disable button to prevent multiple taps
+          });
+
+          try {
+            await _updateUserData();
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage(title: 'Profile')),
+            );
+          } catch (e) {
+            print("Update failed: $e"); // Handle the error (e.g., show a Snackbar)
+          } finally {
+            setState(() {
+              _isButtonEnabled = true; // Re-enable button
+            });
+          }
+        }
+      : null,
+  style: ElevatedButton.styleFrom(
+    backgroundColor: _isButtonEnabled ? Color(0xFFce8f5a) : Colors.grey,
+    elevation: 0,
+    padding: EdgeInsets.symmetric(horizontal: 25, vertical: 8),
+  ),
+  child: Text(
+    'Update',
+    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+  ),
+),
 
               ],
             ),

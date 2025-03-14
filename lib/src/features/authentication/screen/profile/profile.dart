@@ -14,6 +14,10 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 
+const customColor1 = Color(0xFF6D849A); // Example primary color
+const customColor2 = Color(0xFFCE8F5A); // Example secondary color
+const customColor3 = Color(0xFF90A17D); // Example accent color
+
 class EditProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
@@ -45,7 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isLoading = true;
   String username = "Loading...";
   String email = "Loading...";
-  String? _base64Image;
+  String? _profilePicUrl;
 
   // Daily Tracker related variables
   int selectedMonth = DateTime.now().month;
@@ -66,11 +70,58 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         username = data["username"]!;
         email = data["email"]!;
-        _base64Image = data["profilePic"];
       });
     });
-
+    _fetchProfilePic();
     fetchDailyTrackerData(); // Fetch Firestore data
+    listenToDailyTrackerUpdates(); // Start listening to database changes
+  }
+
+  void listenToDailyTrackerUpdates() {
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get()
+        .then((userSnapshot) {
+      if (userSnapshot.exists) {
+        String username =
+            (userSnapshot.data() as Map<String, dynamic>)['username'];
+        String documentId = '$username-$todayDate';
+
+        FirebaseFirestore.instance
+            .collection('dailytracker')
+            .doc(documentId)
+            .snapshots()
+            .listen((snapshot) {
+          if (snapshot.exists) {
+            fetchDailyTrackerData(); // Fetch data whenever there's a change
+          }
+        });
+      }
+    });
+  }
+
+  Future<void> _fetchProfilePic() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists) {
+        setState(() {
+          _profilePicUrl = userDoc["profilePic"]; // URL from Firestore
+        });
+      }
+    } catch (e) {
+      print("Error fetching profile picture: $e");
+    }
   }
 
   void fetchDailyTrackerData() async {
@@ -225,21 +276,37 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
               child: Column(
                 children: [
-                  _base64Image == null
+                  _profilePicUrl == null
                       ? Image.asset(
                           'assets/images/avatar.png', // Default image if no profilePic is available
                           width: screenWidth * 0.35,
                           height: screenWidth * 0.35,
                         )
                       : ClipOval(
-                          child: Image.memory(
-                            base64Decode(
-                                _base64Image!), // Decode the base64 string to display the image
+                          child: Image.network(
+                            _profilePicUrl!,
                             width: screenWidth * 0.35,
                             height: screenWidth * 0.35,
                             fit: BoxFit.cover,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return SizedBox(
+                                width: screenWidth * 0.35,
+                                height: screenWidth * 0.35,
+                                child:
+                                    CircularProgressIndicator(), // Loading indicator
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Image.asset(
+                                'assets/images/avatar.png', // Fallback image on error
+                                width: screenWidth * 0.35,
+                                height: screenWidth * 0.35,
+                              );
+                            },
                           ),
                         ),
+
                   SizedBox(height: 10),
                   Column(
                     children: [
@@ -290,22 +357,32 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // Builds each task row for Today's tracker
   Widget _buildTaskRow(String task, Map<String, bool> taskMap) {
+    bool isCompleted = taskMap[task] ?? false;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
           Checkbox(
-            value: taskMap[task] ?? false,
-            onChanged: null, // Keep this as null to disable interaction
+            value: isCompleted,
+            activeColor: customColor1, // Applied customColor1 here
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            onChanged: null, // Checkbox is no longer tappable
           ),
           InkWell(
             onTap: () {
-              // Handle the task click here
               print('Tapped on $task');
             },
             child: Text(
               task,
-              style: TextStyle(color: const Color.fromARGB(255, 0, 0, 0)),
+              style: TextStyle(
+                color: isCompleted
+                    ? customColor3
+                    : Colors.black, // Applied customColor3 for completed tasks
+                fontWeight: isCompleted ? FontWeight.bold : FontWeight.normal,
+                fontSize: 16,
+              ),
             ),
           ),
         ],
@@ -320,7 +397,7 @@ class _ProfilePageState extends State<ProfilePage> {
     List<String> weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     return FutureBuilder<Set<int>>(
-      future: _fetchTrackedDays(), // Fetch tracked days
+      future: _fetchTrackedDays(),
       builder: (context, snapshot) {
         Set<int> trackedDays = snapshot.data ?? {};
 
@@ -330,7 +407,9 @@ class _ProfilePageState extends State<ProfilePage> {
           constraints: BoxConstraints(maxWidth: 500),
           decoration: BoxDecoration(
             color: Colors.white,
-            border: Border.all(color: Colors.black, width: 2),
+            border: Border.all(
+                color: customColor2,
+                width: 2), // Applied customColor2 for the calendar border
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
@@ -357,8 +436,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       12,
                       (index) => DropdownMenuItem<int>(
                         value: index + 1,
-                        child: Text(DateFormat('MMMM')
-                            .format(DateTime(selectedYear, index + 1, 1))),
+                        child: Text(
+                          DateFormat('MMMM')
+                              .format(DateTime(selectedYear, index + 1, 1)),
+                        ),
                       ),
                     ),
                   ),
@@ -387,7 +468,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     .map((day) => Expanded(
                           child: Center(
                             child: Text(day,
-                                style: TextStyle(fontWeight: FontWeight.bold)),
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        customColor1)), // Applied customColor1 for weekday labels
                           ),
                         ))
                     .toList(),
@@ -413,8 +497,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       .isBefore(DateTime(currentDate.year, currentDate.month,
                           currentDate.day));
 
-                  bool hasData =
-                      trackedDays.contains(day); // Check if day has data
+                  bool hasData = trackedDays.contains(day);
 
                   return InkWell(
                     onTap: () => _showDailyTrackerDialog(day),
@@ -425,18 +508,20 @@ class _ProfilePageState extends State<ProfilePage> {
                         color: (day == currentDate.day &&
                                 selectedMonth == currentDate.month &&
                                 selectedYear == currentDate.year)
-                            ? Colors.greenAccent // Today's highlight
+                            ? customColor2 // Applied customColor2 to highlight today's date
                             : (isPastDay && hasData
-                                ? Colors
-                                    .greenAccent // Highlight past days with data
+                                ? customColor3 // Applied customColor3 to highlight past days with data
                                 : Colors.white), // Default for other days
-                        border: Border.all(color: Colors.black),
+                        border: Border.all(
+                            color:
+                                customColor1), // Applied customColor1 for calendar day borders
                       ),
                       child: Text(
                         '$day',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: Colors.black, // Always keep text black
+                          color: const Color.fromARGB(255, 0, 0,
+                              0), // Applied customColor1 for day numbers
                         ),
                       ),
                     ),
