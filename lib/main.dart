@@ -86,7 +86,6 @@ class App extends StatelessWidget {
                 title: '',
                 note: [],
                 createdAt: DateTime.now(),
-                images: [],
                 category: '',
               )),
           '/profile': (context) => ProfilePage(

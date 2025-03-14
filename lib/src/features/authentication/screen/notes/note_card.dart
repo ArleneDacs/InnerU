@@ -43,13 +43,13 @@ class NoteCard extends StatelessWidget {
     return GestureDetector(
       onTap: onPressed,
       child: Card(
-        elevation: 4,
+        elevation: 2,
         color: Color(note.color),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -70,16 +70,16 @@ class NoteCard extends StatelessWidget {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5.0),
                     child: Text(
-                      item["value"],
+                      item["value"]!,
                       style: const TextStyle(
                         fontSize: 16,
-                        color: Colors.black87,
+                        color: Color.fromARGB(221, 19, 19, 19),
                         height: 1.5,
                       ),
                     ),
                   );
                 } else if (item["type"] == "image") {
-                  String imageValue = item["value"];
+                  String imageValue = item["value"]!;
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: ClipRRect(
@@ -105,7 +105,7 @@ class NoteCard extends StatelessWidget {
                     '@${note.username}',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey[800],
+                      color: Colors.grey[600],
                     ),
                   ),
                   const Spacer(),
@@ -113,13 +113,8 @@ class NoteCard extends StatelessWidget {
                     formattedDateTime,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey[500],
+                      color: Colors.grey[600],
                     ),
-                  ),
-                  IconButton(
-                    onPressed: () {}, // Like Function Placeholder
-                    icon: const Icon(Icons.favorite_border_rounded),
-                    color: Colors.black54,
                   ),
                   StreamBuilder(
                     stream: FirebaseFirestore.instance

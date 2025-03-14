@@ -3,6 +3,7 @@ import 'dart:convert'; // Add this for Base64 encoding
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -50,7 +51,6 @@ class _NotesTypeState extends State<NotesType> {
     color = note.color == 0xFFFFFFFF ? generateRandomLightShade() : note.color;
     titleController = TextEditingController(text: titleString);
 
-    // Loop through the note content and add widgets
     if (note.note.isEmpty) {
       contentWidgets.add(
         TextField(
@@ -66,7 +66,6 @@ class _NotesTypeState extends State<NotesType> {
         ),
       );
     } else {
-      // Your existing loop for note.note contents
       for (var item in note.note) {
         if (item["type"] == "text") {
           contentController = TextEditingController(text: item["value"]);
@@ -81,12 +80,11 @@ class _NotesTypeState extends State<NotesType> {
             ),
           );
         } else if (item["type"] == "image") {
-          // Here we can use Image.network directly for both URLs and Base64
           contentWidgets.add(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Image.network(
-                item["value"], // Works with both http URLs and data URLs
+                item["value"]!, // Fetch image from Firebase Storage URL
                 width: 200,
                 height: 200,
                 fit: BoxFit.cover,
@@ -269,7 +267,7 @@ class _NotesTypeState extends State<NotesType> {
   }
 
   Future<void> saveNotes() async {
-    if (_isSaving) return; // Prevent multiple clicks
+    if (_isSaving) return;
     _isSaving = true;
     List<Map<String, String>> contentList = [];
     DateTime now = DateTime.now();
@@ -282,33 +280,15 @@ class _NotesTypeState extends State<NotesType> {
             "value": content.controller?.text ?? "",
           });
         }
-      } else if (content is Padding) {
-        // For image widgets
-        if (content.child is Stack) {
-          final stackWidget = content.child as Stack;
-          if (stackWidget.children.isNotEmpty &&
-              stackWidget.children[0] is Image) {
-            final imageWidget = stackWidget.children[0] as Image;
+      } else if (content is Padding && content.child is Image) {
+        Image imageWidget = content.child as Image;
 
-            if (imageWidget.image is FileImage) {
-              // This is a local file image that needs to be converted to Base64
-              final fileImage = imageWidget.image as FileImage;
-              final File imageFile = fileImage.file;
-              final bytes = await imageFile.readAsBytes();
-              final base64Image =
-                  'data:image/jpeg;base64,${base64Encode(bytes)}';
-
-              contentList.add({
-                "type": "image",
-                "value": base64Image,
-              });
-            } else {
-              contentList.add({
-                "type": "image",
-                "value": imageWidget.image.toString(),
-              });
-            }
-          }
+        if (imageWidget.image is NetworkImage) {
+          String imageUrl = (imageWidget.image as NetworkImage).url;
+          contentList.add({
+            "type": "image",
+            "value": imageUrl,
+          });
         }
       }
     }
@@ -342,65 +322,48 @@ class _NotesTypeState extends State<NotesType> {
       }
     }
 
-    _isSaving = false; // Reset flag after saving
+    _isSaving = false;
+  }
+
+  Future<String> uploadImageToFirebase(File imageFile) async {
+    try {
+      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
+      Reference storageRef =
+          FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
+
+      UploadTask uploadTask = storageRef.putFile(imageFile);
+      TaskSnapshot snapshot = await uploadTask;
+
+      return await snapshot.ref.getDownloadURL(); // Get image URL
+    } catch (e) {
+      print("Error uploading image: $e");
+      return "";
+    }
   }
 
   void pickImage() async {
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
-      setState(() {
-        contentWidgets.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Stack(
-              children: [
-                Image.file(
-                  File(image.path),
-                  width: 200,
-                  height: 200,
-                  fit: BoxFit.cover,
-                ),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: IconButton(
-                    icon: Icon(Icons.cancel, color: Colors.red),
-                    onPressed: () {
-                      setState(() {
-                        contentWidgets.removeLast(); // Remove Image
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+      File imageFile = File(image.path);
 
-        // Automatically Add TextField Under Image
-        contentWidgets.add(
-          TextField(
-            controller: TextEditingController(),
-            maxLines: null,
-            decoration: InputDecoration(border: InputBorder.none),
-            onSubmitted: (value) {
-              addText(value);
-            },
-            onChanged: (value) {
-              if (value.isEmpty) {
-                // If user deletes text, remove image above
-                int index = contentWidgets.indexOf(contentWidgets.last);
-                if (index > 0 && contentWidgets[index - 1] is Padding) {
-                  setState(() {
-                    contentWidgets.removeAt(index - 1); // Delete Image
-                    contentWidgets.removeAt(index - 1); // Delete TextField
-                  });
-                }
-              }
-            },
-          ),
-        );
-      });
+      // Upload image to Firebase Storage
+      String imageUrl = await uploadImageToFirebase(imageFile);
+
+      if (imageUrl.isNotEmpty) {
+        setState(() {
+          contentWidgets.add(
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Image.network(
+                imageUrl,
+                width: 200,
+                height: 200,
+                fit: BoxFit.cover,
+              ),
+            ),
+          );
+        });
+      }
     }
   }
 

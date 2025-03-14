@@ -3,37 +3,37 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Note {
-  String username;
   String id;
+  String username;
   String title;
-  List<dynamic> note;
+  List<Map<String, String>> note; // Stores both text and images
   int color;
-  final List<String> images;
-  final DateTime createdAt;
-  final String category;
+  DateTime createdAt;
+  String category;
 
-  Note(
-      {required this.username,
-      required this.id,
-      required this.title,
-      required this.note,
-      this.color = 0xFFFFFFFF,
-      required this.images,
-      required this.createdAt,
-      required this.category});
+  Note({
+    required this.id,
+    required this.username,
+    required this.title,
+    required this.note,
+    this.color = 0xFFFFFFFF,
+    required this.createdAt,
+    required this.category,
+  });
 
-  factory Note.fromMap(Map<String, dynamic> map) {
+  factory Note.fromMap(Map<String, dynamic> data) {
     return Note(
-        id: map['id'] ?? '',
-        title: map['title'] ?? '',
-        note: map['note'] ?? [],
-        images: List<String>.from(map['images'] ?? []),
-        createdAt: map['createdAt'] != null
-            ? (map['createdAt'] as Timestamp).toDate()
-            : DateTime.now(),
-        color: map['color'] ?? 0xFFFFFFFF,
-        username: map['username'] ?? 'Anonymous', //
-        category: map['category']);
+      id: data['id'] ?? '',
+      username: data['username'] ?? '',
+      title: data['title'] ?? '',
+      note: List<Map<String, String>>.from(
+        (data['note'] as List<dynamic>)
+            .map((item) => Map<String, String>.from(item)),
+      ),
+      color: data['color'] ?? '',
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      category: data['category'] ?? '',
+    );
   }
 
   Map<String, dynamic> toJson() {
