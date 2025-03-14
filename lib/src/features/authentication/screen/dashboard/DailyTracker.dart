@@ -3,6 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
+// Custom Colors
+const customColor1 = Color(0xFF6D849A); // Primary color
+const customColor2 = Color(0xFFCE8F5A); // Secondary color
+const customColor3 = Color(0xFF90A17D); // Accent color
+
 class UserProgressPage extends StatefulWidget {
   @override
   _UserProgressPageState createState() => _UserProgressPageState();
@@ -73,10 +78,6 @@ class _UserProgressPageState extends State<UserProgressPage> {
         };
       }
 
-      // ✅ Debugging: Print user list before setting state
-      print("Usernames before setState:");
-      tempUsers.forEach((user) => print(user['username']));
-
       setState(() {
         users = tempUsers
           ..sort((a, b) => a['username'].compareTo(b['username']));
@@ -90,27 +91,47 @@ class _UserProgressPageState extends State<UserProgressPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Friends Tracker')),
+      appBar: AppBar(
+        title: Text('Friends Tracker'),
+      ),
       body: users.isEmpty
-          ? Center(child: Text('No other users found'))
+          ? Center(
+              child: Text('No other users found',
+                  style: TextStyle(color: customColor1)))
           : ListView.builder(
               itemCount: users.length,
               itemBuilder: (context, index) {
                 String userId = users[index]['userId'];
                 String username = users[index]['username'];
 
-                return ExpansionTile(
-                  title: Text(username),
-                  children: [
-                    _buildDailyTracker(userId, DateTime.now()),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('Previous Progress',
+                return Card(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ExpansionTile(
+                    tilePadding:
+                        EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    title: Text(username,
+                        style: TextStyle(
+                            color: customColor1, fontWeight: FontWeight.bold)),
+                    children: [
+                      _buildDailyTracker(userId, DateTime.now()),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          'Previous Progress',
                           style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                    ),
-                    _buildCalendar(userId),
-                  ],
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: customColor2),
+                        ),
+                      ),
+                      _buildCalendar(userId),
+                    ],
+                  ),
                 );
               },
             ),
@@ -129,13 +150,15 @@ class _UserProgressPageState extends State<UserProgressPage> {
         };
 
     return Padding(
-      padding: const EdgeInsets.all(8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         children: tasks.keys.map((task) {
           return CheckboxListTile(
-            title: Text(task),
+            title: Text(task, style: TextStyle(color: customColor3)),
             value: tasks[task],
             onChanged: null,
+            activeColor: customColor1,
+            checkColor: Colors.white,
           );
         }).toList(),
       ),
@@ -151,8 +174,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
       margin: EdgeInsets.all(8),
       padding: EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black, width: 2),
+        color: customColor3.withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
@@ -173,7 +195,8 @@ class _UserProgressPageState extends State<UserProgressPage> {
                 child: Center(
                   child: Text(
                     day,
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: customColor2),
                   ),
                 ),
               );
@@ -203,12 +226,13 @@ class _UserProgressPageState extends State<UserProgressPage> {
                     borderRadius: BorderRadius.circular(8),
                     color:
                         userProgressData[userId]?.containsKey(dateKey) ?? false
-                            ? Colors.greenAccent
+                            ? customColor3.withOpacity(0.5)
                             : Colors.white,
-                    border: Border.all(color: Colors.black),
+                    border: Border.all(color: customColor1),
                   ),
                   child: Text('$day',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: customColor1)),
                 ),
               );
             },
@@ -223,7 +247,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         IconButton(
-          icon: Icon(Icons.arrow_left),
+          icon: Icon(Icons.arrow_left, color: customColor1),
           onPressed: () {
             setState(() {
               if (selectedMonth == 1) {
@@ -237,9 +261,12 @@ class _UserProgressPageState extends State<UserProgressPage> {
         ),
         Text(
             '${DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth))}',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: customColor1)),
         IconButton(
-          icon: Icon(Icons.arrow_right),
+          icon: Icon(Icons.arrow_right, color: customColor1),
           onPressed: () {
             setState(() {
               if (selectedMonth == 12) {
@@ -269,17 +296,20 @@ class _UserProgressPageState extends State<UserProgressPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text("Daily Tracker"),
+          title: Text("Daily Tracker", style: TextStyle(color: customColor1)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: tasks.keys.map((task) {
               return CheckboxListTile(
-                  title: Text(task), value: tasks[task], onChanged: null);
+                  title: Text(task, style: TextStyle(color: customColor2)),
+                  value: tasks[task],
+                  onChanged: null);
             }).toList(),
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context), child: Text("Close"))
+                onPressed: () => Navigator.pop(context),
+                child: Text("Close", style: TextStyle(color: customColor1)))
           ],
         );
       },
