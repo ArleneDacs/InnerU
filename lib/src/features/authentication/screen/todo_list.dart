@@ -168,29 +168,21 @@ class TodoListScreen extends StatefulWidget {
   _TodoListScreenState createState() => _TodoListScreenState();
 }
 
-class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProviderStateMixin {
+class _TodoListScreenState extends State<TodoListScreen> {
   List<Task> _tasks = [];
   bool _isLoading = true;
   int _currentTabIndex = 0;
-  late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
   @override
-void initState() {
-  super.initState();
-  _tabController = TabController(length: 3, vsync: this);
-  _tabController.addListener(() {
-    setState(() {
-      _currentTabIndex = _tabController.index;
-    });
-  });
-  _loadTasks();
-}
+  void initState() {
+    super.initState();
+    _loadTasks();
+  }
 
   @override
   void dispose() {
-    _tabController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -274,6 +266,7 @@ void initState() {
         builder: (context, setState) => AlertDialog(
           title: const Text('New Task'),
           contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+          actionsPadding: EdgeInsets.zero,
           backgroundColor: const Color(0xFFF2F0F7),
           content: SingleChildScrollView(
             child: Column(
@@ -433,26 +426,77 @@ void initState() {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('CANCEL', style: TextStyle(color: Colors.deepPurple)),
-            ),
-            TextButton(
-              onPressed: () {
-                if (titleController.text.trim().isNotEmpty) {
-                  _addTask(
-                    Task(
-                      id: DateTime.now().millisecondsSinceEpoch.toString(),
-                      title: titleController.text.trim(),
-                      description: descriptionController.text.trim(),
-                      dueDate: selectedDate,
-                      tag: selectedTag,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  // ADD button - gold/beige with white text (on the left)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (titleController.text.trim().isNotEmpty) {
+                            _addTask(
+                              Task(
+                                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                                title: titleController.text.trim(),
+                                description: descriptionController.text.trim(),
+                                dueDate: selectedDate,
+                                tag: selectedTag,
+                              ),
+                            );
+                            Navigator.pop(context);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFEFD199), // Gold/beige color
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        child: const Text(
+                          'ADD',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ),
-                  );
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('ADD', style: TextStyle(color: Colors.deepPurple)),
+                  ),
+                  // CANCEL button - white with gray text (on the right)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.grey,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            side: BorderSide(color: Colors.grey.shade300),
+                          ),
+                        ),
+                        child: const Text(
+                          'CANCEL',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -466,90 +510,128 @@ void initState() {
     
     return Scaffold(
       appBar: PreferredSize(
-  preferredSize: const Size.fromHeight(48),
-  child: Container(
-    decoration: const BoxDecoration(
-      color: Colors.white,
-      // Removed the box shadow to eliminate the line
-    ),
-    child: TabBar(
-      controller: _tabController,
-      indicatorColor: Colors.transparent, // Hide default underline indicator
-      dividerColor: Colors.transparent, // Hide divider line
-      indicatorSize: TabBarIndicatorSize.tab, // Make indicator full width
-      labelColor: Colors.white,
-      unselectedLabelColor: Colors.black54,
-      // Add indicator to fill entire tab
-      indicator: BoxDecoration(
-        color: const Color(0xFF90A17D),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      // Make tabs equally sized
-      labelPadding: EdgeInsets.zero,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      tabs: [
-        // All tab
-        Container(
-          height: 36,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
+        preferredSize: const Size.fromHeight(48),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
           ),
-          alignment: Alignment.center,
-          child: const Text(
-            'All',
-            textAlign: TextAlign.center,
-          ),
-        ),
-        // Pending tab
-        Container(
-          height: 36,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('Pending'),
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: _currentTabIndex == 1 
-                      ? Colors.white.withOpacity(0.3) 
-                      : const Color(0xFF90A17D),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  _tasks.where((task) => !task.isCompleted).length.toString(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                // All tab
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _currentTabIndex = 0;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _currentTabIndex == 0
+                            ? const Color(0xFF90A17D)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'All',
+                        style: TextStyle(
+                          color: _currentTabIndex == 0 ? Colors.white : Colors.black54,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                // Pending tab
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _currentTabIndex = 1;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _currentTabIndex == 1
+                            ? const Color(0xFF90A17D)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Pending',
+                            style: TextStyle(
+                              color: _currentTabIndex == 1 ? Colors.white : Colors.black54,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _currentTabIndex == 1
+                                  ? Colors.white.withOpacity(0.3)
+                                  : const Color(0xFF90A17D),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              _tasks.where((task) => !task.isCompleted).length.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Completed tab
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _currentTabIndex = 2;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _currentTabIndex == 2
+                            ? const Color(0xFF90A17D)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Completed',
+                        style: TextStyle(
+                          color: _currentTabIndex == 2 ? Colors.white : Colors.black54,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        // Completed tab
-        Container(
-          height: 36,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          alignment: Alignment.center,
-          child: const Text(
-            'Completed',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    ),
-  ),
-),
+      ),
 
       backgroundColor: Colors.white,
       body: _isLoading
@@ -747,8 +829,9 @@ void initState() {
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
+                                      // Due date in its own row
                                       Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                        padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
                                         child: Row(
                                           children: [
                                             Icon(
@@ -764,30 +847,32 @@ void initState() {
                                                 fontSize: 14,
                                               ),
                                             ),
-                                            if (task.tag != TaskTag.none) ...[
-                                              const Spacer(),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(
-                                                  horizontal: 8,
-                                                  vertical: 4,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: task.tag.color.withOpacity(0.2),
-                                                  borderRadius: BorderRadius.circular(16),
-                                                ),
-                                                child: Text(
-                                                  task.tag.displayName,
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: task.tag.color,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
                                           ],
                                         ),
                                       ),
+                                      // Task tag in its own row
+                                      if (task.tag != TaskTag.none)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 2.0, bottom: 4.0),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: task.tag.color.withOpacity(0.2),
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: Text(
+                                              task.tag.displayName,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: task.tag.color,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                   trailing: IconButton(
@@ -828,7 +913,7 @@ void initState() {
         onPressed: _showAddTaskDialog,
         backgroundColor: const Color(0xFFEFD199),
         elevation: 2,
-        shape: CircleBorder(),
+        shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
     );
