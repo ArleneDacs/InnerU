@@ -89,6 +89,17 @@ class NoteCard extends StatelessWidget {
                         width: double.infinity,
                         height: 200,
                         fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                              child:
+                                  CircularProgressIndicator()); // Show loader while loading
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          print("Image failed to load: $error"); // ✅ Debug log
+                          return Icon(Icons.broken_image,
+                              size: 100, color: Colors.red);
+                        },
                       ),
                     ),
                   );

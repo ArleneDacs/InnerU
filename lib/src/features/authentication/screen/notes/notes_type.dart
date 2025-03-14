@@ -82,14 +82,22 @@ class _NotesTypeState extends State<NotesType> {
         } else if (item["type"] == "image") {
           contentWidgets.add(
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Image.network(
-                item["value"]!, // Fetch image from Firebase Storage URL
-                width: 200,
-                height: 200,
-                fit: BoxFit.cover,
-              ),
-            ),
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Image.network(
+                  item["value"]!,
+                  width: 200,
+                  height: 200,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                        child: CircularProgressIndicator()); // Show loader
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return Text("Image failed to load",
+                        style: TextStyle(color: Colors.red));
+                  },
+                )),
           );
         }
       }
@@ -346,10 +354,11 @@ class _NotesTypeState extends State<NotesType> {
     if (image != null) {
       File imageFile = File(image.path);
 
-      // Upload image to Firebase Storage
+      // Upload image and wait for URL
       String imageUrl = await uploadImageToFirebase(imageFile);
 
       if (imageUrl.isNotEmpty) {
+        print("Uploaded image URL: $imageUrl"); // Debugging
         setState(() {
           contentWidgets.add(
             Padding(
@@ -363,6 +372,8 @@ class _NotesTypeState extends State<NotesType> {
             ),
           );
         });
+      } else {
+        print("Failed to upload image.");
       }
     }
   }
