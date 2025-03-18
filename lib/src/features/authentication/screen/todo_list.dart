@@ -3,9 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-void main() {
-  runApp(const TodoList());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const TodoList());  await Firebase.initializeApp();
+
 }
 
 class TodoList extends StatelessWidget {
@@ -44,6 +48,19 @@ extension TaskTagExtension on TaskTag {
   String get displayName {
     switch (this) {
       case TaskTag.personal:
+        return 'Personal'; // Shortened from 'Personal Goals'
+      case TaskTag.professional:
+        return 'Professional'; // Shortened from 'Professional Milestones'
+      case TaskTag.contribution:
+        return 'Contribution'; // Shortened from 'Contribution Goals'
+      case TaskTag.none:
+        return 'No Tag';
+    }
+  }
+
+  String get fullDisplayName {
+    switch (this) {
+      case TaskTag.personal:
         return 'Personal Goals';
       case TaskTag.professional:
         return 'Professional Milestones';
@@ -53,7 +70,7 @@ extension TaskTagExtension on TaskTag {
         return 'No Tag';
     }
   }
-  
+
   // tag colors
   Color get color {
     switch (this) {
@@ -121,7 +138,103 @@ class Task {
   );
 }
 
-// Todo list repository
+// Firebase Firestore Repository
+class FirestoreRepository {
+  final CollectionReference tasksCollection = FirebaseFirestore.instance.collection('tasks');
+  
+  // Get user ID for multi-user support (optional)
+  String? userId = 'default_user'; // Replace with actual user ID if using authentication
+  
+  // Load tasks
+  Future<List<Task>> loadTasks() async {
+    try {
+      // First attempt - try getting all tasks without userId filter
+      final snapshot = await tasksCollection.orderBy('dueDate').get();
+      
+      if (snapshot.docs.isEmpty) {
+        print('No tasks found in Firestore collection');
+      }
+      
+      return snapshot.docs.map((doc) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        
+        // Handle Timestamp format from Firestore
+        if (data['dueDate'] is Timestamp) {
+          data['dueDate'] = (data['dueDate'] as Timestamp).toDate().toIso8601String();
+        }
+        
+        // Add the document ID as task ID
+        data['id'] = doc.id;
+        
+        // Debug the data coming from Firestore
+        print('Task data from Firestore: $data');
+        
+        return Task.fromJson(data);
+      }).toList();
+    } catch (e) {
+      print('Error loading tasks from Firestore: $e');
+      return [];
+    }
+  }
+  
+  // Add a task
+  Future<void> addTask(Task task) async {
+    try {
+      // Don't add userId field to enable task fetching without filtering
+      await tasksCollection.add({
+        'title': task.title,
+        'description': task.description,
+        'isCompleted': task.isCompleted,
+        'dueDate': Timestamp.fromDate(task.dueDate),
+        'tag': task.tag.index,
+      });
+      print('Task added to Firestore: ${task.title}');
+    } catch (e) {
+      print('Error adding task to Firestore: $e');
+    }
+  }
+  
+  // Update a task
+  Future<void> updateTask(Task task) async {
+    try {
+      await tasksCollection.doc(task.id).update({
+        'title': task.title,
+        'description': task.description,
+        'isCompleted': task.isCompleted,
+        'dueDate': Timestamp.fromDate(task.dueDate),
+        'tag': task.tag.index,
+      });
+    } catch (e) {
+      print('Error updating task in Firestore: $e');
+    }
+  }
+  
+  // Delete a task
+  Future<void> deleteTask(String id) async {
+    try {
+      await tasksCollection.doc(id).delete();
+    } catch (e) {
+      print('Error deleting task from Firestore: $e');
+    }
+  }
+  
+  // Optional: Migration from local storage to Firestore
+  Future<void> migrateFromLocalStorage() async {
+    try {
+      final localTasks = await TodoRepository.loadTasks();
+      
+      for (final task in localTasks) {
+        await addTask(task);
+      }
+      
+      print('Migration completed successfully!');
+    } catch (e) {
+      print('Error during migration: $e');
+    }
+  }
+}
+
+// Keep the original TodoRepository for migration purposes
 class TodoRepository {
   static Future<String> get _localPath async {
     final directory = await getApplicationDocumentsDirectory();
@@ -174,6 +287,20 @@ class _TodoListScreenState extends State<TodoListScreen> {
   int _currentTabIndex = 0;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  
+  // Create an instance of FirestoreRepository with fallback
+  late final FirestoreRepository _repository;
+  
+  // Constructor with repository initialization
+  _TodoListScreenState() {
+    try {
+      _repository = FirestoreRepository();
+      print('Firestore repository initialized');
+    } catch (e) {
+      print('Error initializing Firestore repository: $e');
+      // This catch block allows the app to continue even if Firestore initialization fails
+    }
+  }
 
   @override
   void initState() {
@@ -191,37 +318,93 @@ class _TodoListScreenState extends State<TodoListScreen> {
     setState(() {
       _isLoading = true;
     });
-    final tasks = await TodoRepository.loadTasks();
+    
+    // Load tasks from Firestore instead of local storage
+    final tasks = await _repository.loadTasks();
+    
     setState(() {
       _tasks = tasks;
       _isLoading = false;
     });
   }
 
-  Future<void> _saveTasks() async {
-    await TodoRepository.saveTasks(_tasks);
+  void _addTask(Task task) async {
+    // Add task to Firestore
+    await _repository.addTask(task);
+    
+    // Reload tasks to get the latest data with proper IDs
+    _loadTasks();
   }
 
-  void _addTask(Task task) {
-    setState(() {
-      _tasks.add(task);
-    });
-    _saveTasks();
-  }
-
-  void _toggleTaskCompletion(String id) {
-    setState(() {
-      final task = _tasks.firstWhere((task) => task.id == id);
+  void _toggleTaskCompletion(String id) async {
+    final index = _tasks.indexWhere((task) => task.id == id);
+    if (index != -1) {
+      final task = _tasks[index];
       task.isCompleted = !task.isCompleted;
-    });
-    _saveTasks();
+      
+      // Update task in Firestore
+      await _repository.updateTask(task);
+      
+      setState(() {
+        // Update UI
+        _tasks[index] = task;
+      });
+    }
   }
 
-  void _deleteTask(String id) {
+  void _deleteTask(String id) async {
+    // Delete task from Firestore
+    await _repository.deleteTask(id);
+    
     setState(() {
       _tasks.removeWhere((task) => task.id == id);
     });
-    _saveTasks();
+  }
+
+  // Show migration dialog - useful for first-time setup
+  void _showMigrationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Migrate Data'),
+        content: const Text('Would you like to migrate your existing tasks to Firebase Firestore?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              // Show loading indicator
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+              
+              // Perform migration
+              await _repository.migrateFromLocalStorage();
+              
+              // Dismiss loading indicator
+              Navigator.pop(context);
+              
+              // Reload tasks
+              _loadTasks();
+              
+              // Show success message
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Migration completed!')),
+              );
+            },
+            child: const Text('MIGRATE'),
+          ),
+        ],
+      ),
+    );
   }
 
   List<Task> _getFilteredTasks() {
@@ -259,7 +442,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final descriptionController = TextEditingController();
     DateTime selectedDate = DateTime.now();
     TaskTag selectedTag = TaskTag.none;
-    
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -330,8 +513,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
-                // Tag selection with tag icon
+
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -352,19 +534,30 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             items: TaskTag.values.map((tag) {
                               return DropdownMenuItem<TaskTag>(
                                 value: tag,
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: tag == TaskTag.none ? Colors.grey : tag.color,
-                                        shape: BoxShape.circle,
+                                // Improve layout of dropdown items to prevent overflow
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 8.0), // Add padding to prevent overflow
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min, // Use minimum space needed
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: tag == TaskTag.none ? Colors.grey : tag.color,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(tag == TaskTag.none ? 'No Tag' : tag.displayName),
-                                  ],
+                                      const SizedBox(width: 8),
+                                      // Use Flexible to allow text to wrap or shrink if needed
+                                      Flexible(
+                                        child: Text(
+                                          tag == TaskTag.none ? 'No Tag' : tag.displayName,
+                                          overflow: TextOverflow.ellipsis, // Handle text overflow
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               );
                             }).toList(),
@@ -373,6 +566,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                 selectedTag = newValue!;
                               });
                             },
+                            // Constrain dropdown menu width
+                            menuMaxHeight: 300,
                             hint: const Text('Add a task tag'),
                           ),
                         ),
@@ -440,7 +635,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           if (titleController.text.trim().isNotEmpty) {
                             _addTask(
                               Task(
-                                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                                id: DateTime.now().millisecondsSinceEpoch.toString(), // This will be replaced by Firestore's ID
                                 title: titleController.text.trim(),
                                 description: descriptionController.text.trim(),
                                 dueDate: selectedDate,
@@ -915,6 +1110,34 @@ class _TodoListScreenState extends State<TodoListScreen> {
         elevation: 2,
         shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white),
+      ),
+      // Add migration button in the drawer
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const DrawerHeader(
+              decoration: BoxDecoration(
+                color: Color(0xFF90A17D),
+              ),
+              child: Text(
+                'Todo List',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_upload),
+              title: const Text('Migrate Local Data to Firebase'),
+              onTap: () {
+                Navigator.pop(context);
+                _showMigrationDialog();
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
