@@ -77,6 +77,25 @@ class _ProfilePageState extends State<ProfilePage> {
     listenToDailyTrackerUpdates(); // Start listening to database changes
   }
 
+  void updateUserPoints(int points) async {
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+
+    // Fetch the current user points
+    DocumentReference userDocRef =
+        FirebaseFirestore.instance.collection('users').doc(userId);
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      DocumentSnapshot snapshot = await transaction.get(userDocRef);
+      if (!snapshot.exists) {
+        throw Exception("User does not exist!");
+      }
+
+      int currentPoints =
+          (snapshot.data() as Map<String, dynamic>)['points'] ?? 0;
+      transaction.update(userDocRef, {'points': currentPoints + points});
+    });
+  }
+
   void listenToDailyTrackerUpdates() {
     String userId = FirebaseAuth.instance.currentUser!.uid;
     String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -365,21 +384,26 @@ class _ProfilePageState extends State<ProfilePage> {
         children: [
           Checkbox(
             value: isCompleted,
-            activeColor: customColor1, // Applied customColor1 here
+            activeColor: customColor1,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             onChanged: null, // Checkbox is no longer tappable
           ),
           InkWell(
             onTap: () {
+              if (!isCompleted) {
+                setState(() {
+                  taskMap[task] = true;
+                });
+                // Add points for the task
+                updateUserPoints(10); // For example, 10 points per task
+              }
               print('Tapped on $task');
             },
             child: Text(
               task,
               style: TextStyle(
-                color: isCompleted
-                    ? customColor3
-                    : Colors.black, // Applied customColor3 for completed tasks
+                color: isCompleted ? customColor3 : Colors.black,
                 fontWeight: isCompleted ? FontWeight.bold : FontWeight.normal,
                 fontSize: 16,
               ),
