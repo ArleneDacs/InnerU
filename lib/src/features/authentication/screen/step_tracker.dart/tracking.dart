@@ -122,7 +122,7 @@
                               sideTitles: SideTitles(
                                 showTitles: true,
                                 getTitlesWidget: (double value, TitleMeta meta) {
-                                  const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                                  const days = ['Mon', 'Tue', 'Wed', 'Th', 'Fri', 'Sat', 'Sun'];
                                   return Padding(
                                     padding: const EdgeInsets.only(top: 0),
                                     child: Text(
@@ -159,11 +159,12 @@
                             ),
                             SizedBox(height: 8),
                             Text(
-                              totalSteps >= 50000
-                                  ? 'Amazing! You’ve surpassed your goal!'
-                                  : totalSteps >= 30000
+                              totalSteps >= 5000
+                                  ? 'Amazing! You’ve surpassed your first goal!'
+                                  : totalSteps >= 10000
                                       ? 'Great job! Keep going!'
                                       : 'Keep moving!',
+                            textAlign: TextAlign.center, 
                               style: TextStyle(fontSize: 14, color: Colors.orange[700]),
                             ),
                           ],
@@ -185,10 +186,10 @@
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         children: [
-                          milestoneCard('5k', 'assets/images/milestone1.jpg'),
-                          milestoneCard('10k', 'assets/images/milestone2.jpg'),
-                          milestoneCard('15k', 'assets/images/milestone3.jpg'),
-                          milestoneCard('20k', 'assets/images/milestone4.jpg'),
+                        milestoneCard('5k', 'assets/images/milestone1.jpg', totalSteps),
+                        milestoneCard('10k', 'assets/images/milestone2.jpg', totalSteps),
+                        milestoneCard('15k', 'assets/images/milestone3.jpg', totalSteps),
+                        milestoneCard('20k', 'assets/images/milestone4.jpg', totalSteps),
                         ],
                       ),
                     ),
@@ -213,62 +214,66 @@
           );
         }
 
-      Widget milestoneCard(String steps, String imagePath) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Stack(
-            children: [
-              Container(
-                width: 80,
-                height: 100,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  color: Colors.grey[300],
-                  image: DecorationImage(
-                    image: AssetImage(imagePath),
-                    fit: BoxFit.cover,
-                    colorFilter: ColorFilter.mode(
-                      Colors.grey.withOpacity(0.5),
-                      BlendMode.darken,
-                    ),
-                  ),
-                ),
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 40),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200], 
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        steps,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFce8f5a),
-                          fontSize: 25,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 5,
-                left: 5,
-                child: Container(
-                  width: 25,
-                  height: 25,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.8),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.star, color: Colors.amber, size: 20),
-                ),
-              ),
-            ],
+   Widget milestoneCard(String steps, String imagePath, int totalSteps) {
+  int milestoneValue = int.parse(steps.replaceAll('k', '')) * 1000; // Convert "5k" to 5000
+
+  bool isAchieved = totalSteps >= milestoneValue; // Check if milestone is achieved
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    child: Stack(
+      children: [
+        Container(
+          width: 80,
+          height: 100,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: isAchieved ? null : Colors.grey[600], // Remove grey if achieved
+            image: DecorationImage(
+              image: AssetImage(imagePath),
+              fit: BoxFit.cover,
+              colorFilter: isAchieved
+                  ? null
+                  : ColorFilter.mode(Colors.grey.withOpacity(0.5), BlendMode.darken),
+            ),
           ),
-        );
-      }
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 40),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                 color: isAchieved ? Colors.white : Colors.grey[400],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  steps,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFce8f5a),
+                    fontSize: 25,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 5,
+          left: 5,
+          child: Container(
+            width: 25,
+            height: 25,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.8),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.star, color: Colors.amber, size: 20),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
       }

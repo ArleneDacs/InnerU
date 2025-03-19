@@ -21,20 +21,21 @@ class Note {
     required this.category,
   });
 
-  factory Note.fromMap(Map<String, dynamic> data) {
-    return Note(
-      id: data['id'] ?? '',
-      username: data['username'] ?? '',
-      title: data['title'] ?? '',
-      note: List<Map<String, String>>.from(
-        (data['note'] as List<dynamic>)
-            .map((item) => Map<String, String>.from(item)),
-      ),
-      color: data['color'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      category: data['category'] ?? '',
-    );
-  }
+factory Note.fromMap(Map<String, dynamic> data) {
+  return Note(
+    id: data['id'] ?? '',
+    username: data['username'] ?? '',
+    title: data['title'] ?? '',
+    note: List<Map<String, String>>.from(
+      (data['note'] as List<dynamic>)
+          .map((item) => Map<String, String>.from(item)),
+    ),
+    color: data['color'] is int ? data['color'] : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
+    createdAt: (data['createdAt'] as Timestamp).toDate(),
+    category: data['category'] ?? '',
+  );
+}
+
 
   Map<String, dynamic> toJson() {
     return {

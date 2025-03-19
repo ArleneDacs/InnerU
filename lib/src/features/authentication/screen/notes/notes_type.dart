@@ -24,6 +24,8 @@ class _NotesTypeState extends State<NotesType> {
   String? selectedCategory;
   List<Widget> contentWidgets = []; // This will store text and image widgets
   final ImagePicker _picker = ImagePicker();
+  List<String> uploadedImageUrls = [];
+  List<String> imagePaths = []; 
   XFile? _selectedImage;
 
   final CollectionReference myNotes =
@@ -190,6 +192,7 @@ class _NotesTypeState extends State<NotesType> {
             SizedBox(
               height: 20,
             ),
+     
             TextField(
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               controller: titleController,
@@ -201,28 +204,22 @@ class _NotesTypeState extends State<NotesType> {
                 titleString = value;
               },
             ),
-            Expanded(
-                child: ListView.builder(
-                    itemCount: contentWidgets.length,
-                    itemBuilder: (context, index) {
-                      return contentWidgets[index];
-                    })),
-            TextField(
-              controller: contentController,
-              maxLines: null,
-              decoration: InputDecoration(
-                border: InputBorder.none,
+         
+          
+          Expanded(
+              child: ListView(
+                children: [
+                  ...contentWidgets, // Ensure existing text fields are shown first
+                  buildImageSlider(), // Move image previews below text inputs
+                  SizedBox(height: 10),
+                ],
               ),
-              onSubmitted: (value) {
-                addText(value);
-              },
             ),
+
+            // Button for Adding Images
             ElevatedButton(
               onPressed: pickImage,
-              child: Icon(
-                Icons.image_search,
-                size: 30,
-              ),
+              child: Icon(Icons.image_search, size: 30),
             ),
           ],
         ),
@@ -273,110 +270,160 @@ class _NotesTypeState extends State<NotesType> {
       await _saveDailyActivity(addValue: true);
     }
   }
+/// Function to save notes (including uploaded images)
+Future<void> saveNotes() async {
+  if (_isSaving) return;
+  _isSaving = true;
+  List<Map<String, String>> contentList = [];
+  DateTime now = DateTime.now();
 
-  Future<void> saveNotes() async {
-    if (_isSaving) return;
-    _isSaving = true;
-    List<Map<String, String>> contentList = [];
-    DateTime now = DateTime.now();
-
-    for (var content in contentWidgets) {
-      if (content is TextField) {
-        if (content.controller?.text.isNotEmpty ?? false) {
-          contentList.add({
-            "type": "text",
-            "value": content.controller?.text ?? "",
-          });
-        }
-      } else if (content is Padding && content.child is Image) {
-        Image imageWidget = content.child as Image;
-
-        if (imageWidget.image is NetworkImage) {
-          String imageUrl = (imageWidget.image as NetworkImage).url;
-          contentList.add({
-            "type": "image",
-            "value": imageUrl,
-          });
-        }
-      }
-    }
-
-    try {
-      if (note.id.isEmpty) {
-        final querySnapshot = await myNotes
-            .where('username', isEqualTo: username)
-            .where('title', isEqualTo: titleString)
-            .get();
-
-        if (querySnapshot.docs.isEmpty) {
-          await myNotes.add({
-            'username': username,
-            'title': titleString,
-            'note': contentList,
-            'color': color,
-            'createdAt': now,
-            'category': selectedCategory
-          });
-
-          if (_mounted) {
-            CustomSnackBar.showCustomSnackBar(
-                context, "Note saved successfully.", Colors.white);
-          }
-        }
-      }
-    } catch (e) {
-      if (_mounted) {
-        CustomSnackBar.showCustomSnackBar(context, e.toString(), Colors.white);
-      }
-    }
-
-    _isSaving = false;
-  }
-
-  Future<String> uploadImageToFirebase(File imageFile) async {
-    try {
-      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-      Reference storageRef =
-          FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
-
-      UploadTask uploadTask = storageRef.putFile(imageFile);
-      TaskSnapshot snapshot = await uploadTask;
-
-      return await snapshot.ref.getDownloadURL(); // Get image URL
-    } catch (e) {
-      print("Error uploading image: $e");
-      return "";
-    }
-  }
-
-  void pickImage() async {
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      File imageFile = File(image.path);
-
-      // Upload image and wait for URL
-      String imageUrl = await uploadImageToFirebase(imageFile);
-
-      if (imageUrl.isNotEmpty) {
-        print("Uploaded image URL: $imageUrl"); // Debugging
-        setState(() {
-          contentWidgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Image.network(
-                imageUrl,
-                width: 200,
-                height: 200,
-                fit: BoxFit.cover,
-              ),
-            ),
-          );
+  // Add text content
+  for (var content in contentWidgets) {
+    if (content is TextField) {
+      if (content.controller?.text.isNotEmpty ?? false) {
+        contentList.add({
+          "type": "text",
+          "value": content.controller?.text ?? "",
         });
-      } else {
-        print("Failed to upload image.");
       }
     }
   }
+
+  // Add uploaded image URLs
+  for (var imageUrl in uploadedImageUrls) {
+    contentList.add({
+      "type": "image",
+      "value": imageUrl,
+    });
+  }
+
+  try {
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('notes')
+        .where('username', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+        .where('title', isEqualTo: "Note Title") // Change as needed
+        .get();
+
+    if (querySnapshot.docs.isEmpty) {
+      await FirebaseFirestore.instance.collection('notes').add({
+        'username': username,
+        'title': titleString, // Update this dynamically
+        'note': contentList,
+        'color':color, // Change based on user selection
+        'createdAt': now,
+        'category': selectedCategory
+      });
+
+      if (_mounted) {
+        CustomSnackBar.showCustomSnackBar(
+            context, "Note saved successfully.", Colors.white);
+      }
+    }
+  } catch (e) {
+    if (_mounted) {
+      CustomSnackBar.showCustomSnackBar(context, e.toString(), Colors.white);
+    }
+  }
+
+  _isSaving = false;
+}
+
+Future<String> uploadImageToFirebase(File imageFile) async {
+  try {
+    String fileName = DateTime.now().millisecondsSinceEpoch.toString();
+    Reference storageRef =
+        FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
+
+    UploadTask uploadTask = storageRef.putFile(imageFile);
+    TaskSnapshot snapshot = await uploadTask;
+
+    return await snapshot.ref.getDownloadURL();
+  } catch (e) {
+    print("Error uploading image: $e");
+    return "";
+  }
+}
+void pickImage() async {
+  final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+
+  if (image != null) {
+    setState(() {
+      _selectedImage = image;
+      imagePaths.add(image.path); // Store local path for UI preview
+    });
+
+    // Upload image to Firebase and store the URL
+  String imageUrl = await uploadImageToFirebase(File(image.path));
+if (imageUrl.isNotEmpty && mounted) { // Check if widget is still in the tree
+  setState(() {
+    uploadedImageUrls.add(imageUrl);
+  });
+}   
+  }
+}
+
+Widget buildImageSlider() {
+  return Center(
+    child: SizedBox(
+      height: MediaQuery.of(context).size.height * 0.5, // 40% of screen height
+      child: imagePaths.isEmpty
+          ? SizedBox() // Show nothing if there are no images
+          : ListView.builder(
+              scrollDirection: Axis.horizontal, // Make images slide horizontally
+              shrinkWrap: true,
+              physics: BouncingScrollPhysics(),
+              itemCount: imagePaths.length,
+              itemBuilder: (context, index) {
+                double screenWidth = MediaQuery.of(context).size.width;
+                double imageWidth = screenWidth * 0.8; // 70% of screen width
+                double imageHeight = screenWidth * 1; // 80% of screen width
+
+                return Align(
+                  alignment: Alignment.center, // Center images
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02), // Responsive padding
+                    child: Stack(
+                      alignment: Alignment.topRight,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12), // Rounded corners
+                          child: Image.file(
+                            File(imagePaths[index]), 
+                            width: imageWidth, 
+                            height: imageHeight, 
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: 5,
+                          right: 5,
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                imagePaths.removeAt(index); // Remove image on tap
+                              });
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withOpacity(0.8), // Semi-transparent
+                                shape: BoxShape.circle,
+                              ),
+                              padding: EdgeInsets.all(6),
+                              child: Icon(Icons.close, color: Colors.white, size: 18),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    ),
+  );
+}
+
+
 
   void addText(String text) {
     if (text.isNotEmpty) {

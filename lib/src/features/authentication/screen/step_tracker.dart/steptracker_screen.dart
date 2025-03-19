@@ -88,65 +88,73 @@ class _StepTrackerState extends State<StepTracker>
     print("Saved $steps steps for $date");
   }
   
-
   void _initStepCounter() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    _initialSteps = prefs.getInt('initial_steps') ?? -1;
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  _initialSteps = prefs.getInt('initial_steps') ?? -1;
 
-    _stepCountStream = Pedometer.stepCountStream.listen(
-      (StepCount event) {
-        int currentSteps = event.steps;
+  _stepCountStream = Pedometer.stepCountStream.listen(
+    (StepCount event) async {
+      int currentSteps = event.steps;
 
-        if (_initialSteps == -1) {
-          _initialSteps = currentSteps;
-          prefs.setInt('initial_steps', _initialSteps);
-        }
-
-        int newSteps = currentSteps - _initialSteps;
-
-        if (newSteps != _steps) {
-          _updateStepCount(newSteps);
-        }
-      },
-      onError: (error) {
-        debugPrint("Step counter error: $error");
-      },
-    );
-
-    _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (_steps == _lastSteps) {
-        _setWalkingState(false);
+      if (_initialSteps == -1 || currentSteps < _initialSteps) {
+        // Ensure initialSteps is always valid
+        _initialSteps = currentSteps;
+        await prefs.setInt('initial_steps', _initialSteps);
       }
-      _lastSteps = _steps;
-    });
+
+      int newSteps = currentSteps - _initialSteps;
+
+      // Prevent negative step count
+      if (newSteps < 0) newSteps = 0;
+
+      if (newSteps != _steps) {
+        _updateStepCount(newSteps);
+      }
+    },
+    onError: (error) {
+      debugPrint("Step counter error: $error");
+    },
+  );
+
+  _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    if (_steps == _lastSteps) {
+      _setWalkingState(false);
+    }
+    _lastSteps = _steps;
+  });
+}
+
+void _updateStepCount(int newSteps) async {
+  if (!mounted) return; // Prevent updates if widget is disposed
+
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+
+  setState(() {
+    _isWalking = newSteps > _steps;
+    _steps = newSteps;
+  });
+
+  await prefs.setInt('saved_steps', _steps);
+  await prefs.setInt('initial_steps', _initialSteps);
+
+  _stepStreamController.add(_steps);
+
+  if (_steps >= 300) {
+    await _saveDailyActivity(steps: true);
   }
 
-  void _updateStepCount(int newSteps) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      _isWalking = newSteps > _steps;
-      _steps = newSteps;
-    });
-
-    await prefs.setInt('saved_steps', _steps);
-    await prefs.setInt('initial_steps', _initialSteps);
-
-    _stepStreamController.add(_steps);
-
-    // 🔥 Save to Firestore when 300 steps are reached
-    if (_steps >= 300) {
-      await _saveDailyActivity(steps: true);
-    }
-
-    if (_isWalking) {
+  if (_isWalking) {
+    if (_lottieController.isAnimating == false && mounted) {
       _lottieController.repeat();
-    } else {
+    }
+  } else {
+    if (mounted) {
       _lottieController.stop();
-      _lottieController.animateTo(0,
-          duration: const Duration(milliseconds: 500));
+      _lottieController.animateTo(0, duration: const Duration(milliseconds: 500));
     }
   }
+}
+
 
   Future<void> _saveDailyActivity(
       {bool meditation = false, bool steps = false}) async {
