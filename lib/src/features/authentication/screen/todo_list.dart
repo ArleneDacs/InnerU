@@ -5,6 +5,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -138,83 +140,70 @@ class Task {
   );
 }
 
-// Firebase Firestore Repository
 class FirestoreRepository {
-  final CollectionReference tasksCollection = FirebaseFirestore.instance.collection('tasks');
-  
-  // Get user ID for multi-user support (optional)
-  String? userId = 'default_user'; // Replace with actual user ID if using authentication
-  
-  // Load tasks
-  Future<List<Task>> loadTasks() async {
-    try {
-      // First attempt - try getting all tasks without userId filter
-      final snapshot = await tasksCollection.orderBy('dueDate').get();
-      
-      if (snapshot.docs.isEmpty) {
-        print('No tasks found in Firestore collection');
-      }
-      
-      return snapshot.docs.map((doc) {
-        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        
-        // Handle Timestamp format from Firestore
-        if (data['dueDate'] is Timestamp) {
-          data['dueDate'] = (data['dueDate'] as Timestamp).toDate().toIso8601String();
-        }
-        
-        // Add the document ID as task ID
-        data['id'] = doc.id;
-        
-        // Debug the data coming from Firestore
-        print('Task data from Firestore: $data');
-        
-        return Task.fromJson(data);
-      }).toList();
-    } catch (e) {
-      print('Error loading tasks from Firestore: $e');
-      return [];
-    }
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  String? get userId {
+  final user = FirebaseAuth.instance.currentUser;
+  return user?.uid; // Ensure user is logged in
+}
+
+  CollectionReference get tasksCollection {
+    return _firestore.collection('users').doc(userId).collection('tasks');
   }
-  
-  // Add a task
+
+  Future<List<Task>> loadTasks() async {
+  if (userId == null) {
+    print('No user ID found. User not logged in?');
+    return [];
+  }
+
+  print('Fetching tasks for user: $userId');
+
+  try {
+    final snapshot = await tasksCollection.orderBy('dueDate').get();
+
+    if (snapshot.docs.isEmpty) {
+      print('No tasks found for user $userId');
+    }
+
+    return snapshot.docs.map((doc) {
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      print('Fetched task: $data');
+      return Task.fromJson(data);
+    }).toList();
+  } catch (e) {
+    print('Error loading tasks: $e');
+    return [];
+  }
+}
+
+
   Future<void> addTask(Task task) async {
     try {
-      // Don't add userId field to enable task fetching without filtering
-      await tasksCollection.add({
-        'title': task.title,
-        'description': task.description,
-        'isCompleted': task.isCompleted,
-        'dueDate': Timestamp.fromDate(task.dueDate),
-        'tag': task.tag.index,
-      });
-      print('Task added to Firestore: ${task.title}');
+      print('Adding task for user: $userId');
+      print('Task Data: ${task.toJson()}');
+      await tasksCollection.add(task.toJson());
+      print('Task added successfully.');
     } catch (e) {
-      print('Error adding task to Firestore: $e');
+      print('Error adding task: $e');
     }
   }
-  
-  // Update a task
+
   Future<void> updateTask(Task task) async {
     try {
-      await tasksCollection.doc(task.id).update({
-        'title': task.title,
-        'description': task.description,
-        'isCompleted': task.isCompleted,
-        'dueDate': Timestamp.fromDate(task.dueDate),
-        'tag': task.tag.index,
-      });
+      await tasksCollection.doc(task.id).update(task.toJson());
     } catch (e) {
-      print('Error updating task in Firestore: $e');
+      print('Error updating task: $e');
     }
   }
-  
-  // Delete a task
+
   Future<void> deleteTask(String id) async {
     try {
       await tasksCollection.doc(id).delete();
     } catch (e) {
-      print('Error deleting task from Firestore: $e');
+      print('Error deleting task: $e');
     }
   }
   
@@ -329,12 +318,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }
 
   void _addTask(Task task) async {
-    // Add task to Firestore
-    await _repository.addTask(task);
-    
-    // Reload tasks to get the latest data with proper IDs
-    _loadTasks();
-  }
+  await _repository.addTask(task);
+  await _loadTasks(); // Force refresh
+}
 
   void _toggleTaskCompletion(String id) async {
     final index = _tasks.indexWhere((task) => task.id == id);
