@@ -110,7 +110,7 @@ class _LeaderboardState extends State<Leaderboard> {
   void initState() {
     super.initState();
     isLoading = widget.isLoading;
-    _loadSampleData();
+    _loadUserData();
 
     // Simulate loading for demo
     if (isLoading) {
@@ -124,110 +124,45 @@ class _LeaderboardState extends State<Leaderboard> {
     }
   }
 
-  void _loadSampleData() {
-    // Add sample users with activities for Valenin server - with correct names and varied points
-    _leaderboardService.addUserActivity(
-        'Aina Mae',
-        UserActivity(
-            meditationMinutes: 1200,
-            stepsTaken: 240000,
-            journalEntries: 50,
-            server: "Valenin"));
+  void _loadUserData() async {
+  QuerySnapshot snapshot =
+      await FirebaseFirestore.instance.collection('userpoints').get();
 
-    _leaderboardService.addUserActivity(
-        'Karlo',
-        UserActivity(
-            meditationMinutes: 1050,
-            stepsTaken: 210000,
-            journalEntries: 45,
-            server: "Valenin"));
+  List<LeaderboardEntry> fetchedEntries = snapshot.docs.map((doc) {
+    var data = doc.data() as Map<String, dynamic>;
 
-    _leaderboardService.addUserActivity(
-        'Jenealle',
-        UserActivity(
-            meditationMinutes: 990,
-            stepsTaken: 205000,
-            journalEntries: 43,
-            server: "Valenin"));
+    return LeaderboardEntry(
+      name: data['username'],
+      score: data['totalPoints'],
+      rank: 0, // Will be updated after sorting
+      activity: UserActivity(
+        meditationMinutes: data['taskPoints']['Meditation Points'] ?? 0,
+        stepsTaken: (data['taskPoints']['Steps Points'] ?? 0) * 200, // Reverse calculation
+        journalEntries: 
+        (data['taskPoints']['Learning Points'] ?? 0) ~/ 15 +  // Convert Learning points
+        (data['taskPoints']['Add Value Points'] ?? 0) ~/ 15,  // Convert Add Value points
+      ),
+    );
+  }).toList();
 
-    // Add more users for Valenin to show below podium
-    _leaderboardService.addUserActivity(
-        'Maychell',
-        UserActivity(
-            meditationMinutes: 800,
-            stepsTaken: 180000,
-            journalEntries: 30,
-            server: "Valenin"));
+  fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
 
-    _leaderboardService.addUserActivity(
-        'Lucky',
-        UserActivity(
-            meditationMinutes: 750,
-            stepsTaken: 170000,
-            journalEntries: 25,
-            server: "Valenin"));
-
-    _leaderboardService.addUserActivity(
-        'Vesanie',
-        UserActivity(
-            meditationMinutes: 700,
-            stepsTaken: 160000,
-            journalEntries: 20,
-            server: "Valenin"));
-
-    // Add sample users for other servers
-    _leaderboardService.addUserActivity(
-        'John Angel',
-        UserActivity(
-            meditationMinutes: 1200,
-            stepsTaken: 240000,
-            journalEntries: 50,
-            server: "Server2"));
-
-    _leaderboardService.addUserActivity(
-        'Rose Anne',
-        UserActivity(
-            meditationMinutes: 1000,
-            stepsTaken: 220000,
-            journalEntries: 45,
-            server: "Server2"));
-
-    _leaderboardService.addUserActivity(
-        'Kurt',
-        UserActivity(
-            meditationMinutes: 980,
-            stepsTaken: 210000,
-            journalEntries: 48,
-            server: "Server3"));
-
-    _leaderboardService.addUserActivity(
-        'Arlene Mae',
-        UserActivity(
-            meditationMinutes: 900,
-            stepsTaken: 200000,
-            journalEntries: 40,
-            server: "Server2"));
-
-    _leaderboardService.addUserActivity(
-        'Trixie Nicole',
-        UserActivity(
-            meditationMinutes: 850,
-            stepsTaken: 190000,
-            journalEntries: 35,
-            server: "Server2"));
-
-    _leaderboardService.addUserActivity(
-        'Craig Euwan',
-        UserActivity(
-            meditationMinutes: 800,
-            stepsTaken: 180000,
-            journalEntries: 30,
-            server: "Server3"));
-
-    entries = _leaderboardService.getLeaderboard();
-    displayedEntries =
-        List.from(entries); // Initialize displayed entries with all entries
+  for (int i = 0; i < fetchedEntries.length; i++) {
+    fetchedEntries[i] = LeaderboardEntry(
+      name: fetchedEntries[i].name,
+      score: fetchedEntries[i].score,
+      rank: i + 1,
+      activity: fetchedEntries[i].activity,
+    );
   }
+
+  setState(() {
+    entries = fetchedEntries;
+    displayedEntries = List.from(entries);
+    isLoading = false;
+  });
+}
+
 
   // Function to filter entries by server - FIXED VERSION
   void _filterByServer(String server) {
@@ -454,20 +389,22 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   Widget _buildPodium() {
-    // Check if we have enough entries to show in podium
-    if (displayedEntries.length < 3) {
-      return Center(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(
-            "Not enough entries to display podium",
-            style: TextStyle(fontSize: 16, color: Colors.grey),
-          ),
+  // Check if we have enough entries to show in podium
+  if (displayedEntries.length < 3) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          "Not enough entries to display podium",
+          style: TextStyle(fontSize: 16, color: Colors.grey),
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    return Stack(
+   return SingleChildScrollView( // Add this widget to make the content scrollable if needed
+    child: Stack(
+      clipBehavior: Clip.none, // Change to allow overflow without warnings
       alignment: Alignment.center,
       children: [
         // Left confetti
@@ -509,8 +446,9 @@ class _LeaderboardState extends State<Leaderboard> {
           ],
         ),
       ],
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
     return GestureDetector(
@@ -536,7 +474,7 @@ class _LeaderboardState extends State<Leaderboard> {
               // Add crown to first place
               if (position == 1)
                 Positioned(
-                  top: -20,
+                  top: 70,
                   child: Image.asset(
                     'assets/images/crown.png',
                     height: 30,
