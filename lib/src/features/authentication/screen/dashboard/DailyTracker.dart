@@ -9,6 +9,8 @@ const customColor2 = Color(0xFFCE8F5A); // Secondary color
 const customColor3 = Color(0xFF90A17D); // Accent color
 
 class UserProgressPage extends StatefulWidget {
+  const UserProgressPage({super.key});
+
   @override
   _UserProgressPageState createState() => _UserProgressPageState();
 }

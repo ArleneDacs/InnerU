@@ -77,25 +77,6 @@ class _ProfilePageState extends State<ProfilePage> {
     listenToDailyTrackerUpdates(); // Start listening to database changes
   }
 
-  void updateUserPoints(int points) async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-
-    // Fetch the current user points
-    DocumentReference userDocRef =
-        FirebaseFirestore.instance.collection('users').doc(userId);
-
-    await FirebaseFirestore.instance.runTransaction((transaction) async {
-      DocumentSnapshot snapshot = await transaction.get(userDocRef);
-      if (!snapshot.exists) {
-        throw Exception("User does not exist!");
-      }
-
-      int currentPoints =
-          (snapshot.data() as Map<String, dynamic>)['points'] ?? 0;
-      transaction.update(userDocRef, {'points': currentPoints + points});
-    });
-  }
-
   void listenToDailyTrackerUpdates() {
     String userId = FirebaseAuth.instance.currentUser!.uid;
     String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -182,6 +163,7 @@ class _ProfilePageState extends State<ProfilePage> {
               isLoading = false;
             });
           }
+          checkAndAssignPoints();
         } else {
           resetDailyTracker(
               todayDate, username); // If no data exists, create a fresh tracker
@@ -192,6 +174,74 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       print("Error fetching Firestore data: $e");
       setState(() => isLoading = false);
+    }
+  }
+
+  void checkAndAssignPoints() async {
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    try {
+      DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      if (userSnapshot.exists) {
+        String username =
+            (userSnapshot.data() as Map<String, dynamic>)['username'];
+        String documentId = '$username-$todayDate';
+
+        DocumentSnapshot snapshot = await FirebaseFirestore.instance
+            .collection('dailytracker')
+            .doc(documentId)
+            .get();
+
+        if (snapshot.exists) {
+          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+
+          // Define tasks and points for individual tasks
+          Map<String, bool> taskCompletion = {
+            'Meditation': data['meditation'] ?? false,
+            'Steps': data['steps'] ?? false,
+            'Call': data['call'] ?? false,
+            'Learning': data['learning'] ?? false,
+            'Add Value': data['addValue'] ?? false,
+          };
+
+          Map<String, int> taskPoints = {
+            'Meditation Points': taskCompletion['Meditation'] == true ? 5 : 0,
+            'Steps Points': taskCompletion['Steps'] == true ? 10 : 0,
+            'Call Points': taskCompletion['Call'] == true ? 10 : 0,
+            'Learning Points': taskCompletion['Learning'] == true ? 15 : 0,
+            'Add Value Points': taskCompletion['Add Value'] == true ? 15 : 0,
+          };
+
+          int totalPoints = taskPoints.values
+              .reduce((a, b) => a + b); // Sum of individual points
+
+          // Save points in the userpoints collection
+          await FirebaseFirestore.instance
+              .collection('userpoints')
+              .doc(documentId)
+              .set({
+            'username': username,
+            'date': todayDate,
+            'totalPoints': totalPoints,
+            'taskPoints': taskPoints, // Points per task stored here
+            'tasks': taskCompletion, // Boolean completion status for each task
+          });
+
+          print("Total points assigned: $totalPoints");
+          print("Points per task: $taskPoints");
+        } else {
+          print("No daily tracker data found for today.");
+        }
+      } else {
+        print("Error: User document does not exist.");
+      }
+    } catch (e) {
+      print("Error in assigning points: $e");
     }
   }
 
@@ -384,26 +434,21 @@ class _ProfilePageState extends State<ProfilePage> {
         children: [
           Checkbox(
             value: isCompleted,
-            activeColor: customColor1,
+            activeColor: customColor1, // Applied customColor1 here
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             onChanged: null, // Checkbox is no longer tappable
           ),
           InkWell(
             onTap: () {
-              if (!isCompleted) {
-                setState(() {
-                  taskMap[task] = true;
-                });
-                // Add points for the task
-                updateUserPoints(10); // For example, 10 points per task
-              }
               print('Tapped on $task');
             },
             child: Text(
               task,
               style: TextStyle(
-                color: isCompleted ? customColor3 : Colors.black,
+                color: isCompleted
+                    ? customColor3
+                    : Colors.black, // Applied customColor3 for completed tasks
                 fontWeight: isCompleted ? FontWeight.bold : FontWeight.normal,
                 fontSize: 16,
               ),

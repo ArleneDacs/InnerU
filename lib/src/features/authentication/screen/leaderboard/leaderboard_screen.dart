@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class UserActivity {
   final int meditationMinutes;
@@ -17,13 +18,13 @@ class UserActivity {
   int calculatePoints() {
     // Meditation: 1pt per minute
     int meditationPoints = meditationMinutes;
-    
+
     // Step Tracker: 1pt per 200 steps
     int stepPoints = (stepsTaken / 200).floor();
-    
+
     // Journal: 1pt per entry
     int journalPoints = journalEntries;
-    
+
     return meditationPoints + stepPoints + journalPoints;
   }
 }
@@ -33,21 +34,21 @@ class LeaderboardService {
 
   void addUserActivity(String userName, UserActivity activity) {
     int existingIndex = _entries.indexWhere((entry) => entry.name == userName);
-    
+
     if (existingIndex != -1) {
       _entries.removeAt(existingIndex);
     }
-    
+
     _entries.add(LeaderboardEntry(
-      name: userName, 
+      name: userName,
       score: activity.calculatePoints(),
       rank: 0,
       activity: activity,
     ));
-    
+
     // Sort and update ranks
     _entries.sort((a, b) => b.score.compareTo(a.score));
-    
+
     for (int i = 0; i < _entries.length; i++) {
       _entries[i] = LeaderboardEntry(
         name: _entries[i].name,
@@ -61,16 +62,14 @@ class LeaderboardService {
   List<LeaderboardEntry> getLeaderboard() {
     return List.from(_entries);
   }
-  
+
   // New method to get filtered leaderboard
   List<LeaderboardEntry> getFilteredLeaderboard(String server) {
     if (server.isEmpty) {
       return List.from(_entries);
     }
-    
-    return _entries
-        .where((entry) => entry.activity.server == server)
-        .toList();
+
+    return _entries.where((entry) => entry.activity.server == server).toList();
   }
 }
 
@@ -90,7 +89,7 @@ class LeaderboardEntry {
 
 class Leaderboard extends StatefulWidget {
   final bool isLoading;
-  
+
   Leaderboard({this.isLoading = true});
 
   @override
@@ -100,7 +99,8 @@ class Leaderboard extends StatefulWidget {
 class _LeaderboardState extends State<Leaderboard> {
   final LeaderboardService _leaderboardService = LeaderboardService();
   late List<LeaderboardEntry> entries;
-  late List<LeaderboardEntry> displayedEntries; // New variable for displayed entries
+  late List<LeaderboardEntry>
+      displayedEntries; // New variable for displayed entries
   bool isLoading = true;
   String selectedServer = "Server"; // Default selected server
   String username = "Valenin"; // Default username
@@ -111,7 +111,7 @@ class _LeaderboardState extends State<Leaderboard> {
     super.initState();
     isLoading = widget.isLoading;
     _loadSampleData();
-    
+
     // Simulate loading for demo
     if (isLoading) {
       Future.delayed(Duration(seconds: 2), () {
@@ -127,69 +127,106 @@ class _LeaderboardState extends State<Leaderboard> {
   void _loadSampleData() {
     // Add sample users with activities for Valenin server - with correct names and varied points
     _leaderboardService.addUserActivity(
-      'Aina Mae', 
-      UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50, server: "Valenin")
-    );
-    
+        'Aina Mae',
+        UserActivity(
+            meditationMinutes: 1200,
+            stepsTaken: 240000,
+            journalEntries: 50,
+            server: "Valenin"));
+
     _leaderboardService.addUserActivity(
-      'Karlo', 
-      UserActivity(meditationMinutes: 1050, stepsTaken: 210000, journalEntries: 45, server: "Valenin")
-    );
-    
+        'Karlo',
+        UserActivity(
+            meditationMinutes: 1050,
+            stepsTaken: 210000,
+            journalEntries: 45,
+            server: "Valenin"));
+
     _leaderboardService.addUserActivity(
-      'Jenealle', 
-      UserActivity(meditationMinutes: 990, stepsTaken: 205000, journalEntries: 43, server: "Valenin")
-    );
-    
+        'Jenealle',
+        UserActivity(
+            meditationMinutes: 990,
+            stepsTaken: 205000,
+            journalEntries: 43,
+            server: "Valenin"));
+
     // Add more users for Valenin to show below podium
     _leaderboardService.addUserActivity(
-      'Maychell', 
-      UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30, server: "Valenin")
-    );
-    
+        'Maychell',
+        UserActivity(
+            meditationMinutes: 800,
+            stepsTaken: 180000,
+            journalEntries: 30,
+            server: "Valenin"));
+
     _leaderboardService.addUserActivity(
-      'Lucky', 
-      UserActivity(meditationMinutes: 750, stepsTaken: 170000, journalEntries: 25, server: "Valenin")
-    );
-    
+        'Lucky',
+        UserActivity(
+            meditationMinutes: 750,
+            stepsTaken: 170000,
+            journalEntries: 25,
+            server: "Valenin"));
+
     _leaderboardService.addUserActivity(
-      'Vesanie', 
-      UserActivity(meditationMinutes: 700, stepsTaken: 160000, journalEntries: 20, server: "Valenin")
-    );
-    
+        'Vesanie',
+        UserActivity(
+            meditationMinutes: 700,
+            stepsTaken: 160000,
+            journalEntries: 20,
+            server: "Valenin"));
+
     // Add sample users for other servers
     _leaderboardService.addUserActivity(
-      'John Angel', 
-      UserActivity(meditationMinutes: 1200, stepsTaken: 240000, journalEntries: 50, server: "Server2")
-    );
-    
+        'John Angel',
+        UserActivity(
+            meditationMinutes: 1200,
+            stepsTaken: 240000,
+            journalEntries: 50,
+            server: "Server2"));
+
     _leaderboardService.addUserActivity(
-      'Rose Anne', 
-      UserActivity(meditationMinutes: 1000, stepsTaken: 220000, journalEntries: 45, server: "Server2")
-    );
-    
+        'Rose Anne',
+        UserActivity(
+            meditationMinutes: 1000,
+            stepsTaken: 220000,
+            journalEntries: 45,
+            server: "Server2"));
+
     _leaderboardService.addUserActivity(
-      'Kurt', 
-      UserActivity(meditationMinutes: 980, stepsTaken: 210000, journalEntries: 48, server: "Server3")
-    );
-    
+        'Kurt',
+        UserActivity(
+            meditationMinutes: 980,
+            stepsTaken: 210000,
+            journalEntries: 48,
+            server: "Server3"));
+
     _leaderboardService.addUserActivity(
-      'Arlene Mae', 
-      UserActivity(meditationMinutes: 900, stepsTaken: 200000, journalEntries: 40, server: "Server2")
-    );
-    
+        'Arlene Mae',
+        UserActivity(
+            meditationMinutes: 900,
+            stepsTaken: 200000,
+            journalEntries: 40,
+            server: "Server2"));
+
     _leaderboardService.addUserActivity(
-      'Trixie Nicole', 
-      UserActivity(meditationMinutes: 850, stepsTaken: 190000, journalEntries: 35, server: "Server2")
-    );
-    
+        'Trixie Nicole',
+        UserActivity(
+            meditationMinutes: 850,
+            stepsTaken: 190000,
+            journalEntries: 35,
+            server: "Server2"));
+
     _leaderboardService.addUserActivity(
-      'Craig Euwan', 
-      UserActivity(meditationMinutes: 800, stepsTaken: 180000, journalEntries: 30, server: "Server3")
-    );
-    
+        'Craig Euwan',
+        UserActivity(
+            meditationMinutes: 800,
+            stepsTaken: 180000,
+            journalEntries: 30,
+            server: "Server3"));
+
     entries = _leaderboardService.getLeaderboard();
-    displayedEntries = List.from(entries); // Initialize displayed entries with all entries
+    displayedEntries =
+        List.from(entries); // Initialize displayed entries with all entries
   }
 
   // Function to filter entries by server - FIXED VERSION
@@ -202,18 +239,19 @@ class _LeaderboardState extends State<Leaderboard> {
         selectedServer = "Server";
       } else {
         // Filter by specific server
-        List<LeaderboardEntry> filtered = entries.where((entry) => entry.activity.server == server).toList();
-        
+        List<LeaderboardEntry> filtered =
+            entries.where((entry) => entry.activity.server == server).toList();
+
         // Re-rank the filtered entries from 1 to N
         for (int i = 0; i < filtered.length; i++) {
           filtered[i] = LeaderboardEntry(
             name: filtered[i].name,
             score: filtered[i].score,
-            rank: i + 1,  // Reassign ranks starting from 1
+            rank: i + 1, // Reassign ranks starting from 1
             activity: filtered[i].activity,
           );
         }
-        
+
         displayedEntries = filtered;
         isFilteredByUser = true;
         selectedServer = server; // Store the actual server name
@@ -244,7 +282,8 @@ class _LeaderboardState extends State<Leaderboard> {
             child: Container(
               height: 36, // Reduced height
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18), // Adjusted to match half of height
+                borderRadius: BorderRadius.circular(
+                    18), // Adjusted to match half of height
                 border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
               ),
               child: Row(
@@ -257,7 +296,9 @@ class _LeaderboardState extends State<Leaderboard> {
                       },
                       child: Container(
                         decoration: BoxDecoration(
-                          color: isFilteredByUser ? Color(0xFFCEA47E) : Colors.white,
+                          color: isFilteredByUser
+                              ? Color(0xFFCEA47E)
+                              : Colors.white,
                           borderRadius: BorderRadius.only(
                             topLeft: Radius.circular(17),
                             bottomLeft: Radius.circular(17),
@@ -267,7 +308,9 @@ class _LeaderboardState extends State<Leaderboard> {
                         child: Text(
                           username,
                           style: TextStyle(
-                            color: isFilteredByUser ? Colors.white : Color(0xFFCEA47E),
+                            color: isFilteredByUser
+                                ? Colors.white
+                                : Color(0xFFCEA47E),
                             fontWeight: FontWeight.w500,
                             fontSize: 15, // Slightly smaller text
                           ),
@@ -283,7 +326,9 @@ class _LeaderboardState extends State<Leaderboard> {
                       },
                       child: Container(
                         decoration: BoxDecoration(
-                          color: !isFilteredByUser ? Color(0xFFCEA47E) : Colors.white,
+                          color: !isFilteredByUser
+                              ? Color(0xFFCEA47E)
+                              : Colors.white,
                           borderRadius: BorderRadius.only(
                             topRight: Radius.circular(17),
                             bottomRight: Radius.circular(17),
@@ -293,7 +338,9 @@ class _LeaderboardState extends State<Leaderboard> {
                         child: Text(
                           "Server",
                           style: TextStyle(
-                            color: !isFilteredByUser ? Colors.white : Color(0xFFCEA47E),
+                            color: !isFilteredByUser
+                                ? Colors.white
+                                : Color(0xFFCEA47E),
                             fontWeight: FontWeight.w500,
                             fontSize: 15, // Slightly smaller text
                           ),
@@ -307,22 +354,23 @@ class _LeaderboardState extends State<Leaderboard> {
           ),
           Container(
             height: 220,
-            child: isLoading 
-              ? _buildSkeletonPodium()
-              : _buildPodium(),
+            child: isLoading ? _buildSkeletonPodium() : _buildPodium(),
           ),
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: isLoading ? 5 : 
-                (displayedEntries.length <= 3 ? 0 : displayedEntries.length - 3),
+              itemCount: isLoading
+                  ? 5
+                  : (displayedEntries.length <= 3
+                      ? 0
+                      : displayedEntries.length - 3),
               itemBuilder: (context, index) {
                 // Use actual rank from entry rather than calculating from index
                 return Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
-                  child: isLoading 
-                    ? _buildSkeletonItem()
-                    : _buildLeaderboardItem(displayedEntries[index + 3]),
+                  child: isLoading
+                      ? _buildSkeletonItem()
+                      : _buildLeaderboardItem(displayedEntries[index + 3]),
                 );
               },
             ),
@@ -406,63 +454,63 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   Widget _buildPodium() {
-  // Check if we have enough entries to show in podium
-  if (displayedEntries.length < 3) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          "Not enough entries to display podium",
-          style: TextStyle(fontSize: 16, color: Colors.grey),
+    // Check if we have enough entries to show in podium
+    if (displayedEntries.length < 3) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            "Not enough entries to display podium",
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
         ),
-      ),
+      );
+    }
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Left confetti
+        Positioned(
+          left: 0,
+          top: 20,
+          child: SizedBox(
+            width: 100,
+            height: 180,
+            child: Image.asset(
+              'assets/images/confetti_left.gif',
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+
+        // Right confetti
+        Positioned(
+          right: 0,
+          top: 20,
+          child: SizedBox(
+            width: 100,
+            height: 180,
+            child: Image.asset(
+              'assets/images/confetti_right.gif',
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+
+        // Podium content
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _buildPodiumItem(displayedEntries[1], 120, 2),
+            _buildPodiumItem(displayedEntries[0], 140, 1),
+            _buildPodiumItem(displayedEntries[2], 100, 3),
+          ],
+        ),
+      ],
     );
   }
-  
-  return Stack(
-    alignment: Alignment.center,
-    children: [
-      // Left confetti
-      Positioned(
-        left: 0,
-        top: 20,
-        child: SizedBox(
-          width: 100,
-          height: 180,
-          child: Image.asset(
-            'assets/images/confetti_left.gif',
-            fit: BoxFit.cover,
-          ),
-        ),
-      ),
-      
-      // Right confetti
-      Positioned(
-        right: 0,
-        top: 20,
-        child: SizedBox(
-          width: 100,
-          height: 180,
-          child: Image.asset(
-            'assets/images/confetti_right.gif',
-            fit: BoxFit.cover,
-          ),
-        ),
-      ),
-      
-      // Podium content
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _buildPodiumItem(displayedEntries[1], 120, 2),
-          _buildPodiumItem(displayedEntries[0], 140, 1),
-          _buildPodiumItem(displayedEntries[2], 100, 3),
-        ],
-      ),
-    ],
-  );
-}
 
   Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
     return GestureDetector(
@@ -556,7 +604,8 @@ class _LeaderboardState extends State<Leaderboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(entry.name,
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   SizedBox(height: 4),
                   Text(
                     entry.activity.server,
@@ -566,7 +615,7 @@ class _LeaderboardState extends State<Leaderboard> {
                   LinearProgressIndicator(
                     value: entry.score / 3000,
                     backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange), 
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
                 ],
               ),
@@ -608,13 +657,13 @@ class _LeaderboardState extends State<Leaderboard> {
                 style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
               SizedBox(height: 16),
-              _buildPointsRow('Meditation', entry.activity.meditationMinutes, 
+              _buildPointsRow('Meditation', entry.activity.meditationMinutes,
                   '1 pt/minute', entry.activity.meditationMinutes),
               Divider(),
-              _buildPointsRow('Steps', entry.activity.stepsTaken, 
+              _buildPointsRow('Steps', entry.activity.stepsTaken,
                   '1 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),
               Divider(),
-              _buildPointsRow('Journal', entry.activity.journalEntries, 
+              _buildPointsRow('Journal', entry.activity.journalEntries,
                   '1 pt/entry', entry.activity.journalEntries),
               Divider(),
               Padding(
@@ -622,10 +671,14 @@ class _LeaderboardState extends State<Leaderboard> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total Points', 
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    Text('${entry.score}', 
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.orange)),
+                    Text('Total Points',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('${entry.score}',
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange)),
                   ],
                 ),
               ),
@@ -651,11 +704,13 @@ class _LeaderboardState extends State<Leaderboard> {
           ),
           Expanded(
             flex: 2,
-            child: Text(rate, style: TextStyle(fontSize: 14, color: Colors.grey)),
+            child:
+                Text(rate, style: TextStyle(fontSize: 14, color: Colors.grey)),
           ),
           Expanded(
             flex: 2,
-            child: Text('$points pts', 
+            child: Text(
+              '$points pts',
               style: TextStyle(fontSize: 16, color: Colors.orange),
               textAlign: TextAlign.right,
             ),
@@ -679,15 +734,15 @@ class ShimmerWidget extends StatefulWidget {
 
   const ShimmerWidget.circular({
     required double size,
-  }) : width = size,
-       height = size,
-       isCircular = true;
+  })  : width = size,
+        height = size,
+        isCircular = true;
 
   @override
   _ShimmerWidgetState createState() => _ShimmerWidgetState();
 }
 
-class _ShimmerWidgetState extends State<ShimmerWidget> 
+class _ShimmerWidgetState extends State<ShimmerWidget>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
