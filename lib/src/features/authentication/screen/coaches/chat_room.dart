@@ -67,7 +67,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     // For now, we'll use coach name as a simple placeholder
     final coachId = widget.coach.name.replaceAll(' ', '_').toLowerCase();
     final userId = widget.userId;
-    
+
     // Sort to ensure the same chat room ID regardless of who initiates
     final sortedIds = [coachId, userId]..sort();
     return '${sortedIds[0]}_${sortedIds[1]}';
@@ -92,7 +92,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           .doc(chatRoomId)
           .collection('messages')
           .add(message.toMap());
-      
+
       // Update chat room metadata
       await FirebaseFirestore.instance
           .collection('chatRooms')
@@ -100,14 +100,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           .set({
         'lastMessage': message.message,
         'lastMessageTime': message.timestamp,
-        'participants': [widget.userId, widget.coach.name.replaceAll(' ', '_').toLowerCase()],
+        'participants': [
+          widget.userId,
+          widget.coach.name.replaceAll(' ', '_').toLowerCase()
+        ],
         'coachName': widget.coach.name,
         'userName': widget.userName,
       });
 
       // Clear the text field
       _messageController.clear();
-      
+
       // Scroll to the bottom
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
@@ -136,7 +139,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final chatRoomId = getChatRoomId();
-    
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: widget.coach.backgroundColor,
@@ -186,7 +189,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  
+
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     return Center(
                       child: Column(
@@ -211,10 +214,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       ),
                     );
                   }
-                  
-                  final messages = snapshot.data!.docs.map((doc) => 
-                      Message.fromDocument(doc)).toList();
-                  
+
+                  final messages = snapshot.data!.docs
+                      .map((doc) => Message.fromDocument(doc))
+                      .toList();
+
                   return ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(16),
@@ -222,11 +226,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     itemBuilder: (context, index) {
                       final message = messages[index];
                       final isMe = message.senderId == widget.userId;
-                      final previousDate = index > 0 
-                          ? messages[index - 1].timestamp 
+                      final previousDate = index > 0
+                          ? messages[index - 1].timestamp
                           : DateTime(2000);
-                      final showDateSeparator = !_isSameDay(message.timestamp, previousDate);
-                      
+                      final showDateSeparator =
+                          !_isSameDay(message.timestamp, previousDate);
+
                       return Column(
                         children: [
                           if (showDateSeparator)
@@ -240,7 +245,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
             ),
           ),
-          
+
           // Message input area
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
@@ -289,13 +294,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
     );
   }
-  
+
   bool _isSameDay(DateTime date1, DateTime date2) {
-    return date1.year == date2.year && 
-           date1.month == date2.month && 
-           date1.day == date2.day;
+    return date1.year == date2.year &&
+        date1.month == date2.month &&
+        date1.day == date2.day;
   }
-  
+
   Widget _buildDateSeparator(DateTime date) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -317,7 +322,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
     );
   }
-  
+
   String _getDateText(DateTime date) {
     final now = DateTime.now();
     if (_isSameDay(date, now)) {
@@ -328,14 +333,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       return DateFormat('MMM d, yyyy').format(date);
     }
   }
-  
+
   Widget _buildMessageBubble(Message message, bool isMe) {
     final time = DateFormat('h:mm a').format(message.timestamp);
-    
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Row(
-        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
@@ -346,7 +352,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
             const SizedBox(width: 8),
           ],
-          
           Flexible(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -397,7 +402,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
             ),
           ),
-          
           if (isMe) const SizedBox(width: 8),
         ],
       ),
@@ -445,7 +449,7 @@ class CoachProfileDialog extends StatelessWidget {
                   onPressed: () {
                     // Close the profile dialog
                     Navigator.pop(context);
-                    
+
                     // Open the chat room
                     Navigator.push(
                       context,
@@ -453,7 +457,8 @@ class CoachProfileDialog extends StatelessWidget {
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
                           userId: 'user_123', // Replace with actual user ID
-                          userName: 'Current User', // Replace with actual username
+                          userName:
+                              'Current User', // Replace with actual username
                         ),
                       ),
                     );
@@ -542,7 +547,7 @@ class ChatListScreen extends StatelessWidget {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          
+
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return Center(
               child: Column(
@@ -566,16 +571,18 @@ class ChatListScreen extends StatelessWidget {
               ),
             );
           }
-          
+
           return ListView.builder(
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
-              final chatData = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+              final chatData =
+                  snapshot.data!.docs[index].data() as Map<String, dynamic>;
               final chatId = snapshot.data!.docs[index].id;
               final otherName = chatData['coachName'] ?? 'Coach';
               final lastMessage = chatData['lastMessage'] ?? '';
-              final lastMessageTime = (chatData['lastMessageTime'] as Timestamp).toDate();
-              
+              final lastMessageTime =
+                  (chatData['lastMessageTime'] as Timestamp).toDate();
+
               // Find the coach from your existing coaches list (you'll need to modify this)
               // For simplicity, we'll create a dummy coach
               final coach = Coach(
@@ -583,7 +590,7 @@ class ChatListScreen extends StatelessWidget {
                 bio: '',
                 backgroundColor: const Color(0xFF90A17D),
               );
-              
+
               return ListTile(
                 leading: const CircleAvatar(
                   backgroundColor: Color(0xFF90A17D),
@@ -621,13 +628,13 @@ class ChatListScreen extends StatelessWidget {
       ),
     );
   }
-  
+
   String _formatChatTime(DateTime dateTime) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
     final dateToCheck = DateTime(dateTime.year, dateTime.month, dateTime.day);
-    
+
     if (dateToCheck == today) {
       return DateFormat('h:mm a').format(dateTime);
     } else if (dateToCheck == yesterday) {
