@@ -27,12 +27,14 @@ class Coach {
   final String name;
   final String phone;
   final String bio;
+  final String profilePic; // New field for profile picture URL
   final Color backgroundColor;
 
   Coach({
     required this.name,
     this.phone = '',
     this.bio = '',
+    this.profilePic = '', // Default empty if no image
     required this.backgroundColor,
   });
 }
@@ -149,14 +151,19 @@ class CoachProfileDialog extends StatelessWidget {
                 ),
               ],
             ),
-            const CircleAvatar(
+            CircleAvatar(
               radius: 50,
               backgroundColor: Colors.white,
-              child: Icon(
-                Icons.person,
-                size: 50,
-                color: Colors.grey,
-              ),
+              backgroundImage: coach.profilePic.isNotEmpty
+                  ? NetworkImage(coach.profilePic)
+                  : null,
+              child: coach.profilePic.isEmpty
+                  ? const Icon(
+                      Icons.person,
+                      size: 50,
+                      color: Colors.grey,
+                    )
+                  : null,
             ),
             const SizedBox(height: 24),
             Text(
@@ -248,12 +255,13 @@ class _CoachesScreenState extends State<CoachesScreen> {
       return snapshot.docs.map((doc) {
         final data = doc.data();
         return Coach(
-          name: data['name'] ?? '',
-          phone: data['phone'] ?? '',
+          name: data['fullName'] ?? '',
+          phone: data['phonenumber'] ?? '',
           bio: data['bio'] ?? '',
+          profilePic: data['profilePic'] ?? '', // Fetch profile picture URL
           backgroundColor: data['backgroundColor'] == 'green'
-              ? Color(0xFF90A17D)
-              : Color(0xFF6D849A),
+              ? const Color(0xFF90A17D)
+              : const Color(0xFF6D849A),
         );
       }).toList();
     });
@@ -337,9 +345,16 @@ class _CoachesScreenState extends State<CoachesScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: ListTile(
-                          leading: const CircleAvatar(
+                          leading: CircleAvatar(
                             backgroundColor: Colors.white,
-                            child: Icon(Icons.person, color: Colors.grey),
+                            backgroundImage: coach.profilePic.isNotEmpty
+                                ? NetworkImage(
+                                    coach.profilePic) // Load image from URL
+                                : null,
+                            child: coach.profilePic.isEmpty
+                                ? const Icon(Icons.person,
+                                    color: Colors.grey) // Default icon
+                                : null,
                           ),
                           title: Text(
                             coach.name,

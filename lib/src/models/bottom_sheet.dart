@@ -1,10 +1,15 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/addcoach.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 
 class BottomSheetWidget {
-  static void show(BuildContext context) {
+  static void show(BuildContext context) async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    String allowedUserId =
+        "hG1FxGW2xrVXtKZnnDWERJpPQof2"; // Replace with actual allowed user ID
+
     showModalBottomSheet(
       backgroundColor: Color(0xFF589675),
       context: context,
@@ -59,6 +64,27 @@ class BottomSheetWidget {
                   },
                 ),
                 Divider(),
+
+                // Conditionally show "Add Coach" icon only for specific user
+                if (currentUser?.uid == allowedUserId) ...[
+                  ListTile(
+                    leading: Icon(Icons.supervisor_account),
+                    title: Text("Add Coach"),
+                    onTap: () {
+                      Navigator.pop(
+                          context); // Close the current drawer or menu
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              AddCoachScreen(), // Navigate to AddCoachScreen
+                        ),
+                      );
+                    },
+                  ),
+                  Divider(),
+                ],
+
                 ListTile(
                   leading: Image.asset(
                     "assets/images/logout.png",
