@@ -29,34 +29,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String author = "Unknown";
   String? selectedEmotion;
   String? currentUserEmotion;
-  String? _profilePicUrl;
+  String? _profilePic;
 
   @override
   void initState() {
-   _fetchProfilePic();
+    _fetchProfilePic();
     super.initState();
     fetchQuote();
     _loadTodayEmotion();
   }
-Future<void> _fetchProfilePic() async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return;
 
-  try {
-    DocumentSnapshot userDoc = await FirebaseFirestore.instance
-        .collection("users")
-        .doc(user.uid)
-        .get();
+  Future<void> _fetchProfilePic() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    if (userDoc.exists) {
-      setState(() {
-        _profilePicUrl = userDoc["profilePic"]; // Get the profile picture URL
-      });
+    try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists) {
+        setState(() {
+          _profilePic = userDoc["profilePic"]; // Get the profile picture URL
+        });
+      }
+    } catch (e) {
+      print("Error fetching profile picture: $e");
     }
-  } catch (e) {
-    print("Error fetching profile picture: $e");
   }
-}
+
   selectEmotion(String emotion) async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -264,23 +266,23 @@ Future<void> _fetchProfilePic() async {
       appBar: AppBar(
         elevation: 0,
         leading: IconButton(
-        icon: _profilePicUrl == null
+          icon: _profilePic == null
               ? Image.asset(
                   'assets/images/avatar.png', // Default image if no profilePic is available
                   width: screenWidth * 0.08,
                   height: screenWidth * 0.08,
                 )
-              :ClipOval(
-  child: _profilePicUrl != null
-      ? Image.network(
-          _profilePicUrl!,
-          width: screenWidth * 0.08,
-          height: screenWidth * 0.08,
-          fit: BoxFit.cover,
-        )
-      : Icon(Icons.person, size: screenWidth * 0.08), // Default icon if no image
-),
-
+              : ClipOval(
+                  child: _profilePic != null
+                      ? Image.network(
+                          _profilePic!,
+                          width: screenWidth * 0.08,
+                          height: screenWidth * 0.08,
+                          fit: BoxFit.cover,
+                        )
+                      : Icon(Icons.person,
+                          size: screenWidth * 0.08), // Default icon if no image
+                ),
           onPressed: () => Navigator.pushNamed(context, '/profile'),
         ),
         actions: [
@@ -419,19 +421,15 @@ Future<void> _fetchProfilePic() async {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                // Horizontal divider that stretches to the left side
                                 Divider(
                                   thickness: 1,
-
                                   height: 5,
-                                  indent: 0, // Ensure no indentation
-                                  endIndent:
-                                      0, // Ensure no right-side indentation
+                                  indent: 0,
+                                  endIndent: 0,
                                 ),
                                 const SizedBox(height: 8),
                                 InkWell(
                                   onTap: () {
-                                    // Navigate to "See All" screen
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -495,16 +493,51 @@ Future<void> _fetchProfilePic() async {
                                     var data = coachSnapshot.data!.data()
                                         as Map<String, dynamic>;
                                     String coachName =
-                                        data['name'] ?? 'Unknown Coach';
-
+                                        data['fullName'] ?? 'Unknown Coach';
                                     String coachTitle =
                                         data['bio'] ?? 'Unknown Title';
+                                    String profilePic =
+                                        data['profilePic'] ?? '';
 
                                     return Stack(
                                       clipBehavior: Clip.none,
                                       children: [
-                                        _buildCoachCard(
-                                            context, coachName, coachTitle),
+                                        Row(
+                                          children: [
+                                            // Coach Profile Picture
+                                            CircleAvatar(
+                                              radius: 30,
+                                              backgroundImage:
+                                                  NetworkImage(profilePic),
+                                            ),
+                                            const SizedBox(width: 16),
+                                            // Coach Details
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    coachName,
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    coachTitle,
+                                                    style: const TextStyle(
+                                                      fontSize: 14,
+                                                      color: Colors.grey,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                         Positioned(
                                           top: -12,
                                           left: -12,
