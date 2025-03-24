@@ -15,7 +15,6 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
   Future<void> setAsCoach(String userId, String userName, String email,
       String fullName, String bio, String phonenumber) async {
     try {
-      // Fetch user's profile picture
       final userDoc = await usersCollection.doc(userId).get();
       final userData = userDoc.data() as Map<String, dynamic>?;
 
@@ -25,7 +24,6 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
 
       final profilePic = userData['profilePic'] ?? '';
 
-      // Save user as a coach in the 'coaches' collection
       await coachesCollection.doc(userId).set({
         'userId': userId,
         'username': userName,
@@ -33,19 +31,18 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
         'fullName': fullName,
         'bio': bio,
         'phonenumber': phonenumber,
-        'profilePic': profilePic, // Ensuring it's stored correctly
-        'backgroundColor': 'blue', // Assigning default background color
+        'profilePic': profilePic,
+        'backgroundColor': 'blue',
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Update the user’s document in the 'users' collection
       await usersCollection.doc(userId).update({'isCoach': true});
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('User successfully set as coach!')),
       );
 
-      setState(() {}); // Refresh the UI if needed
+      setState(() {});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error setting user as coach: $e')),
@@ -63,26 +60,51 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
           title: Text('Add Full Name, Bio, and Phone Number'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               TextField(
                 controller: fullNameController,
-                decoration: InputDecoration(labelText: 'Full Name'),
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
+              SizedBox(height: 10),
               TextField(
                 controller: bioController,
-                decoration: InputDecoration(labelText: 'Bio'),
+                decoration: InputDecoration(
+                  labelText: 'Bio',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
+              SizedBox(height: 10),
               TextField(
                 controller: phonenumberController,
-                decoration: InputDecoration(labelText: 'Phone Number'),
+                decoration: InputDecoration(
+                  labelText: 'Phone Number',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
             ],
           ),
           actions: <Widget>[
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
               onPressed: () {
                 if (fullNameController.text.isNotEmpty &&
                     bioController.text.isNotEmpty &&
@@ -109,7 +131,18 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Manage Coaches'),
-        backgroundColor: Colors.green,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                const Color.fromARGB(255, 255, 255, 255),
+                const Color.fromARGB(255, 255, 255, 255)
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: usersCollection.snapshots(),
@@ -138,6 +171,7 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
           }
 
           return ListView.builder(
+            padding: EdgeInsets.all(10),
             itemCount: users.length,
             itemBuilder: (context, index) {
               final user = users[index];
@@ -147,19 +181,53 @@ class _ManageCoachesScreenState extends State<ManageCoachesScreen> {
               final email = data['email'] ?? 'No Email';
               final profilePic = data['profilePic'] ?? '';
 
-              return ListTile(
-                leading: profilePic.isNotEmpty
-                    ? CircleAvatar(
-                        backgroundImage: NetworkImage(profilePic),
-                        radius: 25,
-                      )
-                    : Icon(Icons.person, size: 50),
-                title: Text(userName),
-                subtitle: Text('User'),
-                trailing: ElevatedButton(
-                  onPressed: () =>
-                      showAddCoachDialog(context, userId, userName, email),
-                  child: Text('Set as Coach'),
+              return Card(
+                margin: EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                elevation: 5,
+                child: ListTile(
+                  leading: profilePic.isNotEmpty
+                      ? CircleAvatar(
+                          backgroundImage: NetworkImage(profilePic),
+                          radius: 30,
+                        )
+                      : Icon(Icons.person, size: 50),
+                  title: Text(
+                    userName,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18, // Reduced font size for the name
+                    ),
+                  ),
+                  subtitle: Text(
+                    email,
+                    style: TextStyle(
+                      fontSize: 15, // Set the font size here
+                    ),
+                  ),
+                  trailing: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF589675),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical:
+                              7), // Adjust the padding for a smaller button
+                      minimumSize: Size(50,
+                          40), // Smaller button size (smaller width and height)
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () =>
+                        showAddCoachDialog(context, userId, userName, email),
+                    child: Text('Set as Coach',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontSize: 12,
+                        )),
+                  ),
                 ),
               );
             },

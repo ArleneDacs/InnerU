@@ -502,52 +502,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     return Stack(
                                       clipBehavior: Clip.none,
                                       children: [
-                                        Row(
-                                          children: [
-                                            // Coach Profile Picture
-                                            CircleAvatar(
-                                              radius: 30,
-                                              backgroundImage:
-                                                  NetworkImage(profilePic),
-                                            ),
-                                            const SizedBox(width: 16),
-                                            // Coach Details
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    coachName,
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    coachTitle,
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                      color: Colors.grey,
-                                                    ),
-                                                  ),
-                                                ],
+                                        Container(
+                                          padding: const EdgeInsets.all(16.0),
+                                          margin: const EdgeInsets.all(8.0),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 290, // Adjust width
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.grey
+                                                    .withOpacity(0.5),
+                                                spreadRadius: 2,
+                                                blurRadius: 5,
+                                                offset: const Offset(0, 3),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              // Coach Profile Picture
+                                              CircleAvatar(
+                                                radius: 30,
+                                                backgroundImage:
+                                                    NetworkImage(profilePic),
+                                              ),
+                                              const SizedBox(width: 16),
+                                              // Coach Details
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      coachName,
+                                                      style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      coachTitle,
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        color: Colors.grey,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                        // Top-left Star (outside container)
                                         Positioned(
-                                          top: -12,
-                                          left: -12,
+                                          top: -5,
+                                          left: -3,
                                           child: Icon(Icons.star,
                                               size: 24,
                                               color: Colors.lightBlue),
                                         ),
+                                        // Bottom-right Star (outside container)
                                         Positioned(
-                                          bottom: -12,
-                                          right: -12,
+                                          bottom: -3,
+                                          right: -3,
                                           child: Icon(Icons.star,
                                               size: 24, color: Colors.orange),
                                         ),
