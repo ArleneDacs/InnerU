@@ -252,6 +252,7 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
           ),
         ],
       ),
+       floatingActionButton: null,
       body: SafeArea(
         child: Column(
           children: [

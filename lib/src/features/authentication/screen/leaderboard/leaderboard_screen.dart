@@ -6,13 +6,13 @@ class UserActivity {
   final int meditationMinutes;
   final int stepsTaken;
   final int journalEntries;
-  final String server; // Added server field
+  final String server;
 
   const UserActivity({
     this.meditationMinutes = 0,
     this.stepsTaken = 0,
     this.journalEntries = 0,
-    this.server = "", // Default empty server
+    this.server = "",
   });
 
   int calculatePoints() {
@@ -63,7 +63,7 @@ class LeaderboardService {
     return List.from(_entries);
   }
 
-  // New method to get filtered leaderboard
+  // Get filtered leaderboard
   List<LeaderboardEntry> getFilteredLeaderboard(String server) {
     if (server.isEmpty) {
       return List.from(_entries);
@@ -99,18 +99,19 @@ class Leaderboard extends StatefulWidget {
 class _LeaderboardState extends State<Leaderboard> {
   final LeaderboardService _leaderboardService = LeaderboardService();
   late List<LeaderboardEntry> entries;
-  late List<LeaderboardEntry>
-      displayedEntries; // New variable for displayed entries
+  late List<LeaderboardEntry> displayedEntries;
   bool isLoading = true;
-  String selectedServer = "Server"; // Default selected server
-  String username = "Valenin"; // Default username
-  bool isFilteredByUser = false; // Track if we're filtering by user
+  String selectedServer = "Default"; // Default server to show first
+  String username = "Valenin";
+  bool hasJoinedTeam = false; // Flag to determine if user has joined a team
+  bool isFilteredByUser = false;
 
   @override
   void initState() {
     super.initState();
     isLoading = widget.isLoading;
     _loadUserData();
+    _checkUserTeamStatus(); // Check if user has joined a team
 
     // Simulate loading for demo
     if (isLoading) {
@@ -124,54 +125,92 @@ class _LeaderboardState extends State<Leaderboard> {
     }
   }
 
-  void _loadUserData() async {
-  QuerySnapshot snapshot =
-      await FirebaseFirestore.instance.collection('userpoints').get();
+  // Check if user has joined a team
+  void _checkUserTeamStatus() async {
+    try {
+      // Fetch user data from Firestore
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(username) // Assuming username is used as document ID
+          .get();
 
-  List<LeaderboardEntry> fetchedEntries = snapshot.docs.map((doc) {
-    var data = doc.data() as Map<String, dynamic>;
-
-    return LeaderboardEntry(
-      name: data['username'],
-      score: data['totalPoints'],
-      rank: 0, // Will be updated after sorting
-      activity: UserActivity(
-        meditationMinutes: data['taskPoints']['Meditation Points'] ?? 0,
-        stepsTaken: (data['taskPoints']['Steps Points'] ?? 0) * 200, // Reverse calculation
-        journalEntries: 
-        (data['taskPoints']['Learning Points'] ?? 0) ~/ 15 +  // Convert Learning points
-        (data['taskPoints']['Add Value Points'] ?? 0) ~/ 15,  // Convert Add Value points
-      ),
-    );
-  }).toList();
-
-  fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
-
-  for (int i = 0; i < fetchedEntries.length; i++) {
-    fetchedEntries[i] = LeaderboardEntry(
-      name: fetchedEntries[i].name,
-      score: fetchedEntries[i].score,
-      rank: i + 1,
-      activity: fetchedEntries[i].activity,
-    );
+      if (userDoc.exists) {
+        var userData = userDoc.data() as Map<String, dynamic>;
+        
+        // Check if user has a team field and it's not empty
+        if (userData.containsKey('team') && userData['team'] != null && userData['team'].toString().isNotEmpty) {
+          setState(() {
+            hasJoinedTeam = true;
+            // If user has a team, set it as selected server
+            selectedServer = userData['team'];
+          });
+        } else {
+          setState(() {
+            hasJoinedTeam = false;
+            // User hasn't joined a team, keep default server
+            selectedServer = "Default";
+          });
+        }
+      }
+    } catch (e) {
+      print('Error checking user team status: $e');
+      // Default to false if error occurs
+      setState(() {
+        hasJoinedTeam = false;
+      });
+    }
   }
 
-  setState(() {
-    entries = fetchedEntries;
-    displayedEntries = List.from(entries);
-    isLoading = false;
-  });
-}
+  void _loadUserData() async {
+    QuerySnapshot snapshot =
+        await FirebaseFirestore.instance.collection('userpoints').get();
 
+    List<LeaderboardEntry> fetchedEntries = snapshot.docs.map((doc) {
+      var data = doc.data() as Map<String, dynamic>;
+      
+      // Extract server information if available, otherwise use "Default"
+      String server = data['server'] ?? "Default";
 
-  // Function to filter entries by server - FIXED VERSION
+      return LeaderboardEntry(
+        name: data['username'],
+        score: data['totalPoints'],
+        rank: 0, // Will be updated after sorting
+        activity: UserActivity(
+          meditationMinutes: data['taskPoints']['Meditation Points'] ?? 0,
+          stepsTaken: (data['taskPoints']['Steps Points'] ?? 0) * 200, // Reverse calculation
+          journalEntries: 
+          (data['taskPoints']['Learning Points'] ?? 0) ~/ 15 +  // Convert Learning points
+          (data['taskPoints']['Add Value Points'] ?? 0) ~/ 15,  // Convert Add Value points
+          server: server, // Add server information
+        ),
+      );
+    }).toList();
+
+    fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
+
+    for (int i = 0; i < fetchedEntries.length; i++) {
+      fetchedEntries[i] = LeaderboardEntry(
+        name: fetchedEntries[i].name,
+        score: fetchedEntries[i].score,
+        rank: i + 1,
+        activity: fetchedEntries[i].activity,
+      );
+    }
+
+    setState(() {
+      entries = fetchedEntries;
+      _filterByServer(selectedServer); // Initially filter by the selected server
+    });
+  }
+
+  // Function to filter entries by server
   void _filterByServer(String server) {
     setState(() {
-      if (server == "Server") {
+      if (server == "All") {
         // Show all servers
         displayedEntries = List.from(entries);
         isFilteredByUser = false;
-        selectedServer = "Server";
+        selectedServer = "All";
       } else {
         // Filter by specific server
         List<LeaderboardEntry> filtered =
@@ -188,8 +227,8 @@ class _LeaderboardState extends State<Leaderboard> {
         }
 
         displayedEntries = filtered;
-        isFilteredByUser = true;
-        selectedServer = server; // Store the actual server name
+        selectedServer = server;
+        isFilteredByUser = server == username;
       }
     });
   }
@@ -211,82 +250,82 @@ class _LeaderboardState extends State<Leaderboard> {
       ),
       body: Column(
         children: [
-          // Server/User selector with tappable areas
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Container(
-              height: 36, // Reduced height
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(
-                    18), // Adjusted to match half of height
-                border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        // Filter by Valenin server
-                        _filterByServer("Valenin");
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: isFilteredByUser
-                              ? Color(0xFFCEA47E)
-                              : Colors.white,
-                          borderRadius: BorderRadius.only(
-                            topLeft: Radius.circular(17),
-                            bottomLeft: Radius.circular(17),
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          username,
-                          style: TextStyle(
+          // Only show server/user selector if user has joined a team
+          if (hasJoinedTeam)
+            Padding(
+              padding: EdgeInsets.all(16),
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          // Filter by username
+                          _filterByServer(username);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
                             color: isFilteredByUser
-                                ? Colors.white
-                                : Color(0xFFCEA47E),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 15, // Slightly smaller text
+                                ? Color(0xFFCEA47E)
+                                : Colors.white,
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(17),
+                              bottomLeft: Radius.circular(17),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            username,
+                            style: TextStyle(
+                              color: isFilteredByUser
+                                  ? Colors.white
+                                  : Color(0xFFCEA47E),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        // Show all servers
-                        _filterByServer("Server");
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: !isFilteredByUser
-                              ? Color(0xFFCEA47E)
-                              : Colors.white,
-                          borderRadius: BorderRadius.only(
-                            topRight: Radius.circular(17),
-                            bottomRight: Radius.circular(17),
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          "Server",
-                          style: TextStyle(
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          // Show all servers or the server the user belongs to
+                          _filterByServer(selectedServer == username ? "All" : selectedServer);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
                             color: !isFilteredByUser
-                                ? Colors.white
-                                : Color(0xFFCEA47E),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 15, // Slightly smaller text
+                                ? Color(0xFFCEA47E)
+                                : Colors.white,
+                            borderRadius: BorderRadius.only(
+                              topRight: Radius.circular(17),
+                              bottomRight: Radius.circular(17),
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            selectedServer == username ? "All" : selectedServer,
+                            style: TextStyle(
+                              color: !isFilteredByUser
+                                  ? Colors.white
+                                  : Color(0xFFCEA47E),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           Container(
             height: 220,
             child: isLoading ? _buildSkeletonPodium() : _buildPodium(),
@@ -300,7 +339,6 @@ class _LeaderboardState extends State<Leaderboard> {
                       ? 0
                       : displayedEntries.length - 3),
               itemBuilder: (context, index) {
-                // Use actual rank from entry rather than calculating from index
                 return Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: isLoading
@@ -389,66 +427,66 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   Widget _buildPodium() {
-  // Check if we have enough entries to show in podium
-  if (displayedEntries.length < 3) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          "Not enough entries to display podium",
-          style: TextStyle(fontSize: 16, color: Colors.grey),
+    // Check if we have enough entries to show in podium
+    if (displayedEntries.length < 3) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            "Not enough entries to display podium",
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
         ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          // Left confetti
+          Positioned(
+            left: 0,
+            top: 20,
+            child: SizedBox(
+              width: 100,
+              height: 180,
+              child: Image.asset(
+                'assets/images/confetti_left.gif',
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+          // Right confetti
+          Positioned(
+            right: 0,
+            top: 20,
+            child: SizedBox(
+              width: 100,
+              height: 180,
+              child: Image.asset(
+                'assets/images/confetti_right.gif',
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+          // Podium content
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _buildPodiumItem(displayedEntries[1], 120, 2),
+              _buildPodiumItem(displayedEntries[0], 140, 1),
+              _buildPodiumItem(displayedEntries[2], 100, 3),
+            ],
+          ),
+        ],
       ),
     );
   }
-
-   return SingleChildScrollView( // Add this widget to make the content scrollable if needed
-    child: Stack(
-      clipBehavior: Clip.none, // Change to allow overflow without warnings
-      alignment: Alignment.center,
-      children: [
-        // Left confetti
-        Positioned(
-          left: 0,
-          top: 20,
-          child: SizedBox(
-            width: 100,
-            height: 180,
-            child: Image.asset(
-              'assets/images/confetti_left.gif',
-              fit: BoxFit.cover,
-            ),
-          ),
-        ),
-
-        // Right confetti
-        Positioned(
-          right: 0,
-          top: 20,
-          child: SizedBox(
-            width: 100,
-            height: 180,
-            child: Image.asset(
-              'assets/images/confetti_right.gif',
-              fit: BoxFit.cover,
-            ),
-          ),
-        ),
-
-        // Podium content
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _buildPodiumItem(displayedEntries[1], 120, 2),
-            _buildPodiumItem(displayedEntries[0], 140, 1),
-            _buildPodiumItem(displayedEntries[2], 100, 3),
-          ],
-        ),
-      ],
-    ),
-  );
-}
 
   Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
     return GestureDetector(
@@ -474,7 +512,7 @@ class _LeaderboardState extends State<Leaderboard> {
               // Add crown to first place
               if (position == 1)
                 Positioned(
-                  top: 70,
+                  top: -15,
                   child: Image.asset(
                     'assets/images/crown.png',
                     height: 30,
@@ -484,7 +522,20 @@ class _LeaderboardState extends State<Leaderboard> {
             ],
           ),
           SizedBox(height: 8),
-          Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: Text('.', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+              ),
+              Text(entry.name, 
+                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                   overflow: TextOverflow.ellipsis,
+                   maxLines: 1),
+            ],
+          ),
           Container(
             width: 80,
             height: height,
@@ -545,10 +596,12 @@ class _LeaderboardState extends State<Leaderboard> {
                   Text(entry.name,
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   SizedBox(height: 4),
-                  Text(
-                    entry.activity.server,
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
+                  // Only show server info if hasJoinedTeam is true
+                  if (hasJoinedTeam)
+                    Text(
+                      entry.activity.server,
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   SizedBox(height: 4),
                   LinearProgressIndicator(
                     value: entry.score / 3000,
@@ -590,10 +643,12 @@ class _LeaderboardState extends State<Leaderboard> {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 8),
-              Text(
-                'Server: ${entry.activity.server}',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-              ),
+              // Only show server info if hasJoinedTeam is true
+              if (hasJoinedTeam)
+                Text(
+                  'Server: ${entry.activity.server}',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
               SizedBox(height: 16),
               _buildPointsRow('Meditation', entry.activity.meditationMinutes,
                   '1 pt/minute', entry.activity.meditationMinutes),
