@@ -49,6 +49,65 @@ class CoachProfileDialog extends StatelessWidget {
     required this.coach,
   });
 
+  void _launchDialer(String phoneNumber) async {
+    final Uri url = Uri(scheme: 'tel', path: phoneNumber);
+
+    // Get current date dynamically in the format 'yyyy-MM-dd'
+    String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    // Get the current logged-in user from FirebaseAuth
+    User? currentUser = FirebaseAuth.instance.currentUser;
+
+    if (currentUser != null) {
+      String userId = currentUser.uid; // Get the userId from the Firebase user
+
+      try {
+        // Fetch username from Firestore user document
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .get();
+        String? username = userDoc.get('username');
+
+        if (username != null) {
+          String documentId =
+              '$username-$formattedDate'; // Firestore document ID
+
+          // Try to launch the phone dialer
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url);
+            debugPrint("Dialer launched successfully");
+
+            // Update or create Firestore document for the current user and date
+            try {
+              await FirebaseFirestore.instance
+                  .collection('dailytracker')
+                  .doc(documentId)
+                  .set({
+                'username': username,
+                'date': formattedDate,
+                'call': true, // Set 'call' field to true
+              }, SetOptions(merge: true));
+
+              debugPrint(
+                  "Firestore updated successfully: 'call' field set to true");
+            } catch (e) {
+              debugPrint("Error updating Firestore: $e");
+            }
+          } else {
+            debugPrint("Could not launch dialer");
+          }
+        } else {
+          debugPrint("Error: Username not found for userId: $userId");
+        }
+      } catch (e) {
+        debugPrint("Error fetching user data: $e");
+      }
+    } else {
+      debugPrint("No user logged in");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -71,6 +130,16 @@ class CoachProfileDialog extends StatelessWidget {
                   ),
                   onPressed: () => Navigator.pop(context),
                 ),
+                IconButton(
+                  icon: const Icon(
+                    CupertinoIcons.chat_bubble_2_fill,
+                    size: 30,
+                    color: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                ),
               ],
             ),
             CircleAvatar(
@@ -78,12 +147,15 @@ class CoachProfileDialog extends StatelessWidget {
               backgroundColor: Colors.white,
               backgroundImage: coach.profilePic.isNotEmpty
                   ? NetworkImage(coach.profilePic)
-                  : null, // If no picture, show default icon
+                  : null,
               child: coach.profilePic.isEmpty
-                  ? const Icon(Icons.person, size: 50, color: Colors.grey)
-                  : null, // If picture exists, remove icon
+                  ? const Icon(
+                      Icons.person,
+                      size: 50,
+                      color: Colors.grey,
+                    )
+                  : null,
             ),
-
             const SizedBox(height: 24),
             Text(
               coach.fullname,
@@ -94,37 +166,23 @@ class CoachProfileDialog extends StatelessWidget {
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            // Phone Number Display
-            if (coach.phone.isNotEmpty) ...[
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Phone:',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white,
-                  ),
+            GestureDetector(
+              onTap: () {
+                _launchDialer(coach
+                    .phone); // Call the launcher with the coach's phone number
+              },
+              child: Text(
+                coach.phone.isNotEmpty ? coach.phone : 'No phone available',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  decoration: TextDecoration.underline,
                 ),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  coach.phone,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
+            ),
+            const SizedBox(height: 32),
             const Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -252,7 +310,7 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
           ),
         ],
       ),
-       floatingActionButton: null,
+      floatingActionButton: null,
       body: SafeArea(
         child: Column(
           children: [
@@ -325,7 +383,7 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
                             style: const TextStyle(color: Colors.white),
                           ),
                           subtitle: Text(
-                            coach.phone,
+                            coach.bio,
                             style: const TextStyle(color: Colors.white70),
                           ),
                           onTap: () => showDialog(

@@ -270,26 +270,12 @@ class _CoachesScreenState extends State<CoachesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Our Coaches'),
+      ),
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(CupertinoIcons.arrow_left),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const Text(
-                    'Our Coaches',
-                    style: TextStyle(
-                      fontSize: 24,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20.0),
               child: SizedBox(
@@ -362,6 +348,10 @@ class _CoachesScreenState extends State<CoachesScreen> {
                               color: Colors.white,
                               fontWeight: FontWeight.w500,
                             ),
+                          ),
+                          subtitle: Text(
+                            coach.bio,
+                            style: const TextStyle(color: Colors.white70),
                           ),
                           onTap: () {
                             showDialog(
