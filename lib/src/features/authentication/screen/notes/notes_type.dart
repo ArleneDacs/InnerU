@@ -114,56 +114,79 @@ class _NotesTypeState extends State<NotesType> {
 
   @override
   void dispose() {
-    _mounted = false; // Mark the widget as unmounted when disposed
+    _isSaving = false; // Mark the widget as unmounted when disposed
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            icon: Icon(Icons.arrow_back)),
-        actions: <Widget>[
-          TextButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text("Post this note?",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    content: Text(
-                        "Are you sure you want to share this note with the community?"),
-                    actions: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context); // Close the dialog
-                        },
-                        child: Text("Cancel"),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          saveNotes(); // Save the note
-                          _finishedWriting();
-                          Navigator.pop(context);
-                          Navigator.pop(context);
-                        },
-                        child:
-                            Text("Yes", style: TextStyle(color: Colors.green)),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              child: Text(
-                "Post",
-                style: TextStyle(fontSize: 15),
-              ))
-        ],
-      ),
+    appBar: AppBar(
+  leading: IconButton(
+    onPressed: () {
+      Navigator.pop(context);
+    },
+    icon: Icon(Icons.arrow_back),
+  ),
+  actions: <Widget>[
+    // Save Button
+    TextButton(
+      onPressed: () {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text("Save this note?"),
+            content: Text("Do you want to save this note for later?"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  saveNotes(isSaved: true);
+                  Navigator.pop(context);
+                  Navigator.pop(context);
+                },
+                child: Text("Save", style: TextStyle(color: Colors.blue)),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Text("Save", style: TextStyle(fontSize: 15)),
+    ),
+    
+    // Post Button
+    TextButton(
+      onPressed: () {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text("Post this note?"),
+            content: Text("Are you sure you want to share this note?"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  saveNotes(isSaved: false); // Save with saved: false
+                  _finishedWriting();
+                  Navigator.pop(context);
+                  Navigator.pop(context);
+                },
+                child: Text("Yes", style: TextStyle(color: Colors.green)),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Text("Post", style: TextStyle(fontSize: 15)),
+    ),
+  ],
+),
       body: SafeArea(
           child: Padding(
         padding: EdgeInsets.all(20),
@@ -270,14 +293,19 @@ class _NotesTypeState extends State<NotesType> {
       await _saveDailyActivity(addValue: true);
     }
   }
-/// Function to save notes (including uploaded images)
-Future<void> saveNotes() async {
+Future<void> saveNotes({required bool isSaved}) async {
   if (_isSaving) return;
   _isSaving = true;
   List<Map<String, String>> contentList = [];
   DateTime now = DateTime.now();
+  
+  String? userId = FirebaseAuth.instance.currentUser?.uid; // Get current user ID
+  if (userId == null) {
+    print("Error: User not logged in.");
+    return;
+  }
 
-  // Add text content
+
   for (var content in contentWidgets) {
     if (content is TextField) {
       if (content.controller?.text.isNotEmpty ?? false) {
@@ -289,40 +317,37 @@ Future<void> saveNotes() async {
     }
   }
 
-  // Add uploaded image URLs
+  // Ensure images are always uploaded even if only one remains
   for (var imageUrl in uploadedImageUrls) {
-    contentList.add({
-      "type": "image",
-      "value": imageUrl,
-    });
+    if (imageUrl.isNotEmpty) {
+      contentList.add({
+        "type": "image",
+        "value": imageUrl,
+      });
+    }
   }
 
   try {
-    final querySnapshot = await FirebaseFirestore.instance
-        .collection('notes')
-        .where('username', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-        .where('title', isEqualTo: "Note Title") // Change as needed
-        .get();
+    await FirebaseFirestore.instance.collection('notes').add({
+      'username': username,
+      'userId' : userId,
+      'title': titleString,
+      'note': contentList,
+      'color': color,
+      'createdAt': now,
+      'category': selectedCategory,
+      'saved': isSaved,
+    });
 
-    if (querySnapshot.docs.isEmpty) {
-      await FirebaseFirestore.instance.collection('notes').add({
-        'username': username,
-        'title': titleString, // Update this dynamically
-        'note': contentList,
-        'color':color, // Change based on user selection
-        'createdAt': now,
-        'category': selectedCategory
-      });
-
-      if (_mounted) {
-        CustomSnackBar.showCustomSnackBar(
-            context, "Note saved successfully.", Colors.white);
-      }
+    if (_mounted) {
+      CustomSnackBar.showCustomSnackBar(
+        context,
+        isSaved ? "Note saved successfully." : "Note posted successfully.",
+        Colors.white,
+      );
     }
   } catch (e) {
-    if (_mounted) {
-      CustomSnackBar.showCustomSnackBar(context, e.toString(), Colors.white);
-    }
+    print("Error saving note: $e");
   }
 
   _isSaving = false;
@@ -343,69 +368,122 @@ Future<String> uploadImageToFirebase(File imageFile) async {
     return "";
   }
 }
+
 void pickImage() async {
-  final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+  final List<XFile>? images = await _picker.pickMultiImage();
 
-  if (image != null) {
-    setState(() {
-      _selectedImage = image;
-      imagePaths.add(image.path); // Store local path for UI preview
-    });
+  if (images != null && images.isNotEmpty) {
+    if (!mounted) return;
 
-    // Upload image to Firebase and store the URL
-  String imageUrl = await uploadImageToFirebase(File(image.path));
-if (imageUrl.isNotEmpty && mounted) { // Check if widget is still in the tree
+    List<String> newUploadedUrls = [];
+
+    for (var image in images) {
+      if (!mounted) return;
+
+      setState(() {
+        uploadedImageUrls.add("loading"); // Add a temporary loading state
+      });
+
+      String imageUrl = await uploadImageToFirebase(File(image.path));
+
+      if (imageUrl.isNotEmpty && mounted) {
+        setState(() {
+          int loadingIndex = uploadedImageUrls.indexOf("loading");
+          if (loadingIndex != -1) {
+            uploadedImageUrls[loadingIndex] = imageUrl; // Replace loading with actual URL
+          } else {
+            uploadedImageUrls.add(imageUrl);
+          }
+        });
+      }
+    }
+  }
+}
+
+
+Future<void> removeImage(int index) async {
+  if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
+
+  String imageUrl = uploadedImageUrls[index];
   setState(() {
-    uploadedImageUrls.add(imageUrl);
+    uploadedImageUrls.removeAt(index);
   });
-}   
+
+  await FirebaseFirestore.instance
+      .collection('notes')
+      .where('note', arrayContains: {"type": "image", "value": imageUrl})
+      .get()
+      .then((querySnapshot) {
+    for (var doc in querySnapshot.docs) {
+      doc.reference.update({
+        'note': FieldValue.arrayRemove([
+          {"type": "image", "value": imageUrl}
+        ])
+      });
+    }
+  });
+
+  await deleteImageFromFirebase(imageUrl);
+}
+
+Future<void> deleteImageFromFirebase(String imageUrl) async {
+  try {
+    Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
+    await storageRef.delete();
+  } catch (e) {
+    print("Error deleting image: $e");
   }
 }
 
 Widget buildImageSlider() {
   return Center(
     child: SizedBox(
-      height: MediaQuery.of(context).size.height * 0.5, // 40% of screen height
-      child: imagePaths.isEmpty
-          ? SizedBox() // Show nothing if there are no images
+      height: MediaQuery.of(context).size.height * 0.5,
+      child: uploadedImageUrls.isEmpty
+          ? SizedBox()
           : ListView.builder(
-              scrollDirection: Axis.horizontal, // Make images slide horizontally
+              scrollDirection: Axis.horizontal,
               shrinkWrap: true,
               physics: BouncingScrollPhysics(),
-              itemCount: imagePaths.length,
+              itemCount: uploadedImageUrls.length,
               itemBuilder: (context, index) {
                 double screenWidth = MediaQuery.of(context).size.width;
-                double imageWidth = screenWidth * 0.8; // 70% of screen width
-                double imageHeight = screenWidth * 1; // 80% of screen width
+                double imageWidth = screenWidth * 0.8;
+                double imageHeight = screenWidth * 1;
 
                 return Align(
-                  alignment: Alignment.center, // Center images
+                  alignment: Alignment.center,
                   child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02), // Responsive padding
+                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
                     child: Stack(
                       alignment: Alignment.topRight,
                       children: [
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(12), // Rounded corners
-                          child: Image.file(
-                            File(imagePaths[index]), 
-                            width: imageWidth, 
-                            height: imageHeight, 
-                            fit: BoxFit.cover,
-                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          child: uploadedImageUrls[index] == "loading"
+                              ? Container(
+                                  width: imageWidth,
+                                  height: imageHeight,
+                                  color: Colors.grey[300],
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+                              : Image.network(
+                                  uploadedImageUrls[index],
+                                  width: imageWidth,
+                                  height: imageHeight,
+                                  fit: BoxFit.cover,
+                                ),
                         ),
                         Positioned(
                           top: 5,
                           right: 5,
                           child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                imagePaths.removeAt(index); // Remove image on tap
-                              });
-                            },
+                            onTap: () => removeImage(index),
                             child: Container(
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.8), // Semi-transparent
+                                color: Colors.grey.withOpacity(0.8),
                                 shape: BoxShape.circle,
                               ),
                               padding: EdgeInsets.all(6),

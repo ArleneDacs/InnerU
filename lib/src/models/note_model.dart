@@ -10,6 +10,7 @@ class Note {
   int color;
   DateTime createdAt;
   String category;
+  bool saved; // Add the saved field
 
   Note({
     required this.id,
@@ -19,23 +20,24 @@ class Note {
     this.color = 0xFFFFFFFF,
     required this.createdAt,
     required this.category,
+    this.saved = false, // Default to false
   });
 
-factory Note.fromMap(Map<String, dynamic> data) {
-  return Note(
-    id: data['id'] ?? '',
-    username: data['username'] ?? '',
-    title: data['title'] ?? '',
-    note: List<Map<String, String>>.from(
-      (data['note'] as List<dynamic>)
-          .map((item) => Map<String, String>.from(item)),
-    ),
-    color: data['color'] is int ? data['color'] : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
-    createdAt: (data['createdAt'] as Timestamp).toDate(),
-    category: data['category'] ?? '',
-  );
-}
-
+  factory Note.fromMap(Map<String, dynamic> data) {
+    return Note(
+      id: data['id'] ?? '',
+      username: data['username'] ?? '',
+      title: data['title'] ?? '',
+      note: List<Map<String, String>>.from(
+        (data['note'] as List<dynamic>)
+            .map((item) => Map<String, String>.from(item)),
+      ),
+      color: data['color'] is int ? data['color'] : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      category: data['category'] ?? '',
+      saved: data['saved'] ?? false, // Default to false if missing
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -44,7 +46,8 @@ factory Note.fromMap(Map<String, dynamic> data) {
       "note": note,
       "color": color,
       "createdAt": createdAt,
-      'category': category
+      "category": category,
+      "saved": saved, // Include saved field
     };
   }
 }

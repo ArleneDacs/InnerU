@@ -1,50 +1,48 @@
-import 'dart:io';
-import 'dart:convert';
-import 'dart:typed_data';
-
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 
-class NoteCard extends StatelessWidget {
+class NoteCard extends StatefulWidget {
   final Note note;
   final VoidCallback onPressed;
 
   const NoteCard({super.key, required this.note, required this.onPressed});
 
-  Future<int> getCommentCount() async {
-    QuerySnapshot comments = await FirebaseFirestore.instance
-        .collection('notes')
-        .doc(note.id)
-        .collection('comments')
-        .get();
+  @override
+  _NoteCardState createState() => _NoteCardState();
+}
 
-    return comments.docs.length;
-  }
+class _NoteCardState extends State<NoteCard> {
+  int currentPage = 0; // Track current image for indicator
 
   void openCommentSection(BuildContext context) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) => CommentWidget(
-        postId: note.id,
+        postId: widget.note.id,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    DateTime displayTime = note.createdAt;
+    DateTime displayTime = widget.note.createdAt;
     String formattedDateTime =
         DateFormat('h:mma MMMM d, y').format(displayTime);
 
+    List<String> imageUrls = widget.note.note
+        .where((item) => item["type"] == "image")
+        .map<String>((item) => item["value"]!)
+        .toList();
+
     return GestureDetector(
-      onTap: onPressed,
+      onTap: widget.onPressed,
       child: Card(
         elevation: 2,
-        color: Color(note.color),
+        color: Color(widget.note.color),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
         ),
@@ -55,7 +53,7 @@ class NoteCard extends StatelessWidget {
             children: [
               // Title
               Text(
-                note.title,
+                widget.note.title,
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
@@ -64,8 +62,8 @@ class NoteCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              // Content Loop (Text + Images)
-              ...note.note.map((item) {
+              // Content (Text + Images)
+              ...widget.note.note.map((item) {
                 if (item["type"] == "text") {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5.0),
@@ -78,34 +76,66 @@ class NoteCard extends StatelessWidget {
                       ),
                     ),
                   );
-                } else if (item["type"] == "image") {
-                  String imageValue = item["value"]!;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(15),
-                      child: Image.network(
-                        imageValue,
-                        width: double.infinity,
-                        height: 200,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Center(
-                              child:
-                                  CircularProgressIndicator()); // Show loader while loading
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          print("Image failed to load: $error"); // ✅ Debug log
-                          return Icon(Icons.broken_image,
-                              size: 100, color: Colors.red);
-                        },
-                      ),
-                    ),
-                  );
                 }
                 return const SizedBox();
               }),
+
+              // Display Images as Slider (PageView) if multiple exist
+              if (imageUrls.isNotEmpty)
+                Column(
+                  children: [
+                    SizedBox(
+                      height: 200,
+                      child: PageView.builder(
+                        itemCount: imageUrls.length,
+                        onPageChanged: (index) {
+                          setState(() {
+                            currentPage = index;
+                          });
+                        },
+                        itemBuilder: (context, index) {
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(15),
+                            child: Image.network(
+                              imageUrls[index],
+                              width: double.infinity,
+                              height: 200,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return const Center(child: CircularProgressIndicator());
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Icon(Icons.broken_image, size: 100, color: Colors.red);
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    // Page Indicator (Dots)
+                    if (imageUrls.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0), // Add top margin
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(
+                            imageUrls.length,
+                            (index) => Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              width: currentPage == index ? 12 : 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: currentPage == index ? Colors.black : Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                  ],
+                ),
 
               const SizedBox(height: 10),
 
@@ -113,7 +143,7 @@ class NoteCard extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    '@${note.username}',
+                    '@${widget.note.username}',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.grey[600],
@@ -130,7 +160,7 @@ class NoteCard extends StatelessWidget {
                   StreamBuilder(
                     stream: FirebaseFirestore.instance
                         .collection('notes')
-                        .doc(note.id)
+                        .doc(widget.note.id)
                         .collection('comments')
                         .snapshots(),
                     builder: (context, snapshot) {
