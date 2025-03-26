@@ -14,24 +14,20 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
   Map<DateTime, String> _emotionsByDay = {};
   String? _todayEmotion;
 
-  // Variables for week selection based on the current month
   List<String> _weeks = [];
   String? _selectedWeek;
-  DateTime _focusedMonth = DateTime.now(); // Track the focused month
+  DateTime _focusedMonth = DateTime.now();
 
   @override
   void initState() {
     super.initState();
     _fetchEmotions();
-    _updateWeeksForMonth(
-        _focusedMonth.month); // Initialize weeks for the current month
+    _updateWeeksForMonth(_focusedMonth.month);
   }
 
-  /// Fetch emotions from Firestore and update calendar
   void _fetchEmotions() async {
     User? user = _auth.currentUser;
     if (user == null) {
-      print("❌ User not logged in.");
       return;
     }
 
@@ -65,40 +61,61 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
         _todayEmotion = todayEmotion;
       });
     } catch (e) {
-      print("❌ Error fetching emotions from Firestore: $e");
-    }
-  }
-
-  void _showEmotionMessage(BuildContext context, String emotion) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Emotion of the Day"),
-        content: Text(
-          "You felt $emotion on this day! ${_getEmojiForEmotion(emotion)}",
-          style: TextStyle(fontSize: 18),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("OK"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  DateTime _parseFirestoreDate(String dateString) {
-    try {
-      DateTime parsedDate = DateTime.parse(dateString);
-      return _normalizeDate(parsedDate);
-    } catch (e) {
-      return DateTime.now(); // Fallback to today's date
+      print("Error fetching emotions: $e");
     }
   }
 
   DateTime _normalizeDate(DateTime date) {
     return DateTime(date.year, date.month, date.day);
+  }
+
+  DateTime _parseFirestoreDate(String dateString) {
+    try {
+      return _normalizeDate(DateTime.parse(dateString));
+    } catch (e) {
+      return DateTime.now();
+    }
+  }
+
+  void _updateWeeksForMonth(int month) {
+    DateTime now = DateTime.now();
+    int year = now.year;
+
+    int lastDay = DateTime(year, month + 1, 1).subtract(Duration(days: 1)).day;
+
+    List<String> weeks = [
+      'Week 1: ${_formatDate(DateTime(year, month, 1))} to ${_formatDate(DateTime(year, month, 9))}',
+      'Week 2: ${_formatDate(DateTime(year, month, 10))} to ${_formatDate(DateTime(year, month, 16))}',
+      'Week 3: ${_formatDate(DateTime(year, month, 17))} to ${_formatDate(DateTime(year, month, 23))}',
+      'Week 4: ${_formatDate(DateTime(year, month, 24))} to ${_formatDate(DateTime(year, month, lastDay))}',
+    ];
+
+    setState(() {
+      _weeks = weeks;
+      _selectedWeek = null; // Set to null so analysis doesn't run automatically
+    });
+  }
+
+  String _formatDate(DateTime date) {
+    return "${_getMonthName(date.month)} ${date.day}";
+  }
+
+  String _getMonthName(int month) {
+    List<String> months = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December"
+    ];
+    return months[month - 1];
   }
 
   Color _getColorForEmotion(String emotion) {
@@ -131,30 +148,38 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
     }
   }
 
-  /// Update the list of weeks based on the focused month
-  void _updateWeeksForMonth(int month) {
-    List<String> weeks = [];
-    // Example week ranges per month
-    weeks.add('Week 1: 1-$month to 9-$month');
-    weeks.add('Week 2: 10-$month to 16-$month');
-    weeks.add('Week 3: 17-$month to 23-$month');
-    weeks.add('Week 4: 24-$month to 31-$month');
-
-    setState(() {
-      _weeks = weeks;
-      _selectedWeek = _weeks.first; // Default to the first week
-    });
+  void _showEmotionMessage(BuildContext context, String emotion) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Emotion of the Day"),
+        content: Text(
+          "You felt $emotion on this day! ${_getEmojiForEmotion(emotion)}",
+          style: TextStyle(fontSize: 18),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("OK"),
+          ),
+        ],
+      ),
+    );
   }
 
-  /// Stress Analysis based on emotion logs for the selected week
+  /// Stress Analysis based on the selected week
   void _analyzeStressForWeek(String selectedWeek) {
-    RegExp weekRegExp = RegExp(r'(\d+)-(\d+) to (\d+)-(\d+)');
+    RegExp weekRegExp = RegExp(r'(\w+) (\d+) to (\w+) (\d+)');
     Match? match = weekRegExp.firstMatch(selectedWeek);
+
     if (match != null) {
-      int startDay = int.parse(match.group(1)!);
-      int startMonth = _focusedMonth.month;
-      int endDay = int.parse(match.group(3)!);
-      int endMonth = _focusedMonth.month;
+      String startMonthName = match.group(1)!;
+      int startDay = int.parse(match.group(2)!);
+      String endMonthName = match.group(3)!;
+      int endDay = int.parse(match.group(4)!);
+
+      int startMonth = _getMonthIndex(startMonthName);
+      int endMonth = _getMonthIndex(endMonthName);
 
       DateTime startDate = DateTime(DateTime.now().year, startMonth, startDay);
       DateTime endDate = DateTime(DateTime.now().year, endMonth, endDay);
@@ -188,6 +213,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
         }
       }
 
+      // Show Dialog
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -204,6 +230,24 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
     }
   }
 
+  int _getMonthIndex(String monthName) {
+    List<String> months = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December"
+    ];
+    return months.indexOf(monthName) + 1;
+  }
+
   @override
   Widget build(BuildContext context) {
     User? user = _auth.currentUser;
@@ -218,112 +262,132 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       appBar: AppBar(
         title: Text('Emotion Tracker'),
       ),
-      body: Column(
-        children: [
-          // Display today's emotion
-          if (_todayEmotion != null) ...[
-            Padding(
-              padding: const EdgeInsets.all(10.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    "Today's Emotion: ",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            if (_todayEmotion != null) ...[
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Today's Emotion: ",
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        _getEmojiForEmotion(_todayEmotion!) +
+                            " " +
+                            _todayEmotion!,
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    ],
                   ),
-                  Text(
-                    _getEmojiForEmotion(_todayEmotion!) + " " + _todayEmotion!,
-                    style: TextStyle(fontSize: 18),
-                  ),
-                ],
-              ),
-            ),
-
-            // Dropdown for selecting week within the selected month
-            Padding(
-              padding: const EdgeInsets.all(10.0),
-              child: DropdownButton<String>(
-                value: _selectedWeek,
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedWeek = newValue;
-                    _analyzeStressForWeek(
-                        _selectedWeek!); // Analyze stress for the selected week
-                  });
-                },
-                items: _weeks.map((String week) {
-                  return DropdownMenuItem<String>(
-                    value: week,
-                    child: Text(week),
-                  );
-                }).toList(),
-              ),
-            ),
-
-            // Calendar
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: TableCalendar(
-                  focusedDay: _focusedMonth,
-                  firstDay: DateTime.utc(2020, 1, 1),
-                  lastDay: DateTime.utc(2030, 12, 31),
-                  calendarStyle: CalendarStyle(
-                    markersMaxCount: 0,
-                    todayDecoration: BoxDecoration(
-                      color: Colors.green,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  calendarBuilders: CalendarBuilders(
-                    defaultBuilder: (context, date, _) {
-                      DateTime normalizedDate = _normalizeDate(date);
-                      if (_emotionsByDay.containsKey(normalizedDate)) {
-                        String emotion = _emotionsByDay[normalizedDate]!;
-
-                        return Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: _getColorForEmotion(emotion),
-                                shape: BoxShape.circle,
-                              ),
-                              width: 35,
-                              height: 35,
-                            ),
-                            Text(
-                              _getEmojiForEmotion(emotion),
-                              style: TextStyle(fontSize: 18),
-                            ),
-                          ],
-                        );
-                      }
-                      return null;
-                    },
-                  ),
-                  onDaySelected: (selectedDay, focusedDay) {
-                    DateTime normalizedDate = _normalizeDate(selectedDay);
-                    if (_emotionsByDay.containsKey(normalizedDate)) {
-                      String emotion = _emotionsByDay[normalizedDate]!;
-                      _showEmotionMessage(context, emotion);
-                    } else {
-                      _showEmotionMessage(
-                          context, "No emotion recorded for this day.");
-                    }
-                  },
-                  onPageChanged: (focusedDay) {
-                    setState(() {
-                      _focusedMonth = focusedDay;
-                      _updateWeeksForMonth(_focusedMonth
-                          .month); // Update the weeks based on new month
-                    });
-                  },
                 ),
               ),
-            ),
+              SizedBox(height: 20),
+              Card(
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: DropdownButton<String>(
+                    value: _selectedWeek,
+                    hint: Text("Select a week"), // Added hint for clarity
+                    isExpanded: true,
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          _selectedWeek = newValue;
+                        });
+                        _analyzeStressForWeek(
+                            newValue); // Runs analysis only when user selects
+                      }
+                    },
+                    items: _weeks.map((String week) {
+                      return DropdownMenuItem<String>(
+                        value: week,
+                        child: Text(week),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Expanded(
+                child: Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: TableCalendar(
+                      focusedDay: _focusedMonth,
+                      firstDay: DateTime.utc(2020, 1, 1),
+                      lastDay: DateTime.utc(2030, 12, 31),
+                      calendarStyle: CalendarStyle(
+                        markersMaxCount: 0,
+                        todayDecoration: BoxDecoration(
+                          color: Colors.teal,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      calendarBuilders: CalendarBuilders(
+                        defaultBuilder: (context, date, _) {
+                          DateTime normalizedDate = _normalizeDate(date);
+                          if (_emotionsByDay.containsKey(normalizedDate)) {
+                            String emotion = _emotionsByDay[normalizedDate]!;
+                            return Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: _getColorForEmotion(emotion),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  width: 35,
+                                  height: 35,
+                                ),
+                                Text(
+                                  _getEmojiForEmotion(emotion),
+                                  style: TextStyle(fontSize: 18),
+                                ),
+                              ],
+                            );
+                          }
+                          return null;
+                        },
+                      ),
+                      onDaySelected: (selectedDay, focusedDay) {
+                        DateTime normalizedDate = _normalizeDate(selectedDay);
+                        if (_emotionsByDay.containsKey(normalizedDate)) {
+                          String emotion = _emotionsByDay[normalizedDate]!;
+                          _showEmotionMessage(context, emotion);
+                        } else {
+                          _showEmotionMessage(
+                              context, "No emotion recorded for this day.");
+                        }
+                      },
+                      onPageChanged: (focusedDay) {
+                        setState(() {
+                          _focusedMonth = focusedDay;
+                          _updateWeeksForMonth(_focusedMonth.month);
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
