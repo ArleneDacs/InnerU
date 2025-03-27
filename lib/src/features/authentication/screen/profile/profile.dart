@@ -178,72 +178,106 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void checkAndAssignPoints() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  String userId = FirebaseAuth.instance.currentUser!.uid;
+  String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    try {
-      DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
+  try {
+    DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
+
+    if (userSnapshot.exists) {
+      Map<String, dynamic> userData = userSnapshot.data() as Map<String, dynamic>;
+      String username = userData['username'];
+      String server = userData['team'] ?? "Default"; // Get user's team
+      String documentId = '$username-$todayDate';
+
+      DocumentSnapshot snapshot = await FirebaseFirestore.instance
+          .collection('dailytracker')
+          .doc(documentId)
           .get();
 
-      if (userSnapshot.exists) {
-        String username =
-            (userSnapshot.data() as Map<String, dynamic>)['username'];
-        String documentId = '$username-$todayDate';
+      if (snapshot.exists) {
+        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
 
-        DocumentSnapshot snapshot = await FirebaseFirestore.instance
-            .collection('dailytracker')
-            .doc(documentId)
-            .get();
+        // Get actual activity counts from dailytracker (if available)
+        int meditationMinutes = data['meditationMinutes'] ?? 0;
+        int stepsTaken = data['stepCount'] ?? 0;
+        int callsMade = data['callCount'] ?? 0;
+        int learningEntries = data['learningCount'] ?? 0;
+        int valueEntries = data['valueCount'] ?? 0;
 
-        if (snapshot.exists) {
-          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+        // Define tasks and points for individual tasks
+        Map<String, bool> taskCompletion = {
+          'Meditation': data['meditation'] ?? false,
+          'Steps': data['steps'] ?? false,
+          'Call': data['call'] ?? false,
+          'Learning': data['learning'] ?? false,
+          'Add Value': data['addValue'] ?? false,
+        };
 
-          // Define tasks and points for individual tasks
-          Map<String, bool> taskCompletion = {
-            'Meditation': data['meditation'] ?? false,
-            'Steps': data['steps'] ?? false,
-            'Call': data['call'] ?? false,
-            'Learning': data['learning'] ?? false,
-            'Add Value': data['addValue'] ?? false,
-          };
+        // Calculate points based on actual activity
+        Map<String, int> taskPoints = {
+          'Meditation Points': meditationMinutes, // 1 point per minute
+          'Steps Points': (stepsTaken / 200).floor(), // 1 point per 200 steps
+          'Call Points': callsMade, // 1 point per call
+          'Learning Points': learningEntries, // 1 point per entry
+          'Add Value Points': valueEntries, // 1 point per entry
+        };
 
-          Map<String, int> taskPoints = {
-            'Meditation Points': taskCompletion['Meditation'] == true ? 5 : 0,
-            'Steps Points': taskCompletion['Steps'] == true ? 10 : 0,
-            'Call Points': taskCompletion['Call'] == true ? 10 : 0,
-            'Learning Points': taskCompletion['Learning'] == true ? 15 : 0,
-            'Add Value Points': taskCompletion['Add Value'] == true ? 15 : 0,
-          };
-
-          int totalPoints = taskPoints.values
-              .reduce((a, b) => a + b); // Sum of individual points
-
-          // Save points in the userpoints collection
-          await FirebaseFirestore.instance
-              .collection('userpoints')
-              .doc(documentId)
-              .set({
-            'username': username,
-            'date': todayDate,
-            'totalPoints': totalPoints,
-            'taskPoints': taskPoints, // Points per task stored here
-            'tasks': taskCompletion, // Boolean completion status for each task
-          });
-
-          print("Total points assigned: $totalPoints");
-          print("Points per task: $taskPoints");
-        } else {
-          print("No daily tracker data found for today.");
+        // Fallback to fixed points if activity counts are not available
+        if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
+          taskPoints['Meditation Points'] = 5;
         }
+        if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
+          taskPoints['Steps Points'] = 10;
+        }
+        if (callsMade == 0 && taskCompletion['Call'] == true) {
+          taskPoints['Call Points'] = 10;
+        }
+        if (learningEntries == 0 && taskCompletion['Learning'] == true) {
+          taskPoints['Learning Points'] = 15;
+        }
+        if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
+          taskPoints['Add Value Points'] = 15;
+        }
+
+        int totalPoints = taskPoints.values.reduce((a, b) => a + b);
+
+        // Save points in the userpoints collection
+        await FirebaseFirestore.instance
+            .collection('userpoints')
+            .doc(documentId)
+            .set({
+          'username': username,
+          'date': todayDate,
+          'totalPoints': totalPoints,
+          'taskPoints': taskPoints,
+          'tasks': taskCompletion,
+          'server': server,
+          // Store raw activity counts for better display
+          'activityCounts': {
+            'meditationMinutes': meditationMinutes,
+            'stepsTaken': stepsTaken,
+            'callsMade': callsMade,
+            'learningEntries': learningEntries,
+            'valueEntries': valueEntries,
+          }
+        });
+
+        print("Total points assigned: $totalPoints");
+        print("Points per task: $taskPoints");
       } else {
-        print("Error: User document does not exist.");
+        print("No daily tracker data found for today.");
       }
-    } catch (e) {
-      print("Error in assigning points: $e");
+    } else {
+      print("Error: User document does not exist.");
     }
+  } catch (e) {
+    print("Error in assigning points: $e");
   }
+}
 
   void resetDailyTracker(String todayDate, String username) async {
     String documentId = '$username-$todayDate';
