@@ -165,10 +165,28 @@ Future<void> _updateUserData() async {
 }
 
 
+
 Future<void> _checkUsernameAvailability(String username) async {
   final user = FirebaseAuth.instance.currentUser;
-  _isButtonEnabled = _isEmailValid && _isUsernameValid;
 
+  // Check max length first
+  if (username.length > 20) {
+    setState(() {
+      _isUsernameValid = false;
+      _isButtonEnabled = false;
+    });
+
+    // Show error message for exceeding length
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Username must be 20 characters or fewer."),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return; // Stop further validation if too long
+  }
+
+  _isButtonEnabled = _isEmailValid && _isUsernameValid;
   if (user == null) return;
 
   final querySnapshot = await FirebaseFirestore.instance
@@ -182,11 +200,13 @@ Future<void> _checkUsernameAvailability(String username) async {
       _isButtonEnabled = false;
     });
 
-    // Show a Snackbar with an error message for username
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text("This username is already taken."),
-      backgroundColor: Colors.red,
-    ));
+    // Show error message for taken username
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("This username is already taken."),
+        backgroundColor: Colors.red,
+      ),
+    );
   } else {
     setState(() {
       _isUsernameValid = true;
@@ -194,6 +214,7 @@ Future<void> _checkUsernameAvailability(String username) async {
     });
   }
 }
+
 
 
   bool _isEmailFormatValid(String email) {
@@ -304,7 +325,7 @@ void _checkEmailAvailability(String email) async {
                   ),
                 ),
                 SizedBox(height: 40),
-                _buildEditableInputField("Name", _usernameController, (value) {
+                _buildEditableInputField("Username", _usernameController, (value) {
                   if (value != _usernameController.text) {
                     _checkUsernameAvailability(value);
                   }
@@ -415,31 +436,33 @@ void _checkEmailAvailability(String email) async {
         children: [
           Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
           SizedBox(height: 5),
-          TextField(
-            controller: controller,
-            style: TextStyle(fontSize: 14, color: Colors.black),
-            onChanged: (value) {
-              onChanged(value);
-              if (label == "Name") {
-                _checkUsernameAvailability(value);
-              } else if (label == "Email") {
-                _checkEmailAvailability(value);
-              } else {
-                setState(() {
-                  _isButtonEnabled = _hasChanges();
-                });
-              }
-            },
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: Color(0xFFffecc9),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: EdgeInsets.all(12),
+        TextField(
+          controller: controller,
+          maxLength: 20, // Prevent typing beyond 20 characters
+          style: TextStyle(fontSize: 14, color: Colors.black),
+          onChanged: (value) {
+            if (label == "Username") {
+              _checkUsernameAvailability(value.trim());
+            } else if (label == "Email") {
+              _checkEmailAvailability(value);
+            } else {
+              setState(() {
+                _isButtonEnabled = _hasChanges();
+              });
+            }
+          },
+          decoration: InputDecoration(
+            counterText: "", // Hide default counter
+            filled: true,
+            fillColor: Color(0xFFffecc9),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
             ),
+            contentPadding: EdgeInsets.all(12),
           ),
+        ),
+
         ],
       ),
     );

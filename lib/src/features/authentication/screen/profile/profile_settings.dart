@@ -13,7 +13,7 @@ class ProfileSettings extends StatelessWidget {
       appBar: AppBar(),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -22,7 +22,7 @@ class ProfileSettings extends StatelessWidget {
                 style: TextStyle(fontSize: 35),
               ),
 
-                SizedBox(height: 40),
+                SizedBox(height: 70),
               _buildSectionTitle("General"),
               _buildButton(
                   context,
@@ -39,9 +39,7 @@ class ProfileSettings extends StatelessWidget {
                   PrivacyScreen(
                     title: 'Privacy',
                   )),
-              _buildSectionTitle("Subscription"),
-              _buildButton(
-                  context, "Manage Subscription", SubscriptionScreen()),
+             
               SizedBox(height: 10),
             ],
           ),

@@ -17,7 +17,7 @@ class CommunityBottomSheet {
                 children: [
                   ListTile(
                       leading: Icon(Icons.settings),
-                      title: Text("Account Settings"),
+                      title: Text("Profile Settings"),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.pushNamed(context, '/profileSettings');

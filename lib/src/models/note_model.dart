@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Note {
   String id;
+  String userId;
   String username;
   String title;
   List<Map<String, String>> note; // Stores both text and images
@@ -14,6 +15,7 @@ class Note {
 
   Note({
     required this.id,
+    required this.userId,
     required this.username,
     required this.title,
     required this.note,
@@ -34,7 +36,7 @@ class Note {
       ),
       color: data['color'] is int ? data['color'] : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
-      category: data['category'] ?? '',
+      category: data['category'] ?? '',userId: data['userId'] ?? '',
       saved: data['saved'] ?? false, // Default to false if missing
     );
   }
@@ -47,6 +49,7 @@ class Note {
       "color": color,
       "createdAt": createdAt,
       "category": category,
+      "userId": userId,
       "saved": saved, // Include saved field
     };
   }

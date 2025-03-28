@@ -15,7 +15,8 @@ class NoteCard extends StatefulWidget {
 }
 
 class _NoteCardState extends State<NoteCard> {
-  int currentPage = 0; // Track current image for indicator
+  int currentPage = 0;
+  bool isExpanded = false; // Track expansion state
 
   void openCommentSection(BuildContext context) {
     showModalBottomSheet(
@@ -30,8 +31,7 @@ class _NoteCardState extends State<NoteCard> {
   @override
   Widget build(BuildContext context) {
     DateTime displayTime = widget.note.createdAt;
-    String formattedDateTime =
-        DateFormat('h:mma MMMM d, y').format(displayTime);
+    String formattedDateTime = DateFormat('h:mma MMMM d, y').format(displayTime);
 
     List<String> imageUrls = widget.note.note
         .where((item) => item["type"] == "image")
@@ -65,22 +65,43 @@ class _NoteCardState extends State<NoteCard> {
               // Content (Text + Images)
               ...widget.note.note.map((item) {
                 if (item["type"] == "text") {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5.0),
-                    child: Text(
-                      item["value"]!,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Color.fromARGB(221, 19, 19, 19),
-                        height: 1.5,
+                  String textContent = item["value"]!;
+                  bool isLongText = textContent.length > 150; // Define long text threshold
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isExpanded ? textContent : textContent.substring(0, isLongText ? 150 : textContent.length),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Color.fromARGB(221, 19, 19, 19),
+                          height: 1.5,
+                        ),
                       ),
-                    ),
+                      if (isLongText)
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              isExpanded = !isExpanded; // Toggle expansion
+                            });
+                          },
+                          child: Text(
+                            isExpanded ? "Read Less" : "Read More...",
+                            style: TextStyle(
+                              color: const Color.fromARGB(255, 165, 165, 165),
+                              fontStyle: FontStyle.italic,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
                   );
                 }
                 return const SizedBox();
               }),
 
-              // Display Images as Slider (PageView) if multiple exist
+              // Image Slider
               if (imageUrls.isNotEmpty)
                 Column(
                   children: [
@@ -113,27 +134,32 @@ class _NoteCardState extends State<NoteCard> {
                         },
                       ),
                     ),
-                    // Page Indicator (Dots)
+
+                    // Page Indicator (Max 4 dots visible)
                     if (imageUrls.length > 1)
                       Padding(
-                        padding: const EdgeInsets.only(top: 8.0), // Add top margin
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: List.generate(
-                            imageUrls.length,
-                            (index) => Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 4),
-                              width: currentPage == index ? 12 : 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: currentPage == index ? Colors.black : Colors.grey,
-                              ),
-                            ),
+                            imageUrls.length > 4 ? 4 : imageUrls.length, // Limit to 4
+                            (index) {
+                              int startIndex = (currentPage ~/ 4) * 4; // Dynamic start index
+
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                margin: const EdgeInsets.symmetric(horizontal: 4),
+                                width: (currentPage % 4 == index) ? 16 : 8, // Highlight current
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(4),
+                                  color: (currentPage % 4 == index) ? Colors.black : Colors.grey[400],
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),
-
                   ],
                 ),
 
@@ -142,6 +168,7 @@ class _NoteCardState extends State<NoteCard> {
               // Time + Buttons Row
               Row(
                 children: [
+                  // Username (Left-Aligned)
                   Text(
                     '@${widget.note.username}',
                     style: TextStyle(
@@ -149,14 +176,7 @@ class _NoteCardState extends State<NoteCard> {
                       color: Colors.grey[600],
                     ),
                   ),
-                  const Spacer(),
-                  Text(
-                    formattedDateTime,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
+                  const Spacer(), // Pushes the next content to the right
                   StreamBuilder(
                     stream: FirebaseFirestore.instance
                         .collection('notes')
@@ -184,6 +204,18 @@ class _NoteCardState extends State<NoteCard> {
                     },
                   ),
                 ],
+              ),
+
+              // Centered Date and Time
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                  formattedDateTime,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
               ),
             ],
           ),

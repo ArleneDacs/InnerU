@@ -15,6 +15,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   String selectedCategory = "Add Value";
+  TextEditingController _searchController = TextEditingController();
+  String searchQuery = "";
 
   @override
   Widget build(BuildContext context) {
@@ -22,9 +24,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
     if (currentUserId == null) {
       return Scaffold(
-        body: Center(
-          child: Text("User not logged in."),
-        ),
+        body: Center(child: Text("User not logged in.")),
       );
     }
 
@@ -43,6 +43,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
     return Scaffold(
       body: Column(
         children: [
+          // Category Buttons
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
             child: Row(
@@ -52,6 +53,44 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   .toList(),
             ),
           ),
+
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.3),
+                    blurRadius: 6,
+                    offset: Offset(2, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    searchQuery = value.toLowerCase();
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: "Search by username or title...",
+                  prefixIcon: Icon(Icons.search, color: Colors.black),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey[200],
+                ),
+              ),
+            ),
+          ),
+
+          // Posts List
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: notesQuery.snapshots(),
@@ -72,6 +111,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   );
                 }
 
+                // Filtering posts based on search input
                 var posts = snapshot.data!.docs.map((doc) {
                   Map<String, dynamic> noteData = doc.data() as Map<String, dynamic>;
                   noteData['id'] = doc.id;
@@ -79,6 +119,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     noteData['note'] = List<dynamic>.from(noteData['note']);
                   }
                   return Note.fromMap(noteData);
+                }).where((note) {
+                  String username = note.username.toLowerCase();
+                  String title = note.title.toLowerCase();
+                  return username.contains(searchQuery) || title.contains(searchQuery);
                 }).toList();
 
                 return ListView.builder(
@@ -96,38 +140,74 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               print("Tapped ${note.title}");
                             },
                           ),
-                          if (selectedCategory == "Saved")
-                          Positioned(
-                          top: 20,
-                          right: 10,
-                          child: GestureDetector(
-                            onTap: () => _confirmUpload(note.id),
-                            child: Container(
-                              padding: EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  colors: [Color(0xFF90A17D), Color(0xFF90A17D)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Color(0xFF90A17D).withOpacity(0.3),
-                                    blurRadius: 6,
-                                    offset: Offset(2, 2),
+                          if (note.userId == currentUserId)
+                            Positioned(
+                              top: 10,
+                              right: 5,
+                              child: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'save') {
+                                    _markAsSaved(note.id);
+                                  } else if (value == 'delete') {
+                                    _confirmDelete(note.id);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  if (selectedCategory != "Saved")
+                                    PopupMenuItem(
+                                      value: 'save',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.bookmark, color: Colors.blue),
+                                          SizedBox(width: 8),
+                                          Text("Keep Private"),
+                                        ],
+                                      ),
+                                    ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.delete, color: Colors.red),
+                                        SizedBox(width: 8),
+                                        Text("Delete"),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
-                              child: Icon(
-                                Icons.cloud_upload_rounded,
-                                color: Colors.white,
-                                size: 24,
+                            ),
+                          if (selectedCategory == "Saved")
+                            Positioned(
+                              top: 17,
+                              right: 40,
+                              child: GestureDetector(
+                                onTap: () => _confirmUpload(note.id),
+                                child: Container(
+                                  padding: EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: LinearGradient(
+                                      colors: [Color(0xFF90A17D), Color(0xFF90A17D)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Color(0xFF90A17D).withOpacity(0.3),
+                                        blurRadius: 6,
+                                        offset: Offset(2, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Icon(
+                                    Icons.cloud_upload_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
-
                         ],
                       ),
                     );
@@ -153,7 +233,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
         duration: Duration(milliseconds: 200),
         padding: EdgeInsets.symmetric(vertical: 8, horizontal: 15),
         decoration: BoxDecoration(
-          color: isSelected ? Color(0xFF90A17D) : Colors.grey[200],
+          color: isSelected ? Color(0xFF90A17D) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: isSelected
               ? [BoxShadow(color: Color(0xFF90A17D).withOpacity(0.4), blurRadius: 5)]
@@ -162,7 +242,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
         child: Text(
           category,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
+            color: isSelected ? Colors.white : Colors.black54,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -170,6 +250,12 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
+  void _markAsSaved(String noteId) {
+    _firestore.collection('notes').doc(noteId).update({"saved": true});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Note saved successfully")),
+    );
+  }
   void _confirmUpload(String noteId) {
     showDialog(
       context: context,
@@ -187,6 +273,25 @@ class _CommunityScreenState extends State<CommunityScreen> {
               Navigator.pop(context);
             },
             child: Text("Upload", style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+  }
+  void _confirmDelete(String noteId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Delete Note"),
+        content: Text("Are you sure you want to delete this note?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel")),
+          TextButton(
+            onPressed: () {
+              _firestore.collection('notes').doc(noteId).delete();
+              Navigator.pop(context);
+            },
+            child: Text("Delete", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
