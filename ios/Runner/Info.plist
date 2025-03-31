@@ -55,5 +55,30 @@
     <array>
         <string>tel</string>
     </array>
+	<!-- Required for Apple Sign-In -->
+<key>NSAppleMusicUsageDescription</key>
+<string>We use Apple Sign-In for authentication.</string>
+
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string><com class="example selfcareProjects"></com></string> <!-- Replace with your actual Bundle ID -->
+        </array>
+    </dict>
+</array>
+
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+</dict>
+
+<key>SignInWithApple</key>
+<true/>
+
 </dict>
 </plist>

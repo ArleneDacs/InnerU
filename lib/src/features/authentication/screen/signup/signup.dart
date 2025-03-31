@@ -5,7 +5,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/dashboard/d
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:google_sign_in/google_sign_in.dart'; // For Google Sign-In
 import 'package:firebase_auth/firebase_auth.dart'; // Firebase Authentication
-/*import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // For Apple Sign-In*/
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -148,8 +148,7 @@ class _SignupScreenState extends State<SignupScreen> {
     });
   }
 
-  // Function to handle Apple Sign-In
-  /*Future<void> _handleAppleSignIn() async {
+  Future<void> _handleAppleSignIn() async {
     setState(() {
       _isLoading = true;
     });
@@ -168,24 +167,28 @@ class _SignupScreenState extends State<SignupScreen> {
         accessToken: appleCredential.authorizationCode,
       );
 
-      // Sign in with Firebase using Apple credentials
+      // Sign in with Firebase
       UserCredential userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
-      // Navigate to dashboard after Apple sign-in
-      Navigator.pushReplacementNamed(context, '/dashboard');
+      // Navigate to Dashboard after Apple Sign-In
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => Setuppage()),
+      );
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Apple sign-in failed: $error'),
-            backgroundColor: Colors.red),
+          content: Text('Apple sign-in failed: $error'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
 
     setState(() {
       _isLoading = false;
     });
-  }*/
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -382,7 +385,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
                         const SizedBox(width: 20), // Space between buttons
                         GestureDetector(
-                          /* onTap: _isLoading ? null : _handleAppleSignIn, */
+                          onTap: _isLoading ? null : _handleAppleSignIn,
                           child: Row(
                             children: [
                               Image.asset("assets/logo/ios.png", width: 30),
