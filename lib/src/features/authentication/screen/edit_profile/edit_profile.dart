@@ -49,6 +49,7 @@ void initState() {
       _dobController.text = _currentBirthdate;
       _selectedImage = userData["profilePic"] ?? null; // Use URL instead of base64
     });
+    
     return userData;
   });
 }
@@ -169,7 +170,7 @@ Future<void> _updateUserData() async {
 Future<void> _checkUsernameAvailability(String username) async {
   final user = FirebaseAuth.instance.currentUser;
 
-  // Check max length first
+
   if (username.length > 20) {
     setState(() {
       _isUsernameValid = false;

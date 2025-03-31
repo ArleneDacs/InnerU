@@ -23,14 +23,7 @@ class CommunityBottomSheet {
                         Navigator.pushNamed(context, '/profileSettings');
                       }),
                   Divider(),
-                  ListTile(
-                      leading: Icon(Icons.note),
-                      title: Text("Write"),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.pushNamed(context, 'notesType');
-                      }),
-                  Divider(),
+                
                   ListTile(
                       leading: Icon(Icons.list),
                       title: Text("View Other User Progress"),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/note_card.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 
 class CommunityScreen extends StatefulWidget {
@@ -217,6 +218,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
             ),
           ),
         ],
+      ),
+        floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.pushNamed(context, 'notesType');
+        },
+         backgroundColor: const Color(0xFFEFD199),
+        elevation: 10,
+        shape: const CircleBorder(),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

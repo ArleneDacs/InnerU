@@ -101,67 +101,92 @@ class _NoteCardState extends State<NoteCard> {
                 return const SizedBox();
               }),
 
-              // Image Slider
-              if (imageUrls.isNotEmpty)
-                Column(
-                  children: [
-                    SizedBox(
-                      height: 200,
-                      child: PageView.builder(
-                        itemCount: imageUrls.length,
-                        onPageChanged: (index) {
-                          setState(() {
-                            currentPage = index;
-                          });
-                        },
-                        itemBuilder: (context, index) {
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(15),
-                            child: Image.network(
-                              imageUrls[index],
-                              width: double.infinity,
-                              height: 200,
-                              fit: BoxFit.cover,
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return const Center(child: CircularProgressIndicator());
-                              },
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(Icons.broken_image, size: 100, color: Colors.red);
-                              },
-                            ),
-                          );
-                        },
-                      ),
+             if (imageUrls.isNotEmpty)
+  Column(
+    children: [
+      SizedBox(
+        height: 200,
+        child: Stack(
+          children: [
+            PageView.builder(
+              itemCount: imageUrls.length,
+              onPageChanged: (index) {
+                setState(() {
+                  currentPage = index;
+                });
+              },
+              itemBuilder: (context, index) {
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: Image.network(
+                    imageUrls[index],
+                    width: double.infinity,
+                    height: 200,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(child: CircularProgressIndicator());
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(Icons.broken_image, size: 100, color: Colors.red);
+                    },
+                  ),
+                );
+              },
+            ),
+
+            // Image Counter (Only if there are multiple images)
+            if (imageUrls.length > 1)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${currentPage + 1}/${imageUrls.length}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
                     ),
-
-                    // Page Indicator (Max 4 dots visible)
-                    if (imageUrls.length > 1)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(
-                            imageUrls.length > 4 ? 4 : imageUrls.length, // Limit to 4
-                            (index) {
-                              int startIndex = (currentPage ~/ 4) * 4; // Dynamic start index
-
-                              return AnimatedContainer(
-                                duration: const Duration(milliseconds: 300),
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
-                                width: (currentPage % 4 == index) ? 16 : 8, // Highlight current
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(4),
-                                  color: (currentPage % 4 == index) ? Colors.black : Colors.grey[400],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
+              ),
+          ],
+        ),
+      ),
+
+      // Page Indicator (Max 4 dots visible)
+      if (imageUrls.length > 1)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              imageUrls.length > 4 ? 4 : imageUrls.length, // Limit to 4
+              (index) {
+                int startIndex = (currentPage ~/ 4) * 4; // Dynamic start index
+
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: (currentPage % 4 == index) ? 16 : 8, // Highlight current
+                  height: 8,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    color: (currentPage % 4 == index) ? Colors.black : Colors.grey[400],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+    ],
+  ),
+
 
               const SizedBox(height: 10),
 
