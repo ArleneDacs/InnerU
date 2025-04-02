@@ -6,12 +6,11 @@ import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const TodoList());  await Firebase.initializeApp();
-
+  await Firebase.initializeApp();
+  runApp(const TodoList());
 }
 
 class TodoList extends StatelessWidget {
@@ -145,47 +144,54 @@ class FirestoreRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String? get userId {
-  final user = FirebaseAuth.instance.currentUser;
-  return user?.uid; // Ensure user is logged in
-}
+    final user = FirebaseAuth.instance.currentUser;
+    return user?.uid; // Ensure user is logged in
+  }
 
   CollectionReference get tasksCollection {
     return _firestore.collection('users').doc(userId).collection('tasks');
   }
 
   Future<List<Task>> loadTasks() async {
-  if (userId == null) {
-    print('No user ID found. User not logged in?');
-    return [];
-  }
-
-  print('Fetching tasks for user: $userId');
-
-  try {
-    final snapshot = await tasksCollection.orderBy('dueDate').get();
-
-    if (snapshot.docs.isEmpty) {
-      print('No tasks found for user $userId');
+    if (userId == null) {
+      print('No user ID found. User not logged in?');
+      return [];
     }
 
-    return snapshot.docs.map((doc) {
-      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-      print('Fetched task: $data');
-      return Task.fromJson(data);
-    }).toList();
-  } catch (e) {
-    print('Error loading tasks: $e');
-    return [];
-  }
-}
+    print('Fetching tasks for user: $userId');
 
+    try {
+      final snapshot = await tasksCollection.orderBy('dueDate').get();
+
+      if (snapshot.docs.isEmpty) {
+        print('No tasks found for user $userId');
+      }
+
+      return snapshot.docs.map((doc) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        // Use Firestore's document ID instead of the one in the data
+        data['id'] = doc.id;
+        print('Fetched task: $data');
+        return Task.fromJson(data);
+      }).toList();
+    } catch (e) {
+      print('Error loading tasks: $e');
+      return [];
+    }
+  }
 
   Future<void> addTask(Task task) async {
     try {
       print('Adding task for user: $userId');
-      print('Task Data: ${task.toJson()}');
-      await tasksCollection.add(task.toJson());
-      print('Task added successfully.');
+      // Remove the task ID before adding to Firestore (let Firestore generate the ID)
+      final taskData = task.toJson();
+      // If we want to maintain the original ID structure, we could use:
+      // await tasksCollection.doc(task.id).set(taskData);
+      // But for simplicity, let's use Firestore's auto-generated IDs:
+      final docRef = await tasksCollection.add(taskData);
+      // Update the task ID with Firestore's document ID
+      task.id = docRef.id;
+      print('Task added successfully with ID: ${task.id}');
     } catch (e) {
       print('Error adding task: $e');
     }
@@ -202,6 +208,7 @@ class FirestoreRepository {
   Future<void> deleteTask(String id) async {
     try {
       await tasksCollection.doc(id).delete();
+      print('Task deleted successfully: $id');
     } catch (e) {
       print('Error deleting task: $e');
     }
@@ -318,34 +325,69 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }
 
   void _addTask(Task task) async {
-  await _repository.addTask(task);
-  await _loadTasks(); // Force refresh
+    try {
+    if (task.id.isEmpty) {
+      task.id = DateTime.now().millisecondsSinceEpoch.toString();
+    }
+    
+    // Add to Firestore first
+    await _repository.addTask(task);
+    
+    // Then reload tasks to ensure UI is in sync with database
+    await _loadTasks();
+  } catch (e) {
+    print('Error adding task: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Failed to add task. Please try again.')),
+    );
+  }
 }
 
-  void _toggleTaskCompletion(String id) async {
+void _deleteTask(String id) async {
+  // First remove from UI for immediate feedback
+  setState(() {
+    _tasks.removeWhere((task) => task.id == id);
+  });
+  
+  try {
+    // Then delete from Firestore
+    await _repository.deleteTask(id);
+    print('Task deleted successfully with ID: $id');
+  } catch (e) {
+    print('Error deleting task: $e');
+    // If deletion fails, reload tasks to ensure UI is in sync with database
+    await _loadTasks();
+  }
+}
+
+void _toggleTaskCompletion(String id) async {
+  try {
+    // Find the task in the local list
     final index = _tasks.indexWhere((task) => task.id == id);
     if (index != -1) {
+      // Create a local copy of the task
       final task = _tasks[index];
+      // Toggle the completion status
       task.isCompleted = !task.isCompleted;
       
-      // Update task in Firestore
+      // Update the task in Firestore
       await _repository.updateTask(task);
       
+      // Update the UI immediately for better user experience
       setState(() {
-        // Update UI
         _tasks[index] = task;
       });
+      
+      print('Task completion toggled: $id, New status: ${task.isCompleted}');
+    } else {
+      print('Task not found with ID: $id');
     }
+  } catch (e) {
+    print('Error toggling task completion: $e');
+    // If the update fails, reload all tasks to ensure UI is in sync
+    await _loadTasks();
   }
-
-  void _deleteTask(String id) async {
-    // Delete task from Firestore
-    await _repository.deleteTask(id);
-    
-    setState(() {
-      _tasks.removeWhere((task) => task.id == id);
-    });
-  }
+}
 
   // Show migration dialog - useful for first-time setup
   void _showMigrationDialog() {
@@ -612,25 +654,24 @@ class _TodoListScreenState extends State<TodoListScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  // ADD button - gold/beige with white text (on the left)
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.only(right: 8.0),
                       child: ElevatedButton(
                         onPressed: () {
-                          if (titleController.text.trim().isNotEmpty) {
-                            _addTask(
-                              Task(
-                                id: DateTime.now().millisecondsSinceEpoch.toString(), // This will be replaced by Firestore's ID
-                                title: titleController.text.trim(),
-                                description: descriptionController.text.trim(),
-                                dueDate: selectedDate,
-                                tag: selectedTag,
-                              ),
-                            );
-                            Navigator.pop(context);
-                          }
-                        },
+  if (titleController.text.trim().isNotEmpty) {
+    _addTask(
+      Task(
+        id: "", // Empty ID - will be set by Firestore
+        title: titleController.text.trim(),
+        description: descriptionController.text.trim(),
+        dueDate: selectedDate,
+        tag: selectedTag,
+      ),
+    );
+    Navigator.pop(context);
+  }
+},
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFEFD199), // Gold/beige color
                           foregroundColor: Colors.white,
@@ -685,67 +726,67 @@ class _TodoListScreenState extends State<TodoListScreen> {
     );
   }
 
-@override
-Widget build(BuildContext context) {
-  final filteredTasks = _getFilteredTasks();
-  
-  return Scaffold(
-    appBar: PreferredSize(
-      preferredSize: const Size.fromHeight(50),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _buildCategoryButton('All', 0),
-            _buildCategoryButton('Pending', 1, badge: _tasks.where((task) => !task.isCompleted).length),
-            _buildCategoryButton('Completed', 2),
-          ],
+  @override
+  Widget build(BuildContext context) {
+    final filteredTasks = _getFilteredTasks();
+    
+    return Scaffold(
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(50),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildCategoryButton('All', 0),
+              _buildCategoryButton('Pending', 1, badge: _tasks.where((task) => !task.isCompleted).length),
+              _buildCategoryButton('Completed', 2),
+            ],
+          ),
         ),
       ),
-    ),
-    backgroundColor: Colors.white,
-    body: _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-            children: [
-              // Search field
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search tasks...',
-                    prefixIcon: const Icon(Icons.search, color: Colors.black),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(32),
-                      borderSide: BorderSide.none,
+      backgroundColor: Colors.white,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // Search field
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search tasks...',
+                      prefixIcon: const Icon(Icons.search, color: Colors.black),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(32),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFFEFEEEE),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, color: Colors.grey),
+                              onPressed: () {
+                                setState(() {
+                                  _searchController.clear();
+                                  _searchQuery = '';
+                                });
+                              },
+                            )
+                          : null,
                     ),
-                    filled: true,
-                    fillColor: const Color(0xFFEFEEEE),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, color: Colors.grey),
-                            onPressed: () {
-                              setState(() {
-                                _searchController.clear();
-                                _searchQuery = '';
-                              });
-                            },
-                          )
-                        : null,
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
                   ),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
                 ),
-              ),
                 Expanded(
                   child: filteredTasks.isEmpty
                       ? Center(
@@ -788,210 +829,188 @@ Widget build(BuildContext context) {
                             final bool isOverdue = !task.isCompleted && 
                                 task.dueDate.isBefore(DateTime.now().subtract(const Duration(days: 1)));
                             
-                            return Dismissible(
-                              key: Key(task.id),
-                              background: Container(
-                                color: Colors.green,
-                                alignment: Alignment.centerLeft,
-                                padding: const EdgeInsets.symmetric(horizontal: 20),
-                                child: const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              secondaryBackground: Container(
-                                color: Colors.red,
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.symmetric(horizontal: 20),
-                                child: const Icon(
-                                  Icons.delete,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              confirmDismiss: (direction) async {
-                                if (direction == DismissDirection.endToStart) {
-                                  // Delete confirmation
-                                  return await showDialog(
+                            return GestureDetector(
+                              onHorizontalDragEnd: (details) {
+                                if (details.primaryVelocity! < 0) {
+                                  showDialog(
                                     context: context,
                                     builder: (context) => AlertDialog(
                                       title: const Text('Delete Task'),
                                       content: const Text('Are you sure you want to delete this task?'),
                                       actions: [
                                         TextButton(
-                                          onPressed: () => Navigator.pop(context, false),
+                                          onPressed: () => Navigator.pop(context),
                                           child: const Text('CANCEL'),
                                         ),
                                         TextButton(
-                                          onPressed: () => Navigator.pop(context, true),
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            _deleteTask(task.id);
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: const Text('Task deleted'),
+                                                action: SnackBarAction(
+                                                  label: 'UNDO',
+                                                  onPressed: () {
+                                                    _addTask(task);
+                                                  },
+                                                ),
+                                              ),
+                                            );
+                                          },
                                           child: const Text('DELETE'),
                                         ),
                                       ],
                                     ),
                                   );
-                                } else {
-                                  // Toggle completion without confirmation
-                                  _toggleTaskCompletion(task.id);
-                                  return false; // Don't actually dismiss
                                 }
-                              },
-                              onDismissed: (direction) {
-                                if (direction == DismissDirection.endToStart) {
-                                  _deleteTask(task.id);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: const Text('Task deleted'),
-                                      action: SnackBarAction(
-                                        label: 'UNDO',
-                                        onPressed: () {
-                                          _addTask(task);
-                                        },
-                                      ),
-                                    ),
-                                  );
+                                // Handle swipe right (complete)
+                                else if (details.primaryVelocity! > 0) {
+                                  _toggleTaskCompletion(task.id);
                                 }
                               },
                               child: Card(
-  margin: const EdgeInsets.symmetric(
-    horizontal: 16,
-    vertical: 8,
-  ),
-  color: task.tag.lightColor,
-  elevation: 0.5,
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
-  ),
-  child: ListTile(
-    contentPadding: const EdgeInsets.symmetric(
-      horizontal: 16,
-      vertical: 8,
-    ),
-    leading: Checkbox(
-      value: task.isCompleted,
-      onChanged: (value) {
-        _toggleTaskCompletion(task.id);
-      },
-      shape: const CircleBorder(),
-      checkColor: Colors.white,
-      activeColor: Colors.deepPurple,
-    ),
-    title: Text(
-      task.title,
-      style: TextStyle(
-        decoration: task.isCompleted
-            ? TextDecoration.lineThrough
-            : null,
-        fontWeight: task.isCompleted
-            ? FontWeight.normal
-            : FontWeight.bold,
-        color: task.isCompleted
-            ? Colors.grey
-            : null,
-      ),
-    ),
-    subtitle: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (task.description.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
-            child: Text(
-              task.description,
-              style: TextStyle(
-                color: task.isCompleted ? Colors.grey : Colors.black87,
-                decoration: task.isCompleted ? TextDecoration.lineThrough : null,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        // Due date in its own row
-        Padding(
-          padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
-          child: Row(
-            children: [
-              Icon(
-                Icons.calendar_today,
-                size: 16,
-                color: Colors.grey,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                DateFormat('MMM d, yyyy').format(task.dueDate),
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Task tag in its own row
-        if (task.tag != TaskTag.none)
-          Padding(
-            padding: const EdgeInsets.only(top: 2.0, bottom: 4.0),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 4,
-              ),
-              decoration: BoxDecoration(
-                color: task.tag.color.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                task.tag.displayName,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: task.tag.color,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ),
-      ],
-    ),
-    // Replace the single trailing icon with a row of icons
-    trailing: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Edit button
-        IconButton(
-          icon: const Icon(Icons.edit_outlined),
-          onPressed: () {
-            _editTask(task);
-          },
-        ),
-        // Delete button
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          onPressed: () async {
-            final shouldDelete = await showDialog<bool>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('Delete Task'),
-                content: const Text('Are you sure you want to delete this task?'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('CANCEL'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('DELETE'),
-                  ),
-                ],
-              ),
-            );
-            
-            if (shouldDelete == true) {
-              _deleteTask(task.id);
-            }
-          },
-        ),
-      ],
-    ),
-  ),
-),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                color: task.tag.lightColor,
+                                elevation: 0.5,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  leading: Checkbox(
+                                    value: task.isCompleted,
+                                    onChanged: (value) {
+                                      _toggleTaskCompletion(task.id);
+                                    },
+                                    shape: const CircleBorder(),
+                                    checkColor: Colors.white,
+                                    activeColor: Colors.deepPurple,
+                                  ),
+                                  title: Text(
+                                    task.title,
+                                    style: TextStyle(
+                                      decoration: task.isCompleted
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                      fontWeight: task.isCompleted
+                                          ? FontWeight.normal
+                                          : FontWeight.bold,
+                                      color: task.isCompleted
+                                          ? Colors.grey
+                                          : null,
+                                    ),
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (task.description.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
+                                          child: Text(
+                                            task.description,
+                                            style: TextStyle(
+                                              color: task.isCompleted ? Colors.grey : Colors.black87,
+                                              decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      // Due date in its own row
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.calendar_today,
+                                              size: 16,
+                                              color: Colors.grey,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              DateFormat('MMM d, yyyy').format(task.dueDate),
+                                              style: TextStyle(
+                                                color: Colors.grey.shade700,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // Task tag in its own row
+                                      if (task.tag != TaskTag.none)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 2.0, bottom: 4.0),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: task.tag.color.withOpacity(0.2),
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: Text(
+                                              task.tag.displayName,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: task.tag.color,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  // Replace the single trailing icon with a row of icons
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Edit button
+                                      IconButton(
+                                        icon: const Icon(Icons.edit_outlined),
+                                        onPressed: () {
+                                          _editTask(task);
+                                        },
+                                      ),
+                                      // Delete button
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline),
+                                        onPressed: () async {
+                                          final shouldDelete = await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              title: const Text('Delete Task'),
+                                              content: const Text('Are you sure you want to delete this task?'),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, false),
+                                                  child: const Text('CANCEL'),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, true),
+                                                  child: const Text('DELETE'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          
+                                          if (shouldDelete == true) {
+                                            _deleteTask(task.id);
+                                          }
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             );
                           },
                         ),
@@ -999,13 +1018,13 @@ Widget build(BuildContext context) {
               ],
             ),
       floatingActionButton: FloatingActionButton(
-      onPressed: _showAddTaskDialog,
-      backgroundColor: const Color(0xFFEFD199),
-      elevation: 2,
-      shape: const CircleBorder(),
-      child: const Icon(Icons.add, color: Colors.white),
-    ),
-   drawer: Drawer(
+        onPressed: _showAddTaskDialog,
+        backgroundColor: const Color(0xFFEFD199),
+        elevation: 2,
+        shape: const CircleBorder(),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -1032,351 +1051,362 @@ Widget build(BuildContext context) {
           ],
         ),
       ),
-  );
-}
+    );
+  }
 
-void _editTask(Task task) {
-  final titleController = TextEditingController(text: task.title);
-  final descriptionController = TextEditingController(text: task.description);
-  DateTime selectedDate = task.dueDate;
-  TaskTag selectedTag = task.tag;
+  void _editTask(Task task) {
+    final titleController = TextEditingController(text: task.title);
+    final descriptionController = TextEditingController(text: task.description);
+    DateTime selectedDate = task.dueDate;
+    TaskTag selectedTag = task.tag;
 
-  showDialog(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: const Text('Edit Task'),
-        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-        actionsPadding: EdgeInsets.zero,
-        backgroundColor: const Color(0xFFF2F0F7),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Title field with list icon
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Icon(Icons.list, color: Colors.brown[400], size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: titleController,
-                      decoration: InputDecoration(
-                        labelText: 'Title',
-                        hintText: '',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Edit Task'),
+          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+          actionsPadding: EdgeInsets.zero,
+          backgroundColor: const Color(0xFFF2F0F7),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Title field with list icon
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(Icons.list, color: Colors.brown[400], size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: titleController,
+                        decoration: InputDecoration(
+                          labelText: 'Title',
+                          hintText: '',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                          ),
                         ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
-                        ),
+                        autofocus: true,
                       ),
-                      autofocus: true,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              
-              // Description field with chat icon
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Icon(Icons.chat_bubble_outline, color: Colors.brown[400], size: 28),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: descriptionController,
-                      decoration: InputDecoration(
-                        hintText: 'Description (optional)',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-                      ),
-                      maxLines: 3,
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Description field with chat icon
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Icon(Icons.chat_bubble_outline, color: Colors.brown[400], size: 28),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Icon(Icons.local_offer_outlined, color: Colors.brown[400], size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade400),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.white,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: descriptionController,
+                        decoration: InputDecoration(
+                          hintText: 'Description (optional)',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                        ),
+                        maxLines: 3,
                       ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<TaskTag>(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          isExpanded: true,
-                          value: selectedTag,
-                          items: TaskTag.values.map((tag) {
-                            return DropdownMenuItem<TaskTag>(
-                              value: tag,
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 8.0),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: tag == TaskTag.none ? Colors.grey : tag.color,
-                                        shape: BoxShape.circle,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(Icons.local_offer_outlined, color: Colors.brown[400], size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white,
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<TaskTag>(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            isExpanded: true,
+                            value: selectedTag,
+                            items: TaskTag.values.map((tag) {
+                              return DropdownMenuItem<TaskTag>(
+                                value: tag,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 8.0),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: tag == TaskTag.none ? Colors.grey : tag.color,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Text(
-                                        tag == TaskTag.none ? 'No Tag' : tag.displayName,
-                                        overflow: TextOverflow.ellipsis,
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          tag == TaskTag.none ? 'No Tag' : tag.displayName,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (newValue) {
-                            setState(() {
-                              selectedTag = newValue!;
-                            });
-                          },
-                          menuMaxHeight: 300,
-                          hint: const Text('Add a task tag'),
+                              );
+                            }).toList(),
+                            onChanged: (newValue) {
+                              setState(() {
+                                selectedTag = newValue!;
+                              });
+                            },
+                            menuMaxHeight: 300,
+                            hint: const Text('Add a task tag'),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              
-              // Due date selection
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Icon(Icons.calendar_today, color: Colors.brown[400], size: 28),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Due Date',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Due date selection
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(Icons.calendar_today, color: Colors.brown[400], size: 28),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Due Date',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
-                      GestureDetector(
-                        onTap: () async {
-                          final DateTime? picked = await showDatePicker(
-                            context: context,
-                            initialDate: selectedDate,
-                            firstDate: DateTime.now(),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null && picked != selectedDate) {
-                            setState(() {
-                              selectedDate = picked;
-                            });
+                        GestureDetector(
+                          onTap: () async {
+                            final DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime(2100),
+                            );
+                            if (picked != null && picked != selectedDate) {
+                              setState(() {
+                                selectedDate = picked;
+                              });
+                            }
+                          },
+                          child: Text(
+                            DateFormat('EEE, MMM d, yyyy').format(selectedDate),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  // SAVE button
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (titleController.text.trim().isNotEmpty) {
+                            final updatedTask = Task(
+                              id: task.id,
+                              title: titleController.text.trim(),
+                              description: descriptionController.text.trim(),
+                              dueDate: selectedDate,
+                              isCompleted: task.isCompleted,
+                              tag: selectedTag,
+                            );
+                            
+                            _updateTask(updatedTask);
+                            Navigator.pop(context);
                           }
                         },
-                        child: Text(
-                          DateFormat('EEE, MMM d, yyyy').format(selectedDate),
-                          style: const TextStyle(fontSize: 16),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFEFD199),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                // SAVE button
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (titleController.text.trim().isNotEmpty) {
-                          final updatedTask = Task(
-                            id: task.id,
-                            title: titleController.text.trim(),
-                            description: descriptionController.text.trim(),
-                            dueDate: selectedDate,
-                            isCompleted: task.isCompleted,
-                            tag: selectedTag,
-                          );
-                          
-                          _updateTask(updatedTask);
-                          Navigator.pop(context);
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEFD199),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
-                      child: const Text(
-                        'SAVE',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                        child: const Text(
+                          'SAVE',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                // CANCEL button
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.grey,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                          side: BorderSide(color: Colors.grey.shade300),
+                  // CANCEL button
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.grey,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            side: BorderSide(color: Colors.grey.shade300),
+                          ),
+                        ),
+                        child: const Text(
+                          'CANCEL',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                      child: const Text(
-                        'CANCEL',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _updateTask(Task task) async {
+  try {
+    // Update in Firestore
+    await _repository.updateTask(task);
+    
+    // Update local state for immediate UI feedback
+    setState(() {
+      final index = _tasks.indexWhere((t) => t.id == task.id);
+      if (index != -1) {
+        _tasks[index] = task;
+      }
+    });
+    
+    // Show a confirmation message
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Task updated successfully')),
+    );
+  } catch (e) {
+    print('Error updating task: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Failed to update task. Please try again.')),
+    );
+    // If update fails, reload tasks to ensure UI is in sync with database
+    await _loadTasks();
+  }
+}
+
+  Widget _buildCategoryButton(String category, int index, {int? badge}) {
+    bool isSelected = index == _currentTabIndex;
+    
+    double buttonWidth;
+    if (category == 'All') {
+      buttonWidth = 80;
+    } else if (category == 'Pending') {
+      buttonWidth = 120;
+    } else { // Completed
+      buttonWidth = 120;
+    }
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentTabIndex = index;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 40,
+        width: buttonWidth,
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF90A17D) : Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: isSelected
+              ? [BoxShadow(color: const Color(0xFF90A17D).withOpacity(0.4), blurRadius: 5, offset: const Offset(0, 2))]
+              : [],
+        ),
+        child: Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                category,
+                style: TextStyle(
+                   color: isSelected ? Colors.white : Colors.black54,
+                   fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (badge != null && badge > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: isSelected 
+                      ? Colors.white.withOpacity(0.3) 
+                      : const Color(0xFF90A17D),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      badge.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-void _updateTask(Task task) async {
-  await _repository.updateTask(task);
-  
-  setState(() {
-    final index = _tasks.indexWhere((t) => t.id == task.id);
-    if (index != -1) {
-      _tasks[index] = task;
-    }
-  });
-  
-  // Show a confirmation message
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Task updated successfully')),
-  );
-}
-
-Widget _buildCategoryButton(String category, int index, {int? badge}) {
-  bool isSelected = index == _currentTabIndex;
-  
-  double buttonWidth;
-  if (category == 'All') {
-    buttonWidth = 80;
-  } else if (category == 'Pending') {
-    buttonWidth = 120;
-  } else { // Completed
-    buttonWidth = 120;
-  }
-  
-  return GestureDetector(
-    onTap: () {
-      setState(() {
-        _currentTabIndex = index;
-      });
-    },
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      height: 40,
-      width: buttonWidth,
-      decoration: BoxDecoration(
-        color: isSelected ? const Color(0xFF90A17D) : Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: isSelected
-            ? [BoxShadow(color: const Color(0xFF90A17D).withOpacity(0.4), blurRadius: 5, offset: const Offset(0, 2))]
-            : [],
-      ),
-      child: Center(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              category,
-              style: TextStyle(
-                 color: isSelected ? Colors.white : Colors.black54,
-                 fontWeight: FontWeight.bold,
-              ),
-            ),
-            if (badge != null && badge > 0) ...[
-              const SizedBox(width: 6),
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color: isSelected 
-                    ? Colors.white.withOpacity(0.3) 
-                    : const Color(0xFF90A17D),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    badge.toString(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
             ],
-          ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
