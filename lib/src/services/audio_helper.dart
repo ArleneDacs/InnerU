@@ -17,6 +17,7 @@ class AudioHelper {
     onStateChange(playingSong);
   }
 
+  // Stop music and clear the playing song state
   static Future<void> stopAudio() async {
     await _audioPlayer.stop();
     playingSong = null;

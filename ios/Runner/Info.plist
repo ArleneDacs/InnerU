@@ -66,19 +66,15 @@
         <string>Editor</string>
         <key>CFBundleURLSchemes</key>
         <array>
-            <string><com class="example selfcareProjects"></com></string> <!-- Replace with your actual Bundle ID -->
+            <string>com.inneru.selfcare.authentication-services</string> <!-- Apple Sign-In URL scheme -->
         </array>
     </dict>
 </array>
-
-<key>NSAppTransportSecurity</key>
-<dict>
-    <key>NSAllowsArbitraryLoads</key>
-    <true/>
-</dict>
-
+<key>NSAppleMusicUsageDescription</key>
+<string>We use Apple Sign-In for authentication.</string>
 <key>SignInWithApple</key>
 <true/>
+
 
 </dict>
 </plist>

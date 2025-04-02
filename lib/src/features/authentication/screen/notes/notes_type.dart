@@ -25,7 +25,7 @@ class _NotesTypeState extends State<NotesType> {
   List<Widget> contentWidgets = []; // This will store text and image widgets
   final ImagePicker _picker = ImagePicker();
   List<String> uploadedImageUrls = [];
-  List<String> imagePaths = []; 
+  List<String> imagePaths = [];
   XFile? _selectedImage;
 
   final CollectionReference myNotes =
@@ -121,72 +121,72 @@ class _NotesTypeState extends State<NotesType> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-    appBar: AppBar(
-  leading: IconButton(
-    onPressed: () {
-      Navigator.pop(context);
-    },
-    icon: Icon(Icons.arrow_back),
-  ),
-  actions: <Widget>[
-    // Save Button
-    TextButton(
-      onPressed: () {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text("Save this note?"),
-            content: Text("Do you want to save this note for later?"),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () {
-                  saveNotes(isSaved: true);
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                },
-                child: Text("Save", style: TextStyle(color: Colors.blue)),
-              ),
-            ],
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () {
+            Navigator.pop(context);
+          },
+          icon: Icon(Icons.arrow_back),
+        ),
+        actions: <Widget>[
+          // Save Button
+          TextButton(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text("Save this note?"),
+                  content: Text("Do you want to save this note for later?"),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text("Cancel"),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        saveNotes(isSaved: true);
+                        Navigator.pop(context);
+                        Navigator.pop(context);
+                      },
+                      child: Text("Save", style: TextStyle(color: Colors.blue)),
+                    ),
+                  ],
+                ),
+              );
+            },
+            child: Text("Save", style: TextStyle(fontSize: 15)),
           ),
-        );
-      },
-      child: Text("Save", style: TextStyle(fontSize: 15)),
-    ),
-    
-    // Post Button
-    TextButton(
-      onPressed: () {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text("Post this note?"),
-            content: Text("Are you sure you want to share this note?"),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () {
-                  saveNotes(isSaved: false); // Save with saved: false
-                  _finishedWriting();
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                },
-                child: Text("Yes", style: TextStyle(color: Colors.green)),
-              ),
-            ],
+
+          // Post Button
+          TextButton(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text("Post this note?"),
+                  content: Text("Are you sure you want to share this note?"),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text("Cancel"),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        saveNotes(isSaved: false); // Save with saved: false
+                        _finishedWriting();
+                        Navigator.pop(context);
+                        Navigator.pop(context);
+                      },
+                      child: Text("Yes", style: TextStyle(color: Colors.green)),
+                    ),
+                  ],
+                ),
+              );
+            },
+            child: Text("Post", style: TextStyle(fontSize: 15)),
           ),
-        );
-      },
-      child: Text("Post", style: TextStyle(fontSize: 15)),
-    ),
-  ],
-),
+        ],
+      ),
       body: SafeArea(
           child: Padding(
         padding: EdgeInsets.all(20),
@@ -215,7 +215,7 @@ class _NotesTypeState extends State<NotesType> {
             SizedBox(
               height: 20,
             ),
-     
+
             TextField(
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               controller: titleController,
@@ -227,9 +227,8 @@ class _NotesTypeState extends State<NotesType> {
                 titleString = value;
               },
             ),
-         
-          
-          Expanded(
+
+            Expanded(
               child: ListView(
                 children: [
                   ...contentWidgets, // Ensure existing text fields are shown first
@@ -263,15 +262,18 @@ class _NotesTypeState extends State<NotesType> {
     // Fetch username from Firestore user document
     DocumentSnapshot userDoc =
         await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.get('username');
+    String? username = userDoc.exists ? userDoc.get('username') : null;
 
     if (username != null) {
       String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+      // Use UID for document ID
       DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$username-$formattedDate');
+          firestore.collection('dailytracker').doc('$userId-$formattedDate');
 
       // Use Firestore's FieldValue.merge to update without overwriting other fields
       await docRef.set({
+        'userId': userId, // Added userId field
         'username': username,
         'date': formattedDate,
         if (meditation) 'meditation': true,
@@ -280,7 +282,8 @@ class _NotesTypeState extends State<NotesType> {
         if (addValue) 'addValue': true
       }, SetOptions(merge: true));
 
-      print("Successfully updated the daily tracker.");
+      print(
+          "Successfully updated the daily tracker for userId: $userId, username: $username");
     } else {
       print("Error: Username not found for userId: $userId");
     }
@@ -293,215 +296,216 @@ class _NotesTypeState extends State<NotesType> {
       await _saveDailyActivity(addValue: true);
     }
   }
-Future<void> saveNotes({required bool isSaved}) async {
-  if (_isSaving) return;
-  _isSaving = true;
-  List<Map<String, String>> contentList = [];
-  DateTime now = DateTime.now();
-  
-  String? userId = FirebaseAuth.instance.currentUser?.uid; // Get current user ID
-  if (userId == null) {
-    print("Error: User not logged in.");
-    return;
-  }
 
+  Future<void> saveNotes({required bool isSaved}) async {
+    if (_isSaving) return;
+    _isSaving = true;
+    List<Map<String, String>> contentList = [];
+    DateTime now = DateTime.now();
 
-  for (var content in contentWidgets) {
-    if (content is TextField) {
-      if (content.controller?.text.isNotEmpty ?? false) {
+    String? userId =
+        FirebaseAuth.instance.currentUser?.uid; // Get current user ID
+    if (userId == null) {
+      print("Error: User not logged in.");
+      return;
+    }
+
+    for (var content in contentWidgets) {
+      if (content is TextField) {
+        if (content.controller?.text.isNotEmpty ?? false) {
+          contentList.add({
+            "type": "text",
+            "value": content.controller?.text ?? "",
+          });
+        }
+      }
+    }
+
+    // Ensure images are always uploaded even if only one remains
+    for (var imageUrl in uploadedImageUrls) {
+      if (imageUrl.isNotEmpty) {
         contentList.add({
-          "type": "text",
-          "value": content.controller?.text ?? "",
+          "type": "image",
+          "value": imageUrl,
         });
       }
     }
-  }
 
-  // Ensure images are always uploaded even if only one remains
-  for (var imageUrl in uploadedImageUrls) {
-    if (imageUrl.isNotEmpty) {
-      contentList.add({
-        "type": "image",
-        "value": imageUrl,
+    try {
+      await FirebaseFirestore.instance.collection('notes').add({
+        'username': username,
+        'userId': userId,
+        'title': titleString,
+        'note': contentList,
+        'color': color,
+        'createdAt': now,
+        'category': selectedCategory,
+        'saved': isSaved,
       });
+
+      if (_mounted) {
+        CustomSnackBar.showCustomSnackBar(
+          context,
+          isSaved ? "Note saved successfully." : "Note posted successfully.",
+          Colors.white,
+        );
+      }
+    } catch (e) {
+      print("Error saving note: $e");
+    }
+
+    _isSaving = false;
+  }
+
+  Future<String> uploadImageToFirebase(File imageFile) async {
+    try {
+      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
+      Reference storageRef =
+          FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
+
+      UploadTask uploadTask = storageRef.putFile(imageFile);
+      TaskSnapshot snapshot = await uploadTask;
+
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print("Error uploading image: $e");
+      return "";
     }
   }
 
-  try {
-    await FirebaseFirestore.instance.collection('notes').add({
-      'username': username,
-      'userId' : userId,
-      'title': titleString,
-      'note': contentList,
-      'color': color,
-      'createdAt': now,
-      'category': selectedCategory,
-      'saved': isSaved,
-    });
+  void pickImage() async {
+    final List<XFile>? images = await _picker.pickMultiImage();
 
-    if (_mounted) {
-      CustomSnackBar.showCustomSnackBar(
-        context,
-        isSaved ? "Note saved successfully." : "Note posted successfully.",
-        Colors.white,
-      );
-    }
-  } catch (e) {
-    print("Error saving note: $e");
-  }
-
-  _isSaving = false;
-}
-
-Future<String> uploadImageToFirebase(File imageFile) async {
-  try {
-    String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-    Reference storageRef =
-        FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
-
-    UploadTask uploadTask = storageRef.putFile(imageFile);
-    TaskSnapshot snapshot = await uploadTask;
-
-    return await snapshot.ref.getDownloadURL();
-  } catch (e) {
-    print("Error uploading image: $e");
-    return "";
-  }
-}
-
-void pickImage() async {
-  final List<XFile>? images = await _picker.pickMultiImage();
-
-  if (images != null && images.isNotEmpty) {
-    if (!mounted) return;
-
-    List<String> newUploadedUrls = [];
-
-    for (var image in images) {
+    if (images != null && images.isNotEmpty) {
       if (!mounted) return;
 
-      setState(() {
-        uploadedImageUrls.add("loading"); // Add a temporary loading state
-      });
+      List<String> newUploadedUrls = [];
 
-      String imageUrl = await uploadImageToFirebase(File(image.path));
+      for (var image in images) {
+        if (!mounted) return;
 
-      if (imageUrl.isNotEmpty && mounted) {
         setState(() {
-          int loadingIndex = uploadedImageUrls.indexOf("loading");
-          if (loadingIndex != -1) {
-            uploadedImageUrls[loadingIndex] = imageUrl; // Replace loading with actual URL
-          } else {
-            uploadedImageUrls.add(imageUrl);
-          }
+          uploadedImageUrls.add("loading"); // Add a temporary loading state
         });
+
+        String imageUrl = await uploadImageToFirebase(File(image.path));
+
+        if (imageUrl.isNotEmpty && mounted) {
+          setState(() {
+            int loadingIndex = uploadedImageUrls.indexOf("loading");
+            if (loadingIndex != -1) {
+              uploadedImageUrls[loadingIndex] =
+                  imageUrl; // Replace loading with actual URL
+            } else {
+              uploadedImageUrls.add(imageUrl);
+            }
+          });
+        }
       }
     }
   }
-}
 
+  Future<void> removeImage(int index) async {
+    if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
 
-Future<void> removeImage(int index) async {
-  if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
+    String imageUrl = uploadedImageUrls[index];
+    setState(() {
+      uploadedImageUrls.removeAt(index);
+    });
 
-  String imageUrl = uploadedImageUrls[index];
-  setState(() {
-    uploadedImageUrls.removeAt(index);
-  });
+    await FirebaseFirestore.instance
+        .collection('notes')
+        .where('note', arrayContains: {"type": "image", "value": imageUrl})
+        .get()
+        .then((querySnapshot) {
+          for (var doc in querySnapshot.docs) {
+            doc.reference.update({
+              'note': FieldValue.arrayRemove([
+                {"type": "image", "value": imageUrl}
+              ])
+            });
+          }
+        });
 
-  await FirebaseFirestore.instance
-      .collection('notes')
-      .where('note', arrayContains: {"type": "image", "value": imageUrl})
-      .get()
-      .then((querySnapshot) {
-    for (var doc in querySnapshot.docs) {
-      doc.reference.update({
-        'note': FieldValue.arrayRemove([
-          {"type": "image", "value": imageUrl}
-        ])
-      });
-    }
-  });
-
-  await deleteImageFromFirebase(imageUrl);
-}
-
-Future<void> deleteImageFromFirebase(String imageUrl) async {
-  try {
-    Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
-    await storageRef.delete();
-  } catch (e) {
-    print("Error deleting image: $e");
+    await deleteImageFromFirebase(imageUrl);
   }
-}
 
-Widget buildImageSlider() {
-  return Center(
-    child: SizedBox(
-      height: MediaQuery.of(context).size.height * 0.5,
-      child: uploadedImageUrls.isEmpty
-          ? SizedBox()
-          : ListView.builder(
-              scrollDirection: Axis.horizontal,
-              shrinkWrap: true,
-              physics: BouncingScrollPhysics(),
-              itemCount: uploadedImageUrls.length,
-              itemBuilder: (context, index) {
-                double screenWidth = MediaQuery.of(context).size.width;
-                double imageWidth = screenWidth * 0.8;
-                double imageHeight = screenWidth * 1;
+  Future<void> deleteImageFromFirebase(String imageUrl) async {
+    try {
+      Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
+      await storageRef.delete();
+    } catch (e) {
+      print("Error deleting image: $e");
+    }
+  }
 
-                return Align(
-                  alignment: Alignment.center,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
-                    child: Stack(
-                      alignment: Alignment.topRight,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: uploadedImageUrls[index] == "loading"
-                              ? Container(
-                                  width: imageWidth,
-                                  height: imageHeight,
-                                  color: Colors.grey[300],
-                                  child: Center(
-                                    child: CircularProgressIndicator(),
+  Widget buildImageSlider() {
+    return Center(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.5,
+        child: uploadedImageUrls.isEmpty
+            ? SizedBox()
+            : ListView.builder(
+                scrollDirection: Axis.horizontal,
+                shrinkWrap: true,
+                physics: BouncingScrollPhysics(),
+                itemCount: uploadedImageUrls.length,
+                itemBuilder: (context, index) {
+                  double screenWidth = MediaQuery.of(context).size.width;
+                  double imageWidth = screenWidth * 0.8;
+                  double imageHeight = screenWidth * 1;
+
+                  return Align(
+                    alignment: Alignment.center,
+                    child: Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
+                      child: Stack(
+                        alignment: Alignment.topRight,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: uploadedImageUrls[index] == "loading"
+                                ? Container(
+                                    width: imageWidth,
+                                    height: imageHeight,
+                                    color: Colors.grey[300],
+                                    child: Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  )
+                                : Image.network(
+                                    uploadedImageUrls[index],
+                                    width: imageWidth,
+                                    height: imageHeight,
+                                    fit: BoxFit.cover,
                                   ),
-                                )
-                              : Image.network(
-                                  uploadedImageUrls[index],
-                                  width: imageWidth,
-                                  height: imageHeight,
-                                  fit: BoxFit.cover,
+                          ),
+                          Positioned(
+                            top: 5,
+                            right: 5,
+                            child: GestureDetector(
+                              onTap: () => removeImage(index),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.withOpacity(0.8),
+                                  shape: BoxShape.circle,
                                 ),
-                        ),
-                        Positioned(
-                          top: 5,
-                          right: 5,
-                          child: GestureDetector(
-                            onTap: () => removeImage(index),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.8),
-                                shape: BoxShape.circle,
+                                padding: EdgeInsets.all(6),
+                                child: Icon(Icons.close,
+                                    color: Colors.white, size: 18),
                               ),
-                              padding: EdgeInsets.all(6),
-                              child: Icon(Icons.close, color: Colors.white, size: 18),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
-    ),
-  );
-}
-
-
+                  );
+                },
+              ),
+      ),
+    );
+  }
 
   void addText(String text) {
     if (text.isNotEmpty) {

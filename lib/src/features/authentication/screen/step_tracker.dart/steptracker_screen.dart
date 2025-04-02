@@ -166,15 +166,18 @@ class _StepTrackerState extends State<StepTracker>
     // Fetch username from Firestore user document
     DocumentSnapshot userDoc =
         await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.get('username');
+    String? username = userDoc.exists ? userDoc.get('username') : null;
 
     if (username != null) {
       String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+      // Use UID for document ID
       DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$username-$formattedDate');
+          firestore.collection('dailytracker').doc('$userId-$formattedDate');
 
       // Use Firestore's FieldValue.merge to update without overwriting other fields
       await docRef.set({
+        'userId': userId,
         'username': username,
         'date': formattedDate,
         if (meditation) 'meditation': true,
@@ -182,7 +185,7 @@ class _StepTrackerState extends State<StepTracker>
       }, SetOptions(merge: true));
 
       print(
-          "Updated Firestore: Meditation = $meditation, Steps = $steps, for username: $username");
+          "Updated Firestore: Meditation = $meditation, Steps = $steps, for userId: $userId, username: $username");
     } else {
       print("Error: Username not found for userId: $userId");
     }

@@ -40,8 +40,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   // Password Validation
   bool _isValidPassword(String password) {
-    final RegExp passwordRegex = RegExp(
-        r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$');
+    final RegExp passwordRegex =
+        RegExp(r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$');
     return passwordRegex.hasMatch(password);
   }
 
@@ -126,14 +126,36 @@ class _SignupScreenState extends State<SignupScreen> {
       UserCredential userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (!userCredential.user!.emailVerified) {
-        await userCredential.user!.sendEmailVerification();
-      }
+      User? user = userCredential.user;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => Setuppage()),
-      );
+      if (user != null && !user.emailVerified) {
+        await user.sendEmailVerification();
+
+        // Show alert to notify user to verify their email
+        showDialog(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text("Verify Your Email"),
+              content: const Text(
+                  "A verification email has been sent to your email address. Please check your inbox and verify before logging in."),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("OK"),
+                ),
+              ],
+            );
+          },
+        );
+
+        await FirebaseAuth.instance.signOut(); // Prevent access until verified
+      } else if (user != null && user.emailVerified) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => Setuppage()),
+        );
+      }
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -148,7 +170,7 @@ class _SignupScreenState extends State<SignupScreen> {
     });
   }
 
-  Future<void> _handleAppleSignIn() async {
+  /*Future<void> _handleAppleSignIn() async {
     setState(() {
       _isLoading = true;
     });
@@ -188,7 +210,7 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() {
       _isLoading = false;
     });
-  }
+  }*/
 
   @override
   Widget build(BuildContext context) {
@@ -369,33 +391,48 @@ class _SignupScreenState extends State<SignupScreen> {
                     const SizedBox(height: 10),
                     // Google Sign-In Button
                     // Google & Apple Sign-In Buttons in the same row
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        GestureDetector(
-                          onTap: _isLoading ? null : _handleGoogleSignIn,
-                          child: Row(
-                            children: [
-                              Image.asset("assets/logo/google.png", width: 50),
-                              const SizedBox(width: 10),
-                              const Text("Google",
-                                  style: TextStyle(fontSize: 16)),
-                            ],
+// Google & Apple Sign-In Buttons inside a Container
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.5),
+                            blurRadius: 5,
+                            offset: Offset(0, 2),
                           ),
-                        ),
-                        const SizedBox(width: 20), // Space between buttons
-                        GestureDetector(
-                          onTap: _isLoading ? null : _handleAppleSignIn,
-                          child: Row(
-                            children: [
-                              Image.asset("assets/logo/ios.png", width: 30),
-                              const SizedBox(width: 10),
-                              const Text("Apple",
-                                  style: TextStyle(fontSize: 16)),
-                            ],
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: _isLoading ? null : _handleGoogleSignIn,
+                            child: Row(
+                              children: [
+                                Image.asset("assets/logo/google.png",
+                                    width: 50),
+                                const SizedBox(width: 10),
+                                const Text("Google",
+                                    style: TextStyle(fontSize: 16)),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 20), // Space between buttons
+                          /*GestureDetector(
+        onTap: _isLoading ? null : _handleAppleSignIn,
+        child: Row(
+          children: [
+            Image.asset("assets/logo/ios.png", width: 30),
+            const SizedBox(width: 10),
+            const Text("Apple", style: TextStyle(fontSize: 16)),
+          ],
+        ),
+      ),*/
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: 15),

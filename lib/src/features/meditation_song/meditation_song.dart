@@ -10,9 +10,11 @@ class MeditationSong extends StatefulWidget {
   State<MeditationSong> createState() => _MeditationSongState();
 }
 
-class _MeditationSongState extends State<MeditationSong> {
-  int? isLikedIndex; // Track liked song index
-  int? playingIndex; // Track currently playing song index
+class _MeditationSongState extends State<MeditationSong>
+    with WidgetsBindingObserver {
+  int? isLikedIndex;
+  int? playingIndex;
+  final AudioPlayer _audioPlayer = AudioPlayer(); // Local AudioPlayer instance
 
   final List<Map<String, String>> songs = [
     {
@@ -40,7 +42,18 @@ class _MeditationSongState extends State<MeditationSong> {
   @override
   void initState() {
     super.initState();
-    _loadLikedSong(); // Load liked song when opening page
+    WidgetsBinding.instance.addObserver(this);
+    _loadLikedSong();
+  }
+
+  /// Detect when the app is backgrounded or exited
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.inactive) {
+      _stopAudio(); // Stop when the app goes into the background
+    }
   }
 
   /// Load liked song from SharedPreferences and find its index
@@ -74,19 +87,29 @@ class _MeditationSongState extends State<MeditationSong> {
     }
   }
 
+  /// Stop music when the user leaves the page
+  void _stopAudio() {
+    AudioHelper.stopAudio(); // Stop playback when user exits or navigates away
+    setState(() {
+      playingIndex = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stopAudio(); // Stop playback when leaving the page
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Music Player"),
-      ),
+      appBar: AppBar(title: const Text("Music Player")),
       body: Column(
         children: [
           Image.asset('assets/images/naive-dance-sticker-set.png'),
-          Text(
-            "SONG PREVIEWS",
-            style: TextStyle(fontSize: 20),
-          ),
+          const Text("SONG PREVIEWS", style: TextStyle(fontSize: 20)),
           Expanded(
             child: ListView.builder(
               itemCount: songs.length,
@@ -105,17 +128,13 @@ class _MeditationSongState extends State<MeditationSong> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Play/Pause Button
                       IconButton(
-                        icon: Icon(
-                          isPlaying ? Icons.pause : Icons.play_arrow,
-                        ),
+                        icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
                         onPressed: () {
                           AudioHelper.togglePlayPause(
                             songs[index]["title"]!,
                             songs[index]["assetPath"]!,
                             (song) {
-                              // Update playingIndex to manage play/pause button
                               setState(() {
                                 playingIndex = song == null ? null : index;
                               });
@@ -128,7 +147,12 @@ class _MeditationSongState extends State<MeditationSong> {
                           isLiked ? Icons.star : Icons.star_border_outlined,
                           color: isLiked ? Colors.amber : null,
                         ),
-                        onPressed: () => _saveLikedSong(isLiked ? null : index),
+                        onPressed: () async {
+                          await _saveLikedSong(isLiked ? null : index);
+                          if (!isLiked) {
+                            Navigator.pop(context, songs[index]["title"]!);
+                          }
+                        },
                       ),
                     ],
                   ),

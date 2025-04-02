@@ -49,29 +49,30 @@ class _UserProgressPageState extends State<UserProgressPage> {
       QuerySnapshot trackerSnapshot =
           await FirebaseFirestore.instance.collection('dailytracker').get();
 
-      Set<String> uniqueUsernames = {}; // Ensure unique usernames
+      Set<String> uniqueUserIds = {}; // Ensure unique user IDs
       Map<String, Map<String, Map<String, bool>>> progressData = {};
       List<Map<String, dynamic>> tempUsers = [];
 
       for (var doc in trackerSnapshot.docs) {
         Map<String, dynamic> userData = doc.data() as Map<String, dynamic>;
 
-        // Extract username without the date
+        // Get the user ID and username
+        String userId = userData['userId'] ?? doc.id.split('-').first;
         String username = userData['username'] ?? doc.id.split('-').first;
 
         // Skip the current user
-        if (username == currentUserId) continue;
+        if (userId == currentUserId) continue;
 
-        if (!uniqueUsernames.contains(username)) {
-          uniqueUsernames.add(username);
-          tempUsers.add({'userId': username, 'username': username});
+        if (!uniqueUserIds.contains(userId)) {
+          uniqueUserIds.add(userId);
+          tempUsers.add({'userId': userId, 'username': username});
         }
 
         String lastUpdated = userData['lastUpdated'] ??
             DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-        progressData.putIfAbsent(username, () => {});
-        progressData[username]![lastUpdated] = {
+        progressData.putIfAbsent(userId, () => {});
+        progressData[userId]![lastUpdated] = {
           'Call': userData['call'] ?? false,
           'Steps': userData['steps'] ?? false,
           'Meditation': userData['meditation'] ?? false,
@@ -87,6 +88,26 @@ class _UserProgressPageState extends State<UserProgressPage> {
       });
     } catch (e) {
       print("Error fetching data: $e");
+    }
+  }
+
+  Future<void> updateUsername(String newUsername) async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        // Update the username in Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({
+          'username': newUsername,
+        });
+
+        // After updating the username, reload the progress data
+        fetchUsersAndProgress();
+      } catch (e) {
+        print("Error updating username: $e");
+      }
     }
   }
 

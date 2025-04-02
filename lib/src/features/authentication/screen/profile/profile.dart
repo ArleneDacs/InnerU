@@ -80,119 +80,25 @@ class _ProfilePageState extends State<ProfilePage> {
   void listenToDailyTrackerUpdates() {
     String userId = FirebaseAuth.instance.currentUser!.uid;
     String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    String documentId = '$userId-$todayDate'; // Use UID for document ID
 
     FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .get()
-        .then((userSnapshot) {
-      if (userSnapshot.exists) {
-        String username =
-            (userSnapshot.data() as Map<String, dynamic>)['username'];
-        String documentId = '$username-$todayDate';
-
-        FirebaseFirestore.instance
-            .collection('dailytracker')
-            .doc(documentId)
-            .snapshots()
-            .listen((snapshot) {
-          if (snapshot.exists) {
-            fetchDailyTrackerData(); // Fetch data whenever there's a change
-          }
-        });
+        .collection('dailytracker')
+        .doc(documentId)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists) {
+        fetchDailyTrackerData(); // Fetch data whenever there's a change
       }
     });
-  }
-
-  Future<void> _fetchProfilePic() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection("users")
-          .doc(user.uid)
-          .get();
-
-      if (userDoc.exists) {
-        setState(() {
-          _profilePicUrl = userDoc["profilePic"]; // URL from Firestore
-        });
-      }
-    } catch (e) {
-      print("Error fetching profile picture: $e");
-    }
   }
 
   void fetchDailyTrackerData() async {
     String userId = FirebaseAuth.instance.currentUser!.uid;
     String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    String documentId = '$userId-$todayDate'; // Use UID for document ID
 
     try {
-      // Fetch the username based on userId
-      DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
-          .collection('users') // Assuming 'users' collection stores user data
-          .doc(userId)
-          .get();
-
-      if (userSnapshot.exists) {
-        String username =
-            (userSnapshot.data() as Map<String, dynamic>)['username'];
-        String documentId =
-            '$username-$todayDate'; // Use username instead of userId
-
-        DocumentSnapshot snapshot = await FirebaseFirestore.instance
-            .collection('dailytracker')
-            .doc(documentId)
-            .get();
-
-        if (snapshot.exists) {
-          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
-          String lastUpdated = data['lastUpdated'] ?? "";
-
-          // If last updated date is different from today, reset tasks
-          if (lastUpdated != todayDate) {
-            resetDailyTracker(todayDate, username);
-          } else {
-            setState(() {
-              todayTasks['Meditation'] = data['meditation'] ?? false;
-              todayTasks['Steps'] = data['steps'] ?? false;
-              todayTasks['Call'] = data['call'] ?? false;
-              todayTasks['Learning'] = data['learning'] ?? false;
-              todayTasks['Add Value'] = data['addValue'] ?? false;
-              isLoading = false;
-            });
-          }
-          checkAndAssignPoints();
-        } else {
-          resetDailyTracker(
-              todayDate, username); // If no data exists, create a fresh tracker
-        }
-      } else {
-        print("Error: User document does not exist.");
-      }
-    } catch (e) {
-      print("Error fetching Firestore data: $e");
-      setState(() => isLoading = false);
-    }
-  }
-
-  void checkAndAssignPoints() async {
-  String userId = FirebaseAuth.instance.currentUser!.uid;
-  String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-  try {
-    DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .get();
-
-    if (userSnapshot.exists) {
-      Map<String, dynamic> userData = userSnapshot.data() as Map<String, dynamic>;
-      String username = userData['username'];
-      String server = userData['team'] ?? "Default"; // Get user's team
-      String documentId = '$username-$todayDate';
-
       DocumentSnapshot snapshot = await FirebaseFirestore.instance
           .collection('dailytracker')
           .doc(documentId)
@@ -200,87 +106,34 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (snapshot.exists) {
         Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+        String lastUpdated = data['lastUpdated'] ?? "";
 
-        // Get actual activity counts from dailytracker (if available)
-        int meditationMinutes = data['meditationMinutes'] ?? 0;
-        int stepsTaken = data['stepCount'] ?? 0;
-        int callsMade = data['callCount'] ?? 0;
-        int learningEntries = data['learningCount'] ?? 0;
-        int valueEntries = data['valueCount'] ?? 0;
-
-        // Define tasks and points for individual tasks
-        Map<String, bool> taskCompletion = {
-          'Meditation': data['meditation'] ?? false,
-          'Steps': data['steps'] ?? false,
-          'Call': data['call'] ?? false,
-          'Learning': data['learning'] ?? false,
-          'Add Value': data['addValue'] ?? false,
-        };
-
-        // Calculate points based on actual activity
-        Map<String, int> taskPoints = {
-          'Meditation Points': meditationMinutes, // 1 point per minute
-          'Steps Points': (stepsTaken / 200).floor(), // 1 point per 200 steps
-          'Call Points': callsMade, // 1 point per call
-          'Learning Points': learningEntries, // 1 point per entry
-          'Add Value Points': valueEntries, // 1 point per entry
-        };
-
-        // Fallback to fixed points if activity counts are not available
-        if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
-          taskPoints['Meditation Points'] = 5;
+        // If last updated date is different from today, reset tasks
+        if (lastUpdated != todayDate) {
+          resetDailyTracker(todayDate, userId);
+        } else {
+          setState(() {
+            todayTasks['Meditation'] = data['meditation'] ?? false;
+            todayTasks['Steps'] = data['steps'] ?? false;
+            todayTasks['Call'] = data['call'] ?? false;
+            todayTasks['Learning'] = data['learning'] ?? false;
+            todayTasks['Add Value'] = data['addValue'] ?? false;
+            isLoading = false;
+          });
         }
-        if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
-          taskPoints['Steps Points'] = 10;
-        }
-        if (callsMade == 0 && taskCompletion['Call'] == true) {
-          taskPoints['Call Points'] = 10;
-        }
-        if (learningEntries == 0 && taskCompletion['Learning'] == true) {
-          taskPoints['Learning Points'] = 15;
-        }
-        if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
-          taskPoints['Add Value Points'] = 15;
-        }
-
-        int totalPoints = taskPoints.values.reduce((a, b) => a + b);
-
-        // Save points in the userpoints collection
-        await FirebaseFirestore.instance
-            .collection('userpoints')
-            .doc(documentId)
-            .set({
-          'username': username,
-          'date': todayDate,
-          'totalPoints': totalPoints,
-          'taskPoints': taskPoints,
-          'tasks': taskCompletion,
-          'server': server,
-          // Store raw activity counts for better display
-          'activityCounts': {
-            'meditationMinutes': meditationMinutes,
-            'stepsTaken': stepsTaken,
-            'callsMade': callsMade,
-            'learningEntries': learningEntries,
-            'valueEntries': valueEntries,
-          }
-        });
-
-        print("Total points assigned: $totalPoints");
-        print("Points per task: $taskPoints");
+        checkAndAssignPoints();
       } else {
-        print("No daily tracker data found for today.");
+        resetDailyTracker(
+            todayDate, userId); // If no data exists, create a fresh tracker
       }
-    } else {
-      print("Error: User document does not exist.");
+    } catch (e) {
+      print("Error fetching Firestore data: $e");
+      setState(() => isLoading = false);
     }
-  } catch (e) {
-    print("Error in assigning points: $e");
   }
-}
 
-  void resetDailyTracker(String todayDate, String username) async {
-    String documentId = '$username-$todayDate';
+  void resetDailyTracker(String todayDate, String userId) async {
+    String documentId = '$userId-$todayDate'; // Use UID for document ID
 
     // Reset task values
     setState(() {
@@ -310,17 +163,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<Set<int>> _fetchTrackedDays() async {
     String userId = FirebaseAuth.instance.currentUser!.uid;
-
-    // Fetch the username based on userId
-    DocumentSnapshot userSnapshot =
-        await FirebaseFirestore.instance.collection('users').doc(userId).get();
-
-    if (!userSnapshot.exists) {
-      print("Error: User document does not exist.");
-      return {};
-    }
-
-    String username = (userSnapshot.data() as Map<String, dynamic>)['username'];
     String monthPrefix =
         '$selectedYear-${selectedMonth.toString().padLeft(2, '0')}';
 
@@ -328,9 +170,9 @@ class _ProfilePageState extends State<ProfilePage> {
       QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('dailytracker')
           .where(FieldPath.documentId,
-              isGreaterThanOrEqualTo: "$username-$monthPrefix-01")
+              isGreaterThanOrEqualTo: "$userId-$monthPrefix-01")
           .where(FieldPath.documentId,
-              isLessThanOrEqualTo: "$username-$monthPrefix-31")
+              isLessThanOrEqualTo: "$userId-$monthPrefix-31")
           .get();
 
       Set<int> trackedDays = snapshot.docs
@@ -345,6 +187,129 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       print("Error fetching tracked days: $e");
       return {};
+    }
+  }
+
+  Future<void> _fetchProfilePic() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists) {
+        setState(() {
+          _profilePicUrl = userDoc["profilePic"]; // URL from Firestore
+        });
+      }
+    } catch (e) {
+      print("Error fetching profile picture: $e");
+    }
+  }
+
+  void checkAndAssignPoints() async {
+    String userId = FirebaseAuth.instance.currentUser!.uid;
+    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    try {
+      DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      if (userSnapshot.exists) {
+        Map<String, dynamic> userData =
+            userSnapshot.data() as Map<String, dynamic>;
+        String username = userData['username'];
+        String server = userData['team'] ?? "Default"; // Get user's team
+        String documentId = '$username-$todayDate';
+
+        DocumentSnapshot snapshot = await FirebaseFirestore.instance
+            .collection('dailytracker')
+            .doc(documentId)
+            .get();
+
+        if (snapshot.exists) {
+          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+
+          // Get actual activity counts from dailytracker (if available)
+          int meditationMinutes = data['meditationMinutes'] ?? 0;
+          int stepsTaken = data['stepCount'] ?? 0;
+          int callsMade = data['callCount'] ?? 0;
+          int learningEntries = data['learningCount'] ?? 0;
+          int valueEntries = data['valueCount'] ?? 0;
+
+          // Define tasks and points for individual tasks
+          Map<String, bool> taskCompletion = {
+            'Meditation': data['meditation'] ?? false,
+            'Steps': data['steps'] ?? false,
+            'Call': data['call'] ?? false,
+            'Learning': data['learning'] ?? false,
+            'Add Value': data['addValue'] ?? false,
+          };
+
+          // Calculate points based on actual activity
+          Map<String, int> taskPoints = {
+            'Meditation Points': meditationMinutes, // 1 point per minute
+            'Steps Points': (stepsTaken / 200).floor(), // 1 point per 200 steps
+            'Call Points': callsMade, // 1 point per call
+            'Learning Points': learningEntries, // 1 point per entry
+            'Add Value Points': valueEntries, // 1 point per entry
+          };
+
+          // Fallback to fixed points if activity counts are not available
+          if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
+            taskPoints['Meditation Points'] = 5;
+          }
+          if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
+            taskPoints['Steps Points'] = 10;
+          }
+          if (callsMade == 0 && taskCompletion['Call'] == true) {
+            taskPoints['Call Points'] = 10;
+          }
+          if (learningEntries == 0 && taskCompletion['Learning'] == true) {
+            taskPoints['Learning Points'] = 15;
+          }
+          if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
+            taskPoints['Add Value Points'] = 15;
+          }
+
+          int totalPoints = taskPoints.values.reduce((a, b) => a + b);
+
+          // Save points in the userpoints collection
+          await FirebaseFirestore.instance
+              .collection('userpoints')
+              .doc(documentId)
+              .set({
+            'username': username,
+            'date': todayDate,
+            'totalPoints': totalPoints,
+            'taskPoints': taskPoints,
+            'tasks': taskCompletion,
+            'server': server,
+            // Store raw activity counts for better display
+            'activityCounts': {
+              'meditationMinutes': meditationMinutes,
+              'stepsTaken': stepsTaken,
+              'callsMade': callsMade,
+              'learningEntries': learningEntries,
+              'valueEntries': valueEntries,
+            }
+          });
+
+          print("Total points assigned: $totalPoints");
+          print("Points per task: $taskPoints");
+        } else {
+          print("No daily tracker data found for today.");
+        }
+      } else {
+        print("Error: User document does not exist.");
+      }
+    } catch (e) {
+      print("Error in assigning points: $e");
     }
   }
 
@@ -644,78 +609,69 @@ class _ProfilePageState extends State<ProfilePage> {
     String selectedDate = DateFormat('yyyy-MM-dd')
         .format(DateTime(selectedYear, selectedMonth, day));
 
-    // Fetch the username based on userId
-    DocumentSnapshot userSnapshot =
-        await FirebaseFirestore.instance.collection('users').doc(userId).get();
+    // Use userId to fetch data instead of username
+    String documentId = '$userId-$selectedDate'; // Document ID now uses UID
 
-    if (userSnapshot.exists) {
-      String username =
-          (userSnapshot.data() as Map<String, dynamic>)['username'];
-      String documentId = '$username-$selectedDate';
+    // Fetch the daily tracker data for the selected date from Firestore
+    Map<String, bool> selectedDateTasks = {
+      'Call': false,
+      'Steps': false,
+      'Meditation': false,
+      'Learning': false,
+      'Add Value': false,
+    };
 
-      // Fetch the daily tracker data for the selected date from Firestore
-      Map<String, bool> selectedDateTasks = {
-        'Call': false,
-        'Steps': false,
-        'Meditation': false,
-        'Learning': false,
-        'Add Value': false,
-      };
+    try {
+      DocumentSnapshot snapshot = await FirebaseFirestore.instance
+          .collection('dailytracker')
+          .doc(documentId)
+          .get();
 
-      try {
-        DocumentSnapshot snapshot = await FirebaseFirestore.instance
-            .collection('dailytracker')
-            .doc(documentId)
-            .get();
-
-        if (snapshot.exists) {
-          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
-          selectedDateTasks = {
-            'Call': data['call'] ?? false,
-            'Steps': data['steps'] ?? false,
-            'Meditation': data['meditation'] ?? false,
-            'Learning': data['learning'] ?? false,
-            'Add Value': data['addValue'] ?? false,
-          };
-        } else {
-          print("No data found for $selectedDate.");
-        }
-      } catch (e) {
-        print("Error fetching Firestore data for $selectedDate: $e");
+      if (snapshot.exists) {
+        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+        selectedDateTasks = {
+          'Call': data['call'] ?? false,
+          'Steps': data['steps'] ?? false,
+          'Meditation': data['meditation'] ?? false,
+          'Learning': data['learning'] ?? false,
+          'Add Value': data['addValue'] ?? false,
+        };
+      } else {
+        print("No data found for $selectedDate.");
       }
-
-      // Show the dialog with fetched data
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: Text("Tracker for $selectedMonth/$day/$selectedYear"),
-            content: StatefulBuilder(
-              builder: (context, setState) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: selectedDateTasks.keys.map((task) {
-                    return CheckboxListTile(
-                      title: Text(task),
-                      value: selectedDateTasks[task],
-                      onChanged:
-                          null, // Checkboxes are not interactive in this dialog
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Close"),
-              ),
-            ],
-          );
-        },
-      );
-    } else {
-      print("Error: User document does not exist.");
+    } catch (e) {
+      print("Error fetching Firestore data for $selectedDate: $e");
     }
+
+    // Show the dialog with fetched data
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text("Tracker for $selectedMonth/$day/$selectedYear"),
+          content: StatefulBuilder(
+            builder: (context, setState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: selectedDateTasks.keys.map((task) {
+                  return CheckboxListTile(
+                    title: Text(task),
+                    value: selectedDateTasks[task],
+                    onChanged:
+                        null, // Checkboxes are not interactive in this dialog
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("Close"),
+            ),
+          ],
+        );
+      },
+    );
   }
 }

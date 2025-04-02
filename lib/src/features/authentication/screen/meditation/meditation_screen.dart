@@ -6,6 +6,7 @@ import 'package:intl/intl.dart'; // For date formatting
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/src/constants/image_strings.dart';
+import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart'; // AudioHelper for music
@@ -23,9 +24,9 @@ class _MeditationState extends State<Meditation> {
   String? favoriteSongPath; // Store song file path
 
   @override
-  void initState() {
-    super.initState();
-    loadFavorite();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    loadFavorite(); // Reload favorite song when coming back
   }
 
   /// Load favorite song from user preferences
@@ -52,15 +53,18 @@ class _MeditationState extends State<Meditation> {
     // Fetch username from Firestore user document
     DocumentSnapshot userDoc =
         await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.get('username');
+    String? username = userDoc.exists ? userDoc.get('username') : null;
 
     if (username != null) {
       String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+      // Use UID for document ID
       DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$username-$formattedDate');
+          firestore.collection('dailytracker').doc('$userId-$formattedDate');
 
       // Use Firestore's FieldValue.merge to update without overwriting other fields
       await docRef.set({
+        'userId': userId,
         'username': username,
         'date': formattedDate,
         if (meditation) 'meditation': true,
@@ -68,7 +72,7 @@ class _MeditationState extends State<Meditation> {
       }, SetOptions(merge: true));
 
       print(
-          "Updated Firestore: Meditation = $meditation, Steps = $steps, for username: $username");
+          "Updated Firestore: Meditation = $meditation, Steps = $steps, for userId: $userId, username: $username");
     } else {
       print("Error: Username not found for userId: $userId");
     }
@@ -171,9 +175,22 @@ class _MeditationState extends State<Meditation> {
                         size: 20,
                       )),
                   GestureDetector(
-                      onTap: () =>
-                          Navigator.pushNamed(context, '/meditationSong'),
-                      child: Text(favoriteSong))
+                    onTap: () async {
+                      final selectedSong = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => MeditationSong()),
+                      );
+
+                      if (selectedSong != null && selectedSong is String) {
+                        setState(() {
+                          favoriteSong = selectedSong;
+                          favoriteSongPath = _getSongPath(favoriteSong);
+                        });
+                      }
+                    },
+                    child: Text(favoriteSong),
+                  )
                 ],
               )
             ],
