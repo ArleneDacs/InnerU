@@ -134,7 +134,7 @@ class _SignupScreenState extends State<SignupScreen> {
       User? user = userCredential.user;
 
       if (user != null) {
-        print("✅ User signed in: ${user.uid}");
+        print("User signed in: ${user.uid}");
 
         // Check if user exists in Firestore
         DocumentSnapshot userDoc = await FirebaseFirestore.instance
@@ -143,7 +143,7 @@ class _SignupScreenState extends State<SignupScreen> {
             .get();
 
         if (!userDoc.exists) {
-          print("⚠️ User does not exist in Firestore, creating user...");
+          print(" User does not exist in Firestore, creating user...");
 
           try {
             await FirebaseFirestore.instance
@@ -158,12 +158,12 @@ class _SignupScreenState extends State<SignupScreen> {
               "createdAt": FieldValue.serverTimestamp(), // Store signup time
             });
 
-            print("✅ Firestore user document created successfully!");
+            print("Firestore user document created successfully!");
           } catch (e) {
-            print("❌ Firestore write error: $e");
+            print(" Firestore write error: $e");
           }
         } else {
-          print("✅ User already exists in Firestore.");
+          print("User already exists in Firestore.");
         }
 
         // Proceed to the next page
@@ -173,7 +173,7 @@ class _SignupScreenState extends State<SignupScreen> {
         );
       }
     } catch (error) {
-      print("❌ Google sign-in failed: $error");
+      print("Google sign-in failed: $error");
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
