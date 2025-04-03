@@ -49,9 +49,10 @@ void initState() {
       _dobController.text = _currentBirthdate;
       _selectedImage = userData["profilePic"] ?? null; // Use URL instead of base64
     });
-    
     return userData;
   });
+
+  
 }
 Future<void> pickImage() async {
   try {
@@ -102,7 +103,6 @@ Future<String?> _uploadImageToFirebaseStorage(Uint8List imageBytes) async {
     return null;
   }
 }
-
 Future<void> _updateUserData() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) return;
@@ -116,8 +116,10 @@ Future<void> _updateUserData() async {
     );
   });
 
+  String newUsername = _usernameController.text.trim();
+
   Map<String, dynamic> updatedData = {
-    "username": _usernameController.text.trim(),
+    "username": newUsername,
     "email": _emailController.text.trim(),
     "number": _phoneController.text.trim(),
   };
@@ -137,7 +139,32 @@ Future<void> _updateUserData() async {
       }
     }
 
+    // Update user document
     await FirebaseFirestore.instance.collection("users").doc(user.uid).update(updatedData);
+
+    // Update username in all notes where the userId matches
+    QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
+        .collection("notes")
+        .where("userId", isEqualTo: user.uid)
+        .get();
+
+    for (var doc in notesSnapshot.docs) {
+      await doc.reference.update({"username": newUsername});
+    }
+
+    // Update username in all comments for the given user
+    QuerySnapshot allNotesSnapshot = await FirebaseFirestore.instance.collection("notes").get();
+
+    for (var noteDoc in allNotesSnapshot.docs) {
+      QuerySnapshot commentsSnapshot = await noteDoc.reference
+          .collection("comments")
+          .where("username", isEqualTo: user.displayName) // Assuming the user's display name was previously used
+          .get();
+
+      for (var commentDoc in commentsSnapshot.docs) {
+        await commentDoc.reference.update({"username": newUsername});
+      }
+    }
 
     setState(() {
       _selectedImage = updatedData["profilePic"];
@@ -167,9 +194,17 @@ Future<void> _updateUserData() async {
 
 
 
+
 Future<void> _checkUsernameAvailability(String username) async {
   final user = FirebaseAuth.instance.currentUser;
 
+  if (username.isEmpty) {
+    setState(() {
+      _isUsernameValid = false;
+      _isButtonEnabled = false;
+    });
+    return;
+  }
 
   if (username.length > 20) {
     setState(() {
@@ -177,31 +212,26 @@ Future<void> _checkUsernameAvailability(String username) async {
       _isButtonEnabled = false;
     });
 
-    // Show error message for exceeding length
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text("Username must be 20 characters or fewer."),
         backgroundColor: Colors.red,
       ),
     );
-    return; // Stop further validation if too long
+    return;
   }
-
-  _isButtonEnabled = _isEmailValid && _isUsernameValid;
-  if (user == null) return;
 
   final querySnapshot = await FirebaseFirestore.instance
       .collection('users')
       .where('username', isEqualTo: username)
       .get();
 
-  if (querySnapshot.docs.isNotEmpty && querySnapshot.docs.first.id != user.uid) {
+  if (querySnapshot.docs.isNotEmpty && querySnapshot.docs.first.id != user?.uid) {
     setState(() {
       _isUsernameValid = false;
       _isButtonEnabled = false;
     });
 
-    // Show error message for taken username
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text("This username is already taken."),
@@ -211,10 +241,14 @@ Future<void> _checkUsernameAvailability(String username) async {
   } else {
     setState(() {
       _isUsernameValid = true;
-      _isButtonEnabled = _isEmailValid && _isUsernameValid;
+      _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
+                         _emailController.text.trim().isNotEmpty &&
+                         _phoneController.text.trim().isNotEmpty &&
+                         _isUsernameValid && _isEmailValid;
     });
   }
 }
+
 
 
 
@@ -224,8 +258,13 @@ Future<void> _checkUsernameAvailability(String username) async {
     return regExp.hasMatch(email);
   }
 void _checkEmailAvailability(String email) async {
-  _isButtonEnabled = _isEmailValid && _isUsernameValid;
-
+  if (email.isEmpty) {
+    setState(() {
+      _isEmailValid = false;
+      _isButtonEnabled = false;
+    });
+    return;
+  }
 
   final user = FirebaseAuth.instance.currentUser;
 
@@ -240,7 +279,6 @@ void _checkEmailAvailability(String email) async {
       _isButtonEnabled = false;
     });
 
-    // Show a Snackbar with an error message for email
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text("This email is already linked to another account."),
       backgroundColor: Colors.red,
@@ -248,7 +286,10 @@ void _checkEmailAvailability(String email) async {
   } else {
     setState(() {
       _isEmailValid = true;
-      _isButtonEnabled = _isUsernameValid && _isEmailValid;
+      _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
+                         _emailController.text.trim().isNotEmpty &&
+                         _phoneController.text.trim().isNotEmpty &&
+                         _isUsernameValid && _isEmailValid;
     });
   }
 }
@@ -439,7 +480,7 @@ void _checkEmailAvailability(String email) async {
           SizedBox(height: 5),
         TextField(
           controller: controller,
-          maxLength: 20, // Prevent typing beyond 20 characters
+            maxLength: label == "Username" ? 20 : null, // Prevent typing beyond 20 characters
           style: TextStyle(fontSize: 14, color: Colors.black),
           onChanged: (value) {
             if (label == "Username") {
@@ -451,9 +492,15 @@ void _checkEmailAvailability(String email) async {
                 _isButtonEnabled = _hasChanges();
               });
             }
+            setState(() {
+          _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
+                            _emailController.text.trim().isNotEmpty &&
+                            _phoneController.text.trim().isNotEmpty &&
+                            _isUsernameValid && _isEmailValid;
+        });
           },
           decoration: InputDecoration(
-            counterText: "", // Hide default counter
+            counterText: label == "Username" ? null : "", // Style for counter
             filled: true,
             fillColor: Color(0xFFffecc9),
             border: OutlineInputBorder(
