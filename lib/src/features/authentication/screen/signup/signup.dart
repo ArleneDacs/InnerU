@@ -6,6 +6,10 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:google_sign_in/google_sign_in.dart'; // For Google Sign-In
 import 'package:firebase_auth/firebase_auth.dart'; // Firebase Authentication
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/material.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -112,7 +116,8 @@ class _SignupScreenState extends State<SignupScreen> {
         setState(() {
           _isLoading = false;
         });
-        return; // User canceled the sign-in process
+        print("❌ Google sign-in canceled by user.");
+        return;
       }
 
       final GoogleSignInAuthentication googleAuth =
@@ -128,35 +133,48 @@ class _SignupScreenState extends State<SignupScreen> {
 
       User? user = userCredential.user;
 
-      if (user != null && !user.emailVerified) {
-        await user.sendEmailVerification();
+      if (user != null) {
+        print("✅ User signed in: ${user.uid}");
 
-        // Show alert to notify user to verify their email
-        showDialog(
-          context: context,
-          builder: (context) {
-            return AlertDialog(
-              title: const Text("Verify Your Email"),
-              content: const Text(
-                  "A verification email has been sent to your email address. Please check your inbox and verify before logging in."),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("OK"),
-                ),
-              ],
-            );
-          },
-        );
+        // Check if user exists in Firestore
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection("users")
+            .doc(user.uid)
+            .get();
 
-        await FirebaseAuth.instance.signOut(); // Prevent access until verified
-      } else if (user != null && user.emailVerified) {
+        if (!userDoc.exists) {
+          print("⚠️ User does not exist in Firestore, creating user...");
+
+          try {
+            await FirebaseFirestore.instance
+                .collection("users")
+                .doc(user.uid)
+                .set({
+              "uid": user.uid,
+              "email": user.email,
+              "username": user.displayName ??
+                  user.email?.split('@')[0], // Fallback to email username
+              "photoURL": user.photoURL,
+              "createdAt": FieldValue.serverTimestamp(), // Store signup time
+            });
+
+            print("✅ Firestore user document created successfully!");
+          } catch (e) {
+            print("❌ Firestore write error: $e");
+          }
+        } else {
+          print("✅ User already exists in Firestore.");
+        }
+
+        // Proceed to the next page
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => Setuppage()),
         );
       }
     } catch (error) {
+      print("❌ Google sign-in failed: $error");
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Google sign-in failed: $error'),
@@ -169,7 +187,6 @@ class _SignupScreenState extends State<SignupScreen> {
       _isLoading = false;
     });
   }
-
   /*Future<void> _handleAppleSignIn() async {
     setState(() {
       _isLoading = true;
