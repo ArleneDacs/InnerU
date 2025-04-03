@@ -326,68 +326,68 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   void _addTask(Task task) async {
     try {
-    if (task.id.isEmpty) {
-      task.id = DateTime.now().millisecondsSinceEpoch.toString();
+      if (task.id.isEmpty) {
+        task.id = DateTime.now().millisecondsSinceEpoch.toString();
+      }
+      
+      // Add to Firestore first
+      await _repository.addTask(task);
+      
+      // Then reload tasks to ensure UI is in sync with database
+      await _loadTasks();
+    } catch (e) {
+      print('Error adding task: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to add task. Please try again.')),
+      );
     }
-    
-    // Add to Firestore first
-    await _repository.addTask(task);
-    
-    // Then reload tasks to ensure UI is in sync with database
-    await _loadTasks();
-  } catch (e) {
-    print('Error adding task: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Failed to add task. Please try again.')),
-    );
   }
-}
 
-void _deleteTask(String id) async {
-  // First remove from UI for immediate feedback
-  setState(() {
-    _tasks.removeWhere((task) => task.id == id);
-  });
-  
-  try {
-    // Then delete from Firestore
-    await _repository.deleteTask(id);
-    print('Task deleted successfully with ID: $id');
-  } catch (e) {
-    print('Error deleting task: $e');
-    // If deletion fails, reload tasks to ensure UI is in sync with database
-    await _loadTasks();
-  }
-}
-
-void _toggleTaskCompletion(String id) async {
-  try {
-    // Find the task in the local list
-    final index = _tasks.indexWhere((task) => task.id == id);
-    if (index != -1) {
-      // Create a local copy of the task
-      final task = _tasks[index];
-      // Toggle the completion status
-      task.isCompleted = !task.isCompleted;
-      
-      // Update the task in Firestore
-      await _repository.updateTask(task);
-      
-      // Update the UI immediately for better user experience
-      setState(() {
-        _tasks[index] = task;
-      });
-      
-      print('Task completion toggled: $id, New status: ${task.isCompleted}');
-    } else {
-      print('Task not found with ID: $id');
+  void _deleteTask(String id) async {
+    // First remove from UI for immediate feedback
+    setState(() {
+      _tasks.removeWhere((task) => task.id == id);
+    });
+    
+    try {
+      // Then delete from Firestore
+      await _repository.deleteTask(id);
+      print('Task deleted successfully with ID: $id');
+    } catch (e) {
+      print('Error deleting task: $e');
+      // If deletion fails, reload tasks to ensure UI is in sync with database
+      await _loadTasks();
     }
-  } catch (e) {
-    print('Error toggling task completion: $e');
-    // If the update fails, reload all tasks to ensure UI is in sync
-    await _loadTasks();
   }
-}
+
+  void _toggleTaskCompletion(String id) async {
+    try {
+      // Find the task in the local list
+      final index = _tasks.indexWhere((task) => task.id == id);
+      if (index != -1) {
+        // Create a local copy of the task
+        final task = _tasks[index];
+        // Toggle the completion status
+        task.isCompleted = !task.isCompleted;
+        
+        // Update the task in Firestore
+        await _repository.updateTask(task);
+        
+        // Update the UI immediately for better user experience
+        setState(() {
+          _tasks[index] = task;
+        });
+        
+        print('Task completion toggled: $id, New status: ${task.isCompleted}');
+      } else {
+        print('Task not found with ID: $id');
+      }
+    } catch (e) {
+      print('Error toggling task completion: $e');
+      // If the update fails, reload all tasks to ensure UI is in sync
+      await _loadTasks();
+    }
+  }
 
   // Show migration dialog - useful for first-time setup
   void _showMigrationDialog() {
@@ -659,19 +659,19 @@ void _toggleTaskCompletion(String id) async {
                       padding: const EdgeInsets.only(right: 8.0),
                       child: ElevatedButton(
                         onPressed: () {
-  if (titleController.text.trim().isNotEmpty) {
-    _addTask(
-      Task(
-        id: "", // Empty ID - will be set by Firestore
-        title: titleController.text.trim(),
-        description: descriptionController.text.trim(),
-        dueDate: selectedDate,
-        tag: selectedTag,
-      ),
-    );
-    Navigator.pop(context);
-  }
-},
+                          if (titleController.text.trim().isNotEmpty) {
+                            _addTask(
+                              Task(
+                                id: "", // Empty ID - will be set by Firestore
+                                title: titleController.text.trim(),
+                                description: descriptionController.text.trim(),
+                                dueDate: selectedDate,
+                                tag: selectedTag,
+                              ),
+                            );
+                            Navigator.pop(context);
+                          }
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFEFD199), // Gold/beige color
                           foregroundColor: Colors.white,
@@ -1315,31 +1315,31 @@ void _toggleTaskCompletion(String id) async {
   }
 
   void _updateTask(Task task) async {
-  try {
-    // Update in Firestore
-    await _repository.updateTask(task);
-    
-    // Update local state for immediate UI feedback
-    setState(() {
-      final index = _tasks.indexWhere((t) => t.id == task.id);
-      if (index != -1) {
-        _tasks[index] = task;
-      }
-    });
-    
-    // Show a confirmation message
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Task updated successfully')),
-    );
-  } catch (e) {
-    print('Error updating task: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Failed to update task. Please try again.')),
-    );
-    // If update fails, reload tasks to ensure UI is in sync with database
-    await _loadTasks();
+    try {
+      // Update in Firestore
+      await _repository.updateTask(task);
+      
+      // Update local state for immediate UI feedback
+      setState(() {
+        final index = _tasks.indexWhere((t) => t.id == task.id);
+        if (index != -1) {
+          _tasks[index] = task;
+        }
+      });
+      
+      // Show a confirmation message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task updated successfully')),
+      );
+    } catch (e) {
+      print('Error updating task: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to update task. Please try again.')),
+      );
+      // If update fails, reload tasks to ensure UI is in sync with database
+      await _loadTasks();
+    }
   }
-}
 
   Widget _buildCategoryButton(String category, int index, {int? badge}) {
     bool isSelected = index == _currentTabIndex;

@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 
 class UserActivity {
   final int callIntent;
@@ -20,19 +21,10 @@ class UserActivity {
   });
 
   int calculatePoints() {
-    // Call: Each call counts as 1 point
     int callPoints = callIntent;
-
-    // Meditation: Each minute counts as 1 point
     int meditationPoints = meditationMinutes;
-
-    // Step Tracker: 1pt per 200 steps
     int stepPoints = (stepsTaken / 200).floor();
-
-    // Add Value: Each entry counts as 1 point
     int valuePoints = valueEntries;
-
-    // Learning: Each entry counts as 1 point
     int learningPoints = learningEntries;
 
     return callPoints + meditationPoints + stepPoints + valuePoints + learningPoints;
@@ -172,109 +164,104 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   void _loadUserData() async {
-  QuerySnapshot snapshot =
-      await FirebaseFirestore.instance.collection('userpoints').get();
+    QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
 
-  // Create a map to store the latest entry for each user
-  Map<String, LeaderboardEntry> userEntries = {};
+    // Create a map to store the latest entry for each user
+    Map<String, LeaderboardEntry> userEntries = {};
 
-  // Process all documents
-  for (var doc in snapshot.docs) {
-    var data = doc.data() as Map<String, dynamic>;
-    String username = data['username'] ?? "Unknown User";
-    
-    // Get task points from Firestore - ensure it's properly initialized
-    Map<String, dynamic> taskPoints = data['taskPoints'] ?? {};
-    
-    // Calculate total points correctly (casting to int)
-    int totalPoints = 0;
-    taskPoints.forEach((key, value) {
-      // Cast the dynamic value to int
-      if (value != null) {
-        totalPoints += (value is int) ? value : (value as num).toInt();
+    // Process all documents
+    for (var doc in snapshot.docs) {
+      var data = doc.data() as Map<String, dynamic>;
+      String username = data['username'] ?? "Unknown User";
+      
+      // Get task points from Firestore - ensure it's properly initialized
+      Map<String, dynamic> taskPoints = data['taskPoints'] ?? {};
+      
+      // Calculate total points correctly (casting to int)
+      int totalPoints = 0;
+      taskPoints.forEach((key, value) {
+        // Cast the dynamic value to int
+        if (value != null) {
+          totalPoints += (value is int) ? value : (value as num).toInt();
+        }
+      });
+      
+      // Extract server information if available, otherwise use "Default"
+      String server = data['server'] ?? "Default";
+
+      // FIXED: Make sure to correctly extract data using consistent field names
+      // This is likely the main issue - the field names might not match what's in Firestore
+      UserActivity activity = UserActivity(
+        // Check both possible field name variants for each activity type
+        callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
+        meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
+        stepsTaken: _extractIntValue(taskPoints, ['Steps Points', 'steps_points', 'stepsPoints']) * 200,
+        valueEntries: _extractIntValue(taskPoints, ['Add Value Points', 'value_points', 'addValuePoints']),
+        learningEntries: _extractIntValue(taskPoints, ['Learning Points', 'learning_points', 'learningPoints']),
+        server: server,
+      );
+      
+      // Calculate the score from our activity model
+      int modelCalculatedScore = activity.calculatePoints();
+      
+      // Create entry with the correct score
+      LeaderboardEntry entry = LeaderboardEntry(
+        name: username,
+        score: modelCalculatedScore, // Use model's calculation
+        rank: 0, // Will be updated after sorting
+        activity: activity,
+      );
+
+      // Only store the entry if we don't already have one for this user,
+      // or if this entry has a higher score than the one we already have
+      if (!userEntries.containsKey(username) || userEntries[username]!.score < modelCalculatedScore) {
+        userEntries[username] = entry;
       }
+    }
+
+    // Convert map to list and sort by score
+    List<LeaderboardEntry> fetchedEntries = userEntries.values.toList();
+    fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
+
+    // Update ranks
+    for (int i = 0; i < fetchedEntries.length; i++) {
+      fetchedEntries[i] = LeaderboardEntry(
+        name: fetchedEntries[i].name,
+        score: fetchedEntries[i].score,
+        rank: i + 1,
+        activity: fetchedEntries[i].activity,
+      );
+    }
+
+    setState(() {
+      entries = fetchedEntries;
+      _filterByServer(selectedServer); // Initially filter by the selected server
     });
-    
-    // Extract server information if available, otherwise use "Default"
-    String server = data['server'] ?? "Default";
-
-    // FIXED: Make sure to correctly extract data using consistent field names
-    // This is likely the main issue - the field names might not match what's in Firestore
-    UserActivity activity = UserActivity(
-      // Check both possible field name variants for each activity type
-      callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
-      
-      meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
-      
-      stepsTaken: _extractIntValue(taskPoints, ['Steps Points', 'steps_points', 'stepsPoints']) * 200,
-      
-      valueEntries: _extractIntValue(taskPoints, ['Add Value Points', 'value_points', 'addValuePoints']),
-      
-      learningEntries: _extractIntValue(taskPoints, ['Learning Points', 'learning_points', 'learningPoints']),
-      
-      server: server,
-    );
-    
-    // Calculate the score from our activity model
-    int modelCalculatedScore = activity.calculatePoints();
-    
-    // Create entry with the correct score
-    LeaderboardEntry entry = LeaderboardEntry(
-      name: username,
-      score: modelCalculatedScore, // Use model's calculation
-      rank: 0, // Will be updated after sorting
-      activity: activity,
-    );
-
-    // Only store the entry if we don't already have one for this user,
-    // or if this entry has a higher score than the one we already have
-    if (!userEntries.containsKey(username) || userEntries[username]!.score < modelCalculatedScore) {
-      userEntries[username] = entry;
-    }
   }
 
-  // Convert map to list and sort by score
-  List<LeaderboardEntry> fetchedEntries = userEntries.values.toList();
-  fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
-
-  // Update ranks
-  for (int i = 0; i < fetchedEntries.length; i++) {
-    fetchedEntries[i] = LeaderboardEntry(
-      name: fetchedEntries[i].name,
-      score: fetchedEntries[i].score,
-      rank: i + 1,
-      activity: fetchedEntries[i].activity,
-    );
-  }
-
-  setState(() {
-    entries = fetchedEntries;
-    _filterByServer(selectedServer); // Initially filter by the selected server
-  });
-}
-
-// Helper method to safely extract integer values from the taskPoints map
-// Tries multiple possible field names and handles type conversion
-int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
-  // Try each possible key
-  for (String key in possibleKeys) {
-    if (data.containsKey(key) && data[key] != null) {
-      var value = data[key];
-      // Handle different possible types
-      if (value is int) {
-        return value;
-      } else if (value is double) {
-        return value.toInt();
-      } else if (value is num) {
-        return value.toInt();
-      } else if (value is String) {
-        // Try to parse string to int
-        return int.tryParse(value) ?? 0;
+  // Helper method to safely extract integer values from the taskPoints map
+  // Tries multiple possible field names and handles type conversion
+  int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
+    // Try each possible key
+    for (String key in possibleKeys) {
+      if (data.containsKey(key) && data[key] != null) {
+        var value = data[key];
+        // Handle different possible types
+        if (value is int) {
+          return value;
+        } else if (value is double) {
+          return value.toInt();
+        } else if (value is num) {
+          return value.toInt();
+        } else if (value is String) {
+          // Try to parse string to int
+          return int.tryParse(value) ?? 0;
+        }
       }
     }
+    return 0; // Default if none of the keys exist or conversion fails
   }
-  return 0; // Default if none of the keys exist or conversion fails
-}
+
   // Function to filter entries by server
   void _filterByServer(String server) {
     setState(() {
@@ -285,8 +272,7 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
         selectedServer = "All";
       } else {
         // Filter by specific server
-        List<LeaderboardEntry> filtered =
-            entries.where((entry) => entry.activity.server == server).toList();
+        List<LeaderboardEntry> filtered = entries.where((entry) => entry.activity.server == server).toList();
 
         // Re-rank the filtered entries from 1 to N
         for (int i = 0; i < filtered.length; i++) {
@@ -499,78 +485,78 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
   }
 
   Widget _buildPodium() {
-  // Check if we have enough entries to show in podium
-  if (displayedEntries.isEmpty) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          "No entries to display",
-          style: TextStyle(fontSize: 16, color: Colors.grey),
+    // Check if we have enough entries to show in podium
+    if (displayedEntries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            "No entries to display",
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
         ),
-      ),
-    );
-  }
-  
-  if (displayedEntries.length < 3) {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          "Not enough entries to display podium (need at least 3)",
-          style: TextStyle(fontSize: 16, color: Colors.grey),
+      );
+    }
+    
+    if (displayedEntries.length < 3) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            "Not enough entries to display podium (need at least 3)",
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
     return SingleChildScrollView(
-    child: Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        // Left confetti
-        Positioned(
-          left: 0,
-          top: 20,
-          child: SizedBox(
-            width: 100,
-            height: 180,
-            child: Image.asset(
-              'assets/images/confetti_left.gif',
-              fit: BoxFit.cover,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          // Left confetti
+          Positioned(
+            left: 0,
+            top: 20,
+            child: SizedBox(
+              width: 100,
+              height: 180,
+              child: Image.asset(
+                'assets/images/confetti_left.gif',
+                fit: BoxFit.cover,
+              ),
             ),
           ),
-        ),
 
-        // Right confetti
-        Positioned(
-          right: 0,
-          top: 20,
-          child: SizedBox(
-            width: 100,
-            height: 180,
-            child: Image.asset(
-              'assets/images/confetti_right.gif',
-              fit: BoxFit.cover,
+          // Right confetti
+          Positioned(
+            right: 0,
+            top: 20,
+            child: SizedBox(
+              width: 100,
+              height: 180,
+              child: Image.asset(
+                'assets/images/confetti_right.gif',
+                fit: BoxFit.cover,
+              ),
             ),
           ),
-        ),
 
           // Podium content
           Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _buildPodiumItem(displayedEntries[1], 120, 2),
-            _buildPodiumItem(displayedEntries[0], 140, 1),
-            _buildPodiumItem(displayedEntries[2], 100, 3),
-          ],
-        ),
-      ],
-    ),
-  );
-}
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _buildPodiumItem(displayedEntries[1], 120, 2),
+              _buildPodiumItem(displayedEntries[0], 140, 1),
+              _buildPodiumItem(displayedEntries[2], 100, 3),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
     return GestureDetector(
@@ -614,10 +600,12 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
                 padding: const EdgeInsets.symmetric(horizontal: 4.0),
                 child: Text('.', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
               ),
-              Text(entry.name, 
-                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                   overflow: TextOverflow.ellipsis,
-                   maxLines: 1),
+              Text(
+                entry.name, 
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1
+              ),
             ],
           ),
           Container(
@@ -644,80 +632,87 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
   }
 
   Widget _buildLeaderboardItem(LeaderboardEntry entry) {
-  return GestureDetector(
-    onTap: () {
-      // Show detailed breakdown of points
-      _showPointsBreakdown(context, entry);
-    },
-    child: Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Color(0xFFFFE5D3),
-          width: 1.5,
-        ),
-      ),
-      padding: EdgeInsets.all(12),
-      child: Row(
-        children: [
-          Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
-          SizedBox(width: 12),
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: Colors.grey[200],
-            child: Icon(
-              Icons.person,
-              size: 30,
-              color: Colors.grey[600],
-            ),
+    return GestureDetector(
+      onTap: () {
+        // Show detailed breakdown of points
+        _showPointsBreakdown(context, entry);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Color(0xFFFFE5D3),
+            width: 1.5,
           ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(entry.name,
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 4),
-                // Only show server info if hasJoinedTeam is true
-                if (hasJoinedTeam)
-                  Text(
-                    entry.activity.server,
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+        padding: EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
+            SizedBox(width: 12),
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: Colors.grey[200],
+              child: Icon(
+                Icons.person,
+                size: 30,
+                color: Colors.grey[600],
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 4),
+                  // Only show server info if hasJoinedTeam is true
+                  if (hasJoinedTeam)
+                    Text(
+                      entry.activity.server,
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: entry.score > 0 ? (entry.score / 3000) : 0.0,  // Prevent division by zero
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
-                SizedBox(height: 4),
-                LinearProgressIndicator(
-                  value: entry.score > 0 ? (entry.score / 3000) : 0.0,  // Prevent division by zero
-                  backgroundColor: Colors.grey[200],
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                ),
+                ],
+              ),
+            ),
+            SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(entry.score.toString(), style: TextStyle(fontSize: 18)),
+                Text('points', style: TextStyle(color: Colors.grey)),
               ],
             ),
-          ),
-          SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(entry.score.toString(), style: TextStyle(fontSize: 18)),
-              Text('points', style: TextStyle(color: Colors.grey)),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
-  void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
-    showModalBottomSheet(
-      context: context,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: EdgeInsets.all(16),
+  // Replace the _showPointsBreakdown method with this updated version
+void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true, // Allow the sheet to be larger
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (context) {
+      return SingleChildScrollView( // Add scrolling capability
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16, // Handle keyboard
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,21 +729,20 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
                   style: TextStyle(fontSize: 14, color: Colors.grey),
                 ),
               SizedBox(height: 16),
-               _buildPointsRow('Call', entry.activity.callIntent,
-                  '10 pt/call', entry.activity.callIntent),
+              _buildPointsRow('Call', entry.activity.callIntent,
+                '10 pt/call', entry.activity.callIntent),
               Divider(),    
               _buildPointsRow('Steps', entry.activity.stepsTaken,
-                  '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),    
+                '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),    
               Divider(),
               _buildPointsRow('Meditation', entry.activity.meditationMinutes,
-                  '5 pt/minute', entry.activity.meditationMinutes),
+                '5 pt/minute', entry.activity.meditationMinutes),
               Divider(),
               _buildPointsRow('Add Value', entry.activity.valueEntries,
-                  '15 pt/entry', entry.activity.valueEntries),
-                  Divider(),
+                '15 pt/entry', entry.activity.valueEntries),
+              Divider(),
               _buildPointsRow('Learning', entry.activity.learningEntries,
-                  '15 pt/entry', entry.activity.learningEntries),
-
+                '15 pt/entry', entry.activity.learningEntries),
               Divider(),
               Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -757,21 +751,27 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
                   children: [
                     Text('Total Points',
                         style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                            fontSize: 18, fontWeight: FontWeight.bold
+                        )
+                    ),
                     Text('${entry.score}',
                         style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange)),
+                            color: Colors.orange
+                        )
+                    ),
                   ],
                 ),
               ),
+              SizedBox(height: 8), // Add some padding at the bottom
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   Widget _buildPointsRow(String title, int value, String rate, int points) {
     return Padding(
@@ -788,8 +788,7 @@ int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
           ),
           Expanded(
             flex: 2,
-            child:
-                Text(rate, style: TextStyle(fontSize: 14, color: Colors.grey)),
+            child: Text(rate, style: TextStyle(fontSize: 14, color: Colors.grey)),
           ),
           Expanded(
             flex: 2,
@@ -826,8 +825,7 @@ class ShimmerWidget extends StatefulWidget {
   _ShimmerWidgetState createState() => _ShimmerWidgetState();
 }
 
-class _ShimmerWidgetState extends State<ShimmerWidget>
-    with SingleTickerProviderStateMixin {
+class _ShimmerWidgetState extends State<ShimmerWidget> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
 
