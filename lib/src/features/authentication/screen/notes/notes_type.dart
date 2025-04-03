@@ -25,7 +25,7 @@ class _NotesTypeState extends State<NotesType> {
   List<Widget> contentWidgets = []; // This will store text and image widgets
   final ImagePicker _picker = ImagePicker();
   List<String> uploadedImageUrls = [];
-  List<String> imagePaths = [];
+  List<String> imagePaths = []; 
   XFile? _selectedImage;
 
   final CollectionReference myNotes =
@@ -117,76 +117,84 @@ class _NotesTypeState extends State<NotesType> {
     _isSaving = false; // Mark the widget as unmounted when disposed
     super.dispose();
   }
+bool _isFormValid = false;
+
+void _validateForm() {
+  bool hasTitle = titleController.text.trim().isNotEmpty;
+  bool hasText = contentWidgets.any((widget) => widget is TextField && (widget.controller?.text.trim().isNotEmpty ?? false));
+  bool hasImage = uploadedImageUrls.isNotEmpty;
+
+  setState(() {
+    _isFormValid = hasTitle && hasText && hasImage;
+  });
+}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          onPressed: () {
-            Navigator.pop(context);
-          },
-          icon: Icon(Icons.arrow_back),
+    appBar: AppBar(
+  leading: IconButton(
+    onPressed: () {
+      Navigator.pop(context);
+    },
+    icon: Icon(Icons.arrow_back),
+  ),
+  actions: <Widget>[
+           TextButton(
+          onPressed: _isFormValid ? () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text("Save this note?"),
+                content: Text("Do you want to save this note for later?"),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text("Cancel"),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      saveNotes(isSaved: true);
+                      Navigator.pop(context);
+                      Navigator.pop(context);
+                    },
+                    child: Text("Save", style: TextStyle(color: Colors.blue)),
+                  ),
+                ],
+              ),
+            );
+          } : null, // Disabled when _isFormValid is false
+          child: Text("Save", style: TextStyle(fontSize: 15, color: _isFormValid ? Colors.black : Colors.grey)),
         ),
-        actions: <Widget>[
-          // Save Button
-          TextButton(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: Text("Save this note?"),
-                  content: Text("Do you want to save this note for later?"),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text("Cancel"),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        saveNotes(isSaved: true);
-                        Navigator.pop(context);
-                        Navigator.pop(context);
-                      },
-                      child: Text("Save", style: TextStyle(color: Colors.blue)),
-                    ),
-                  ],
-                ),
-              );
-            },
-            child: Text("Save", style: TextStyle(fontSize: 15)),
-          ),
+        TextButton(
+          onPressed: _isFormValid ? () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text("Post this note?"),
+                content: Text("Are you sure you want to share this note?"),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text("Cancel"),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      saveNotes(isSaved: false);
 
-          // Post Button
-          TextButton(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: Text("Post this note?"),
-                  content: Text("Are you sure you want to share this note?"),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text("Cancel"),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        saveNotes(isSaved: false); // Save with saved: false
-                        _finishedWriting();
-                        Navigator.pop(context);
-                        Navigator.pop(context);
-                      },
-                      child: Text("Yes", style: TextStyle(color: Colors.green)),
-                    ),
-                  ],
-                ),
-              );
-            },
-            child: Text("Post", style: TextStyle(fontSize: 15)),
-          ),
-        ],
-      ),
+                      Navigator.pop(context);
+                      Navigator.pop(context);
+                    },
+                    child: Text("Yes", style: TextStyle(color: Colors.green)),
+                  ),
+                ],
+              ),
+            );
+          } : null, // Disabled when _isFormValid is false
+          child: Text("Post", style: TextStyle(fontSize: 15, color: _isFormValid ? Colors.black : Colors.grey)),
+        ),
+  ],
+),
       body: SafeArea(
           child: Padding(
         padding: EdgeInsets.all(20),
@@ -215,29 +223,37 @@ class _NotesTypeState extends State<NotesType> {
             SizedBox(
               height: 20,
             ),
-
+     
             TextField(
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               controller: titleController,
+               onChanged: (value) => _validateForm(),
               decoration: InputDecoration(
                 border: InputBorder.none,
                 hintText: "Title",
               ),
-              onChanged: (value) {
-                titleString = value;
-              },
+             
             ),
-
-            Expanded(
+         
+           Expanded(
               child: ListView(
                 children: [
-                  ...contentWidgets, // Ensure existing text fields are shown first
-                  buildImageSlider(), // Move image previews below text inputs
-                  SizedBox(height: 10),
+                  ...contentWidgets.map((widget) {
+                    if (widget is TextField) {
+                      return TextField(
+                        controller: widget.controller,
+                        onChanged: (value) => _validateForm(),
+                        decoration: widget.decoration,
+                      );
+                    }
+                    return widget;
+                  }),
+                  buildImageSlider(),
+                   SizedBox(height: 10),
                 ],
               ),
             ),
-
+       
             // Button for Adding Images
             ElevatedButton(
               onPressed: pickImage,
@@ -262,18 +278,15 @@ class _NotesTypeState extends State<NotesType> {
     // Fetch username from Firestore user document
     DocumentSnapshot userDoc =
         await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.exists ? userDoc.get('username') : null;
+    String? username = userDoc.get('username');
 
     if (username != null) {
       String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-      // Use UID for document ID
       DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$userId-$formattedDate');
+          firestore.collection('dailytracker').doc('$username-$formattedDate');
 
       // Use Firestore's FieldValue.merge to update without overwriting other fields
       await docRef.set({
-        'userId': userId, // Added userId field
         'username': username,
         'date': formattedDate,
         if (meditation) 'meditation': true,
@@ -282,230 +295,236 @@ class _NotesTypeState extends State<NotesType> {
         if (addValue) 'addValue': true
       }, SetOptions(merge: true));
 
-      print(
-          "Successfully updated the daily tracker for userId: $userId, username: $username");
+      print("Successfully updated the daily tracker.");
     } else {
       print("Error: Username not found for userId: $userId");
     }
   }
 
-  void _finishedWriting() async {
+
+Future<void> saveNotes({required bool isSaved}) async {
+  if (_isSaving) return;
+  _isSaving = true;
+  
+  // Get the current user's ID
+  String? userId = FirebaseAuth.instance.currentUser?.uid;
+  if (userId == null) {
+    print("Error: User not logged in.");
+    return;
+  }
+
+  List<Map<String, String>> contentList = [];
+  DateTime now = DateTime.now();
+
+  // Collect note content (text and images)
+  for (var content in contentWidgets) {
+    if (content is TextField) {
+      if (content.controller?.text.isNotEmpty ?? false) {
+        contentList.add({
+          "type": "text",
+          "value": content.controller?.text ?? "",
+        });
+      }
+    }
+  }
+
+  // Ensure images are always uploaded even if only one remains
+  for (var imageUrl in uploadedImageUrls) {
+    if (imageUrl.isNotEmpty) {
+      contentList.add({
+        "type": "image",
+        "value": imageUrl,
+      });
+    }
+  }
+
+  try {
+    // Save the note to Firestore
+    await FirebaseFirestore.instance.collection('notes').add({
+      'username': username,
+      'userId': userId,
+      'title': titleController.text.trim(),
+      'note': contentList,
+      'color': color,
+      'createdAt': now,
+      'category': selectedCategory,
+      'saved': isSaved,
+    });
+
+    // Add data to dailytracker if the category is 'Learning' or 'Add Value'
     if (selectedCategory == "Learning") {
       await _saveDailyActivity(learning: true);
     } else if (selectedCategory == "Add Value") {
       await _saveDailyActivity(addValue: true);
     }
+
+    // Show a confirmation message
+    if (_mounted) {
+      CustomSnackBar.showCustomSnackBar(
+        context,
+        isSaved ? "Note saved successfully." : "Note posted successfully.",
+        Colors.white,
+      );
+    }
+  } catch (e) {
+    print("Error saving note: $e");
   }
 
-  Future<void> saveNotes({required bool isSaved}) async {
-    if (_isSaving) return;
-    _isSaving = true;
-    List<Map<String, String>> contentList = [];
-    DateTime now = DateTime.now();
+  _isSaving = false;
+}
 
-    String? userId =
-        FirebaseAuth.instance.currentUser?.uid; // Get current user ID
-    if (userId == null) {
-      print("Error: User not logged in.");
-      return;
-    }
 
-    for (var content in contentWidgets) {
-      if (content is TextField) {
-        if (content.controller?.text.isNotEmpty ?? false) {
-          contentList.add({
-            "type": "text",
-            "value": content.controller?.text ?? "",
-          });
-        }
-      }
-    }
+Future<String> uploadImageToFirebase(File imageFile) async {
+  try {
+    String fileName = DateTime.now().millisecondsSinceEpoch.toString();
+    Reference storageRef =
+        FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
 
-    // Ensure images are always uploaded even if only one remains
-    for (var imageUrl in uploadedImageUrls) {
-      if (imageUrl.isNotEmpty) {
-        contentList.add({
-          "type": "image",
-          "value": imageUrl,
-        });
-      }
-    }
+    UploadTask uploadTask = storageRef.putFile(imageFile);
+    TaskSnapshot snapshot = await uploadTask;
 
-    try {
-      await FirebaseFirestore.instance.collection('notes').add({
-        'username': username,
-        'userId': userId,
-        'title': titleString,
-        'note': contentList,
-        'color': color,
-        'createdAt': now,
-        'category': selectedCategory,
-        'saved': isSaved,
-      });
-
-      if (_mounted) {
-        CustomSnackBar.showCustomSnackBar(
-          context,
-          isSaved ? "Note saved successfully." : "Note posted successfully.",
-          Colors.white,
-        );
-      }
-    } catch (e) {
-      print("Error saving note: $e");
-    }
-
-    _isSaving = false;
+    return await snapshot.ref.getDownloadURL();
+  } catch (e) {
+    print("Error uploading image: $e");
+    return "";
   }
+}
 
-  Future<String> uploadImageToFirebase(File imageFile) async {
-    try {
-      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-      Reference storageRef =
-          FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
+void pickImage() async {
+  final List<XFile>? images = await _picker.pickMultiImage();
 
-      UploadTask uploadTask = storageRef.putFile(imageFile);
-      TaskSnapshot snapshot = await uploadTask;
+  if (images != null && images.isNotEmpty) {
+    if (!mounted) return;
 
-      return await snapshot.ref.getDownloadURL();
-    } catch (e) {
-      print("Error uploading image: $e");
-      return "";
-    }
-  }
+    List<String> newUploadedUrls = [];
 
-  void pickImage() async {
-    final List<XFile>? images = await _picker.pickMultiImage();
-
-    if (images != null && images.isNotEmpty) {
+    for (var image in images) {
       if (!mounted) return;
 
-      List<String> newUploadedUrls = [];
+      setState(() {
+        uploadedImageUrls.add("loading"); // Add a temporary loading state
+      });
 
-      for (var image in images) {
-        if (!mounted) return;
+      String imageUrl = await uploadImageToFirebase(File(image.path));
 
+      if (imageUrl.isNotEmpty && mounted) {
         setState(() {
-          uploadedImageUrls.add("loading"); // Add a temporary loading state
+          int loadingIndex = uploadedImageUrls.indexOf("loading");
+          if (loadingIndex != -1) {
+            uploadedImageUrls[loadingIndex] = imageUrl;
+             _validateForm();  // Replace loading with actual URL
+          } else {
+            uploadedImageUrls.add(imageUrl);
+          }
         });
-
-        String imageUrl = await uploadImageToFirebase(File(image.path));
-
-        if (imageUrl.isNotEmpty && mounted) {
-          setState(() {
-            int loadingIndex = uploadedImageUrls.indexOf("loading");
-            if (loadingIndex != -1) {
-              uploadedImageUrls[loadingIndex] =
-                  imageUrl; // Replace loading with actual URL
-            } else {
-              uploadedImageUrls.add(imageUrl);
-            }
-          });
-        }
       }
     }
   }
+}
 
-  Future<void> removeImage(int index) async {
-    if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
 
-    String imageUrl = uploadedImageUrls[index];
-    setState(() {
-      uploadedImageUrls.removeAt(index);
-    });
+Future<void> removeImage(int index) async {
+  if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
 
-    await FirebaseFirestore.instance
-        .collection('notes')
-        .where('note', arrayContains: {"type": "image", "value": imageUrl})
-        .get()
-        .then((querySnapshot) {
-          for (var doc in querySnapshot.docs) {
-            doc.reference.update({
-              'note': FieldValue.arrayRemove([
-                {"type": "image", "value": imageUrl}
-              ])
-            });
-          }
-        });
+  String imageUrl = uploadedImageUrls[index];
+  setState(() {
+    uploadedImageUrls.removeAt(index);
+     _validateForm(); 
+  });
 
-    await deleteImageFromFirebase(imageUrl);
-  }
-
-  Future<void> deleteImageFromFirebase(String imageUrl) async {
-    try {
-      Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
-      await storageRef.delete();
-    } catch (e) {
-      print("Error deleting image: $e");
+  await FirebaseFirestore.instance
+      .collection('notes')
+      .where('note', arrayContains: {"type": "image", "value": imageUrl})
+      .get()
+      .then((querySnapshot) {
+    for (var doc in querySnapshot.docs) {
+      doc.reference.update({
+        'note': FieldValue.arrayRemove([
+          {"type": "image", "value": imageUrl}
+        ])
+      });
     }
+  });
+
+  await deleteImageFromFirebase(imageUrl);
+}
+
+Future<void> deleteImageFromFirebase(String imageUrl) async {
+  try {
+    Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
+    await storageRef.delete();
+  } catch (e) {
+    print("Error deleting image: $e");
   }
+}
 
-  Widget buildImageSlider() {
-    return Center(
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.5,
-        child: uploadedImageUrls.isEmpty
-            ? SizedBox()
-            : ListView.builder(
-                scrollDirection: Axis.horizontal,
-                shrinkWrap: true,
-                physics: BouncingScrollPhysics(),
-                itemCount: uploadedImageUrls.length,
-                itemBuilder: (context, index) {
-                  double screenWidth = MediaQuery.of(context).size.width;
-                  double imageWidth = screenWidth * 0.8;
-                  double imageHeight = screenWidth * 1;
+Widget buildImageSlider() {
+  return Center(
+    child: SizedBox(
+      height: MediaQuery.of(context).size.height * 0.5,
+      child: uploadedImageUrls.isEmpty
+          ? SizedBox()
+          : ListView.builder(
+              scrollDirection: Axis.horizontal,
+              shrinkWrap: true,
+              physics: BouncingScrollPhysics(),
+              itemCount: uploadedImageUrls.length,
+              itemBuilder: (context, index) {
+                double screenWidth = MediaQuery.of(context).size.width;
+                double imageWidth = screenWidth * 0.8;
+                double imageHeight = screenWidth * 1;
 
-                  return Align(
-                    alignment: Alignment.center,
-                    child: Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
-                      child: Stack(
-                        alignment: Alignment.topRight,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: uploadedImageUrls[index] == "loading"
-                                ? Container(
-                                    width: imageWidth,
-                                    height: imageHeight,
-                                    color: Colors.grey[300],
-                                    child: Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                  )
-                                : Image.network(
-                                    uploadedImageUrls[index],
-                                    width: imageWidth,
-                                    height: imageHeight,
-                                    fit: BoxFit.cover,
+                return Align(
+                  alignment: Alignment.center,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.02),
+                    child: Stack(
+                      alignment: Alignment.topRight,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: uploadedImageUrls[index] == "loading"
+                              ? Container(
+                                  width: imageWidth,
+                                  height: imageHeight,
+                                  color: Colors.grey[300],
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
                                   ),
-                          ),
-                          Positioned(
-                            top: 5,
-                            right: 5,
-                            child: GestureDetector(
-                              onTap: () => removeImage(index),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.withOpacity(0.8),
-                                  shape: BoxShape.circle,
+                                )
+                              : Image.network(
+                                  uploadedImageUrls[index],
+                                  width: imageWidth,
+                                  height: imageHeight,
+                                  fit: BoxFit.cover,
                                 ),
-                                padding: EdgeInsets.all(6),
-                                child: Icon(Icons.close,
-                                    color: Colors.white, size: 18),
+                        ),
+                        Positioned(
+                          top: 5,
+                          right: 5,
+                          child: GestureDetector(
+                            onTap: () => removeImage(index),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withOpacity(0.8),
+                                shape: BoxShape.circle,
                               ),
+                              padding: EdgeInsets.all(6),
+                              child: Icon(Icons.close, color: Colors.white, size: 18),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  );
-                },
-              ),
-      ),
-    );
-  }
+                  ),
+                );
+              },
+            ),
+    ),
+  );
+}
+
+
 
   void addText(String text) {
     if (text.isNotEmpty) {

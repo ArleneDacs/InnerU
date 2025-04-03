@@ -100,7 +100,7 @@ class _NoteCardState extends State<NoteCard> {
                 }
                 return const SizedBox();
               }),
-
+  const SizedBox(height: 20),
              if (imageUrls.isNotEmpty)
   Column(
     children: [
