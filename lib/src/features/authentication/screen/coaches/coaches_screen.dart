@@ -57,7 +57,7 @@ class CoachProfileDialog extends StatelessWidget {
     User? currentUser = FirebaseAuth.instance.currentUser;
 
     if (currentUser != null) {
-      String userId = currentUser.uid; // Get the userId from the Firebase user
+      String userId = currentUser.uid; // Get the userId from FirebaseAuth
 
       try {
         // Fetch username from Firestore user document
@@ -65,38 +65,36 @@ class CoachProfileDialog extends StatelessWidget {
             .collection('users')
             .doc(userId)
             .get();
-        String? username = userDoc.get('username');
 
-        if (username != null) {
-          String documentId =
-              '$username-$formattedDate'; // Firestore document ID
+        if (userDoc.exists) {
+          String username = userDoc.get('username') ?? 'Unknown User';
+
+          // Use UID instead of username for Firestore document ID
+          String documentId = '$userId-$formattedDate';
 
           // Try to launch the phone dialer
           if (await canLaunchUrl(url)) {
             await launchUrl(url);
             debugPrint("Dialer launched successfully");
 
-            // Update or create Firestore document for the current user and date
-            try {
-              await FirebaseFirestore.instance
-                  .collection('dailytracker')
-                  .doc(documentId)
-                  .set({
-                'username': username,
-                'date': formattedDate,
-                'call': true, // Set 'call' field to true
-              }, SetOptions(merge: true));
+            // Update or create Firestore document using UID instead of username
+            await FirebaseFirestore.instance
+                .collection('dailytracker')
+                .doc(documentId)
+                .set({
+              'userId': userId, // Store userId
+              'username': username, // Store username for display purposes
+              'date': formattedDate,
+              'call': true, // Mark 'call' as true
+            }, SetOptions(merge: true));
 
-              debugPrint(
-                  "Firestore updated successfully: 'call' field set to true");
-            } catch (e) {
-              debugPrint("Error updating Firestore: $e");
-            }
+            debugPrint(
+                "Firestore updated successfully: 'call' field set to true");
           } else {
             debugPrint("Could not launch dialer");
           }
         } else {
-          debugPrint("Error: Username not found for userId: $userId");
+          debugPrint("Error: User document not found for userId: $userId");
         }
       } catch (e) {
         debugPrint("Error fetching user data: $e");
