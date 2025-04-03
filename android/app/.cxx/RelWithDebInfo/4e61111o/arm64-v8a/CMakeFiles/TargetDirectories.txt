@@ -1,0 +1,2 @@
+C:/Users/john angel bahaynon/Desktop/Files/newest/selfcareapp/android/app/.cxx/RelWithDebInfo/4e61111o/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/john angel bahaynon/Desktop/Files/newest/selfcareapp/android/app/.cxx/RelWithDebInfo/4e61111o/arm64-v8a/CMakeFiles/rebuild_cache.dir

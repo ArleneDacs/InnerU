@@ -12,7 +12,20 @@
           "package_name": "com.example.selfcare_projects"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "609604667702-cofrcn20hrkfe40vgthmvh5lgmjl1j1v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.selfcare_projects",
+            "certificate_hash": "0eda28eb6e20de7fcede221f250b8c19506a6101"
+          }
+        },
+        {
+          "client_id": "609604667702-2898tlqiuhgt69viubl09cq4ninu78g9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyD9ITfkOctFd-8tgO0O52q9kM55k7rLZgo"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "609604667702-2898tlqiuhgt69viubl09cq4ninu78g9.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "609604667702-gpl8d3fqfq6k3kqhmoltihnh95k1u2t3.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.selfcareProjects"
+              }
+            }
+          ]
         }
       }
     }
