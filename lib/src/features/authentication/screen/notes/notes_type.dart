@@ -123,9 +123,10 @@ void _validateForm() {
   bool hasTitle = titleController.text.trim().isNotEmpty;
   bool hasText = contentWidgets.any((widget) => widget is TextField && (widget.controller?.text.trim().isNotEmpty ?? false));
   bool hasImage = uploadedImageUrls.isNotEmpty;
+  bool hasCategory = selectedCategory != null && selectedCategory!.trim().isNotEmpty;
 
   setState(() {
-    _isFormValid = hasTitle && hasText && hasImage;
+    _isFormValid = hasTitle && hasText && hasImage && hasCategory;
   });
 }
 
@@ -217,6 +218,7 @@ void _validateForm() {
                   setState(() {
                     selectedCategory = newValue;
                   });
+                  _validateForm(); 
                 },
               ),
             ),
