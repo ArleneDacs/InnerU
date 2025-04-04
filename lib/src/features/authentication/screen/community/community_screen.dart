@@ -29,17 +29,23 @@ class _CommunityScreenState extends State<CommunityScreen> {
       );
     }
 
-    Query<Map<String, dynamic>> notesQuery = _firestore.collection('notes');
+Query<Map<String, dynamic>> notesQuery = FirebaseFirestore.instance
+    .collection('notes');
 
     if (selectedCategory == "Saved") {
       notesQuery = notesQuery
           .where("userId", isEqualTo: currentUserId)
           .where("saved", isEqualTo: true);
+    } 
+     else if (selectedCategory == "My Post") {
+      // Fetch only notes where the userId matches the current user's ID
+      notesQuery = notesQuery.where("userId", isEqualTo: currentUserId).where("saved", isEqualTo: false);
     } else {
       notesQuery = notesQuery
           .where("category", isEqualTo: selectedCategory)
           .where("saved", isEqualTo: false);
     }
+
 
     return Scaffold(
       body: Column(
@@ -49,7 +55,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: ["Add Value", "Learning", "Saved"]
+              children: ["Add Value", "Learning", "My Post", "Saved" ] 
                   .map((category) => _buildCategoryButton(category))
                   .toList(),
             ),

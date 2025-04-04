@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'dart:typed_data';
@@ -480,7 +481,9 @@ void _checkEmailAvailability(String email) async {
           SizedBox(height: 5),
         TextField(
           controller: controller,
-            maxLength: label == "Username" ? 20 : null, // Prevent typing beyond 20 characters
+           maxLength: label == "Username" ? 20 : (label == "Phone Number" ? 11 : null),
+            keyboardType: label == "Phone Number" ? TextInputType.number : TextInputType.text, // Set numeric keyboard
+          inputFormatters: label == "Phone Number" ? [FilteringTextInputFormatter.digitsOnly] : [],// Prevent typing beyond 20 characters
           style: TextStyle(fontSize: 14, color: Colors.black),
           onChanged: (value) {
             if (label == "Username") {
