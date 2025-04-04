@@ -265,9 +265,21 @@ class _SignupScreenState extends State<SignupScreen> {
                     // Username Field
                     TextFormField(
                       controller: _usernameController,
-                      decoration: const InputDecoration(labelText: "Username"),
-                      validator: (value) =>
-                          value!.isEmpty ? "Username cannot be empty" : null,
+                      maxLength: 20, // Limits input to 20 characters
+                      decoration: const InputDecoration(
+                        labelText: "Username",
+                        counterText:
+                            "", // Hides character counter UI (optional)
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return "Username cannot be empty";
+                        }
+                        if (value.length > 20) {
+                          return "Username must be at most 20 characters";
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 10),
                     // Email Field
