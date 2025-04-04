@@ -810,15 +810,6 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                   color: Colors.grey,
                                 ),
                               ),
-                              if (_searchQuery.isEmpty && _currentTabIndex != 2)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: TextButton.icon(
-                                    icon: const Icon(Icons.add_circle_outline, color: Colors.deepPurple),
-                                    label: const Text('Add a new task', style: TextStyle(color: Colors.deepPurple)),
-                                    onPressed: _showAddTaskDialog,
-                                  ),
-                                ),
                             ],
                           ),
                         )
