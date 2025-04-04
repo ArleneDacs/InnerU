@@ -19,6 +19,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
   List<Map<String, dynamic>> users = [];
   Map<String, Map<String, Map<String, bool>>> userProgressData = {};
   String currentUserId = '';
+  String currentUserName = ''; // Store the username here
   int selectedMonth = DateTime.now().month;
   int selectedYear = DateTime.now().year;
 
@@ -37,7 +38,8 @@ class _UserProgressPageState extends State<UserProgressPage> {
           .get();
       if (userDoc.exists) {
         setState(() {
-          currentUserId = userDoc['username'];
+          currentUserId = user.uid; // Store the UID here
+          currentUserName = userDoc['username']; // Store the username here
         });
         fetchUsersAndProgress();
       }
@@ -83,31 +85,12 @@ class _UserProgressPageState extends State<UserProgressPage> {
 
       setState(() {
         users = tempUsers
-          ..sort((a, b) => a['username'].compareTo(b['username']));
+          ..sort((a, b) =>
+              a['username'].compareTo(b['username'])); // Sort by username
         userProgressData = progressData;
       });
     } catch (e) {
       print("Error fetching data: $e");
-    }
-  }
-
-  Future<void> updateUsername(String newUsername) async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      try {
-        // Update the username in Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .update({
-          'username': newUsername,
-        });
-
-        // After updating the username, reload the progress data
-        fetchUsersAndProgress();
-      } catch (e) {
-        print("Error updating username: $e");
-      }
     }
   }
 

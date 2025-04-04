@@ -16,6 +16,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
   bool _isLoading = false;
+  String? _loginError;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -25,13 +26,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() {
       _isLoading = true;
+      _loginError = null;
     });
 
     try {
-      UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
-              email: _emailController.text.trim(),
-              password: _passwordController.text.trim());
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
 
       User? user = userCredential.user;
       if (user != null) {
@@ -57,9 +60,9 @@ class _LoginScreenState extends State<LoginScreen> {
         errorMessage = "Invalid email format.";
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
-      );
+      setState(() {
+        _loginError = errorMessage;
+      });
     }
 
     setState(() {
@@ -179,7 +182,39 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const SizedBox(height: 170),
+                  const SizedBox(height: 90),
+
+                  // Error message container placed at the top
+                  if (_loginError != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.red[100],
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _loginError!,
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () {
+                              setState(() {
+                                _loginError = null;
+                              });
+                            },
+                          )
+                        ],
+                      ),
+                    ),
+
                   const Text(
                     "Selfcare",
                     style: TextStyle(
@@ -188,7 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontFamily: 'Parisienne',
                     ),
                   ),
-                  const SizedBox(height: 25),
+                  const SizedBox(height: 50),
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(labelText: "Email"),
