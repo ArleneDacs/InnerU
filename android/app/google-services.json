@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "609604667702-t88hj948tuopoklb9he9ntd9050k4jj4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.selfcare_projects",
+            "certificate_hash": "a93e990ec93a2a17d7d79ac29357060a7eaf9b41"
+          }
+        },
+        {
           "client_id": "609604667702-2898tlqiuhgt69viubl09cq4ninu78g9.apps.googleusercontent.com",
           "client_type": 3
         }
