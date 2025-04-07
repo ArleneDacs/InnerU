@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -508,8 +509,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
                           ),
+                          counterText: '${titleController.text.length}/60',
+                          helperText: 'Maximum 60 characters',
                         ),
                         autofocus: true,
+                        maxLength: 60,
+                        buildCounter: (BuildContext context, {required int currentLength, required bool isFocused, required int? maxLength}) {
+                          return null;
+                        },
+                        onChanged: (text) {
+                          setState(() {});
+                        },
                       ),
                     ),
                   ],
@@ -897,6 +907,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                           ? Colors.grey
                                           : null,
                                     ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 2,
                                   ),
                                   subtitle: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1088,8 +1100,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
                           ),
+                          counterText: '${titleController.text.length}/60',
+                          helperText: 'Maximum 60 characters',
                         ),
                         autofocus: true,
+                        maxLength: 60,
+                        buildCounter: (BuildContext context, {required int currentLength, required bool isFocused, required int? maxLength}) {
+                          return null;
+                        },
+                        onChanged: (text) {
+                          setState(() {});
+                        },
                       ),
                     ),
                   ],
