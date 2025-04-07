@@ -388,7 +388,7 @@ Future<void> saveNotes({required bool isSaved}) async {
       'title': titleController.text.trim(),
       'note': contentList,
       'color': color,
-      'createdAt': FieldValue.serverTimestamp(),
+      'createdAt': now,
       'category': selectedCategory,
       'saved': isSaved,
     });
