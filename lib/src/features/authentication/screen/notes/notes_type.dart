@@ -121,25 +121,63 @@ bool _isFormValid = false;
 
 void _validateForm() {
   bool hasTitle = titleController.text.trim().isNotEmpty;
-  bool hasText = contentWidgets.any((widget) => widget is TextField && (widget.controller?.text.trim().isNotEmpty ?? false));
+  bool hasText = contentWidgets.any((widget) =>
+      widget is TextField && (widget.controller?.text.trim().isNotEmpty ?? false));
   bool hasImage = uploadedImageUrls.isNotEmpty;
   bool hasCategory = selectedCategory != null && selectedCategory!.trim().isNotEmpty;
 
+  bool isValid = false;
+
+  if (selectedCategory == "Learning") {
+    // Image is optional
+    isValid = hasTitle && hasText && hasCategory;
+  } else if (selectedCategory == "Add Value") {
+    // Image is required
+    isValid = hasTitle && hasText && hasImage && hasCategory;
+  }
+
   setState(() {
-    _isFormValid = hasTitle && hasText && hasImage && hasCategory;
+    _isFormValid = isValid;
   });
+}Future<bool> _showExitConfirmationDialog() async {
+  return await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Discard changes?'),
+      content: Text('Are you sure you want to leave without saving?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text('Yes'),
+        ),
+      ],
+    ),
+  ) ?? false; // Return false if dialog is dismissed without selection
 }
+
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-    appBar: AppBar(
-  leading: IconButton(
-    onPressed: () {
-      Navigator.pop(context);
+ return WillPopScope(
+    onWillPop: () async {
+      bool shouldLeave = await _showExitConfirmationDialog();
+      return shouldLeave;
     },
-    icon: Icon(Icons.arrow_back),
-  ),
+    child: Scaffold(
+    appBar: AppBar(
+ leading: IconButton(
+          onPressed: () async {
+            bool shouldLeave = await _showExitConfirmationDialog();
+            if (shouldLeave) {
+              Navigator.pop(context);
+            }
+          },
+          icon: Icon(Icons.arrow_back),
+        ),
   actions: <Widget>[
            TextButton(
           onPressed: _isFormValid ? () {
@@ -229,10 +267,12 @@ void _validateForm() {
             TextField(
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               controller: titleController,
+              maxLength: 40,
                onChanged: (value) => _validateForm(),
               decoration: InputDecoration(
                 border: InputBorder.none,
                 hintText: "Title",
+                
               ),
              
             ),
@@ -264,7 +304,7 @@ void _validateForm() {
           ],
         ),
       )),
-    );
+    ));
   }
 
   Future<void> _saveDailyActivity(
@@ -348,7 +388,7 @@ Future<void> saveNotes({required bool isSaved}) async {
       'title': titleController.text.trim(),
       'note': contentList,
       'color': color,
-      'createdAt': now,
+      'createdAt': FieldValue.serverTimestamp(),
       'category': selectedCategory,
       'saved': isSaved,
     });
