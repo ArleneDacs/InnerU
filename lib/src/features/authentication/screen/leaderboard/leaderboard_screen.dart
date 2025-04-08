@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 
+// MODEL CLASSES
 class UserActivity {
   final int callIntent;
   final int meditationMinutes;
@@ -31,6 +32,23 @@ class UserActivity {
   }
 }
 
+class LeaderboardEntry {
+  final String name;
+  final int score;
+  final int rank;
+  final UserActivity activity;
+  final String? profilePic;
+
+  const LeaderboardEntry({
+    required this.name,
+    required this.score,
+    required this.rank,
+    this.activity = const UserActivity(),
+    this.profilePic,
+  });
+}
+
+// SERVICE CLASS
 class LeaderboardService {
   List<LeaderboardEntry> _entries = [];
 
@@ -75,20 +93,7 @@ class LeaderboardService {
   }
 }
 
-class LeaderboardEntry {
-  final String name;
-  final int score;
-  final int rank;
-  final UserActivity activity;
-
-  const LeaderboardEntry({
-    required this.name,
-    required this.score,
-    required this.rank,
-    this.activity = const UserActivity(),
-  });
-}
-
+// WIDGET CLASSES
 class Leaderboard extends StatefulWidget {
   final bool isLoading;
 
@@ -101,7 +106,7 @@ class Leaderboard extends StatefulWidget {
 class _LeaderboardState extends State<Leaderboard> {
   final LeaderboardService _leaderboardService = LeaderboardService();
   late List<LeaderboardEntry> entries;
-  late List<LeaderboardEntry> displayedEntries;
+  List<LeaderboardEntry> displayedEntries = []; // Initialize with empty list
   bool isLoading = true;
   String selectedServer = "Default"; // Default server to show first
   String username = "Valenin";
@@ -111,20 +116,11 @@ class _LeaderboardState extends State<Leaderboard> {
   @override
   void initState() {
     super.initState();
-    isLoading = widget.isLoading;
-    _loadUserData();
+    isLoading = true; // Always start with loading
+    entries = [];
+    displayedEntries = [];
     _checkUserTeamStatus(); // Check if user has joined a team
-
-    // Simulate loading for demo
-    if (isLoading) {
-      Future.delayed(Duration(seconds: 2), () {
-        if (mounted) {
-          setState(() {
-            isLoading = false;
-          });
-        }
-      });
-    }
+    _loadUserData(); 
   }
 
   // Check if user has joined a team
@@ -164,89 +160,113 @@ class _LeaderboardState extends State<Leaderboard> {
   }
 
   void _loadUserData() async {
-    QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
+    try {
+      QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
 
-    // Create a map to store the latest entry for each user
-    Map<String, LeaderboardEntry> userEntries = {};
+      // Create a map to store the latest entry for each user
+      Map<String, LeaderboardEntry> userEntries = {};
 
-    // Process all documents
-    for (var doc in snapshot.docs) {
-      var data = doc.data() as Map<String, dynamic>;
-      String username = data['username'] ?? "Unknown User";
-      
-      // Get task points from Firestore - ensure it's properly initialized
-      Map<String, dynamic> taskPoints = data['taskPoints'] ?? {};
-      
-      // Calculate total points correctly (casting to int)
-      int totalPoints = 0;
-      taskPoints.forEach((key, value) {
-        // Cast the dynamic value to int
-        if (value != null) {
-          totalPoints += (value is int) ? value : (value as num).toInt();
+      // Process all documents
+      for (var doc in snapshot.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        String username = data['username'] ?? "Unknown User";
+        
+        // Get task points from Firestore - ensure it's properly initialized
+        Map<String, dynamic> taskPoints = data['taskPoints'] ?? {};
+        
+        // Calculate total points correctly (casting to int)
+        int totalPoints = 0;
+        taskPoints.forEach((key, value) {
+          // Cast the dynamic value to int
+          if (value != null) {
+            totalPoints += (value is int) ? value : (value as num).toInt();
+          }
+        });
+        
+        // Extract server information if available, otherwise use "Default"
+        String server = data['server'] ?? "Default";
+
+        // FIXED: Make sure to correctly extract data using consistent field names
+        UserActivity activity = UserActivity(
+          callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
+          meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
+          stepsTaken: _extractIntValue(taskPoints, ['Steps Points', 'steps_points', 'stepsPoints']) * 200,
+          valueEntries: _extractIntValue(taskPoints, ['Add Value Points', 'value_points', 'addValuePoints']),
+          learningEntries: _extractIntValue(taskPoints, ['Learning Points', 'learning_points', 'learningPoints']),
+          server: server,
+        );
+        
+        // Calculate the score from our activity model
+        int modelCalculatedScore = activity.calculatePoints();
+        
+        // Fetch user's profile picture from users collection using username
+        String? profilePicUrl;
+        try {
+          QuerySnapshot userSnapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .where('username', isEqualTo: username)
+              .limit(1)
+              .get();
+          
+          if (userSnapshot.docs.isNotEmpty) {
+            var userData = userSnapshot.docs.first.data() as Map<String, dynamic>;
+            profilePicUrl = userData['profilePic'];
+          }
+        } catch (e) {
+          print('Error fetching profile pic for $username: $e');
         }
-      });
-      
-      // Extract server information if available, otherwise use "Default"
-      String server = data['server'] ?? "Default";
+        
+        // Create entry with the correct score
+        LeaderboardEntry entry = LeaderboardEntry(
+          name: username,
+          score: modelCalculatedScore, // Use model's calculation
+          rank: 0, // Will be updated after sorting
+          activity: activity,
+          profilePic: profilePicUrl, // Add the profile picture URL
+        );
 
-      // FIXED: Make sure to correctly extract data using consistent field names
-      // This is likely the main issue - the field names might not match what's in Firestore
-      UserActivity activity = UserActivity(
-        // Check both possible field name variants for each activity type
-        callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
-        meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
-        stepsTaken: _extractIntValue(taskPoints, ['Steps Points', 'steps_points', 'stepsPoints']) * 200,
-        valueEntries: _extractIntValue(taskPoints, ['Add Value Points', 'value_points', 'addValuePoints']),
-        learningEntries: _extractIntValue(taskPoints, ['Learning Points', 'learning_points', 'learningPoints']),
-        server: server,
-      );
-      
-      // Calculate the score from our activity model
-      int modelCalculatedScore = activity.calculatePoints();
-      
-      // Create entry with the correct score
-      LeaderboardEntry entry = LeaderboardEntry(
-        name: username,
-        score: modelCalculatedScore, // Use model's calculation
-        rank: 0, // Will be updated after sorting
-        activity: activity,
-      );
-
-      // Only store the entry if we don't already have one for this user,
-      // or if this entry has a higher score than the one we already have
-      if (!userEntries.containsKey(username) || userEntries[username]!.score < modelCalculatedScore) {
-        userEntries[username] = entry;
+        // Only store the entry if we don't already have one for this user,
+        // or if this entry has a higher score than the one we already have
+        if (!userEntries.containsKey(username) || userEntries[username]!.score < modelCalculatedScore) {
+          userEntries[username] = entry;
+        }
       }
+
+      // Convert map to list and sort by score
+      List<LeaderboardEntry> fetchedEntries = userEntries.values.toList();
+      fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
+
+      // Update ranks
+      for (int i = 0; i < fetchedEntries.length; i++) {
+        fetchedEntries[i] = LeaderboardEntry(
+          name: fetchedEntries[i].name,
+          score: fetchedEntries[i].score,
+          rank: i + 1,
+          activity: fetchedEntries[i].activity,
+          profilePic: fetchedEntries[i].profilePic, // Keep the profile pic URL
+        );
+      }
+
+      setState(() {
+        entries = fetchedEntries;
+        _filterByServer(selectedServer);
+        isLoading = false; // Set loading to false only here
+      });
+    } catch (e) {
+      print('Error loading user data: $e');
+      // In case of error, still need to stop loading
+      setState(() {
+        isLoading = false;
+      });
     }
-
-    // Convert map to list and sort by score
-    List<LeaderboardEntry> fetchedEntries = userEntries.values.toList();
-    fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
-
-    // Update ranks
-    for (int i = 0; i < fetchedEntries.length; i++) {
-      fetchedEntries[i] = LeaderboardEntry(
-        name: fetchedEntries[i].name,
-        score: fetchedEntries[i].score,
-        rank: i + 1,
-        activity: fetchedEntries[i].activity,
-      );
-    }
-
-    setState(() {
-      entries = fetchedEntries;
-      _filterByServer(selectedServer); // Initially filter by the selected server
-    });
   }
 
   // Helper method to safely extract integer values from the taskPoints map
   // Tries multiple possible field names and handles type conversion
   int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
-    // Try each possible key
     for (String key in possibleKeys) {
       if (data.containsKey(key) && data[key] != null) {
         var value = data[key];
-        // Handle different possible types
         if (value is int) {
           return value;
         } else if (value is double) {
@@ -254,15 +274,13 @@ class _LeaderboardState extends State<Leaderboard> {
         } else if (value is num) {
           return value.toInt();
         } else if (value is String) {
-          // Try to parse string to int
           return int.tryParse(value) ?? 0;
         }
       }
     }
-    return 0; // Default if none of the keys exist or conversion fails
+    return 0;
   }
 
-  // Function to filter entries by server
   void _filterByServer(String server) {
     setState(() {
       if (server == "All") {
@@ -281,6 +299,7 @@ class _LeaderboardState extends State<Leaderboard> {
             score: filtered[i].score,
             rank: i + 1, // Reassign ranks starting from 1
             activity: filtered[i].activity,
+            profilePic: filtered[i].profilePic, // Include profile pic
           );
         }
 
@@ -392,7 +411,7 @@ class _LeaderboardState extends State<Leaderboard> {
             child: ListView.builder(
               padding: EdgeInsets.symmetric(horizontal: 16),
               itemCount: isLoading
-                  ? 5
+                  ? 5 
                   : (displayedEntries.length <= 3
                       ? 0
                       : displayedEntries.length - 3),
@@ -411,7 +430,7 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
-  // Skeleton loading methods
+  // SKELETON WIDGET METHODS
   Widget _buildSkeletonPodium() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -484,8 +503,12 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
+  // PODIUM WIDGET METHODS
   Widget _buildPodium() {
-    // Check if we have enough entries to show in podium
+    if (isLoading) {
+      return _buildSkeletonPodium();
+    }
+    
     if (displayedEntries.isEmpty) {
       return Center(
         child: Padding(
@@ -570,15 +593,43 @@ class _LeaderboardState extends State<Leaderboard> {
           Stack(
             alignment: Alignment.topCenter,
             children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: Colors.grey[200],
-                child: Icon(
-                  Icons.person,
-                  size: 30,
-                  color: Colors.grey[600],
-                ),
-              ),
+              entry.profilePic != null
+                  ? ClipOval(
+                      child: Image.network(
+                        entry.profilePic!,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return CircleAvatar(
+                            radius: 24,
+                            backgroundColor: Colors.grey[200],
+                            child: CircularProgressIndicator(),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return CircleAvatar(
+                            radius: 24,
+                            backgroundColor: Colors.grey[200],
+                            child: Icon(
+                              Icons.person,
+                              size: 30,
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
+                      ),
+                    )
+                  : CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Colors.grey[200],
+                      child: Icon(
+                        Icons.person,
+                        size: 30,
+                        color: Colors.grey[600],
+                      ),
+                    ),
               // Add crown to first place
               if (position == 1)
                 Positioned(
@@ -631,6 +682,7 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
+  // LEADERBOARD ITEM METHODS
   Widget _buildLeaderboardItem(LeaderboardEntry entry) {
     return GestureDetector(
       onTap: () {
@@ -651,15 +703,43 @@ class _LeaderboardState extends State<Leaderboard> {
           children: [
             Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
             SizedBox(width: 12),
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.grey[200],
-              child: Icon(
-                Icons.person,
-                size: 30,
-                color: Colors.grey[600],
-              ),
-            ),
+            entry.profilePic != null
+                ? ClipOval(
+                    child: Image.network(
+                      entry.profilePic!,
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Colors.grey[200],
+                          child: CircularProgressIndicator(),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Colors.grey[200],
+                          child: Icon(
+                            Icons.person,
+                            size: 30,
+                            color: Colors.grey[600],
+                          ),
+                        );
+                      },
+                    ),
+                  )
+                : CircleAvatar(
+                    radius: 24,
+                    backgroundColor: Colors.grey[200],
+                    child: Icon(
+                      Icons.person,
+                      size: 30,
+                      color: Colors.grey[600],
+                    ),
+                  ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -675,7 +755,7 @@ class _LeaderboardState extends State<Leaderboard> {
                     ),
                   SizedBox(height: 4),
                   LinearProgressIndicator(
-                    value: entry.score > 0 ? (entry.score / 3000) : 0.0,  // Prevent division by zero
+                    value: entry.score > 0 ? (entry.score / 3000) : 0.0, // Prevent division by zero
                     backgroundColor: Colors.grey[200],
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
@@ -696,82 +776,81 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
-  // Replace the _showPointsBreakdown method with this updated version
-void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true, // Allow the sheet to be larger
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (context) {
-      return SingleChildScrollView( // Add scrolling capability
-        child: Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16, // Handle keyboard
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${entry.name}\'s Points',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 8),
-              // Only show server info if hasJoinedTeam is true
-              if (hasJoinedTeam)
+  // POINTS BREAKDOWN METHODS
+  void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, 
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SingleChildScrollView( 
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16, 
+              left: 16,
+              right: 16,
+              top: 16,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  'Server: ${entry.activity.server}',
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  '${entry.name}\'s Points',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-              SizedBox(height: 16),
-              _buildPointsRow('Call', entry.activity.callIntent,
-                '10 pt/call', entry.activity.callIntent),
-              Divider(),    
-              _buildPointsRow('Steps', entry.activity.stepsTaken,
-                '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),    
-              Divider(),
-              _buildPointsRow('Meditation', entry.activity.meditationMinutes,
-                '5 pt/minute', entry.activity.meditationMinutes),
-              Divider(),
-              _buildPointsRow('Add Value', entry.activity.valueEntries,
-                '15 pt/entry', entry.activity.valueEntries),
-              Divider(),
-              _buildPointsRow('Learning', entry.activity.learningEntries,
-                '15 pt/entry', entry.activity.learningEntries),
-              Divider(),
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Total Points',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold
-                        )
-                    ),
-                    Text('${entry.score}',
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange
-                        )
-                    ),
-                  ],
+                SizedBox(height: 8),
+                if (hasJoinedTeam)
+                  Text(
+                    'Server: ${entry.activity.server}',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                SizedBox(height: 16),
+                _buildPointsRow('Call', entry.activity.callIntent,
+                  '10 pt/call', entry.activity.callIntent),
+                Divider(),    
+                _buildPointsRow('Steps', entry.activity.stepsTaken,
+                  '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),    
+                Divider(),
+                _buildPointsRow('Meditation', entry.activity.meditationMinutes,
+                  '5 pt/minute', entry.activity.meditationMinutes),
+                Divider(),
+                _buildPointsRow('Add Value', entry.activity.valueEntries,
+                  '15 pt/entry', entry.activity.valueEntries),
+                Divider(),
+                _buildPointsRow('Learning', entry.activity.learningEntries,
+                  '15 pt/entry', entry.activity.learningEntries),
+                Divider(),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Total Points',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold
+                          )
+                      ),
+                      Text('${entry.score}',
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange
+                          )
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              SizedBox(height: 8), // Add some padding at the bottom
-            ],
+                SizedBox(height: 8),
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   Widget _buildPointsRow(String title, int value, String rate, int points) {
     return Padding(
@@ -804,7 +883,7 @@ void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
   }
 }
 
-// ShimmerWidget class
+// SHIMMER WIDGET CLASS
 class ShimmerWidget extends StatefulWidget {
   final double width;
   final double height;
@@ -858,7 +937,7 @@ class _ShimmerWidgetState extends State<ShimmerWidget> with SingleTickerProvider
           decoration: BoxDecoration(
             color: Colors.grey[300],
             borderRadius: BorderRadius.circular(
-              widget.isCircular ? widget.width / 2 : 4,
+              widget.isCircular ? widget.width / 2 : 4
             ),
             gradient: LinearGradient(
               begin: Alignment(_animation.value, 0),
