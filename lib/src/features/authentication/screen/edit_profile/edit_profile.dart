@@ -156,16 +156,17 @@ Future<void> _updateUserData() async {
     // Update username in all comments for the given user
     QuerySnapshot allNotesSnapshot = await FirebaseFirestore.instance.collection("notes").get();
 
-    for (var noteDoc in allNotesSnapshot.docs) {
-      QuerySnapshot commentsSnapshot = await noteDoc.reference
-          .collection("comments")
-          .where("username", isEqualTo: user.displayName) // Assuming the user's display name was previously used
-          .get();
+// Update username in all comments where the userId matches
+for (var noteDoc in allNotesSnapshot.docs) {
+  QuerySnapshot commentsSnapshot = await noteDoc.reference
+      .collection("comments")
+      .where("userId", isEqualTo: user.uid)
+      .get();
 
-      for (var commentDoc in commentsSnapshot.docs) {
-        await commentDoc.reference.update({"username": newUsername});
-      }
-    }
+  for (var commentDoc in commentsSnapshot.docs) {
+    await commentDoc.reference.update({"username": newUsername});
+  }
+}
 
     setState(() {
       _selectedImage = updatedData["profilePic"];

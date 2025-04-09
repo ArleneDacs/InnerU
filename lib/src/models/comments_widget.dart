@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 
 class CommentWidget extends StatefulWidget {
@@ -14,35 +14,55 @@ class CommentWidget extends StatefulWidget {
 
 class _CommentWidgetState extends State<CommentWidget> {
   final TextEditingController _commentController = TextEditingController();
-
   bool _isSending = false;
   int commentCount = 0;
+  String? currentUsername;
 
-  get todayTasks => null;
+@override
+void initState() {
+  super.initState();
+  _loadCurrentUsername();
+}
+
+Future<void> _loadCurrentUsername() async {
+  final username = await UserPreferences.loadUsername();
+  setState(() {
+    currentUsername = username;
+  });
+}
 
   Future<void> addComment(String comment) async {
-    String username = await UserPreferences.loadUsername() ?? "Anonymous";
     if (comment.trim().isEmpty) return;
 
     setState(() {
       _isSending = true;
     });
 
-    await FirebaseFirestore.instance
-        .collection('notes')
-        .doc(widget.postId)
-        .collection('comments')
-        .add({
-      "username": username, // This will use the current logged-in user
-      "comment": comment,
-      "createdAt": Timestamp.now(),
-    });
+    try {
+      final username = await UserPreferences.loadUsername() ?? "Anonymous";
+String userId = FirebaseAuth.instance.currentUser?.uid ?? "unknown";
 
-    setState(() {
-      commentCount++;
+      await FirebaseFirestore.instance
+          .collection('notes')
+          .doc(widget.postId)
+          .collection('comments')
+          .add({
+        "username": username,
+        "userId": userId,
+        "comment": comment,
+        "createdAt": Timestamp.now(),
+      });
+
       _commentController.clear();
-      _isSending = false;
-    });
+    } catch (e) {
+      debugPrint("Failed to send comment: $e");
+    }
+
+    if (mounted) {
+      setState(() {
+        _isSending = false;
+      });
+    }
   }
 
   @override
@@ -63,13 +83,10 @@ class _CommentWidgetState extends State<CommentWidget> {
               children: [
                 const Text(
                   "Comments",
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  "$commentCount", // Magic happens here ✨
+                  "$commentCount",
                   style: const TextStyle(
                     fontSize: 16,
                     color: Colors.deepPurple,
@@ -80,7 +97,7 @@ class _CommentWidgetState extends State<CommentWidget> {
             ),
             const Divider(),
             Expanded(
-              child: StreamBuilder(
+              child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('notes')
                     .doc(widget.postId)
@@ -88,20 +105,11 @@ class _CommentWidgetState extends State<CommentWidget> {
                     .orderBy('createdAt', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final comments = snapshot.data!.docs;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() {
-                        commentCount = comments.length;
-                      });
-                    }
-                  });
-
-                  if (comments.isEmpty) {
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     return const Center(
                       child: Text(
                         "No comments yet 🥺",
@@ -110,21 +118,102 @@ class _CommentWidgetState extends State<CommentWidget> {
                     );
                   }
 
+                  final comments = snapshot.data!.docs;
+
+                
+
                   return ListView.builder(
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
-                      var comment = comments[index];
-                      return ListTile(
-                        title: Text(
-                          comment['comment'],
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        subtitle: Text(
-                          comment['username'],
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        leading: const Icon(Icons.account_circle_rounded),
-                      );
+                      final comment = comments[index];
+                 final Timestamp timestamp = comment['createdAt'] ?? Timestamp.now();
+final DateTime utcTime = timestamp.toDate();
+final DateTime phTime = utcTime.add(const Duration(hours: 8)); // Convert to PH Time
+final String formattedTime = TimeOfDay.fromDateTime(phTime).format(context);
+
+return Padding(
+  padding: const EdgeInsets.symmetric(vertical: 4),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Icon(Icons.account_circle_rounded, size: 40),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Username (takes available space)
+                Expanded(
+                  child: Text(
+                    comment['username'] ?? "Unknown",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                // Time + 3-dot menu in a Column
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      formattedTime,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[500],
+                      ),
+                    ),
+                   
+                  ],
+                ),
+              ],
+            ),
+            // The comment text and menu on the same line
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    comment['comment'],
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+                // Aligning the 3-dot menu with the comment
+                if (currentUsername == comment['username'])
+                  PopupMenuButton<String>(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.more_vert, size: 18),
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        _showEditDialog(context, comment);
+                      } else if (value == 'delete') {
+                        _deleteComment(comment.id);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Text('Edit'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete'),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+);
+
+
                     },
                   );
                 },
@@ -132,9 +221,7 @@ class _CommentWidgetState extends State<CommentWidget> {
             ),
             Padding(
               padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context)
-                    .viewInsets
-                    .bottom, // This adjusts the padding dynamically
+                bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
               child: Row(
                 children: [
@@ -157,18 +244,20 @@ class _CommentWidgetState extends State<CommentWidget> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  IconButton(
-                    icon: _isSending
-                        ? const CircularProgressIndicator()
-                        : const Icon(Icons.send_rounded,
-                            color: Colors.deepPurple),
-                    onPressed: _isSending
-                        ? null
-                        : () {
+                  _isSending
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.send_rounded,
+                              color: Colors.deepPurple),
+                          onPressed: () {
                             addComment(_commentController.text);
                             FocusScope.of(context).unfocus();
                           },
-                  ),
+                        ),
                 ],
               ),
             ),
@@ -177,4 +266,52 @@ class _CommentWidgetState extends State<CommentWidget> {
       ),
     );
   }
+  void _deleteComment(String commentId) async {
+  await FirebaseFirestore.instance
+      .collection('notes')
+      .doc(widget.postId)
+      .collection('comments')
+      .doc(commentId)
+      .delete();
+}
+
+void _showEditDialog(BuildContext context, QueryDocumentSnapshot comment) {
+  final TextEditingController editController = TextEditingController(text: comment['comment']);
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text("Edit Comment"),
+        content: TextField(
+          controller: editController,
+          maxLines: null,
+          decoration: const InputDecoration(hintText: "Update your comment..."),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () async {
+              final updatedText = editController.text.trim();
+              if (updatedText.isNotEmpty) {
+                await FirebaseFirestore.instance
+                    .collection('notes')
+                    .doc(widget.postId)
+                    .collection('comments')
+                    .doc(comment.id)
+                    .update({'comment': updatedText});
+              }
+              Navigator.pop(context);
+            },
+            child: const Text("Update"),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 }

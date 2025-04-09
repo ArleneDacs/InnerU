@@ -27,6 +27,33 @@ class _NoteCardState extends State<NoteCard> {
       ),
     );
   }
+void showImageDialog(String imageUrl) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.all(10),
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const Center(child: CircularProgressIndicator());
+              },
+              errorBuilder: (context, error, stackTrace) {
+                return const Center(child: Icon(Icons.broken_image, size: 100, color: Colors.red));
+              },
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -108,32 +135,39 @@ class _NoteCardState extends State<NoteCard> {
         height: 200,
         child: Stack(
           children: [
-            PageView.builder(
-              itemCount: imageUrls.length,
-              onPageChanged: (index) {
-                setState(() {
-                  currentPage = index;
-                });
-              },
-              itemBuilder: (context, index) {
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Image.network(
-                    imageUrls[index],
-                    width: double.infinity,
-                    height: 200,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return const Center(child: CircularProgressIndicator());
-                    },
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Icon(Icons.broken_image, size: 100, color: Colors.red);
-                    },
-                  ),
-                );
-              },
-            ),
+         SizedBox(
+  height: 200,
+  child: PageView.builder(
+    itemCount: imageUrls.length,
+    onPageChanged: (int page) {
+      setState(() {
+        currentPage = page;
+      });
+    },
+    itemBuilder: (context, index) {
+      return GestureDetector(
+        onTap: () => showImageDialog(imageUrls[index]),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(15),
+          child: Image.network(
+            imageUrls[index],
+            width: double.infinity,
+            height: 200,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return const Center(child: CircularProgressIndicator());
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return const Icon(Icons.broken_image, size: 100, color: Colors.red);
+            },
+          ),
+        ),
+      );
+    },
+  ),
+),
+
 
             // Image Counter (Only if there are multiple images)
             if (imageUrls.length > 1)
