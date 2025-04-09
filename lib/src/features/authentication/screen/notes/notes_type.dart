@@ -452,23 +452,8 @@ class _NotesTypeState extends State<NotesType> {
     }
   }
 
-<<<<<<< Updated upstream
-  try {
-    // Save the note to Firestore
-    await FirebaseFirestore.instance.collection('notes').add({
-      'username': username,
-      'userId': userId,
-      'title': titleController.text.trim(),
-      'note': contentList,
-      'color': color,
-      'createdAt': now,
-      'category': selectedCategory,
-      'saved': isSaved,
-    });
-=======
   void pickImage() async {
     final List<XFile>? images = await _picker.pickMultiImage();
->>>>>>> Stashed changes
 
     if (images != null && images.isNotEmpty) {
       if (!mounted) return;
