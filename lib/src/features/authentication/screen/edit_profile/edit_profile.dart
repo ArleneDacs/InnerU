@@ -117,6 +117,14 @@ Future<void> _updateUserData() async {
     );
   });
 
+DocumentSnapshot userDoc = await FirebaseFirestore.instance
+    .collection("users")
+    .doc(user.uid)
+    .get();
+
+String oldUsername = userDoc.get("username") ?? "";
+
+
   String newUsername = _usernameController.text.trim();
 
   Map<String, dynamic> updatedData = {
@@ -143,6 +151,16 @@ Future<void> _updateUserData() async {
     // Update user document
     await FirebaseFirestore.instance.collection("users").doc(user.uid).update(updatedData);
 
+    // Update username in all userpoints documents for the user
+QuerySnapshot pointsSnapshot = await FirebaseFirestore.instance
+    .collection("userpoints")
+    .where("username", isEqualTo: oldUsername)
+    .get();
+
+for (var doc in pointsSnapshot.docs) {
+  await doc.reference.update({"username": newUsername});
+}
+
     // Update username in all notes where the userId matches
     QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
         .collection("notes")
@@ -156,17 +174,16 @@ Future<void> _updateUserData() async {
     // Update username in all comments for the given user
     QuerySnapshot allNotesSnapshot = await FirebaseFirestore.instance.collection("notes").get();
 
-// Update username in all comments where the userId matches
-for (var noteDoc in allNotesSnapshot.docs) {
-  QuerySnapshot commentsSnapshot = await noteDoc.reference
-      .collection("comments")
-      .where("userId", isEqualTo: user.uid)
-      .get();
+    for (var noteDoc in allNotesSnapshot.docs) {
+      QuerySnapshot commentsSnapshot = await noteDoc.reference
+          .collection("comments")
+          .where("username", isEqualTo: user.displayName) // Assuming the user's display name was previously used
+          .get();
 
-  for (var commentDoc in commentsSnapshot.docs) {
-    await commentDoc.reference.update({"username": newUsername});
-  }
-}
+      for (var commentDoc in commentsSnapshot.docs) {
+        await commentDoc.reference.update({"username": newUsername});
+      }
+    }
 
     setState(() {
       _selectedImage = updatedData["profilePic"];

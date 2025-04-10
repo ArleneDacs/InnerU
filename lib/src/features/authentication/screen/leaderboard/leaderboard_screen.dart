@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'dart:async';
 
 // MODEL CLASSES
@@ -109,13 +110,14 @@ class _LeaderboardState extends State<Leaderboard> {
   List<LeaderboardEntry> displayedEntries = []; // Initialize with empty list
   bool isLoading = true;
   String selectedServer = "Default"; // Default server to show first
-  String username = "Valenin";
+  String username = "";
   bool hasJoinedTeam = false; // Flag to determine if user has joined a team
   bool isFilteredByUser = false;
 
   @override
   void initState() {
     super.initState();
+    _fetchCurrentUser();
     isLoading = true; // Always start with loading
     entries = [];
     displayedEntries = [];
@@ -159,6 +161,24 @@ class _LeaderboardState extends State<Leaderboard> {
     }
   }
 
+  void _fetchCurrentUser() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+          
+      if (userDoc.exists) {
+        setState(() {
+          username = userDoc['username'] ?? "User";
+        });
+        _loadUserData(); 
+        _checkUserTeamStatus();
+      }
+    }
+  }
+
   void _loadUserData() async {
     try {
       QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
@@ -186,7 +206,7 @@ class _LeaderboardState extends State<Leaderboard> {
         // Extract server information if available, otherwise use "Default"
         String server = data['server'] ?? "Default";
 
-        // FIXED: Make sure to correctly extract data using consistent field names
+        // Make sure to correctly extract data using consistent field names
         UserActivity activity = UserActivity(
           callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
           meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
@@ -260,6 +280,7 @@ class _LeaderboardState extends State<Leaderboard> {
       });
     }
   }
+  
 
   // Helper method to safely extract integer values from the taskPoints map
   // Tries multiple possible field names and handles type conversion
