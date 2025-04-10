@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:shimmer/shimmer.dart'; // <-- Added shimmer package
 
 // Custom Colors
 const customColor1 = Color(0xFF6D849A); // Primary color
@@ -19,9 +20,10 @@ class _UserProgressPageState extends State<UserProgressPage> {
   List<Map<String, dynamic>> users = [];
   Map<String, Map<String, Map<String, bool>>> userProgressData = {};
   String currentUserId = '';
-  String currentUserName = ''; // Store the username here
+  String currentUserName = '';
   int selectedMonth = DateTime.now().month;
   int selectedYear = DateTime.now().year;
+  bool isLoading = true; // <-- Added loading flag
 
   @override
   void initState() {
@@ -38,36 +40,35 @@ class _UserProgressPageState extends State<UserProgressPage> {
           .get();
       if (userDoc.exists) {
         setState(() {
-          currentUserId = user.uid; // Store the UID here
-          currentUserName = userDoc['username']; // Store the username here
+          currentUserId = user.uid;
+          currentUserName = userDoc['username'];
         });
         fetchUsersAndProgress();
       }
     }
   }
 
-  Future<void> fetchUsersAndProgress() async {
-    try {
-      QuerySnapshot trackerSnapshot =
-          await FirebaseFirestore.instance.collection('dailytracker').get();
-
-      Set<String> uniqueUserIds = {}; // Ensure unique user IDs
+  void fetchUsersAndProgress() {
+    FirebaseFirestore.instance
+        .collection('dailytracker')
+        .snapshots()
+        .listen((trackerSnapshot) {
+      Set<String> uniqueUserIds = {};
       Map<String, Map<String, Map<String, bool>>> progressData = {};
+      Map<String, String> userIdToUsername = {};
       List<Map<String, dynamic>> tempUsers = [];
 
       for (var doc in trackerSnapshot.docs) {
         Map<String, dynamic> userData = doc.data() as Map<String, dynamic>;
+        String? userId = userData['userId'];
 
-        // Get the user ID and username
-        String userId = userData['userId'] ?? doc.id.split('-').first;
-        String username = userData['username'] ?? doc.id.split('-').first;
+        if (userId == null || userId == currentUserId) continue;
 
-        // Skip the current user
-        if (userId == currentUserId) continue;
+        String username = userData['username'] ?? 'Unknown';
+        userIdToUsername[userId] = username;
 
         if (!uniqueUserIds.contains(userId)) {
           uniqueUserIds.add(userId);
-          tempUsers.add({'userId': userId, 'username': username});
         }
 
         String lastUpdated = userData['lastUpdated'] ??
@@ -83,15 +84,20 @@ class _UserProgressPageState extends State<UserProgressPage> {
         };
       }
 
+      for (var userId in uniqueUserIds) {
+        tempUsers.add({
+          'userId': userId,
+          'username': userIdToUsername[userId] ?? 'Unknown'
+        });
+      }
+
       setState(() {
         users = tempUsers
-          ..sort((a, b) =>
-              a['username'].compareTo(b['username'])); // Sort by username
+          ..sort((a, b) => a['username'].compareTo(b['username']));
         userProgressData = progressData;
+        isLoading = false;
       });
-    } catch (e) {
-      print("Error fetching data: $e");
-    }
+    });
   }
 
   @override
@@ -100,47 +106,85 @@ class _UserProgressPageState extends State<UserProgressPage> {
       appBar: AppBar(
         title: Text('Friends Tracker'),
       ),
-      body: users.isEmpty
-          ? Center(
-              child: Text('No other users found',
-                  style: TextStyle(color: customColor1)))
-          : ListView.builder(
-              itemCount: users.length,
-              itemBuilder: (context, index) {
-                String userId = users[index]['userId'];
-                String username = users[index]['username'];
+      body: isLoading
+          ? _buildShimmerLoader()
+          : users.isEmpty
+              ? Center(
+                  child: Text('No other users found',
+                      style: TextStyle(color: customColor1)))
+              : ListView.builder(
+                  itemCount: users.length,
+                  itemBuilder: (context, index) {
+                    String userId = users[index]['userId'];
+                    String username = users[index]['username'];
 
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  elevation: 3,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: ExpansionTile(
-                    tilePadding:
-                        EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    title: Text(username,
-                        style: TextStyle(
-                            color: customColor1, fontWeight: FontWeight.bold)),
-                    children: [
-                      _buildDailyTracker(userId, DateTime.now()),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(
-                          'Previous Progress',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: customColor2),
-                        ),
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      _buildCalendar(userId),
-                    ],
-                  ),
-                );
-              },
+                      child: ExpansionTile(
+                        tilePadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        title: Text(username,
+                            style: TextStyle(
+                                color: customColor1,
+                                fontWeight: FontWeight.bold)),
+                        children: [
+                          _buildDailyTracker(userId, DateTime.now()),
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Text(
+                              'Previous Progress',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: customColor2),
+                            ),
+                          ),
+                          _buildCalendar(userId),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+
+  Widget _buildShimmerLoader() {
+    return ListView.builder(
+      itemCount: 4,
+      itemBuilder: (context, index) {
+        return Shimmer.fromColors(
+          baseColor: Colors.grey[300]!,
+          highlightColor: Colors.grey[100]!,
+          child: Card(
+            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
             ),
+            child: Container(
+              height: 100,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(height: 20, width: 150, color: Colors.white),
+                  const SizedBox(height: 10),
+                  Container(
+                      height: 14, width: double.infinity, color: Colors.white),
+                  const SizedBox(height: 10),
+                  Container(
+                      height: 14, width: double.infinity, color: Colors.white),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

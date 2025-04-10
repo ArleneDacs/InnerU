@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:shimmer/shimmer.dart';
 
 class EmotionTrackerPage extends StatefulWidget {
   @override
@@ -17,6 +18,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
   List<String> _weeks = [];
   String? _selectedWeek;
   DateTime _focusedMonth = DateTime.now();
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       setState(() {
         _emotionsByDay = emotionsData;
         _todayEmotion = todayEmotion;
+        _isLoading = false;
       });
     } catch (e) {
       print("Error fetching emotions: $e");
@@ -92,7 +95,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
 
     setState(() {
       _weeks = weeks;
-      _selectedWeek = null; // Set to null so analysis doesn't run automatically
+      _selectedWeek = null;
     });
   }
 
@@ -167,7 +170,6 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
     );
   }
 
-  /// Stress Analysis based on the selected week
   void _analyzeStressForWeek(String selectedWeek) {
     RegExp weekRegExp = RegExp(r'(\w+) (\d+) to (\w+) (\d+)');
     Match? match = weekRegExp.firstMatch(selectedWeek);
@@ -213,7 +215,6 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
         }
       }
 
-      // Show Dialog
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -264,130 +265,156 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            if (_todayEmotion != null) ...[
-              Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        "Today's Emotion: ",
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        _getEmojiForEmotion(_todayEmotion!) +
-                            " " +
-                            _todayEmotion!,
-                        style: TextStyle(fontSize: 18),
-                      ),
-                    ],
-                  ),
+        child: _isLoading
+            ? Shimmer.fromColors(
+                baseColor: Colors.grey.shade300,
+                highlightColor: Colors.grey.shade100,
+                child: Column(
+                  children: [
+                    Container(
+                        height: 60,
+                        width: double.infinity,
+                        color: Colors.white),
+                    SizedBox(height: 20),
+                    Container(
+                        height: 50,
+                        width: double.infinity,
+                        color: Colors.white),
+                    SizedBox(height: 20),
+                    Expanded(
+                      child: Container(
+                          width: double.infinity, color: Colors.white),
+                    ),
+                  ],
                 ),
-              ),
-              SizedBox(height: 20),
-              Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: DropdownButton<String>(
-                    value: _selectedWeek,
-                    hint: Text("Select a week"), // Added hint for clarity
-                    isExpanded: true,
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          _selectedWeek = newValue;
-                        });
-                        _analyzeStressForWeek(
-                            newValue); // Runs analysis only when user selects
-                      }
-                    },
-                    items: _weeks.map((String week) {
-                      return DropdownMenuItem<String>(
-                        value: week,
-                        child: Text(week),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-              Expanded(
-                child: Card(
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: TableCalendar(
-                      focusedDay: _focusedMonth,
-                      firstDay: DateTime.utc(2020, 1, 1),
-                      lastDay: DateTime.utc(2030, 12, 31),
-                      calendarStyle: CalendarStyle(
-                        markersMaxCount: 0,
-                        todayDecoration: BoxDecoration(
-                          color: Colors.teal,
-                          shape: BoxShape.circle,
+              )
+            : Column(
+                children: [
+                  if (_todayEmotion != null) ...[
+                    Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              "Today's Emotion: ",
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              _getEmojiForEmotion(_todayEmotion!) +
+                                  " " +
+                                  _todayEmotion!,
+                              style: TextStyle(fontSize: 18),
+                            ),
+                          ],
                         ),
                       ),
-                      calendarBuilders: CalendarBuilders(
-                        defaultBuilder: (context, date, _) {
-                          DateTime normalizedDate = _normalizeDate(date);
-                          if (_emotionsByDay.containsKey(normalizedDate)) {
-                            String emotion = _emotionsByDay[normalizedDate]!;
-                            return Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: _getColorForEmotion(emotion),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  width: 35,
-                                  height: 35,
-                                ),
-                                Text(
-                                  _getEmojiForEmotion(emotion),
-                                  style: TextStyle(fontSize: 18),
-                                ),
-                              ],
-                            );
-                          }
-                          return null;
-                        },
-                      ),
-                      onDaySelected: (selectedDay, focusedDay) {
-                        DateTime normalizedDate = _normalizeDate(selectedDay);
-                        if (_emotionsByDay.containsKey(normalizedDate)) {
-                          String emotion = _emotionsByDay[normalizedDate]!;
-                          _showEmotionMessage(context, emotion);
-                        } else {
-                          _showEmotionMessage(
-                              context, "No emotion recorded for this day.");
-                        }
-                      },
-                      onPageChanged: (focusedDay) {
-                        setState(() {
-                          _focusedMonth = focusedDay;
-                          _updateWeeksForMonth(_focusedMonth.month);
-                        });
-                      },
                     ),
-                  ),
-                ),
+                    SizedBox(height: 20),
+                    Card(
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: DropdownButton<String>(
+                          value: _selectedWeek,
+                          hint: Text("Select a week"),
+                          isExpanded: true,
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setState(() {
+                                _selectedWeek = newValue;
+                              });
+                              _analyzeStressForWeek(newValue);
+                            }
+                          },
+                          items: _weeks.map((String week) {
+                            return DropdownMenuItem<String>(
+                              value: week,
+                              child: Text(week),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    Expanded(
+                      child: Card(
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: TableCalendar(
+                            focusedDay: _focusedMonth,
+                            firstDay: DateTime.utc(2020, 1, 1),
+                            lastDay: DateTime.utc(2030, 12, 31),
+                            calendarStyle: CalendarStyle(
+                              markersMaxCount: 0,
+                              todayDecoration: BoxDecoration(
+                                color: Colors.teal,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            calendarBuilders: CalendarBuilders(
+                              defaultBuilder: (context, date, _) {
+                                DateTime normalizedDate = _normalizeDate(date);
+                                if (_emotionsByDay
+                                    .containsKey(normalizedDate)) {
+                                  String emotion =
+                                      _emotionsByDay[normalizedDate]!;
+                                  return Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: _getColorForEmotion(emotion),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        width: 35,
+                                        height: 35,
+                                      ),
+                                      Text(
+                                        _getEmojiForEmotion(emotion),
+                                        style: TextStyle(fontSize: 18),
+                                      ),
+                                    ],
+                                  );
+                                }
+                                return null;
+                              },
+                            ),
+                            onDaySelected: (selectedDay, focusedDay) {
+                              DateTime normalizedDate =
+                                  _normalizeDate(selectedDay);
+                              if (_emotionsByDay.containsKey(normalizedDate)) {
+                                String emotion =
+                                    _emotionsByDay[normalizedDate]!;
+                                _showEmotionMessage(context, emotion);
+                              } else {
+                                _showEmotionMessage(context,
+                                    "No emotion recorded for this day.");
+                              }
+                            },
+                            onPageChanged: (focusedDay) {
+                              setState(() {
+                                _focusedMonth = focusedDay;
+                                _updateWeeksForMonth(_focusedMonth.month);
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ],
-        ),
       ),
     );
   }
