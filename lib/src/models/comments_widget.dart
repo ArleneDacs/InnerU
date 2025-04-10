@@ -85,14 +85,7 @@ String userId = FirebaseAuth.instance.currentUser?.uid ?? "unknown";
                   "Comments",
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-                Text(
-                  "$commentCount",
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.deepPurple,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              
               ],
             ),
             const Divider(),
@@ -105,9 +98,7 @@ String userId = FirebaseAuth.instance.currentUser?.uid ?? "unknown";
                     .orderBy('createdAt', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+              
 
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     return const Center(
@@ -126,9 +117,10 @@ String userId = FirebaseAuth.instance.currentUser?.uid ?? "unknown";
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
                       final comment = comments[index];
-                 final Timestamp timestamp = comment['createdAt'] ?? Timestamp.now();
+             final Timestamp timestamp = comment['createdAt'] ?? Timestamp.now();
 final DateTime utcTime = timestamp.toDate();
-final DateTime phTime = utcTime.add(const Duration(hours: 8)); // Convert to PH Time
+final DateTime phTime = utcTime.toLocal();  // Automatically convert to local time (PH Time)
+
 final String formattedTime = TimeOfDay.fromDateTime(phTime).format(context);
 
 return Padding(
@@ -266,14 +258,46 @@ return Padding(
       ),
     );
   }
-  void _deleteComment(String commentId) async {
-  await FirebaseFirestore.instance
-      .collection('notes')
-      .doc(widget.postId)
-      .collection('comments')
-      .doc(commentId)
-      .delete();
+void _deleteComment(String commentId) async {
+  try {
+    final commentDoc = await FirebaseFirestore.instance
+        .collection('notes')
+        .doc(widget.postId)
+        .collection('comments')
+        .doc(commentId)
+        .get();
+
+    if (commentDoc.exists) {
+      await FirebaseFirestore.instance
+          .collection('notes')
+          .doc(widget.postId)
+          .collection('comments')
+          .doc(commentId)
+          .delete();
+    } else {
+      debugPrint("Comment not found or already deleted.");
+      // Optionally, show an alert here if you want to notify the user
+    }
+  } catch (e) {
+    debugPrint("Error deleting comment: $e");
+    // Consider showing a dialog here with the error message
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Error'),
+        content: Text('Failed to delete comment: $e'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+
 
 void _showEditDialog(BuildContext context, QueryDocumentSnapshot comment) {
   final TextEditingController editController = TextEditingController(text: comment['comment']);
