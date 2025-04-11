@@ -139,9 +139,9 @@ class CoachProfileDialog extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
-                          userId: 'user_123', // Replace with dynamic user ID
+                          userId: 'user_123',
                           userName:
-                              'Current User', // Replace with dynamic username
+                              'Current User', 
                         ),
                       ),
                     );

@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; 
 import 'dart:async';
 
 // MODEL CLASSES
@@ -110,19 +109,29 @@ class _LeaderboardState extends State<Leaderboard> {
   List<LeaderboardEntry> displayedEntries = []; // Initialize with empty list
   bool isLoading = true;
   String selectedServer = "Default"; // Default server to show first
-  String username = "";
+  String username = "Valenin";
   bool hasJoinedTeam = false; // Flag to determine if user has joined a team
   bool isFilteredByUser = false;
+  
+  // Stream subscription for real-time updates
+  StreamSubscription<QuerySnapshot>? _userPointsSubscription;
+  final _refreshKey = GlobalKey<RefreshIndicatorState>();
 
   @override
   void initState() {
     super.initState();
-    _fetchCurrentUser();
     isLoading = true; // Always start with loading
     entries = [];
     displayedEntries = [];
     _checkUserTeamStatus(); // Check if user has joined a team
-    _loadUserData(); 
+    _setupUserPointsListener(); // Set up real-time listener
+  }
+
+  @override
+  void dispose() {
+    // Cancel the subscription when the widget is disposed
+    _userPointsSubscription?.cancel();
+    super.dispose();
   }
 
   // Check if user has joined a team
@@ -136,7 +145,7 @@ class _LeaderboardState extends State<Leaderboard> {
 
       if (userDoc.exists) {
         var userData = userDoc.data() as Map<String, dynamic>;
-        
+
         // Check if user has a team field and it's not empty
         if (userData.containsKey('team') && userData['team'] != null && userData['team'].toString().isNotEmpty) {
           setState(() {
@@ -161,52 +170,85 @@ class _LeaderboardState extends State<Leaderboard> {
     }
   }
 
-  void _fetchCurrentUser() async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-          
-      if (userDoc.exists) {
-        setState(() {
-          username = userDoc['username'] ?? "User";
-        });
-        _loadUserData(); 
-        _checkUserTeamStatus();
-      }
+  // Set up real-time listener for userpoints collection
+  void _setupUserPointsListener() {
+    try {
+      // Cancel any existing subscription
+      _userPointsSubscription?.cancel();
+      
+      // Create a new subscription
+      _userPointsSubscription = FirebaseFirestore.instance
+          .collection('userpoints')
+          .snapshots()
+          .listen((snapshot) {
+            print('Received userpoints update with ${snapshot.docs.length} documents');
+            _processUserPointsData(snapshot);
+          }, onError: (error) {
+            print('Error in userpoints listener: $error');
+            setState(() {
+              isLoading = false;
+            });
+          });
+    } catch (e) {
+      print('Error setting up userpoints listener: $e');
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
-  void _loadUserData() async {
+  // Load profile pictures for users
+  Future<Map<String, String?>> _loadProfilePictures() async {
     try {
-      QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
+      QuerySnapshot usersSnapshot = await FirebaseFirestore.instance.collection('users').get();
+      Map<String, String?> profilePicMap = {};
+      
+      for (var doc in usersSnapshot.docs) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        String username = data['username'] ?? '';
+        String? profilePic = data['profilePic'];
+        
+        if (username.isNotEmpty) {
+          profilePicMap[username] = profilePic;
+        }
+      }
+      
+      return profilePicMap;
+    } catch (e) {
+      print('Error loading profile pictures: $e');
+      return {};
+    }
+  }
 
-      // Create a map to store the latest entry for each user
+  // Process userpoints data from snapshot
+  void _processUserPointsData(QuerySnapshot snapshot) async {
+    try {
+      // Load all profile pictures in one go
+      Map<String, String?> profilePicMap = await _loadProfilePictures();
       Map<String, LeaderboardEntry> userEntries = {};
 
-      // Process all documents
       for (var doc in snapshot.docs) {
         var data = doc.data() as Map<String, dynamic>;
         String username = data['username'] ?? "Unknown User";
-        
-        // Get task points from Firestore - ensure it's properly initialized
+
+        // Debug output for data structure
+        print('Processing user data for: $username');
+        print('Data structure: ${data.keys.toList()}');
+
         Map<String, dynamic> taskPoints = data['taskPoints'] ?? {};
-        
-        // Calculate total points correctly (casting to int)
+        print('TaskPoints structure: ${taskPoints.keys.toList()}');
+
+        // Calculate total points
         int totalPoints = 0;
         taskPoints.forEach((key, value) {
-          // Cast the dynamic value to int
           if (value != null) {
+            print('Found task: $key with value: $value (${value.runtimeType})');
             totalPoints += (value is int) ? value : (value as num).toInt();
           }
         });
-        
-        // Extract server information if available, otherwise use "Default"
+
         String server = data['server'] ?? "Default";
 
-        // Make sure to correctly extract data using consistent field names
         UserActivity activity = UserActivity(
           callIntent: _extractIntValue(taskPoints, ['Call Points', 'call_points', 'callPoints']),
           meditationMinutes: _extractIntValue(taskPoints, ['Meditation Points', 'meditation_points', 'meditationPoints']),
@@ -215,72 +257,63 @@ class _LeaderboardState extends State<Leaderboard> {
           learningEntries: _extractIntValue(taskPoints, ['Learning Points', 'learning_points', 'learningPoints']),
           server: server,
         );
-        
-        // Calculate the score from our activity model
+
         int modelCalculatedScore = activity.calculatePoints();
+        print('Calculated score for $username: $modelCalculatedScore');
         
-        // Fetch user's profile picture from users collection using username
-        String? profilePicUrl;
-        try {
-          QuerySnapshot userSnapshot = await FirebaseFirestore.instance
-              .collection('users')
-              .where('username', isEqualTo: username)
-              .limit(1)
-              .get();
-          
-          if (userSnapshot.docs.isNotEmpty) {
-            var userData = userSnapshot.docs.first.data() as Map<String, dynamic>;
-            profilePicUrl = userData['profilePic'];
-          }
-        } catch (e) {
-          print('Error fetching profile pic for $username: $e');
-        }
-        
-        // Create entry with the correct score
+        String? profilePicUrl = profilePicMap[username];
+
         LeaderboardEntry entry = LeaderboardEntry(
           name: username,
-          score: modelCalculatedScore, // Use model's calculation
-          rank: 0, // Will be updated after sorting
+          score: modelCalculatedScore,
+          rank: 0,
           activity: activity,
-          profilePic: profilePicUrl, // Add the profile picture URL
+          profilePic: profilePicUrl,
         );
 
-        // Only store the entry if we don't already have one for this user,
-        // or if this entry has a higher score than the one we already have
         if (!userEntries.containsKey(username) || userEntries[username]!.score < modelCalculatedScore) {
           userEntries[username] = entry;
         }
       }
 
-      // Convert map to list and sort by score
       List<LeaderboardEntry> fetchedEntries = userEntries.values.toList();
       fetchedEntries.sort((a, b) => b.score.compareTo(a.score));
 
-      // Update ranks
       for (int i = 0; i < fetchedEntries.length; i++) {
         fetchedEntries[i] = LeaderboardEntry(
           name: fetchedEntries[i].name,
           score: fetchedEntries[i].score,
           rank: i + 1,
           activity: fetchedEntries[i].activity,
-          profilePic: fetchedEntries[i].profilePic, // Keep the profile pic URL
+          profilePic: fetchedEntries[i].profilePic,
         );
       }
 
       setState(() {
         entries = fetchedEntries;
         _filterByServer(selectedServer);
-        isLoading = false; // Set loading to false only here
+        isLoading = false;
       });
     } catch (e) {
-      print('Error loading user data: $e');
-      // In case of error, still need to stop loading
+      print('Error processing user data: $e');
       setState(() {
         isLoading = false;
       });
     }
   }
-  
+
+  // Manual refresh function for pull-to-refresh
+  Future<void> _refreshLeaderboard() async {
+    try {
+      // Force refresh by reloading data directly
+      QuerySnapshot snapshot = await FirebaseFirestore.instance.collection('userpoints').get();
+      _processUserPointsData(snapshot);
+      return Future.value();
+    } catch (e) {
+      print('Error refreshing leaderboard: $e');
+      return Future.error(e);
+    }
+  }
 
   // Helper method to safely extract integer values from the taskPoints map
   // Tries multiple possible field names and handles type conversion
@@ -288,6 +321,7 @@ class _LeaderboardState extends State<Leaderboard> {
     for (String key in possibleKeys) {
       if (data.containsKey(key) && data[key] != null) {
         var value = data[key];
+        print('Found value for $key: $value (${value.runtimeType})');
         if (value is int) {
           return value;
         } else if (value is double) {
@@ -339,6 +373,15 @@ class _LeaderboardState extends State<Leaderboard> {
         title: Text('Leaderboard'),
         actions: [
           IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: () {
+              setState(() {
+                isLoading = true;
+              });
+              _refreshLeaderboard();
+            },
+          ),
+          IconButton(
             icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
             onPressed: () {
               Navigator.pushNamed(context, "/profile");
@@ -346,107 +389,111 @@ class _LeaderboardState extends State<Leaderboard> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Only show server/user selector if user has joined a team
-          if (hasJoinedTeam)
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: Container(
-                height: 36,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          // Filter by username
-                          _filterByServer(username);
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: isFilteredByUser
-                                ? Color(0xFFCEA47E)
-                                : Colors.white,
-                            borderRadius: BorderRadius.only(
-                              topLeft: Radius.circular(17),
-                              bottomLeft: Radius.circular(17),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            username,
-                            style: TextStyle(
+      body: RefreshIndicator(
+        key: _refreshKey,
+        onRefresh: _refreshLeaderboard,
+        child: Column(
+          children: [
+            // Only show server/user selector if user has joined a team
+            if (hasJoinedTeam)
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Container(
+                  height: 36,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Color(0xFFCEA47E), width: 1.5),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            // Filter by username
+                            _filterByServer(username);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
                               color: isFilteredByUser
-                                  ? Colors.white
-                                  : Color(0xFFCEA47E),
-                              fontWeight: FontWeight.w500,
-                              fontSize: 15,
+                                  ? Color(0xFFCEA47E)
+                                  : Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(17),
+                                bottomLeft: Radius.circular(17),
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              username,
+                              style: TextStyle(
+                                color: isFilteredByUser
+                                    ? Colors.white
+                                    : Color(0xFFCEA47E),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 15,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          // Show all servers or the server the user belongs to
-                          _filterByServer(selectedServer == username ? "All" : selectedServer);
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: !isFilteredByUser
-                                ? Color(0xFFCEA47E)
-                                : Colors.white,
-                            borderRadius: BorderRadius.only(
-                              topRight: Radius.circular(17),
-                              bottomRight: Radius.circular(17),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            selectedServer == username ? "All" : selectedServer,
-                            style: TextStyle(
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            // Show all servers or the server the user belongs to
+                            _filterByServer(selectedServer == username ? "All" : selectedServer);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
                               color: !isFilteredByUser
-                                  ? Colors.white
-                                  : Color(0xFFCEA47E),
-                              fontWeight: FontWeight.w500,
-                              fontSize: 15,
+                                  ? Color(0xFFCEA47E)
+                                  : Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topRight: Radius.circular(17),
+                                bottomRight: Radius.circular(17),
+                              ),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              selectedServer == username ? "All" : selectedServer,
+                              style: TextStyle(
+                                color: !isFilteredByUser
+                                    ? Colors.white
+                                    : Color(0xFFCEA47E),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 15,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
+            Container(
+              height: 220,
+              child: isLoading ? _buildSkeletonPodium() : _buildPodium(),
             ),
-          Container(
-            height: 220,
-            child: isLoading ? _buildSkeletonPodium() : _buildPodium(),
-          ),
-          Expanded(
-            child: ListView.builder(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              itemCount: isLoading
-                  ? 5 
-                  : (displayedEntries.length <= 3
-                      ? 0
-                      : displayedEntries.length - 3),
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: isLoading
-                      ? _buildSkeletonItem()
-                      : _buildLeaderboardItem(displayedEntries[index + 3]),
-                );
-              },
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                itemCount: isLoading
+                    ? 5
+                    : (displayedEntries.length <= 3
+                    ? 0
+                    : displayedEntries.length - 3),
+                itemBuilder: (context, index) {
+                  return Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: isLoading
+                        ? _buildSkeletonItem()
+                        : _buildLeaderboardItem(displayedEntries[index + 3]),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -529,7 +576,7 @@ class _LeaderboardState extends State<Leaderboard> {
     if (isLoading) {
       return _buildSkeletonPodium();
     }
-    
+
     if (displayedEntries.isEmpty) {
       return Center(
         child: Padding(
@@ -541,7 +588,7 @@ class _LeaderboardState extends State<Leaderboard> {
         ),
       );
     }
-    
+
     if (displayedEntries.length < 3) {
       return Center(
         child: Padding(
@@ -616,33 +663,21 @@ class _LeaderboardState extends State<Leaderboard> {
             children: [
               entry.profilePic != null
                   ? ClipOval(
-                      child: Image.network(
-                        entry.profilePic!,
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return CircleAvatar(
-                            radius: 24,
-                            backgroundColor: Colors.grey[200],
-                            child: CircularProgressIndicator(),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return CircleAvatar(
-                            radius: 24,
-                            backgroundColor: Colors.grey[200],
-                            child: Icon(
-                              Icons.person,
-                              size: 30,
-                              color: Colors.grey[600],
-                            ),
-                          );
-                        },
-                      ),
-                    )
-                  : CircleAvatar(
+                child: Image.network(
+                  entry.profilePic!,
+                  width: 48,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Colors.grey[200],
+                      child: CircularProgressIndicator(),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return CircleAvatar(
                       radius: 24,
                       backgroundColor: Colors.grey[200],
                       child: Icon(
@@ -650,7 +685,19 @@ class _LeaderboardState extends State<Leaderboard> {
                         size: 30,
                         color: Colors.grey[600],
                       ),
-                    ),
+                    );
+                  },
+                ),
+              )
+                  : CircleAvatar(
+                radius: 24,
+                backgroundColor: Colors.grey[200],
+                child: Icon(
+                  Icons.person,
+                  size: 30,
+                  color: Colors.grey[600],
+                ),
+              ),
               // Add crown to first place
               if (position == 1)
                 Positioned(
@@ -673,10 +720,10 @@ class _LeaderboardState extends State<Leaderboard> {
                 child: Text('.', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
               ),
               Text(
-                entry.name, 
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1
+                  entry.name,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1
               ),
             ],
           ),
@@ -726,33 +773,21 @@ class _LeaderboardState extends State<Leaderboard> {
             SizedBox(width: 12),
             entry.profilePic != null
                 ? ClipOval(
-                    child: Image.network(
-                      entry.profilePic!,
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return CircleAvatar(
-                          radius: 24,
-                          backgroundColor: Colors.grey[200],
-                          child: CircularProgressIndicator(),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return CircleAvatar(
-                          radius: 24,
-                          backgroundColor: Colors.grey[200],
-                          child: Icon(
-                            Icons.person,
-                            size: 30,
-                            color: Colors.grey[600],
-                          ),
-                        );
-                      },
-                    ),
-                  )
-                : CircleAvatar(
+              child: Image.network(
+                entry.profilePic!,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return CircleAvatar(
+                    radius: 24,
+                    backgroundColor: Colors.grey[200],
+                    child: CircularProgressIndicator(),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return CircleAvatar(
                     radius: 24,
                     backgroundColor: Colors.grey[200],
                     child: Icon(
@@ -760,7 +795,19 @@ class _LeaderboardState extends State<Leaderboard> {
                       size: 30,
                       color: Colors.grey[600],
                     ),
-                  ),
+                  );
+                },
+              ),
+            )
+                : CircleAvatar(
+              radius: 24,
+              backgroundColor: Colors.grey[200],
+              child: Icon(
+                Icons.person,
+                size: 30,
+                color: Colors.grey[600],
+              ),
+            ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -801,15 +848,15 @@ class _LeaderboardState extends State<Leaderboard> {
   void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, 
+      isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return SingleChildScrollView( 
+        return SingleChildScrollView(
           child: Padding(
             padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16, 
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
               left: 16,
               right: 16,
               top: 16,
@@ -830,19 +877,19 @@ class _LeaderboardState extends State<Leaderboard> {
                   ),
                 SizedBox(height: 16),
                 _buildPointsRow('Call', entry.activity.callIntent,
-                  '10 pt/call', entry.activity.callIntent),
-                Divider(),    
+                    '10 pt/call', entry.activity.callIntent),
+                Divider(),
                 _buildPointsRow('Steps', entry.activity.stepsTaken,
-                  '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),    
+                    '10 pt/200 steps', (entry.activity.stepsTaken / 200).floor()),
                 Divider(),
                 _buildPointsRow('Meditation', entry.activity.meditationMinutes,
-                  '5 pt/minute', entry.activity.meditationMinutes),
+                    '5 pt/minute', entry.activity.meditationMinutes),
                 Divider(),
                 _buildPointsRow('Add Value', entry.activity.valueEntries,
-                  '15 pt/entry', entry.activity.valueEntries),
+                    '15 pt/entry', entry.activity.valueEntries),
                 Divider(),
                 _buildPointsRow('Learning', entry.activity.learningEntries,
-                  '15 pt/entry', entry.activity.learningEntries),
+                    '15 pt/entry', entry.activity.learningEntries),
                 Divider(),
                 Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
@@ -958,7 +1005,7 @@ class _ShimmerWidgetState extends State<ShimmerWidget> with SingleTickerProvider
           decoration: BoxDecoration(
             color: Colors.grey[300],
             borderRadius: BorderRadius.circular(
-              widget.isCircular ? widget.width / 2 : 4
+                widget.isCircular ? widget.width / 2 : 4
             ),
             gradient: LinearGradient(
               begin: Alignment(_animation.value, 0),

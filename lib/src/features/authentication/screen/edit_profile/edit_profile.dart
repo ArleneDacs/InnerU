@@ -23,6 +23,7 @@ class EditProfile extends StatefulWidget {
 }
 
 class MyEditProfileState extends State<EditProfile> {
+  String? _oldUsername;
   String? _base64Image;
   String? _selectedImage;
   String? _selectedImageTemp;
@@ -43,6 +44,7 @@ void initState() {
   super.initState();
   _userDataFuture = UserService.getUserData().then((userData) {
     setState(() {
+      _oldUsername = userData["username"];
       _usernameController.text = userData["username"] ?? "";
       _emailController.text = userData["email"] ?? "";
       _phoneController.text = userData["number"] ?? "";
@@ -52,9 +54,8 @@ void initState() {
     });
     return userData;
   });
-
-  
 }
+
 Future<void> pickImage() async {
   try {
     final XFile? image = await ImagePicker().pickImage(source: ImageSource.gallery);
@@ -103,6 +104,7 @@ Future<String?> _uploadImageToFirebaseStorage(Uint8List imageBytes) async {
     print("Error uploading image: $e");
     return null;
   }
+  
 }
 Future<void> _updateUserData() async {
   final user = FirebaseAuth.instance.currentUser;
@@ -116,14 +118,6 @@ Future<void> _updateUserData() async {
       builder: (context) => Center(child: CircularProgressIndicator()),
     );
   });
-
-DocumentSnapshot userDoc = await FirebaseFirestore.instance
-    .collection("users")
-    .doc(user.uid)
-    .get();
-
-String oldUsername = userDoc.get("username") ?? "";
-
 
   String newUsername = _usernameController.text.trim();
 
@@ -151,16 +145,6 @@ String oldUsername = userDoc.get("username") ?? "";
     // Update user document
     await FirebaseFirestore.instance.collection("users").doc(user.uid).update(updatedData);
 
-    // Update username in all userpoints documents for the user
-QuerySnapshot pointsSnapshot = await FirebaseFirestore.instance
-    .collection("userpoints")
-    .where("username", isEqualTo: oldUsername)
-    .get();
-
-for (var doc in pointsSnapshot.docs) {
-  await doc.reference.update({"username": newUsername});
-}
-
     // Update username in all notes where the userId matches
     QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
         .collection("notes")
@@ -184,6 +168,17 @@ for (var doc in pointsSnapshot.docs) {
         await commentDoc.reference.update({"username": newUsername});
       }
     }
+
+    if (_oldUsername != null && _oldUsername != newUsername) {
+  QuerySnapshot userPointsSnapshot = await FirebaseFirestore.instance
+      .collection("userpoints")
+      .where("username", isEqualTo: _oldUsername)
+      .get();
+
+  for (var doc in userPointsSnapshot.docs) {
+    await doc.reference.update({"username": newUsername});
+  }
+}
 
     setState(() {
       _selectedImage = updatedData["profilePic"];
