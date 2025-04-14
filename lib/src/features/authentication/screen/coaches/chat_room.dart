@@ -154,11 +154,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               child: Icon(Icons.person, color: Colors.grey),
             ),
             const SizedBox(width: 12),
-            Text(
-              widget.coach.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
+            Flexible(
+              child: Text(
+                widget.coach.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
           ],
@@ -220,38 +224,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       .toList();
 
                   return ListView.builder(
-  controller: _scrollController,
-  padding: const EdgeInsets.all(16),
-  itemCount: messages.length,
-  itemBuilder: (context, index) {
-    final message = messages[index];
-    final isMe = message.senderId == widget.userId;
-    
-    // Check if this is a date separator
-    final previousDate = index > 0
-        ? messages[index - 1].timestamp
-        : DateTime(2000);
-    final showDateSeparator = !_isSameDay(message.timestamp, previousDate);
-    
-    // Check if this is a new sender
-    final previousSender = index > 0 ? messages[index - 1].senderId : "";
-    final showSenderName = previousSender != message.senderId || showDateSeparator;
-    
-    return Column(
-      children: [
-        // Show date separator if needed
-        if (showDateSeparator)
-          _buildDateSeparator(message.timestamp),
-        
-        // Show sender name if it's a new sender or after date separator
-        if (showSenderName)
-          _buildSenderHeader(message.senderName),
-          
-        _buildMessageBubble(message, isMe),
-      ],
-    );
-  },
-);
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final message = messages[index];
+                      final isMe = message.senderId == widget.userId;
+
+                      // Check if this is a date separator
+                      final previousDate = index > 0
+                          ? messages[index - 1].timestamp
+                          : DateTime(2000);
+                      final showDateSeparator =
+                          !_isSameDay(message.timestamp, previousDate);
+
+                      // Check if this is a new sender
+                      final previousSender =
+                          index > 0 ? messages[index - 1].senderId : "";
+                      final showSenderName =
+                          previousSender != message.senderId ||
+                              showDateSeparator;
+
+                      return Column(
+                        children: [
+                          // Show date separator if needed
+                          if (showDateSeparator)
+                            _buildDateSeparator(message.timestamp),
+
+                          // Show sender name if it's a new sender or after date separator
+                          if (showSenderName)
+                            _buildSenderHeader(message.senderName),
+
+                          _buildMessageBubble(message, isMe),
+                        ],
+                      );
+                    },
+                  );
                 },
               ),
             ),
@@ -306,8 +314,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  
-
   bool _isSameDay(DateTime date1, DateTime date2) {
     return date1.year == date2.year &&
         date1.month == date2.month &&
@@ -315,42 +321,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Widget _buildSenderHeader(String senderName) {
-  return Container(
-    width: double.infinity,
-    padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
-    child: Text(
-      senderName,
-      style: TextStyle(
-        fontWeight: FontWeight.bold,
-        fontSize: 16,
-        color: Colors.grey.shade800,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+      child: Text(
+        senderName,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 16,
+          color: Colors.grey.shade800,
+        ),
+        textAlign: TextAlign.center,
       ),
-      textAlign: TextAlign.center,
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildDateSeparator(DateTime date) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 16.0),
-    child: Row(
-      children: [
-        Expanded(child: Divider(color: Colors.grey.shade400)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-          child: Text(
-            _getDateText(date),
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 12,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: Colors.grey.shade400)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Text(
+              _getDateText(date),
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 12,
+              ),
             ),
           ),
-        ),
-        Expanded(child: Divider(color: Colors.grey.shade400)),
-      ],
-    ),
-  );
-}
+          Expanded(child: Divider(color: Colors.grey.shade400)),
+        ],
+      ),
+    );
+  }
 
   String _getDateText(DateTime date) {
     final now = DateTime.now();
@@ -486,8 +492,7 @@ class CoachProfileDialog extends StatelessWidget {
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
                           userId: 'user_123',
-                          userName:
-                              'Current User', 
+                          userName: 'Current User',
                         ),
                       ),
                     );
