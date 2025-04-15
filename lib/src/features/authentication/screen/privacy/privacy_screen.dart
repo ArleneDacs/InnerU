@@ -295,7 +295,9 @@ class _PrivacyScreen extends State<PrivacyScreen> {
 
       await user.delete();
 
-      Navigator.of(context).pop();
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+
+// Optionally show a toast/snack on the login screen instead
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

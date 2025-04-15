@@ -12,6 +12,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/dashboard/D
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/note_gallery.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
@@ -79,6 +80,7 @@ class App extends StatelessWidget {
           '/communityScreen': (context) => CommunityScreen(),
           '/profileSettings': (context) => ProfileSettings(),
           '/todolist': (context) => TodoList(),
+          '/login': (context) => LoginScreen(),
           '/meditationSong': (context) => MeditationSong(),
           'notesType': (context) => NotesType(
                   note: Note(

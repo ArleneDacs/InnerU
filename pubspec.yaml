@@ -63,6 +63,7 @@ dependencies:
   video_player: ^2.5.0
   sign_in_with_apple: ^6.1.4
   shimmer: ^3.0.0
+  flutter_image_compress: ^2.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

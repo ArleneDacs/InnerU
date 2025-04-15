@@ -165,6 +165,26 @@ class _NotesTypeState extends State<NotesType> {
         false; // Return false if dialog is dismissed without selection
   }
 
+  Future<void> updateUsernameInComments(
+      String userId, String newUsername) async {
+    final firestore = FirebaseFirestore.instance;
+
+    // Query all notes
+    final notesSnapshot = await firestore.collection('notes').get();
+
+    for (var noteDoc in notesSnapshot.docs) {
+      final commentsRef =
+          firestore.collection('notes').doc(noteDoc.id).collection('comments');
+
+      final commentsSnapshot =
+          await commentsRef.where('userId', isEqualTo: userId).get();
+
+      for (var commentDoc in commentsSnapshot.docs) {
+        await commentsRef.doc(commentDoc.id).update({'username': newUsername});
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -436,6 +456,41 @@ class _NotesTypeState extends State<NotesType> {
     _isSaving = false;
   }
 
+  Future<void> pickImage() async {
+    final List<XFile>? images = await _picker.pickMultiImage();
+
+    if (images != null && images.isNotEmpty) {
+      if (!mounted) return;
+
+      List<String> newUploadedUrls = [];
+
+      for (var image in images) {
+        if (!mounted) return;
+
+        // Add a temporary "loading" state while image is uploading
+        setState(() {
+          uploadedImageUrls.add("loading"); // Placeholder during upload
+        });
+
+        // Upload the image and get its URL
+        String imageUrl = await uploadImageToFirebase(File(image.path));
+
+        if (imageUrl.isNotEmpty && mounted) {
+          setState(() {
+            // Find the "loading" state and replace it with the actual URL
+            int loadingIndex = uploadedImageUrls.indexOf("loading");
+            if (loadingIndex != -1) {
+              uploadedImageUrls[loadingIndex] = imageUrl;
+            } else {
+              uploadedImageUrls.add(imageUrl); // Add new image URL
+            }
+            _validateForm(); // <- Add this line here
+          });
+        }
+      }
+    }
+  }
+
   Future<String> uploadImageToFirebase(File imageFile) async {
     try {
       String fileName = DateTime.now().millisecondsSinceEpoch.toString();
@@ -449,73 +504,6 @@ class _NotesTypeState extends State<NotesType> {
     } catch (e) {
       print("Error uploading image: $e");
       return "";
-    }
-  }
-
-  void pickImage() async {
-    final List<XFile>? images = await _picker.pickMultiImage();
-
-    if (images != null && images.isNotEmpty) {
-      if (!mounted) return;
-
-      List<String> newUploadedUrls = [];
-
-      for (var image in images) {
-        if (!mounted) return;
-
-        setState(() {
-          uploadedImageUrls.add("loading"); // Add a temporary loading state
-        });
-
-        String imageUrl = await uploadImageToFirebase(File(image.path));
-
-        if (imageUrl.isNotEmpty && mounted) {
-          setState(() {
-            int loadingIndex = uploadedImageUrls.indexOf("loading");
-            if (loadingIndex != -1) {
-              uploadedImageUrls[loadingIndex] = imageUrl;
-              _validateForm(); // Replace loading with actual URL
-            } else {
-              uploadedImageUrls.add(imageUrl);
-            }
-          });
-        }
-      }
-    }
-  }
-
-  Future<void> removeImage(int index) async {
-    if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
-
-    String imageUrl = uploadedImageUrls[index];
-    setState(() {
-      uploadedImageUrls.removeAt(index);
-      _validateForm();
-    });
-
-    await FirebaseFirestore.instance
-        .collection('notes')
-        .where('note', arrayContains: {"type": "image", "value": imageUrl})
-        .get()
-        .then((querySnapshot) {
-          for (var doc in querySnapshot.docs) {
-            doc.reference.update({
-              'note': FieldValue.arrayRemove([
-                {"type": "image", "value": imageUrl}
-              ])
-            });
-          }
-        });
-
-    await deleteImageFromFirebase(imageUrl);
-  }
-
-  Future<void> deleteImageFromFirebase(String imageUrl) async {
-    try {
-      Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
-      await storageRef.delete();
-    } catch (e) {
-      print("Error deleting image: $e");
     }
   }
 
@@ -585,6 +573,41 @@ class _NotesTypeState extends State<NotesType> {
               ),
       ),
     );
+  }
+
+  Future<void> removeImage(int index) async {
+    if (!mounted || index < 0 || index >= uploadedImageUrls.length) return;
+
+    String imageUrl = uploadedImageUrls[index];
+    setState(() {
+      uploadedImageUrls.removeAt(index);
+    });
+
+    // You may want to update Firestore and remove the image if needed
+    await FirebaseFirestore.instance
+        .collection('notes')
+        .where('note', arrayContains: {"type": "image", "value": imageUrl})
+        .get()
+        .then((querySnapshot) {
+          for (var doc in querySnapshot.docs) {
+            doc.reference.update({
+              'note': FieldValue.arrayRemove([
+                {"type": "image", "value": imageUrl}
+              ])
+            });
+          }
+        });
+
+    await deleteImageFromFirebase(imageUrl);
+  }
+
+  Future<void> deleteImageFromFirebase(String imageUrl) async {
+    try {
+      Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
+      await storageRef.delete();
+    } catch (e) {
+      print("Error deleting image: $e");
+    }
   }
 
   void addText(String text) {
