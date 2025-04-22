@@ -183,10 +183,28 @@ class _MeditationState extends State<Meditation> {
                       );
 
                       if (selectedSong != null && selectedSong is String) {
+                        final newSongPath = _getSongPath(selectedSong);
+
                         setState(() {
                           favoriteSong = selectedSong;
-                          favoriteSongPath = _getSongPath(favoriteSong);
+                          favoriteSongPath = newSongPath;
                         });
+
+                        // ✅ Always play selected song, even if it's the same as the current
+                        if (newSongPath != null) {
+                          print("Changing music to: $selectedSong");
+                          await AudioHelper.playSong(
+                            selectedSong,
+                            newSongPath,
+                            (newPlayingSong) {
+                              if (mounted) {
+                                setState(() {
+                                  playingSong = newPlayingSong;
+                                });
+                              }
+                            },
+                          );
+                        }
                       }
                     },
                     child: Text(favoriteSong),

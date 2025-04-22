@@ -225,11 +225,13 @@ class _ProfilePageState extends State<ProfilePage> {
             userSnapshot.data() as Map<String, dynamic>;
         String username = userData['username'];
         String server = userData['team'] ?? "Default"; // Get user's team
-        String documentId = '$username-$todayDate';
+        String trackerDocId = '$userId-$todayDate';
+        String pointsDocId =
+            '$userId-$todayDate'; // or '$username-$todayDate', up to you
 
         DocumentSnapshot snapshot = await FirebaseFirestore.instance
             .collection('dailytracker')
-            .doc(documentId)
+            .doc(trackerDocId)
             .get();
 
         if (snapshot.exists) {
@@ -282,7 +284,7 @@ class _ProfilePageState extends State<ProfilePage> {
           // Save points in the userpoints collection
           await FirebaseFirestore.instance
               .collection('userpoints')
-              .doc(documentId)
+              .doc(pointsDocId)
               .set({
             'username': username,
             'date': todayDate,

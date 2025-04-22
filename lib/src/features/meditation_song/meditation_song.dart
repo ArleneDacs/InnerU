@@ -135,6 +135,7 @@ class _MeditationSongState extends State<MeditationSong>
                             songs[index]["title"]!,
                             songs[index]["assetPath"]!,
                             (song) {
+                              if (!mounted) return;
                               setState(() {
                                 playingIndex = song == null ? null : index;
                               });
@@ -150,6 +151,8 @@ class _MeditationSongState extends State<MeditationSong>
                         onPressed: () async {
                           await _saveLikedSong(isLiked ? null : index);
                           if (!isLiked) {
+                            _audioPlayer
+                                .stop(); // OR skip this if you want continuous audio
                             Navigator.pop(context, songs[index]["title"]!);
                           }
                         },

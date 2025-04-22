@@ -143,7 +143,7 @@ class _SignupScreenState extends State<SignupScreen> {
             .get();
 
         if (!userDoc.exists) {
-          print(" User does not exist in Firestore, creating user...");
+          print("User does not exist in Firestore, creating user...");
 
           try {
             await FirebaseFirestore.instance
@@ -152,15 +152,17 @@ class _SignupScreenState extends State<SignupScreen> {
                 .set({
               "uid": user.uid,
               "email": user.email,
-              "username": user.displayName ??
-                  user.email?.split('@')[0], // Fallback to email username
+              "username": user.displayName ?? user.email?.split('@')[0],
               "photoURL": user.photoURL,
-              "createdAt": FieldValue.serverTimestamp(), // Store signup time
+              "createdAt": FieldValue.serverTimestamp(),
             });
 
             print("Firestore user document created successfully!");
+
+            // Show dialog to set password
+            await _showSetPasswordDialog(user);
           } catch (e) {
-            print(" Firestore write error: $e");
+            print("Firestore write error: $e");
           }
         } else {
           print("User already exists in Firestore.");
@@ -228,6 +230,99 @@ class _SignupScreenState extends State<SignupScreen> {
       _isLoading = false;
     });
   }*/
+
+  Future<void> _showSetPasswordDialog(User user) async {
+    final TextEditingController passwordController = TextEditingController();
+    final TextEditingController confirmPasswordController =
+        TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool isLoading = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text("Set a Password for Your Account"),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: passwordController,
+                      obscureText: true,
+                      decoration: InputDecoration(labelText: "Password"),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return "Password cannot be empty";
+                        }
+                        if (!_isValidPassword(value)) {
+                          return "Must contain upper, lower, digit & be 8+ chars.";
+                        }
+                        return null;
+                      },
+                    ),
+                    TextFormField(
+                      controller: confirmPasswordController,
+                      obscureText: true,
+                      decoration:
+                          InputDecoration(labelText: "Confirm Password"),
+                      validator: (value) {
+                        if (value != passwordController.text) {
+                          return "Passwords do not match!";
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          if (formKey.currentState!.validate()) {
+                            setState(() => isLoading = true);
+                            try {
+                              await user.updatePassword(
+                                  passwordController.text.trim());
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text("Password set successfully!"),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            } catch (e) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text("Failed to set password: $e"),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  child: isLoading
+                      ? CircularProgressIndicator(color: Colors.white)
+                      : Text("Save Password"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

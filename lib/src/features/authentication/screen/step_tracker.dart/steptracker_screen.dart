@@ -3,7 +3,7 @@ import 'package:pedometer/pedometer.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:permission_handler/permission_handler.dart'; 
+import 'package:permission_handler/permission_handler.dart';
 import 'package:lottie/lottie.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,7 +40,7 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _initializeApp() async {
-      await _requestPermission();
+    await _requestPermission();
     await _loadSteps();
     _initStepCounter();
   }
@@ -70,7 +70,8 @@ class _StepTrackerState extends State<StepTracker>
 
     _updateStepCount(_steps);
   }
- Future<void> _requestPermission() async {
+
+  Future<void> _requestPermission() async {
     PermissionStatus status = await Permission.activityRecognition.request();
 
     if (status.isGranted) {
@@ -82,6 +83,7 @@ class _StepTrackerState extends State<StepTracker>
       openAppSettings();
     }
   }
+
   Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
     if (date == null) return;
 
