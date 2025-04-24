@@ -107,15 +107,11 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
 
-      // Ensure the account picker appears by signing out first
-      await googleSignIn.signOut();
-
+      await googleSignIn.signOut(); // Force account picker
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
       if (googleUser == null) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
         print("❌ Google sign-in canceled by user.");
         return;
       }
@@ -134,46 +130,76 @@ class _SignupScreenState extends State<SignupScreen> {
       User? user = userCredential.user;
 
       if (user != null) {
-        print("User signed in: ${user.uid}");
-
-        // Check if user exists in Firestore
         DocumentSnapshot userDoc = await FirebaseFirestore.instance
             .collection("users")
             .doc(user.uid)
             .get();
 
-        if (!userDoc.exists) {
-          print("User does not exist in Firestore, creating user...");
+        if (userDoc.exists) {
+          // ❌ If the account already exists in Firestore, show warning and sign out
+          await FirebaseAuth.instance
+              .signOut(); // optional: also sign out from Firebase
+          await googleSignIn.signOut(); // also sign out from Google
 
-          try {
-            await FirebaseFirestore.instance
-                .collection("users")
-                .doc(user.uid)
-                .set({
-              "uid": user.uid,
-              "email": user.email,
-              "username": user.displayName ?? user.email?.split('@')[0],
-              "photoURL": user.photoURL,
-              "createdAt": FieldValue.serverTimestamp(),
-            });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Account already used. Please login instead."),
+              backgroundColor: Colors.red,
+            ),
+          );
 
-            print("Firestore user document created successfully!");
-
-            // Show dialog to set password
-            await _showSetPasswordDialog(user);
-          } catch (e) {
-            print("Firestore write error: $e");
-          }
-        } else {
-          print("User already exists in Firestore.");
+          setState(() => _isLoading = false);
+          return;
         }
 
-        // Proceed to the next page
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => Setuppage()),
-        );
+        // Ask to set password first
+        bool passwordSet = await _showSetPasswordDialog(user);
+
+        if (passwordSet) {
+          // ✅ If password is set, create the user document in Firestore
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(user.uid)
+              .set({
+            "uid": user.uid,
+            "email": user.email,
+            "username": user.displayName ?? user.email?.split('@')[0],
+            "photoURL": user.photoURL,
+            "createdAt": FieldValue.serverTimestamp(),
+          });
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => Setuppage()),
+          );
+        } else {
+          // Optionally: sign the user out if you want to cancel the whole signup
+          await FirebaseAuth.instance.currentUser
+              ?.delete(); // Delete the FirebaseAuth user
+          await FirebaseAuth.instance.signOut();
+          await googleSignIn.signOut();
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Signup cancelled."),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       }
+    } on FirebaseAuthException catch (e) {
+      String errorMsg = "Google sign-in failed. Please try again.";
+      if (e.code == 'account-exists-with-different-credential') {
+        errorMsg =
+            "Account already exists with a different sign-in method. Please login using email and password.";
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMsg),
+          backgroundColor: Colors.red,
+        ),
+      );
     } catch (error) {
       print("Google sign-in failed: $error");
 
@@ -189,6 +215,7 @@ class _SignupScreenState extends State<SignupScreen> {
       _isLoading = false;
     });
   }
+
   /*Future<void> _handleAppleSignIn() async {
     setState(() {
       _isLoading = true;
@@ -231,14 +258,14 @@ class _SignupScreenState extends State<SignupScreen> {
     });
   }*/
 
-  Future<void> _showSetPasswordDialog(User user) async {
+  Future<bool> _showSetPasswordDialog(User user) async {
     final TextEditingController passwordController = TextEditingController();
     final TextEditingController confirmPasswordController =
         TextEditingController();
     final formKey = GlobalKey<FormState>();
     bool isLoading = false;
 
-    await showDialog(
+    final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
@@ -282,7 +309,9 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    Navigator.pop(context, false); // return false
+                  },
                   child: Text("Cancel"),
                 ),
                 ElevatedButton(
@@ -294,7 +323,8 @@ class _SignupScreenState extends State<SignupScreen> {
                             try {
                               await user.updatePassword(
                                   passwordController.text.trim());
-                              Navigator.pop(context);
+                              Navigator.pop(context, true); // return true
+
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text("Password set successfully!"),
@@ -302,7 +332,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                 ),
                               );
                             } catch (e) {
-                              Navigator.pop(context);
+                              Navigator.pop(context, false); // return false
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text("Failed to set password: $e"),
@@ -322,6 +352,9 @@ class _SignupScreenState extends State<SignupScreen> {
         );
       },
     );
+
+    // Return the result or false if it's null (e.g., dialog was dismissed)
+    return result ?? false;
   }
 
   @override
