@@ -649,145 +649,47 @@ class _LeaderboardState extends State<Leaderboard> {
     );
   }
 
-  Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
-    return GestureDetector(
-      onTap: () {
-        // Show detailed breakdown of points when tapping on podium item
-        _showPointsBreakdown(context, entry);
-      },
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Stack(
-            alignment: Alignment.topCenter,
-            children: [
-              entry.profilePic != null
-                  ? ClipOval(
-                child: Image.network(
-                  entry.profilePic!,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return CircleAvatar(
-                      radius: 24,
-                      backgroundColor: Colors.grey[200],
-                      child: CircularProgressIndicator(),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return CircleAvatar(
-                      radius: 24,
-                      backgroundColor: Colors.grey[200],
-                      child: Icon(
-                        Icons.person,
-                        size: 30,
-                        color: Colors.grey[600],
-                      ),
-                    );
-                  },
-                ),
-              )
-                  : CircleAvatar(
-                radius: 24,
-                backgroundColor: Colors.grey[200],
-                child: Icon(
-                  Icons.person,
-                  size: 30,
-                  color: Colors.grey[600],
-                ),
-              ),
-              // Add crown to first place
-              if (position == 1)
-                Positioned(
-                  top: 13,
-                  child: Image.asset(
-                    'assets/images/crown.png',
-                    height: 50,
-                    width: 100,
-                  ),
-                ),
-            ],
-          ),
-          SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('#${entry.rank}', style: TextStyle(fontWeight: FontWeight.bold)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: Text('.', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-              ),
-              Text(
-                  entry.name,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1
-              ),
-            ],
-          ),
-          Container(
-            width: 80,
-            height: height,
-            margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.cyan,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-            ),
-            child: Center(
-              child: Text(
-                entry.score.toString(),
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // LEADERBOARD ITEM METHODS
-  Widget _buildLeaderboardItem(LeaderboardEntry entry) {
-    return GestureDetector(
-      onTap: () {
-        // Show detailed breakdown of points
-        _showPointsBreakdown(context, entry);
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Color(0xFFFFE5D3),
-            width: 1.5,
-          ),
-        ),
-        padding: EdgeInsets.all(12),
-        child: Row(
+Widget _buildPodiumItem(LeaderboardEntry entry, double height, int position) {
+  return GestureDetector(
+    onTap: () {
+      _showPointsBreakdown(context, entry);
+    },
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        // Profile picture + crown
+        Stack(
+          alignment: Alignment.topCenter,
           children: [
-            Text('#${entry.rank}', style: TextStyle(fontSize: 18)),
-            SizedBox(width: 12),
             entry.profilePic != null
                 ? ClipOval(
-              child: Image.network(
-                entry.profilePic!,
-                width: 48,
-                height: 48,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return CircleAvatar(
-                    radius: 24,
-                    backgroundColor: Colors.grey[200],
-                    child: CircularProgressIndicator(),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) {
-                  return CircleAvatar(
+                    child: Image.network(
+                      entry.profilePic!,
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Colors.grey[200],
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Colors.grey[200],
+                          child: Icon(
+                            Icons.person,
+                            size: 30,
+                            color: Colors.grey[600],
+                          ),
+                        );
+                      },
+                    ),
+                  )
+                : CircleAvatar(
                     radius: 24,
                     backgroundColor: Colors.grey[200],
                     child: Icon(
@@ -795,54 +697,195 @@ class _LeaderboardState extends State<Leaderboard> {
                       size: 30,
                       color: Colors.grey[600],
                     ),
-                  );
-                },
-              ),
-            )
-                : CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.grey[200],
-              child: Icon(
-                Icons.person,
-                size: 30,
-                color: Colors.grey[600],
-              ),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(entry.name, style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 4),
-                  // Only show server info if hasJoinedTeam is true
-                  if (hasJoinedTeam)
-                    Text(
-                      entry.activity.server,
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: entry.score > 0 ? (entry.score / 3000) : 0.0, // Prevent division by zero
-                    backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
-                ],
+            if (position == 1)
+              Positioned(
+                top: 13,
+                child: Image.asset(
+                  'assets/images/crown.png',
+                  height: 50,
+                  width: 100,
+                ),
               ),
-            ),
-            SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(entry.score.toString(), style: TextStyle(fontSize: 18)),
-                Text('points', style: TextStyle(color: Colors.grey)),
-              ],
-            ),
           ],
         ),
+
+        SizedBox(height: 20), // Space between profile and bar graph
+
+        // Bar graph
+        Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: Stack(
+            children: [
+              Container(
+                width: 80,
+                height: height,
+                margin: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF90A17D), // olive green top
+                      Color(0xFF6F7B5C), // darker olive bottom
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 6,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    '${entry.score} pts',
+                    style: TextStyle(
+                      fontFamily: 'Roboto', // Change to your custom font if needed
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                      letterSpacing: 0.5,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 2,
+                          color: Colors.black45,
+                          offset: Offset(1, 1),
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Username overlay
+              Positioned(
+                top: height / 4,
+                left: 0,
+                right: 0,
+                child: Text(
+                  entry.name,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    shadows: [
+                      Shadow(
+                        blurRadius: 2,
+                        color: Colors.black26,
+                        offset: Offset(1, 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Top X badge
+              if (position == 1 || position == 2 || position == 3)
+                Positioned(
+                  top: 5,
+                  left: 0,
+                  right: 0,
+                  child: Text(
+                    'Top $position',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amberAccent,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 3,
+                          color: Colors.black45,
+                          offset: Offset(1, 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
+
+
+
+
+  // LEADERBOARD ITEM METHODS
+ Widget _buildLeaderboardItem(LeaderboardEntry entry) {
+  return GestureDetector(
+    onTap: () => _showPointsBreakdown(context, entry),
+    child: Container(
+      margin: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4,
+            offset: Offset(0, 3),
+          )
+        ],
       ),
-    );
-  }
+      child: Row(
+        children: [
+          Text('#${entry.rank}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          SizedBox(width: 12),
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: Colors.grey[200],
+            backgroundImage: entry.profilePic != null ? NetworkImage(entry.profilePic!) : null,
+            child: entry.profilePic == null
+                ? Icon(Icons.person, size: 30, color: Colors.grey[600])
+                : null,
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.name,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: LinearProgressIndicator(
+                    value: entry.score > 0 ? (entry.score / 3000).clamp(0.0, 1.0) : 0.0,
+                    minHeight: 8,
+                    backgroundColor: Colors.grey[300],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${entry.score}', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('pts', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+
 
   // POINTS BREAKDOWN METHODS
   void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
