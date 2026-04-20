@@ -26,6 +26,7 @@ class MyApp extends StatelessWidget {
 }
 
 class Coach {
+  final String id;
   final String name;
   final String phone;
   final String bio;
@@ -33,6 +34,7 @@ class Coach {
   final Color backgroundColor;
 
   Coach({
+    required this.id,
     required this.name,
     this.phone = '',
     this.bio = '',
@@ -134,16 +136,38 @@ class CoachProfileDialog extends StatelessWidget {
                     size: 30,
                     color: Colors.white,
                   ),
-                  onPressed: () {
+                  onPressed: () async {
                     Navigator.pop(context);
+                    final currentUser = FirebaseAuth.instance.currentUser;
+                    if (currentUser == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please log in first.')),
+                      );
+                      return;
+                    }
+
+                    String userName = 'User';
+                    try {
+                      final userDoc = await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(currentUser.uid)
+                          .get();
+                      final data = userDoc.data();
+                      userName = (data?['username'] as String?)?.trim().isNotEmpty ==
+                              true
+                          ? (data!['username'] as String)
+                          : (currentUser.email?.split('@').first ?? 'User');
+                    } catch (_) {
+                      userName = currentUser.email?.split('@').first ?? 'User';
+                    }
+
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
-                          userId: 'user_123',
-                          userName:
-                              'Current User', 
+                          userId: currentUser.uid,
+                          userName: userName,
                         ),
                       ),
                     );
@@ -255,6 +279,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
       return snapshot.docs.map((doc) {
         final data = doc.data();
         return Coach(
+          id: doc.id,
           name: data['fullName'] ?? '',
           phone: data['phonenumber'] ?? '',
           bio: data['bio'] ?? '',
@@ -318,7 +343,18 @@ class _CoachesScreenState extends State<CoachesScreen> {
                     return Center(child: Text('No coaches available.'));
                   }
 
-                  final coaches = snapshot.data!;
+                  final query = _searchController.text.trim().toLowerCase();
+                  final coaches = snapshot.data!.where((coach) {
+                    if (query.isEmpty) return true;
+                    return coach.name.toLowerCase().contains(query) ||
+                        coach.bio.toLowerCase().contains(query) ||
+                        coach.phone.toLowerCase().contains(query);
+                  }).toList();
+
+                  if (coaches.isEmpty) {
+                    return const Center(child: Text('No coaches match your search.'));
+                  }
+
                   return ListView.builder(
                     padding: const EdgeInsets.all(16.0),
                     itemCount: coaches.length,

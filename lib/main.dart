@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
@@ -142,7 +143,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
           return Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData && snapshot.data != null) {
-          return Setuppage();
+          return const AuthRoleHome();
         }
         return widget.child;
       },

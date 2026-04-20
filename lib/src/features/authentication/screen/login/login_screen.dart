@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgetpassword_otp/forgotpasswordotp.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgotpassword_mail/forgotpasswordmail.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/role_selection_screen.dart';
@@ -45,7 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (user!.emailVerified) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => Setuppage()),
+            MaterialPageRoute(builder: (context) => const AuthRoleHome()),
           );
         } else {
           _showEmailNotVerifiedDialog(user);
@@ -180,7 +180,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (error == null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const Setuppage()),
+        MaterialPageRoute(builder: (context) => const AuthRoleHome()),
       );
       return;
     } else {

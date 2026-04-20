@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 
@@ -36,7 +36,7 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
         if (mounted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => Setuppage()),
+            MaterialPageRoute(builder: (context) => const AuthRoleHome()),
           );
         }
       }

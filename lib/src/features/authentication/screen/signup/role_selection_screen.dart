@@ -1,6 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 
@@ -34,7 +34,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     if (error == null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const Setuppage()),
+        MaterialPageRoute(
+          builder: (context) => AuthRoleHome(preferredRole: _selectedRole),
+        ),
       );
       return;
     }

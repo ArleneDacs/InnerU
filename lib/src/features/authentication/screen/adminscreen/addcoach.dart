@@ -229,8 +229,12 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
   late TextEditingController _searchController;
   final String allowedUserUID =
       "hG1FxGW2xrVXtKZnnDWERJpPQof2"; // Replace with the actual UID
+  User? _currentUser;
+  bool _isAdmin = false;
+  bool _isCoachUser = false;
   bool _isAuthorized = false;
   bool _isLoading = true;
+  bool _coachProfileExists = false;
 
   @override
   void initState() {
@@ -260,15 +264,169 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
   }
 
   Future<void> _checkUserAccess() async {
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser != null && currentUser.uid == allowedUserUID) {
-      setState(() {
-        _isAuthorized = true;
-      });
+    _currentUser = FirebaseAuth.instance.currentUser;
+
+    if (_currentUser != null) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .get();
+      final data = userDoc.data() ?? {};
+      final role = (data['role'] as String?)?.toLowerCase();
+      final isCoach = data['isCoach'] == true || role == 'coach';
+
+      _isAdmin = _currentUser!.uid == allowedUserUID;
+      _isCoachUser = isCoach;
+      _isAuthorized = _isAdmin || _isCoachUser;
+
+      if (_isCoachUser) {
+        final coachDoc = await FirebaseFirestore.instance
+            .collection('coaches')
+            .doc(_currentUser!.uid)
+            .get();
+        _coachProfileExists = coachDoc.exists;
+      }
     }
+
     setState(() {
       _isLoading = false;
     });
+  }
+
+  Future<void> _showCoachProfileDialog() async {
+    if (_currentUser == null) return;
+
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_currentUser!.uid)
+        .get();
+    final userData = userDoc.data() ?? {};
+    final existingCoachDoc = await FirebaseFirestore.instance
+        .collection('coaches')
+        .doc(_currentUser!.uid)
+        .get();
+    final coachData = existingCoachDoc.data() ?? {};
+
+    final fullNameController = TextEditingController(
+      text: (coachData['fullName'] as String?) ??
+          (userData['username'] as String?) ??
+          '',
+    );
+    final bioController = TextEditingController(
+      text: (coachData['bio'] as String?) ?? '',
+    );
+    final phoneController = TextEditingController(
+      text: (coachData['phonenumber'] as String?) ??
+          (userData['number'] as String?) ??
+          '',
+    );
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          title: Text(_coachProfileExists ? 'Edit Coach Profile' : 'Create Coach Profile'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: fullNameController,
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: bioController,
+                decoration: InputDecoration(
+                  labelText: 'Bio',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneController,
+                decoration: InputDecoration(
+                  labelText: 'Phone Number',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (fullNameController.text.trim().isEmpty ||
+                    bioController.text.trim().isEmpty ||
+                    phoneController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('All fields are required')),
+                  );
+                  return;
+                }
+
+                await FirebaseFirestore.instance
+                    .collection('coaches')
+                    .doc(_currentUser!.uid)
+                    .set({
+                  'userId': _currentUser!.uid,
+                  'username': userData['username'] ?? '',
+                  'email': userData['email'] ?? _currentUser!.email ?? '',
+                  'fullName': fullNameController.text.trim(),
+                  'bio': bioController.text.trim(),
+                  'phonenumber': phoneController.text.trim(),
+                  'profilePic': userData['profilePic'] ?? '',
+                  'backgroundColor': coachData['backgroundColor'] ?? 'blue',
+                  'createdAt':
+                      coachData['createdAt'] ?? FieldValue.serverTimestamp(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(_currentUser!.uid)
+                    .set({
+                  'role': 'coach',
+                  'isCoach': true,
+                }, SetOptions(merge: true));
+
+                setState(() {
+                  _coachProfileExists = true;
+                });
+
+                if (!mounted) return;
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      _coachProfileExists
+                          ? 'Coach profile updated successfully!'
+                          : 'Coach profile created successfully!',
+                    ),
+                  ),
+                );
+              },
+              child: Text(_coachProfileExists ? 'Save Changes' : 'Create Profile'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -301,21 +459,59 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
       appBar: AppBar(
         title: const Text('Our Coaches'),
         actions: [
-          IconButton(
-            icon: const Icon(CupertinoIcons.person_add),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => ManageCoachesScreen()),
-              );
-            },
-          ),
+          if (_isCoachUser)
+            IconButton(
+              icon: const Icon(CupertinoIcons.person_crop_circle_badge_plus),
+              onPressed: _showCoachProfileDialog,
+            ),
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(CupertinoIcons.person_add),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ManageCoachesScreen()),
+                );
+              },
+            ),
         ],
       ),
       floatingActionButton: null,
       body: SafeArea(
         child: Column(
           children: [
+            if (_isCoachUser && !_coachProfileExists)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE9F4EE),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF90A17D)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Complete your coach profile',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Add your full name, bio, and phone number so users can find you as a coach.',
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _showCoachProfileDialog,
+                      child: const Text('Create Coach Profile'),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20.0),
               child: SizedBox(

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,9 +6,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
@@ -241,24 +242,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<String?> getRandomCoachId() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedCoachId = prefs.getString('random_coach_id');
-    final storedDate = prefs.getString('random_coach_date');
-    final today = DateTime.now().toIso8601String().split('T')[0];
+  Future<void> _openCoachChat({
+    required BuildContext context,
+    required Coach coach,
+  }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
 
-    if (storedCoachId != null && storedDate == today) {
-      return storedCoachId;
-    }
+    final username = await _getUsername();
+    if (!mounted) return;
 
-    final snapshot = await FirebaseFirestore.instance.collection('coaches').get();
-    if (snapshot.docs.isEmpty) return null;
-
-    final randomCoach = snapshot.docs[Random().nextInt(snapshot.docs.length)];
-    await prefs.setString('random_coach_id', randomCoach.id);
-    await prefs.setString('random_coach_date', today);
-
-    return randomCoach.id;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatRoomScreen(
+          coach: coach,
+          userId: currentUser.uid,
+          userName: username,
+        ),
+      ),
+    );
   }
 
   @override
@@ -338,7 +341,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _buildActionRows(context),
             const SizedBox(height: 28),
             _buildCoachSection(context),
-            const SizedBox(height: 24),
             _buildMoodSection(context),
             const SizedBox(height: 12),
           ],
@@ -687,172 +689,252 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCoachSection(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 1,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Today's Coach",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .snapshots(),
+      builder: (context, userSnapshot) {
+        if (userSnapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final userData = userSnapshot.data?.data();
+        final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
+        final teamName = (userData?['team'] as String?)?.trim() ?? '';
+
+        if (coachId.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'My Coach',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
               ),
-              const Divider(
-                thickness: 1,
-                height: 5,
-                indent: 0,
-                endIndent: 0,
-              ),
-              const SizedBox(height: 8),
-              InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => CoachesScreen(),
+            ),
+            const Divider(thickness: 1, height: 12),
+            const SizedBox(height: 8),
+            FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              future: FirebaseFirestore.instance
+                  .collection('coaches')
+                  .doc(coachId)
+                  .get(),
+              builder: (context, coachSnapshot) {
+                if (coachSnapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (!coachSnapshot.hasData || !coachSnapshot.data!.exists) {
+                  return const SizedBox.shrink();
+                }
+
+                final coachData = coachSnapshot.data!.data()!;
+                final coach = Coach(
+                  id: coachSnapshot.data!.id,
+                  name: (coachData['fullName'] as String?)?.trim().isNotEmpty ==
+                          true
+                      ? (coachData['fullName'] as String).trim()
+                      : 'My Coach',
+                  phone: (coachData['phone'] as String?)?.trim() ?? '',
+                  bio: (coachData['bio'] as String?)?.trim() ?? 'Your support coach',
+                  profilePic: (coachData['profilePic'] as String?)?.trim() ?? '',
+                  backgroundColor: const Color(0xFFDCE5D4),
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildAssignedCoachCard(context, coach: coach),
+                    const SizedBox(height: 20),
+                    _buildTeamDashboardCard(
+                      context,
+                      teamName: teamName,
+                      coachName: coach.name,
                     ),
-                  );
-                },
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  ],
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildAssignedCoachCard(
+    BuildContext context, {
+    required Coach coach,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 32,
+                backgroundColor: const Color(0xFFDCE5D4),
+                backgroundImage: coach.profilePic.isNotEmpty
+                    ? NetworkImage(coach.profilePic)
+                    : null,
+                child: coach.profilePic.isEmpty
+                    ? const Icon(Icons.person, color: Colors.white, size: 30)
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "SEE ALL",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w200,
-                        fontSize: 13,
+                      coach.name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 15,
+                    const SizedBox(height: 4),
+                    Text(
+                      coach.bio.isEmpty ? 'Your support coach' : coach.bio,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.35,
+                        color: Colors.black54,
+                      ),
                     ),
                   ],
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => CoachProfileDialog(coach: coach),
+                    );
+                  },
+                  child: const Text('View profile'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _openCoachChat(context: context, coach: coach),
+                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                  label: const Text('Message'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF90A17D),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTeamDashboardCard(
+    BuildContext context, {
+    required String teamName,
+    required String coachName,
+  }) {
+    final displayTeamName = teamName.isNotEmpty ? teamName : '$coachName Team';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFEEF3E8),
+            Color(0xFFD8E4C8),
+          ],
         ),
-        Expanded(
-          flex: 2,
-          child: FutureBuilder<String?>(
-            future: getRandomCoachId(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (!snapshot.hasData || snapshot.data == null) {
-                return const Center(child: Text("No coach available"));
-              }
-
-              return FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance
-                    .collection('coaches')
-                    .doc(snapshot.data)
-                    .get(),
-                builder: (context, coachSnapshot) {
-                  if (coachSnapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (!coachSnapshot.hasData || !coachSnapshot.data!.exists) {
-                    return const Center(child: Text("No coach available"));
-                  }
-
-                  final data =
-                      coachSnapshot.data!.data() as Map<String, dynamic>;
-                  final coachName = data['fullName'] ?? 'Unknown Coach';
-                  final coachTitle = data['bio'] ?? 'Unknown Title';
-                  final profilePic = data['profilePic'] ?? '';
-
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(16.0),
-                        margin: const EdgeInsets.all(8.0),
-                        constraints: const BoxConstraints(minWidth: 290),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.grey.withOpacity(0.5),
-                              spreadRadius: 2,
-                              blurRadius: 5,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 30,
-                              backgroundColor: const Color(0xFFDCE5D4),
-                              backgroundImage: profilePic.toString().isNotEmpty
-                                  ? NetworkImage(profilePic)
-                                  : null,
-                              child: profilePic.toString().isEmpty
-                                  ? const Icon(Icons.person, color: Colors.white)
-                                  : null,
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    coachName,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    coachTitle,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Positioned(
-                        top: -5,
-                        left: -3,
-                        child: Icon(
-                          Icons.star,
-                          size: 24,
-                          color: Colors.lightBlue,
-                        ),
-                      ),
-                      const Positioned(
-                        bottom: -3,
-                        right: -3,
-                        child: Icon(
-                          Icons.star,
-                          size: 24,
-                          color: Colors.orange,
-                        ),
-                      ),
-                    ],
-                  );
-                },
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'My Team',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            displayTeamName,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Check how your coach team is doing on the team leaderboard.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.4,
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const Leaderboard()),
               );
             },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2D3A25),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: const Text('Open team leaderboard'),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
