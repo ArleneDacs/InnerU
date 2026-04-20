@@ -10,13 +10,18 @@ import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 // Firebase Auth for user management
 
 class Setuppage extends StatefulWidget {
-  const Setuppage({super.key});
+  const Setuppage({
+    super.key,
+    this.initialIndex = 2,
+  });
+
+  final int initialIndex;
   @override
   State<Setuppage> createState() => _SetuppageState();
 }
 
 class _SetuppageState extends State<Setuppage> {
-  int index = 2;
+  late int index;
 
   final _screens = [
     Meditation(),
@@ -45,6 +50,12 @@ class _SetuppageState extends State<Setuppage> {
     Icon(CupertinoIcons.lightbulb_fill, size: 30),
     Icon(Icons.edit, size: 30),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    index = widget.initialIndex.clamp(0, _screens.length - 1) as int;
+  }
 
   @override
   Widget build(BuildContext context) {

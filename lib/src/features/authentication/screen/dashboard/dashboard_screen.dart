@@ -5,12 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
@@ -31,6 +31,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
+
+  String get _todayDate => DateTime.now().toString().split(' ')[0];
 
   @override
   void initState() {
@@ -264,6 +266,184 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildInboxAction() {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('chatRooms')
+          .where('participants', arrayContains: currentUser.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        var unreadCount = 0;
+        for (final doc in snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+          final chatData = doc.data();
+          final unreadCounts = Map<String, dynamic>.from(
+            chatData['unreadCounts'] as Map? ?? <String, dynamic>{},
+          );
+          if (unreadCounts.containsKey(currentUser.uid)) {
+            final rawValue = unreadCounts[currentUser.uid];
+            if (rawValue is int) {
+              unreadCount += rawValue;
+            } else if (rawValue is num) {
+              unreadCount += rawValue.toInt();
+            }
+          } else {
+            final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
+            final lastMessageTimeRaw = chatData['lastMessageTime'];
+            final lastMessageTime = lastMessageTimeRaw is Timestamp
+                ? lastMessageTimeRaw.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
+            final lastReadAt = Map<String, dynamic>.from(
+              chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
+            );
+            final lastReadAtRaw = lastReadAt[currentUser.uid];
+            final readTime =
+                lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
+
+            if (lastSenderId.isNotEmpty &&
+                lastSenderId != currentUser.uid &&
+                (readTime == null || lastMessageTime.isAfter(readTime))) {
+              unreadCount += 1;
+            }
+          }
+        }
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
+              onPressed: () async {
+                final username = await _getUsername();
+                if (!context.mounted) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatListScreen(
+                      userId: currentUser.uid,
+                      userName: username,
+                    ),
+                  ),
+                );
+              },
+            ),
+            if (unreadCount > 0)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE56B6F),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileAndPoints(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('userpoints')
+          .doc('${currentUser.uid}-$_todayDate')
+          .snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final rawPoints = data?['totalPoints'];
+        final totalPoints = rawPoints is int
+            ? rawPoints
+            : rawPoints is num
+                ? rawPoints.toInt()
+                : 0;
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () => Navigator.pushNamed(context, '/profile'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.92),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0xFFDCE5D4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                (_profilePic == null || _profilePic!.trim().isEmpty)
+                    ? Image.asset(
+                        'assets/images/avatar.png',
+                        width: 28,
+                        height: 28,
+                      )
+                    : ClipOval(
+                        child: Image.network(
+                          _profilePic!,
+                          width: 28,
+                          height: 28,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Icon(Icons.person, size: 24);
+                          },
+                        ),
+                      ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEEF3E8),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        CupertinoIcons.star_fill,
+                        size: 13,
+                        color: Color(0xFFCE8F5A),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$totalPoints',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF2D3A25),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -276,27 +456,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         elevation: 0,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: (_profilePic == null || _profilePic!.trim().isEmpty)
-              ? Image.asset(
-                  'assets/images/avatar.png',
-                  width: screenWidth * 0.08,
-                  height: screenWidth * 0.08,
-                )
-              : ClipOval(
-                  child: Image.network(
-                    _profilePic!,
-                    width: screenWidth * 0.08,
-                    height: screenWidth * 0.08,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Icon(Icons.person, size: screenWidth * 0.08);
-                    },
-                  ),
-                ),
-          onPressed: () => Navigator.pushNamed(context, '/profile'),
+        leadingWidth: 126,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: _buildProfileAndPoints(context),
         ),
         actions: [
+          _buildInboxAction(),
           IconButton(
             icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
             onPressed: () => BottomSheetWidget.show(context),
@@ -508,6 +674,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     Color color,
     String imagePath,
     Widget destinationPage,
+    {int? setupIndex,}
   ) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = ((screenWidth - 54) / 2).clamp(150.0, 220.0);
@@ -518,7 +685,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => destinationPage),
+            MaterialPageRoute(
+              builder: (context) => setupIndex != null
+                  ? Setuppage(initialIndex: setupIndex)
+                  : destinationPage,
+            ),
           );
         },
         child: Container(
@@ -634,6 +805,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Color(0xFFDDE7D5),
               "assets/images/steps.gif",
               StepTracker(),
+              setupIndex: 1,
             ),
             const SizedBox(width: 14),
             _buildClickableInfoCard(
@@ -644,6 +816,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Color(0xFFE8E3D8),
               "assets/images/meditation.gif",
               Meditation(),
+              setupIndex: 0,
             ),
           ],
         ),
@@ -706,8 +879,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final userData = userSnapshot.data?.data();
         final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
-        final teamName = (userData?['team'] as String?)?.trim() ?? '';
-
         if (coachId.isEmpty) {
           return const SizedBox.shrink();
         }
@@ -755,12 +926,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildAssignedCoachCard(context, coach: coach),
-                    const SizedBox(height: 20),
-                    _buildTeamDashboardCard(
-                      context,
-                      teamName: teamName,
-                      coachName: coach.name,
-                    ),
                   ],
                 );
               },
@@ -860,78 +1025,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTeamDashboardCard(
-    BuildContext context, {
-    required String teamName,
-    required String coachName,
-  }) {
-    final displayTeamName = teamName.isNotEmpty ? teamName : '$coachName Team';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFEEF3E8),
-            Color(0xFFD8E4C8),
-          ],
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'My Team',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            displayTeamName,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Check how your coach team is doing on the team leaderboard.',
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.4,
-              color: Colors.black54,
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const Leaderboard()),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2D3A25),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: const Text('Open team leaderboard'),
           ),
         ],
       ),

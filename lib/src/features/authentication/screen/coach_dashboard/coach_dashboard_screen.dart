@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
@@ -27,6 +30,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
 
   bool _isSavingProfile = false;
   String? _currentUserEmotion;
+  String _quote = 'Your daily inspiration...';
+  String _author = 'Unknown';
 
   String get _userId => _auth.currentUser!.uid;
 
@@ -45,6 +50,43 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
   void initState() {
     super.initState();
     _loadTodayEmotion();
+    _fetchQuote();
+  }
+
+  Future<void> _fetchQuote() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedQuote = prefs.getString('coach_quote');
+      final savedAuthor = prefs.getString('coach_author');
+      final savedDate = prefs.getString('coach_quote_date');
+      final today = DateTime.now().toString().split(' ')[0];
+
+      if (savedQuote != null && savedAuthor != null && savedDate == today) {
+        if (!mounted) return;
+        setState(() {
+          _quote = savedQuote;
+          _author = savedAuthor;
+        });
+        return;
+      }
+
+      final response = await http.get(Uri.parse('https://zenquotes.io/api/random'));
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        final newQuote = data[0]['q'] ?? 'No quote available.';
+        final newAuthor = data[0]['a'] ?? 'Unknown';
+
+        if (!mounted) return;
+        setState(() {
+          _quote = newQuote;
+          _author = newAuthor;
+        });
+
+        await prefs.setString('coach_quote', newQuote);
+        await prefs.setString('coach_author', newAuthor);
+        await prefs.setString('coach_quote_date', today);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadTodayEmotion() async {
@@ -338,6 +380,102 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
     );
   }
 
+  Widget _buildInboxAction() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('chatRooms')
+          .where('participants', arrayContains: _userId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        var unreadCount = 0;
+        for (final doc
+            in snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+          final chatData = doc.data();
+          final unreadCounts = Map<String, dynamic>.from(
+            chatData['unreadCounts'] as Map? ?? <String, dynamic>{},
+          );
+          if (unreadCounts.containsKey(_userId)) {
+            final rawValue = unreadCounts[_userId];
+            if (rawValue is int) {
+              unreadCount += rawValue;
+            } else if (rawValue is num) {
+              unreadCount += rawValue.toInt();
+            }
+          } else {
+            final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
+            final lastMessageTimeRaw = chatData['lastMessageTime'];
+            final lastMessageTime = lastMessageTimeRaw is Timestamp
+                ? lastMessageTimeRaw.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
+            final lastReadAt = Map<String, dynamic>.from(
+              chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
+            );
+            final lastReadAtRaw = lastReadAt[_userId];
+            final readTime =
+                lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
+
+            if (lastSenderId.isNotEmpty &&
+                lastSenderId != _userId &&
+                (readTime == null || lastMessageTime.isAfter(readTime))) {
+              unreadCount += 1;
+            }
+          }
+        }
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
+              onPressed: () async {
+                final coachDoc = await _firestore.collection('coaches').doc(_userId).get();
+                final coachData = coachDoc.data();
+                final userName =
+                    (coachData?['fullName'] as String?)?.trim().isNotEmpty == true
+                        ? (coachData!['fullName'] as String).trim()
+                        : await _getUsername();
+                if (!context.mounted) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatListScreen(
+                      userId: _userId,
+                      userName: userName,
+                      allowGroupChat: true,
+                      groupName: (coachData?['fullName'] as String?)?.trim(),
+                    ),
+                  ),
+                );
+              },
+            ),
+            if (unreadCount > 0)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE56B6F),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -388,6 +526,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
                   onPressed: () => Navigator.pushNamed(context, '/profile'),
                 ),
                 actions: [
+                  _buildInboxAction(),
                   IconButton(
                     icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
                     onPressed: () => BottomSheetWidget.show(context),
@@ -415,6 +554,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
                           coachData: coachData,
                           menteeCount: mentees.length,
                           userData: userData,
+                          quote: _quote,
+                          author: _author,
                         ),
                         const SizedBox(height: 22),
                         _buildSectionTitle("Today's focus"),
@@ -457,6 +598,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
     required Map<String, dynamic> coachData,
     required int menteeCount,
     required Map<String, dynamic> userData,
+    required String quote,
+    required String author,
   }) {
     final theme = Theme.of(context);
     final bio = (coachData['bio'] as String?)?.trim();
@@ -526,6 +669,59 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
               _buildHeroChip('Mentees', '$menteeCount'),
               _buildHeroChip('Phone', phone?.isNotEmpty == true ? phone! : 'Not set'),
             ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.16),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(
+                      CupertinoIcons.quote_bubble_fill,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Today\'s note',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  quote,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  author,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.82),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           OutlinedButton.icon(
@@ -798,6 +994,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
                         builder: (context) => ChatListScreen(
                           userId: _userId,
                           userName: username,
+                          allowGroupChat: true,
+                          groupName: teamName,
                         ),
                       ),
                     );

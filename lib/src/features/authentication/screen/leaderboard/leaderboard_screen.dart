@@ -92,6 +92,8 @@ class _LeaderboardState extends State<Leaderboard>
   bool _isCoachUser = false;
   Set<String> _teamMemberNames = <String>{};
 
+  String _normalizeName(String value) => value.trim().toLowerCase();
+
   @override
   void initState() {
     super.initState();
@@ -120,7 +122,9 @@ class _LeaderboardState extends State<Leaderboard>
       final data = userDoc.data();
       final role = (data?['role'] as String?)?.toLowerCase();
       final isCoach = data?['isCoach'] == true || role == 'coach';
-      final username = (data?['username'] as String?)?.trim() ?? 'Coach';
+      final username =
+          (data?['username'] as String?)?.trim() ?? (isCoach ? 'Coach' : 'User');
+      final coachId = (data?['coachId'] as String?)?.trim() ?? '';
       final teamName = ((data?['team'] as String?)?.trim().isNotEmpty ?? false)
           ? (data!['team'] as String).trim()
           : username;
@@ -136,11 +140,35 @@ class _LeaderboardState extends State<Leaderboard>
         for (final mentee in menteesSnapshot.docs) {
           final menteeUsername = (mentee.data()['username'] as String?)?.trim();
           if (menteeUsername != null && menteeUsername.isNotEmpty) {
-            teamMemberNames.add(menteeUsername);
+            teamMemberNames.add(_normalizeName(menteeUsername));
+          }
+        }
+      } else if (coachId.isNotEmpty) {
+        final teammatesSnapshot = await _firestore
+            .collection('users')
+            .where('coachId', isEqualTo: coachId)
+            .get();
+
+        for (final teammate in teammatesSnapshot.docs) {
+          final teammateUsername = (teammate.data()['username'] as String?)?.trim();
+          if (teammateUsername != null && teammateUsername.isNotEmpty) {
+            teamMemberNames.add(_normalizeName(teammateUsername));
+          }
+        }
+      } else if (teamName.isNotEmpty) {
+        final teammatesSnapshot = await _firestore
+            .collection('users')
+            .where('team', isEqualTo: teamName)
+            .get();
+
+        for (final teammate in teammatesSnapshot.docs) {
+          final teammateUsername = (teammate.data()['username'] as String?)?.trim();
+          if (teammateUsername != null && teammateUsername.isNotEmpty) {
+            teamMemberNames.add(_normalizeName(teammateUsername));
           }
         }
       } else if (username.isNotEmpty) {
-        teamMemberNames.add(username);
+        teamMemberNames.add(_normalizeName(username));
       }
 
       if (!mounted) return;
@@ -176,7 +204,8 @@ class _LeaderboardState extends State<Leaderboard>
       final data = doc.data();
       final username = (data['username'] as String?)?.trim() ?? '';
       if (username.isEmpty) continue;
-      profiles[username] = {
+      profiles[_normalizeName(username)] = {
+        'username': username,
         'profilePic': (data['profilePic'] as String?)?.trim(),
         'team': (data['team'] as String?)?.trim(),
         'email': (data['email'] as String?)?.trim(),
@@ -196,6 +225,7 @@ class _LeaderboardState extends State<Leaderboard>
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final username = (data['username'] as String?)?.trim() ?? 'Unknown User';
+        final normalizedName = _normalizeName(username);
         final taskPoints = Map<String, dynamic>.from(
           data['taskPoints'] as Map? ?? <String, dynamic>{},
         );
@@ -229,43 +259,42 @@ class _LeaderboardState extends State<Leaderboard>
           score: activity.calculatePoints(),
           rank: 0,
           activity: activity,
-          profilePic: profiles[username]?['profilePic'] as String?,
-          teamName: profiles[username]?['team'] as String?,
+          profilePic: profiles[normalizedName]?['profilePic'] as String?,
+          teamName: profiles[normalizedName]?['team'] as String?,
         );
 
-        if (!entriesByName.containsKey(username) ||
-            entriesByName[username]!.score < entry.score) {
-          entriesByName[username] = entry;
+        if (!entriesByName.containsKey(normalizedName) ||
+            entriesByName[normalizedName]!.score < entry.score) {
+          entriesByName[normalizedName] = entry;
         }
       }
 
       for (final teamMemberName in _teamMemberNames) {
         if (entriesByName.containsKey(teamMemberName)) continue;
+        final profile = profiles[teamMemberName];
+        final displayName =
+            (profile?['username'] as String?)?.trim().isNotEmpty == true
+                ? (profile!['username'] as String).trim()
+                : 'Team Member';
 
         entriesByName[teamMemberName] = LeaderboardEntry(
-          name: teamMemberName,
+          name: displayName,
           score: 0,
           rank: 0,
           activity: const UserActivity(),
-          profilePic: profiles[teamMemberName]?['profilePic'] as String?,
-          teamName: profiles[teamMemberName]?['team'] as String?,
+          profilePic: profile?['profilePic'] as String?,
+          teamName: profile?['team'] as String?,
         );
       }
 
       final rankedAll = _rankEntries(entriesByName.values.toList());
-      final rankedTeam = _isCoachUser
-          ? _rankEntries(
+      final rankedTeam = _teamMemberNames.isEmpty
+          ? <LeaderboardEntry>[]
+          : _rankEntries(
               rankedAll
-                  .where((entry) => _teamMemberNames.contains(entry.name))
+                  .where((entry) => _teamMemberNames.contains(_normalizeName(entry.name)))
                   .toList(),
-            )
-          : _teamName.isEmpty
-              ? <LeaderboardEntry>[]
-              : _rankEntries(
-                  rankedAll
-                      .where((entry) => (entry.teamName ?? '').trim() == _teamName)
-                      .toList(),
-                );
+            );
 
       if (!mounted) return;
       setState(() {
@@ -333,13 +362,7 @@ class _LeaderboardState extends State<Leaderboard>
             controller: _tabController,
             tabs: [
               const Tab(text: 'All users'),
-              Tab(
-                text: _isCoachUser
-                    ? 'My Team'
-                    : _teamName.isEmpty
-                        ? 'Team'
-                        : _teamName,
-              ),
+              const Tab(text: 'My Team'),
             ],
           ),
         ),
