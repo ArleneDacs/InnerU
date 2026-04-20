@@ -3,10 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgetpassword_otp/forgotpasswordotp.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgotpassword_mail/forgotpasswordmail.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/signup/role_selection_screen.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -167,55 +166,26 @@ class _LoginScreenState extends State<LoginScreen> {
       _loginError = null;
     });
 
-    try {
-      // Sign out of any previously signed-in accounts
-      await GoogleSignIn().signOut();
+    final error = await AuthService().signInWithGoogle();
 
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+    if (!mounted) return;
 
-      if (googleUser == null) {
-        // User cancelled the login
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-
-      final User? user = userCredential.user;
-
-      if (user != null) {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-
-        if (userDoc.exists) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => Setuppage()),
-          );
-        } else {
-          await FirebaseAuth.instance.signOut();
-          await GoogleSignIn().signOut();
-
-          setState(() {
-            _loginError = "No account found. Please sign up first.";
-          });
-        }
-      }
-    } catch (e) {
-      print("Google login failed: $e");
+    if (error == AuthService.userCancelledGoogleFlow) {
       setState(() {
-        _loginError = "Google login failed. Please try again.";
+        _isLoading = false;
+      });
+      return;
+    }
+
+    if (error == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const Setuppage()),
+      );
+      return;
+    } else {
+      setState(() {
+        _loginError = error;
       });
     }
 
@@ -415,7 +385,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (context) => const SignupScreen()),
+                              builder: (context) =>
+                                  const RoleSelectionScreen(),
+                            ),
                           );
                         },
                         child: const Text("Sign up."),

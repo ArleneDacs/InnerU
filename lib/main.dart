@@ -1,5 +1,7 @@
-import 'package:firebase_core/firebase_core.dart';
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -30,6 +32,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/todo_list.d
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
+import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 import 'package:selfcare_projects/src/utils/theme/theme.dart';
 
 void main() async {
@@ -109,9 +112,26 @@ class App extends StatelessWidget {
   }
 }
 
-class GlobalPaddingWrapper extends StatelessWidget {
+class GlobalPaddingWrapper extends StatefulWidget {
   final Widget child;
   const GlobalPaddingWrapper({super.key, required this.child});
+
+  @override
+  State<GlobalPaddingWrapper> createState() => _GlobalPaddingWrapperState();
+}
+
+class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(EmailLinkAuthService.instance.init());
+  }
+
+  @override
+  void dispose() {
+    unawaited(EmailLinkAuthService.instance.dispose());
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +144,7 @@ class GlobalPaddingWrapper extends StatelessWidget {
         if (snapshot.hasData && snapshot.data != null) {
           return Setuppage();
         }
-        return child; // Directly return the child without padding
+        return widget.child;
       },
     );
   }

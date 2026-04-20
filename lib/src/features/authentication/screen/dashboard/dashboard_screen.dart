@@ -1,30 +1,27 @@
 import 'dart:convert';
 import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  _DashboardScreenState createState() => _DashboardScreenState();
+  State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
@@ -36,8 +33,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void initState() {
-    _fetchProfilePic();
     super.initState();
+    _fetchProfilePic();
     fetchQuote();
     _loadTodayEmotion();
   }
@@ -47,76 +44,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (user == null) return;
 
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+      final userDoc = await FirebaseFirestore.instance
           .collection("users")
           .doc(user.uid)
           .get();
 
       if (userDoc.exists) {
-        final dynamic rawProfilePic = userDoc["profilePic"];
-        final String cleanedUrl =
-            rawProfilePic is String ? rawProfilePic.trim() : "";
+        final rawProfilePic = userDoc["profilePic"];
+        final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
         setState(() {
           _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
         });
       }
     } catch (e) {
-      print("Error fetching profile picture: $e");
+      debugPrint("Error fetching profile picture: $e");
     }
   }
 
-  selectEmotion(String emotion) async {
-    User? user = FirebaseAuth.instance.currentUser;
+  Future<void> selectEmotion(String emotion) async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    String username = await _getUsername();
+    final username = await _getUsername();
 
     setState(() {
       selectedEmotion = emotion;
-      currentUserEmotion = emotion; // Immediately update the current emotion
+      currentUserEmotion = emotion;
     });
 
-    _saveEmotionToDatabase(context, emotion, username);
-    _saveEmotionToSharedPreferences(emotion);
+    await _saveEmotionToDatabase(context, emotion, username);
+    await _saveEmotionToSharedPreferences(emotion);
   }
 
   Future<void> _saveEmotionToSharedPreferences(String emotion) async {
     final prefs = await SharedPreferences.getInstance();
-    User? user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    prefs.setString('selected_emotion_${user.uid}', emotion);
-    prefs.setString(
-        'emotion_date_${user.uid}', DateTime.now().toString().split(' ')[0]);
+    await prefs.setString('selected_emotion_${user.uid}', emotion);
+    await prefs.setString(
+      'emotion_date_${user.uid}',
+      DateTime.now().toString().split(' ')[0],
+    );
   }
 
   Future<void> _loadTodayEmotion() async {
     final prefs = await SharedPreferences.getInstance();
-    User? user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    String? savedEmotion = prefs.getString('selected_emotion_${user.uid}');
-    String? savedDate = prefs.getString('emotion_date_${user.uid}');
-    String today = DateTime.now().toString().split(' ')[0];
+    final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
+    final savedDate = prefs.getString('emotion_date_${user.uid}');
+    final today = DateTime.now().toString().split(' ')[0];
 
-    if (savedEmotion != null && savedDate == today) {
-      setState(() {
-        currentUserEmotion = savedEmotion;
-      });
-    } else {
-      setState(() {
-        currentUserEmotion = null;
-      });
-    }
+    setState(() {
+      currentUserEmotion = savedDate == today ? savedEmotion : null;
+    });
   }
 
   Future<void> _clearEmotionOnLogout() async {
     final prefs = await SharedPreferences.getInstance();
-    User? user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    prefs.remove('selected_emotion_${user.uid}');
-    prefs.remove('emotion_date_${user.uid}');
+    await prefs.remove('selected_emotion_${user.uid}');
+    await prefs.remove('emotion_date_${user.uid}');
+
     setState(() {
       currentUserEmotion = null;
     });
@@ -125,26 +118,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildSectionTitle(String title) {
     return Text(
       title,
-      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      style: const TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+      ),
     );
   }
 
   Future<String> _getUsername() async {
-    User? user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return "User";
 
-    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+    final userDoc = await FirebaseFirestore.instance
         .collection("users")
         .doc(user.uid)
         .get();
 
-    // Check if the username exists, if not, extract the first part of the email
     if (userDoc.exists && userDoc["username"] != null) {
       return userDoc["username"];
     } else if (user.email != null) {
-      String email = user.email!;
-      String fallbackName = email.split('@')[0]; // Get the part before '@'
-      return fallbackName;
+      return user.email!.split('@')[0];
     }
 
     return "User";
@@ -153,11 +147,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> fetchQuote() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      String? savedQuote = prefs.getString('quote');
-      String? savedAuthor = prefs.getString('author');
-      String? savedDate = prefs.getString('quote_date');
-
-      String today = DateTime.now().toString().split(' ')[0];
+      final savedQuote = prefs.getString('quote');
+      final savedAuthor = prefs.getString('author');
+      final savedDate = prefs.getString('quote_date');
+      final today = DateTime.now().toString().split(' ')[0];
 
       if (savedQuote != null && savedAuthor != null && savedDate == today) {
         setState(() {
@@ -167,22 +160,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      final response =
-          await http.get(Uri.parse("https://zenquotes.io/api/random"));
+      final response = await http.get(Uri.parse("https://zenquotes.io/api/random"));
 
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
-        String newQuote = data[0]['q'] ?? "No quote available.";
-        String newAuthor = data[0]['a'] ?? "Unknown";
+        final newQuote = data[0]['q'] ?? "No quote available.";
+        final newAuthor = data[0]['a'] ?? "Unknown";
 
         setState(() {
           quote = newQuote;
           author = newAuthor;
         });
 
-        prefs.setString('quote', newQuote);
-        prefs.setString('author', newAuthor);
-        prefs.setString('quote_date', today);
+        await prefs.setString('quote', newQuote);
+        await prefs.setString('author', newAuthor);
+        await prefs.setString('quote_date', today);
       } else {
         setState(() {
           quote = "Failed to load quote.";
@@ -190,7 +182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       }
     } catch (e) {
-      print("Error fetching quote: $e");
+      debugPrint("Error fetching quote: $e");
       setState(() {
         quote = "Failed to load quote.";
         author = "Unknown";
@@ -199,14 +191,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _saveEmotionToDatabase(
-      BuildContext context, String emotion, String username) async {
-    User? user = FirebaseAuth.instance.currentUser;
+    BuildContext context,
+    String emotion,
+    String username,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    String today = DateTime.now().toString().split(' ')[0];
+    final today = DateTime.now().toString().split(' ')[0];
 
     try {
-      QuerySnapshot snapshot = await FirebaseFirestore.instance
+      final snapshot = await FirebaseFirestore.instance
           .collection("emotions")
           .where("userId", isEqualTo: user.uid)
           .where("username", isEqualTo: username)
@@ -214,8 +209,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           .get();
 
       if (snapshot.docs.isNotEmpty) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("You can only select one emotion per day!")),
+          const SnackBar(
+            content: Text("You can only select one emotion per day!"),
+          ),
         );
         return;
       }
@@ -232,32 +230,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
           selectedEmotion = emotion;
         });
       }
-
-      print("Emotion saved successfully.");
     } catch (e) {
-      print("Error saving emotion: $e");
+      debugPrint("Error saving emotion: $e");
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to save emotion. Please try again.")),
+        const SnackBar(
+          content: Text("Failed to save emotion. Please try again."),
+        ),
       );
     }
   }
 
   Future<String?> getRandomCoachId() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? storedCoachId = prefs.getString('random_coach_id');
-    String? storedDate = prefs.getString('random_coach_date');
-    String today = DateTime.now().toIso8601String().split('T')[0];
+    final prefs = await SharedPreferences.getInstance();
+    final storedCoachId = prefs.getString('random_coach_id');
+    final storedDate = prefs.getString('random_coach_date');
+    final today = DateTime.now().toIso8601String().split('T')[0];
 
     if (storedCoachId != null && storedDate == today) {
-      return storedCoachId; // Use cached coach ID if it's still today's date
+      return storedCoachId;
     }
 
-    QuerySnapshot snapshot =
-        await FirebaseFirestore.instance.collection('coaches').get();
-
+    final snapshot = await FirebaseFirestore.instance.collection('coaches').get();
     if (snapshot.docs.isEmpty) return null;
 
-    var randomCoach = snapshot.docs[Random().nextInt(snapshot.docs.length)];
+    final randomCoach = snapshot.docs[Random().nextInt(snapshot.docs.length)];
     await prefs.setString('random_coach_id', randomCoach.id);
     await prefs.setString('random_coach_date', today);
 
@@ -266,47 +263,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    double screenWidth = MediaQuery.of(context).size.width;
+    final theme = Theme.of(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth > 600 ? 28.0 : 20.0;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F7F2),
       appBar: AppBar(
         elevation: 0,
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: (_profilePic == null || _profilePic!.trim().isEmpty)
               ? Image.asset(
-                  'assets/images/avatar.png', // Default image if no profilePic is available
+                  'assets/images/avatar.png',
                   width: screenWidth * 0.08,
                   height: screenWidth * 0.08,
                 )
               : ClipOval(
-                  child: _profilePic != null
-                      ? Image.network(
-                          _profilePic!,
-                          width: screenWidth * 0.08,
-                          height: screenWidth * 0.08,
-                          fit: BoxFit.cover,
-                        )
-                      : Icon(Icons.person,
-                          size: screenWidth * 0.08), // Default icon if no image
+                  child: Image.network(
+                    _profilePic!,
+                    width: screenWidth * 0.08,
+                    height: screenWidth * 0.08,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Icon(Icons.person, size: screenWidth * 0.08);
+                    },
+                  ),
                 ),
           onPressed: () => Navigator.pushNamed(context, '/profile'),
         ),
         actions: [
           IconButton(
-            icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () {
-              BottomSheetWidget.show(context);
-            },
+            icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
+            onPressed: () => BottomSheetWidget.show(context),
           ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.only(left: 16.0, right: 16.0),
+        padding: EdgeInsets.fromLTRB(horizontalPadding, 8, horizontalPadding, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // "Hello, User" - Positioned Above the Image
-            SizedBox(height: kToolbarHeight - 50.0),
             FutureBuilder<String>(
               future: _getUsername(),
               builder: (context, snapshot) {
@@ -314,439 +312,305 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     snapshot.hasData) {
                   UserPreferences.saveUsername(snapshot.data!);
                 }
-                return Text(
-                  snapshot.connectionState == ConnectionState.waiting
-                      ? "Loading..."
-                      : "Hello, ${snapshot.data}!",
-                  style: Theme.of(context).textTheme.titleLarge!.copyWith(
-                        fontSize: 25,
-                      ),
+
+                final username = snapshot.connectionState == ConnectionState.waiting
+                    ? "there"
+                    : snapshot.data ?? "there";
+
+                return _buildWelcomeHero(
+                  context,
+                  username: username,
+                  quote: quote,
+                  author: author,
                 );
               },
             ),
-
-            SizedBox(
-                height: 10), // Adjust space so the quote overlaps the image
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center, // Aligns left
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(16.0),
-                    decoration: BoxDecoration(
-                      color: Colors
-                          .white, // Same background color as the coach container
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 8,
-                          spreadRadius: 2,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          "\"$quote\"",
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontStyle: FontStyle.italic,
-                            fontWeight: FontWeight.w700,
-                            color: const Color.fromARGB(255, 0, 0, 0),
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          "- $author",
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontStyle: FontStyle.italic,
-                            fontWeight: FontWeight.w700,
-                            color: const Color.fromARGB(255, 0, 0, 0),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      /* _buildSectionTitle("Recommended for you"),*/
-                      SizedBox(height: 12), // Space between title and cards
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          Flexible(
-                            child: _buildClickableInfoCard(
-                              context,
-                              "Steps",
-                              "Track your Steps",
-                              CupertinoIcons.flame_fill,
-                              Color.fromARGB(255, 216, 220, 206),
-                              "assets/images/steps.gif",
-                              StepTracker(),
-                            ),
-                          ),
-                          SizedBox(width: 12), // Space between cards
-                          Flexible(
-                            child: _buildClickableInfoCard(
-                              context,
-                              "Meditate",
-                              "Clear your Mind",
-                              CupertinoIcons.hourglass,
-                              Color.fromARGB(255, 226, 223, 215),
-                              "assets/images/meditation.gif",
-                              Meditation(),
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          Flexible(
-                            child: _buildClickableInfoCard(
-                              context,
-                              "Fasting",
-                              "Track your fast",
-                              CupertinoIcons.timer_fill,
-                              Color.fromARGB(255, 242, 230, 213),
-                              "assets/images/card.png",
-                              const FastingTimerScreen(),
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Flexible(
-                            child: _buildClickableInfoCard(
-                              context,
-                              "Calories",
-                              "Log your meals",
-                              CupertinoIcons.leaf_arrow_circlepath,
-                              Color.fromARGB(255, 228, 238, 224),
-                              "assets/images/card.png",
-                              const CalorieTrackerScreen(),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      SizedBox(height: 30),
-                      Row(
-                        children: [
-                          // Left Section: "Today's Coach" label
-                          Expanded(
-                            flex: 1,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  "Today's Coach",
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Divider(
-                                  thickness: 1,
-                                  height: 5,
-                                  indent: 0,
-                                  endIndent: 0,
-                                ),
-                                const SizedBox(height: 8),
-                                InkWell(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => CoachesScreen(),
-                                      ),
-                                    );
-                                  },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: const [
-                                      Text(
-                                        "SEE ALL",
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w200,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.chevron_right,
-                                        size: 15,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: FutureBuilder<String?>(
-                              future: getRandomCoachId(),
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const Center(
-                                      child: CircularProgressIndicator());
-                                }
-                                if (!snapshot.hasData ||
-                                    snapshot.data == null) {
-                                  return const Center(
-                                      child: Text("No coach available"));
-                                }
-                                return FutureBuilder<DocumentSnapshot>(
-                                  future: FirebaseFirestore.instance
-                                      .collection('coaches')
-                                      .doc(snapshot.data)
-                                      .get(),
-                                  builder: (context, coachSnapshot) {
-                                    if (coachSnapshot.connectionState ==
-                                        ConnectionState.waiting) {
-                                      return const Center(
-                                          child: CircularProgressIndicator());
-                                    }
-                                    if (!coachSnapshot.hasData ||
-                                        !coachSnapshot.data!.exists) {
-                                      return const Center(
-                                          child: Text("No coach available"));
-                                    }
-                                    var data = coachSnapshot.data!.data()
-                                        as Map<String, dynamic>;
-                                    String coachName =
-                                        data['fullName'] ?? 'Unknown Coach';
-                                    String coachTitle =
-                                        data['bio'] ?? 'Unknown Title';
-                                    String profilePic =
-                                        data['profilePic'] ?? '';
-
-                                    return Stack(
-                                      clipBehavior: Clip.none,
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(16.0),
-                                          margin: const EdgeInsets.all(8.0),
-                                          constraints: const BoxConstraints(
-                                            minWidth: 290, // Adjust width
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.grey
-                                                    .withOpacity(0.5),
-                                                spreadRadius: 2,
-                                                blurRadius: 5,
-                                                offset: const Offset(0, 3),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              // Coach Profile Picture
-                                              CircleAvatar(
-                                                radius: 30,
-                                                backgroundImage:
-                                                    NetworkImage(profilePic),
-                                              ),
-                                              const SizedBox(width: 16),
-                                              // Coach Details
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      coachName,
-                                                      style: const TextStyle(
-                                                        fontSize: 16,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    Text(
-                                                      coachTitle,
-                                                      style: const TextStyle(
-                                                        fontSize: 14,
-                                                        color: Colors.grey,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        // Top-left Star (outside container)
-                                        Positioned(
-                                          top: -5,
-                                          left: -3,
-                                          child: Icon(Icons.star,
-                                              size: 24,
-                                              color: Colors.lightBlue),
-                                        ),
-                                        // Bottom-right Star (outside container)
-                                        Positioned(
-                                          bottom: -3,
-                                          right: -3,
-                                          child: Icon(Icons.star,
-                                              size: 24, color: Colors.orange),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      SizedBox(height: 20),
-                      _buildSectionTitle("How do you feel today?"),
-                      SizedBox(height: 10),
-                      currentUserEmotion == null
-                          ? Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                GestureDetector(
-                                  onTap: () => selectEmotion("happy"),
-                                  child: Text("😀",
-                                      style: TextStyle(fontSize: 36)),
-                                ),
-                                GestureDetector(
-                                  onTap: () => selectEmotion("neutral"),
-                                  child: Text("😐",
-                                      style: TextStyle(fontSize: 36)),
-                                ),
-                                GestureDetector(
-                                  onTap: () => selectEmotion("sad"),
-                                  child: Text("😔",
-                                      style: TextStyle(fontSize: 36)),
-                                ),
-                                GestureDetector(
-                                  onTap: () => selectEmotion("angry"),
-                                  child: Text("😡",
-                                      style: TextStyle(fontSize: 36)),
-                                ),
-                              ],
-                            )
-                          : Column(
-                              children: [
-                                Text(
-                                  "Today I'm feeling $currentUserEmotion", // Display the selected emotion
-                                  style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                SizedBox(height: 20),
-                                TextButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (context) =>
-                                              EmotionTrackerPage()),
-                                    );
-                                  },
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        "Track Your Emotions",
-                                        style: TextStyle(
-                                            fontSize: 14, color: Colors.blue),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Icon(Icons.arrow_forward_ios,
-                                          size: 14, color: Colors.blue),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                      SizedBox(height: 20),
-                    ],
-                  ),
-                ],
+            const SizedBox(height: 22),
+            _buildSectionTitle("Today's focus"),
+            const SizedBox(height: 6),
+            Text(
+              "Small actions, steady progress.",
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.black54,
               ),
             ),
+            const SizedBox(height: 16),
+            _buildActionRows(context),
+            const SizedBox(height: 28),
+            _buildCoachSection(context),
+            const SizedBox(height: 24),
+            _buildMoodSection(context),
+            const SizedBox(height: 12),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildClickableInfoCard(
-      BuildContext context,
-      String title,
-      String description,
-      IconData icon,
-      Color color,
-      String imagePath,
-      Widget destinationPage) {
-    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    Color textColor = isDarkMode ? Colors.white : Colors.black;
-    Color iconColor = isDarkMode ? Colors.white : Colors.black54;
+  Widget _buildWelcomeHero(
+    BuildContext context, {
+    required String username,
+    required String quote,
+    required String author,
+  }) {
+    final theme = Theme.of(context);
 
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => destinationPage),
-        );
-      },
-      child: Container(
-        width: 160,
-        height: 195,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(20),
-          image: DecorationImage(
-            image: AssetImage(imagePath),
-            fit: BoxFit.cover,
-          ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF90A17D),
+            Color(0xFFE6D1A9),
+          ],
         ),
-        child: Padding(
-          padding: EdgeInsets.all(12),
-          child: Column(
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF90A17D).withOpacity(0.22),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -18,
+            right: -10,
+            child: Container(
+              width: 110,
+              height: 110,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -34,
+            left: -18,
+            child: Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Icon(icon, color: iconColor, size: 20),
-              SizedBox(height: 4),
-              Text(
-                title,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: textColor),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  "Daily reset",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 18),
               Text(
-                description,
-                style:
-                    TextStyle(fontSize: 12, color: textColor.withOpacity(0.7)),
+                "Hello, $username",
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                ),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 8),
+              Text(
+                "Make today feel lighter with one mindful habit at a time.",
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: Colors.white.withOpacity(0.88),
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.16),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.quote_bubble_fill,
+                          size: 18,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          "Today's note",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      quote,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        height: 1.45,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      author,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClickableInfoCard(
+    BuildContext context,
+    String title,
+    String description,
+    IconData icon,
+    Color color,
+    String imagePath,
+    Widget destinationPage,
+  ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cardWidth = ((screenWidth - 54) / 2).clamp(150.0, 220.0);
+
+    return SizedBox(
+      width: cardWidth,
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => destinationPage),
+          );
+        },
+        child: Container(
+          height: 196,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
+            image: DecorationImage(
+              image: AssetImage(imagePath),
+              fit: BoxFit.cover,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(26),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withOpacity(0.12),
+                        Colors.black.withOpacity(0.08),
+                        Colors.black.withOpacity(0.34),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 14,
+                left: 14,
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.82),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(icon, color: const Color(0xFF2D3A25), size: 18),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Text(
+                        "Wellness",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: Colors.white.withOpacity(0.82),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -754,105 +618,326 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildCoachCard(
-      BuildContext context, String coachName, String coachTitle) {
-    final theme = Theme.of(context);
-    final isDarkMode = theme.brightness == Brightness.dark;
-
-    return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: Colors
-            .white, // Set container color to white in both light and dark mode
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          if (!isDarkMode)
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.2),
-              spreadRadius: 2,
-              blurRadius: 5,
-              offset: const Offset(0, 3),
+  Widget _buildActionRows(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildClickableInfoCard(
+              context,
+              "Steps",
+              "Track your movement",
+              CupertinoIcons.flame_fill,
+              const Color(0xFFDDE7D5),
+              "assets/images/steps.gif",
+              StepTracker(),
             ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Profile Image
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: theme.colorScheme.primary,
-            child: Icon(
-              Icons.person,
-              size: 40,
-              color: theme.colorScheme.onPrimary,
+            const SizedBox(width: 14),
+            _buildClickableInfoCard(
+              context,
+              "Meditate",
+              "Clear your mind",
+              CupertinoIcons.sparkles,
+              const Color(0xFFE8E3D8),
+              "assets/images/meditation.gif",
+              Meditation(),
             ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildClickableInfoCard(
+              context,
+              "Fasting",
+              "Stay on your plan",
+              CupertinoIcons.timer_fill,
+              const Color(0xFFF2E5D2),
+              "assets/images/fasting.gif",
+              const FastingTimerScreen(),
+            ),
+            const SizedBox(width: 14),
+            _buildClickableInfoCard(
+              context,
+              "Calories",
+              "Log what you eat",
+              CupertinoIcons.leaf_arrow_circlepath,
+              const Color(0xFFE1EDDF),
+              "assets/images/calories1.gif",
+              const CalorieTrackerScreen(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Center(
+          child: _buildClickableInfoCard(
+            context,
+            "Sleep",
+            "Protect your rest",
+            CupertinoIcons.moon_zzz_fill,
+            const Color(0xFFDDE4F0),
+            "assets/images/sleep.gif",
+            const SleepTracker(),
           ),
-          const SizedBox(width: 12),
-
-          // Name and Title
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  coachName,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: isDarkMode
-                        ? const Color.fromARGB(255, 0, 0, 0)
-                        : const Color.fromARGB(255, 0, 0, 0),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  coachTitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDarkMode
-                        ? const Color.fromARGB(255, 26, 26, 26)
-                        : const Color.fromARGB(255, 42, 42, 42),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildCardContainer({
-    required BuildContext context,
-    required double height,
-    required Widget content,
-  }) {
-    final theme = Theme.of(context);
-    final isDarkMode = theme.brightness == Brightness.dark;
+  Widget _buildCoachSection(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 1,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Today's Coach",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Divider(
+                thickness: 1,
+                height: 5,
+                indent: 0,
+                endIndent: 0,
+              ),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => CoachesScreen(),
+                    ),
+                  );
+                },
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      "SEE ALL",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w200,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 15,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: FutureBuilder<String?>(
+            future: getRandomCoachId(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData || snapshot.data == null) {
+                return const Center(child: Text("No coach available"));
+              }
 
-    return Container(
-      height: height,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface, // Adaptive background color
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          if (!isDarkMode)
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              spreadRadius: 2,
-              blurRadius: 4,
-              offset: const Offset(0, 2), // Light mode shadow effect
-            ),
-        ],
-      ),
-      child: Center(
-        child: DefaultTextStyle(
-          style: TextStyle(
-              color: theme.colorScheme.onSurface), // Adapt text color
-          child: content,
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('coaches')
+                    .doc(snapshot.data)
+                    .get(),
+                builder: (context, coachSnapshot) {
+                  if (coachSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (!coachSnapshot.hasData || !coachSnapshot.data!.exists) {
+                    return const Center(child: Text("No coach available"));
+                  }
+
+                  final data =
+                      coachSnapshot.data!.data() as Map<String, dynamic>;
+                  final coachName = data['fullName'] ?? 'Unknown Coach';
+                  final coachTitle = data['bio'] ?? 'Unknown Title';
+                  final profilePic = data['profilePic'] ?? '';
+
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16.0),
+                        margin: const EdgeInsets.all(8.0),
+                        constraints: const BoxConstraints(minWidth: 290),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.withOpacity(0.5),
+                              spreadRadius: 2,
+                              blurRadius: 5,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 30,
+                              backgroundColor: const Color(0xFFDCE5D4),
+                              backgroundImage: profilePic.toString().isNotEmpty
+                                  ? NetworkImage(profilePic)
+                                  : null,
+                              child: profilePic.toString().isEmpty
+                                  ? const Icon(Icons.person, color: Colors.white)
+                                  : null,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    coachName,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    coachTitle,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Positioned(
+                        top: -5,
+                        left: -3,
+                        child: Icon(
+                          Icons.star,
+                          size: 24,
+                          color: Colors.lightBlue,
+                        ),
+                      ),
+                      const Positioned(
+                        bottom: -3,
+                        right: -3,
+                        child: Icon(
+                          Icons.star,
+                          size: 24,
+                          color: Colors.orange,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMoodSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle("How do you feel today?"),
+        const SizedBox(height: 10),
+        currentUserEmotion == null
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildEmojiMood(
+                    emoji: "😀",
+                    onTap: () => selectEmotion("happy"),
+                  ),
+                  _buildEmojiMood(
+                    emoji: "😐",
+                    onTap: () => selectEmotion("neutral"),
+                  ),
+                  _buildEmojiMood(
+                    emoji: "😔",
+                    onTap: () => selectEmotion("sad"),
+                  ),
+                  _buildEmojiMood(
+                    emoji: "😡",
+                    onTap: () => selectEmotion("angry"),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  Text(
+                    "Today I'm feeling $currentUserEmotion",
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => EmotionTrackerPage(),
+                        ),
+                      );
+                    },
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "Track Your Emotions",
+                          style: TextStyle(fontSize: 14, color: Colors.blue),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          size: 14,
+                          color: Colors.blue,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ],
+    );
+  }
+
+  Widget _buildEmojiMood({
+    required String emoji,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56,
+        height: 56,
+        alignment: Alignment.center,
+        child: Text(
+          emoji,
+          style: const TextStyle(fontSize: 36),
         ),
       ),
     );

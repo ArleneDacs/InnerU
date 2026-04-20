@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "609604667702-br1c4dq0qb432f4qgp61dv0putn4vths.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.selfcare_projects",
+            "certificate_hash": "ba1c383ed58a4a923359db37783a77350a9466c0"
+          }
+        },
+        {
           "client_id": "609604667702-cofrcn20hrkfe40vgthmvh5lgmjl1j1v.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

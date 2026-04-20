@@ -243,6 +243,8 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   const SizedBox(height: 18),
                   _buildTimelineSection(isActive),
                   const SizedBox(height: 18),
+                  _buildAchievementSection(),
+                  const SizedBox(height: 18),
                   _buildHistoryPreview(),
                 ],
               ),
@@ -635,6 +637,140 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAchievementSection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Achievement Medals',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Unlock medals as you complete more fasting goals.',
+            style: TextStyle(color: Colors.black54),
+          ),
+          const SizedBox(height: 14),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _historyRef
+                .orderBy('finishedAt', descending: true)
+                .limit(100)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final docs = snapshot.data?.docs ?? [];
+              final goalHits = docs.where((doc) {
+                return (doc.data()['completedTarget'] as bool?) ?? false;
+              }).length;
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Bronze',
+                      subtitle: '3 goal hits',
+                      icon: Icons.workspace_premium_rounded,
+                      color: const Color(0xFFC78A55),
+                      unlocked: goalHits >= 3,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Silver',
+                      subtitle: '7 goal hits',
+                      icon: Icons.military_tech_rounded,
+                      color: const Color(0xFF98A3B4),
+                      unlocked: goalHits >= 7,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Gold',
+                      subtitle: '15 goal hits',
+                      icon: Icons.emoji_events_rounded,
+                      color: const Color(0xFFFFB52E),
+                      unlocked: goalHits >= 15,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _achievementMedal({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required bool unlocked,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      decoration: BoxDecoration(
+        color: unlocked ? const Color(0xFFFFF8F2) : const Color(0xFFF7F5F3),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: unlocked ? color.withOpacity(0.22) : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: unlocked ? color.withOpacity(0.16) : Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: unlocked ? color : Colors.black26,
+              size: 28,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: unlocked ? const Color(0xFF2E2A28) : Colors.black45,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            unlocked ? 'Unlocked' : 'Locked',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: unlocked ? color : Colors.black38,
+            ),
           ),
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 
 class CheckEmailScreen extends StatefulWidget {
   final String email;
@@ -22,6 +23,7 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
   @override
   void initState() {
     super.initState();
+    EmailLinkAuthService.instance.savePendingEmail(widget.email);
     _startAuthListener();
   }
 
@@ -58,24 +60,25 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
   }
 
   Future<void> _resendLoginLink() async {
-    _startCountdown(); // Start the countdown animation
+    _startCountdown();
 
     try {
       await FirebaseAuth.instance.sendSignInLinkToEmail(
         email: widget.email,
         actionCodeSettings: ActionCodeSettings(
-          url: 'https://selfcareprojects.page.link/email-link-login?email=${widget.email}',
+          url: EmailLinkAuthService.continueUrl,
           handleCodeInApp: true,
           androidPackageName: 'com.example.selfcare_projects',
           androidInstallApp: false,
           androidMinimumVersion: '21',
-          iOSBundleId: 'com.example.selfcare_projects',
-         dynamicLinkDomain: 'selfcareprojects.page.link',
+          iOSBundleId: 'com.example.selfcareProjects',
         ),
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Login link resent! Check your email.")),
+        const SnackBar(
+          content: Text("Login link resent! Check your email."),
+        ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
