@@ -11,8 +11,6 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 
 class StepTracker extends StatefulWidget {
   const StepTracker({super.key});

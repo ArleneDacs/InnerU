@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ManageCoachesScreen extends StatefulWidget {
+  const ManageCoachesScreen({super.key});
+
   @override
   _ManageCoachesScreenState createState() => _ManageCoachesScreenState();
 }

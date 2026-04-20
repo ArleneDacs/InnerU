@@ -45,10 +45,10 @@ class _PrivacyScreen extends State<PrivacyScreen> {
           );
         },
         style: ButtonStyle(
-          padding: MaterialStateProperty.all(
+          padding: WidgetStateProperty.all(
               EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
-          overlayColor: MaterialStateProperty.all(Colors.grey.shade200),
-          shape: MaterialStateProperty.all(
+          overlayColor: WidgetStateProperty.all(Colors.grey.shade200),
+          shape: WidgetStateProperty.all(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
@@ -72,10 +72,10 @@ class _PrivacyScreen extends State<PrivacyScreen> {
           openDelete();
         },
         style: ButtonStyle(
-          padding: MaterialStateProperty.all(
+          padding: WidgetStateProperty.all(
               EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
-          overlayColor: MaterialStateProperty.all(Colors.grey.shade200),
-          shape: MaterialStateProperty.all(
+          overlayColor: WidgetStateProperty.all(Colors.grey.shade200),
+          shape: WidgetStateProperty.all(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),

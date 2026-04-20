@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 
 class ForgotPasswordMail extends StatefulWidget {
-  const ForgotPasswordMail({Key? key}) : super(key: key);
+  const ForgotPasswordMail({super.key});
 
   @override
   _ForgotPasswordMailState createState() => _ForgotPasswordMailState();

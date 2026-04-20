@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore Import
 import 'package:intl/intl.dart'; // For date formatting
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
-import 'package:selfcare_projects/src/constants/image_strings.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';

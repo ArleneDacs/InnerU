@@ -5,7 +5,7 @@ import 'updatepasswordotp.dart';
 class OTPPage extends StatefulWidget {
   final String verificationId;
 
-  const OTPPage({Key? key, required this.verificationId}) : super(key: key);
+  const OTPPage({super.key, required this.verificationId});
 
   @override
   _OTPPageState createState() => _OTPPageState();

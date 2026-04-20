@@ -254,7 +254,7 @@ class _AddCoachDialogState extends State<AddCoachDialog> {
                 Switch(
                   value: _isMale,
                   onChanged: (value) => setState(() => _isMale = value),
-                  activeColor: const Color(0xFF90A17D),
+                  activeThumbColor: const Color(0xFF90A17D),
                 ),
                 const Text('Female'),
               ],

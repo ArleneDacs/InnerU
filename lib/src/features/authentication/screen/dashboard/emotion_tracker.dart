@@ -5,6 +5,8 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:shimmer/shimmer.dart';
 
 class EmotionTrackerPage extends StatefulWidget {
+  const EmotionTrackerPage({super.key});
+
   @override
   _EmotionTrackerPageState createState() => _EmotionTrackerPageState();
 }
@@ -306,9 +308,7 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
                                   fontSize: 18, fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              _getEmojiForEmotion(_todayEmotion!) +
-                                  " " +
-                                  _todayEmotion!,
+                              "${_getEmojiForEmotion(_todayEmotion!)} ${_todayEmotion!}",
                               style: TextStyle(fontSize: 18),
                             ),
                           ],

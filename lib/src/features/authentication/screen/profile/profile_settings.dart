@@ -77,10 +77,10 @@ class ProfileSettings extends StatelessWidget {
           );
         },
         style: ButtonStyle(
-          padding: MaterialStateProperty.all(
+          padding: WidgetStateProperty.all(
               EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
-          overlayColor: MaterialStateProperty.all(Colors.grey.shade200),
-          shape: MaterialStateProperty.all(
+          overlayColor: WidgetStateProperty.all(Colors.grey.shade200),
+          shape: WidgetStateProperty.all(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),

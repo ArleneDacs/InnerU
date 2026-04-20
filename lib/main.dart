@@ -13,6 +13,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/calorie_tra
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_report_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
@@ -84,6 +85,7 @@ class App extends StatelessWidget {
           '/calorieTracker': (context) => const CalorieTrackerScreen(),
           '/todayIntake': (context) => const TodayIntakeScreen(),
           '/fastingTimer': (context) => const FastingTimerScreen(),
+          '/fastingReports': (context) => const FastingReportScreen(),
           '/profileSettings': (context) => ProfileSettings(),
           '/todolist': (context) => TodoList(),
           '/login': (context) => LoginScreen(),
@@ -109,7 +111,7 @@ class App extends StatelessWidget {
 
 class GlobalPaddingWrapper extends StatelessWidget {
   final Widget child;
-  const GlobalPaddingWrapper({required this.child});
+  const GlobalPaddingWrapper({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {

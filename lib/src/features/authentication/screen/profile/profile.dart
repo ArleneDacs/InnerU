@@ -19,18 +19,24 @@ const customColor2 = Color(0xFFCE8F5A); // Example secondary color
 const customColor3 = Color(0xFF90A17D); // Example accent color
 
 class EditProfileScreen extends StatelessWidget {
+  const EditProfileScreen({super.key});
+
   @override
   Widget build(BuildContext context) =>
       Scaffold(appBar: AppBar(title: Text("Edit Profile")));
 }
 
 class ChangeMeditationScreen extends StatelessWidget {
+  const ChangeMeditationScreen({super.key});
+
   @override
   Widget build(BuildContext context) =>
       Scaffold(appBar: AppBar(title: Text("Change Meditation Song")));
 }
 
 class SubscriptionScreen extends StatelessWidget {
+  const SubscriptionScreen({super.key});
+
   @override
   Widget build(BuildContext context) =>
       Scaffold(appBar: AppBar(title: Text("Manage Subscription")));
@@ -443,12 +449,12 @@ class _ProfilePageState extends State<ProfilePage> {
                   Column(
                     children: [
                       Text(
-                        "$username",
+                        username,
                         style: TextStyle(
                             fontSize: 25, fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        "$email",
+                        email,
                         style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                       ),
                     ],

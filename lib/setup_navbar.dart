@@ -7,7 +7,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Firebase Auth for user management
+// Firebase Auth for user management
 
 class Setuppage extends StatefulWidget {
   const Setuppage({super.key});

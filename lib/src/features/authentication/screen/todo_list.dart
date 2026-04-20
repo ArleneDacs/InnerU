@@ -15,7 +15,7 @@ void main() async {
 }
 
 class TodoList extends StatelessWidget {
-  const TodoList({Key? key}) : super(key: key);
+  const TodoList({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -272,7 +272,7 @@ class TodoRepository {
 
 // Main screen
 class TodoListScreen extends StatefulWidget {
-  const TodoListScreen({Key? key}) : super(key: key);
+  const TodoListScreen({super.key});
 
   @override
   _TodoListScreenState createState() => _TodoListScreenState();

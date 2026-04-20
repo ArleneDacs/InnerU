@@ -16,7 +16,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   String selectedCategory = "Add Value";
-  TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   String searchQuery = "";
 
   @override

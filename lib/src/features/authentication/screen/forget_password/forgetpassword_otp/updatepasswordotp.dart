@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class UpdatePasswordOTP extends StatefulWidget {
-  const UpdatePasswordOTP({Key? key}) : super(key: key);
+  const UpdatePasswordOTP({super.key});
 
   @override
   _UpdatePasswordOTPState createState() => _UpdatePasswordOTPState();

@@ -12,7 +12,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({Key? key}) : super(key: key);
+  const SignupScreen({super.key});
 
   @override
   _SignupScreenState createState() => _SignupScreenState();
@@ -417,8 +417,9 @@ class _SignupScreenState extends State<SignupScreen> {
                       decoration: const InputDecoration(labelText: "Email"),
                       validator: (value) {
                         if (value!.isEmpty) return "Email cannot be empty";
-                        if (!_isValidEmail(value))
+                        if (!_isValidEmail(value)) {
                           return "Invalid email format!";
+                        }
                         return null;
                       },
                     ),
@@ -430,10 +431,12 @@ class _SignupScreenState extends State<SignupScreen> {
                       decoration:
                           const InputDecoration(labelText: "Phone Number"),
                       validator: (value) {
-                        if (value!.isEmpty)
+                        if (value!.isEmpty) {
                           return "Phone number cannot be empty";
-                        if (!_isValidPhoneNumber(value))
+                        }
+                        if (!_isValidPhoneNumber(value)) {
                           return "Invalid phone number!";
+                        }
                         return null;
                       },
                     ),

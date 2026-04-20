@@ -59,7 +59,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
       List<Map<String, dynamic>> tempUsers = [];
 
       for (var doc in trackerSnapshot.docs) {
-        Map<String, dynamic> userData = doc.data() as Map<String, dynamic>;
+        Map<String, dynamic> userData = doc.data();
         String? userId = userData['userId'];
 
         if (userId == null || userId == currentUserId) continue;
@@ -310,7 +310,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
           },
         ),
         Text(
-            '${DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth))}',
+            DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth)),
             style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,

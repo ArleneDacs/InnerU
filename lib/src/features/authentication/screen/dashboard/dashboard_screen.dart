@@ -21,6 +21,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
@@ -834,7 +836,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       height: height,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: theme.colorScheme.background, // Adaptive background color
+        color: theme.colorScheme.surface, // Adaptive background color
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           if (!isDarkMode)
@@ -849,7 +851,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Center(
         child: DefaultTextStyle(
           style: TextStyle(
-              color: theme.colorScheme.onBackground), // Adapt text color
+              color: theme.colorScheme.onSurface), // Adapt text color
           child: content,
         ),
       ),

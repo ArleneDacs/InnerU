@@ -7,7 +7,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/login/login
 class CheckEmailScreen extends StatefulWidget {
   final String email;
 
-  const CheckEmailScreen({Key? key, required this.email}) : super(key: key);
+  const CheckEmailScreen({super.key, required this.email});
 
   @override
   _CheckEmailScreenState createState() => _CheckEmailScreenState();

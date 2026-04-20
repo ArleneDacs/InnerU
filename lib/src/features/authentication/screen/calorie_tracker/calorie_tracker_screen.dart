@@ -156,7 +156,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   Timer? _searchDebounce;
   Timer? _goalHintTimer;
   int _dailyGoal = 2000;
-  int _dailyWaterGoal = 8;
+  final int _dailyWaterGoal = 8;
   bool _isSavingGoal = false;
   bool _isLookingUpFood = false;
   bool _isSearchingSuggestions = false;
@@ -165,6 +165,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   bool _showGoalHintBubble = false;
   String _selectedMealType = 'Breakfast';
   String _selectedMeasurementUnit = 'piece';
+  String _selectedHistoryDateKey = '';
   String? _mealPhotoPath;
   List<_NutritionLookupResult> _onlineSuggestions = [];
 
@@ -180,6 +181,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedHistoryDateKey = _todayKey;
     _loadGoal();
     _showGoalHint();
   }
@@ -201,6 +203,68 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     setState(() {
       _showGoalHintBubble = false;
     });
+  }
+
+  Future<void> _openScanOptions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD6DDCF),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Quick Scan',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Choose how you want to add food faster.',
+                style: TextStyle(color: Colors.black54),
+              ),
+              const SizedBox(height: 18),
+              _buildScanOptionTile(
+                icon: Icons.camera_alt_rounded,
+                title: 'Camera Calorie',
+                subtitle: 'Take a photo and label the meal',
+                onTap: () {
+                  Navigator.pop(context);
+                  _captureMealPhoto();
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildScanOptionTile(
+                icon: Icons.qr_code_scanner_rounded,
+                title: 'Barcode Scanner',
+                subtitle: 'Scan packaged food details',
+                onTap: () {
+                  Navigator.pop(context);
+                  _scanBarcode();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadGoal() async {
@@ -308,7 +372,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<String>(
-                      value: selectedSex,
+                      initialValue: selectedSex,
                       decoration: const InputDecoration(labelText: 'Sex'),
                       items: const [
                         DropdownMenuItem(value: 'Male', child: Text('Male')),
@@ -350,7 +414,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: activityLabel,
+                      initialValue: activityLabel,
                       decoration: const InputDecoration(labelText: 'Activity'),
                       items: const [
                         DropdownMenuItem(
@@ -1177,6 +1241,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
+  DateTime _startOfWeekSunday(DateTime date) {
+    final offset = date.weekday % 7;
+    return DateTime(date.year, date.month, date.day).subtract(Duration(days: offset));
+  }
+
   @override
   void dispose() {
     _searchDebounce?.cancel();
@@ -1437,6 +1506,256 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
+  Widget _buildScanOptionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: const Color(0xFFF7F8F3),
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F0DF),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Icon(icon, color: const Color(0xFF4D6A45)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryCalendarStrip(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> dayDocs,
+  ) {
+    final now = DateTime.now();
+    final weekStart = _startOfWeekSunday(now);
+    final logsByDate = {
+      for (final doc in dayDocs) doc.id: doc.data(),
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'History',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              Text(
+                DateFormat('MMMM yyyy').format(now),
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: List.generate(7, (index) {
+              final date = weekStart.add(Duration(days: index));
+              final key = DateFormat('yyyy-MM-dd').format(date);
+              final isSelected = key == _selectedHistoryDateKey;
+              final data = logsByDate[key];
+              final dayCalories = (data?['totalCalories'] as num?)?.toInt() ?? 0;
+              final isToday = key == _todayKey;
+
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedHistoryDateKey = key;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFFE8F0DF) : const Color(0xFFF8FAF5),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF90A17D)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          DateFormat('E').format(date).substring(0, 3),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isSelected ? const Color(0xFF4D6A45) : Colors.black45,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${date.day}',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: isSelected ? const Color(0xFF20351D) : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: dayCalories > 0
+                                ? const Color(0xFF90A17D)
+                                : Colors.transparent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        if (isToday) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4D6A45),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              'Today',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedDayHistoryCard(Map<String, dynamic>? data) {
+    final calories = (data?['totalCalories'] as num?)?.toInt() ?? 0;
+    final protein = (data?['totalProtein'] as num?)?.toInt() ?? 0;
+    final carbs = (data?['totalCarbs'] as num?)?.toInt() ?? 0;
+    final fat = (data?['totalFat'] as num?)?.toInt() ?? 0;
+    final water = (data?['waterGlasses'] as num?)?.toInt() ?? 0;
+    final selectedDate = DateTime.tryParse(_selectedHistoryDateKey) ?? DateTime.now();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAF5),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            DateFormat('EEEE, MMM d').format(selectedDate),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _historyMetricChip('$calories kcal', 'Calories'),
+              _historyMetricChip('${protein}g', 'Protein'),
+              _historyMetricChip('${carbs}g', 'Carbs'),
+              _historyMetricChip('${fat}g', 'Fat'),
+              _historyMetricChip('$water glasses', 'Water'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _historyMetricChip(String value, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(color: Colors.black87),
+          children: [
+            TextSpan(
+              text: '$value\n',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+            ),
+            TextSpan(
+              text: label,
+              style: const TextStyle(
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _numberField(
     TextEditingController controller,
     String hint, {
@@ -1676,6 +1995,19 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         actions: [
+          IconButton(
+            onPressed: _isLookingUpFood || _isCapturingMealPhoto ? null : _openScanOptions,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF4D6A45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+            ),
+            icon: const Icon(Icons.center_focus_weak_rounded),
+            tooltip: 'Quick scan',
+          ),
+          const SizedBox(width: 4),
           TextButton(
             onPressed: () => Navigator.pushNamed(context, '/todayIntake'),
             child: const Text(
@@ -1717,6 +2049,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               final weekDocs = dayDocs
                   .where((doc) => doc.id.compareTo(weekStartKey) >= 0)
                   .toList();
+              Map<String, dynamic>? selectedHistoryData;
+              for (final doc in dayDocs) {
+                if (doc.id == _selectedHistoryDateKey) {
+                  selectedHistoryData = doc.data();
+                  break;
+                }
+              }
               final weeklyCalories = _weeklyTotal(weekDocs, 'totalCalories');
               final weeklyProtein = _weeklyTotal(weekDocs, 'totalProtein');
               final weeklyCarbs = _weeklyTotal(weekDocs, 'totalCarbs');
@@ -1727,6 +2066,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _buildHistoryCalendarStrip(dayDocs),
+                    const SizedBox(height: 18),
                     _buildDailyProgressCard(
                       totalCalories: totalCalories,
                       currentGoal: currentGoal,
@@ -1740,6 +2081,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     _buildWaterTracker(
                       waterGlasses: waterGlasses,
                       waterGoal: waterGoal,
+                    ),
+                    const SizedBox(height: 18),
+                    _buildSoftSection(
+                      title: 'Selected Day',
+                      child: _buildSelectedDayHistoryCard(selectedHistoryData),
                     ),
                     const SizedBox(height: 18),
                     _buildSoftSection(
@@ -1850,7 +2196,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: DropdownButtonFormField<String>(
-                                  value: _selectedMeasurementUnit,
+                                  initialValue: _selectedMeasurementUnit,
                                   decoration: InputDecoration(
                                     labelText: 'Measurement',
                                     filled: true,
@@ -1924,30 +2270,68 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                             ),
                           ],
                           const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _isLookingUpFood ? null : _scanBarcode,
-                                  icon: const Icon(Icons.qr_code_scanner),
-                                  label: const Text('Scan Barcode'),
+                          Material(
+                            color: const Color(0xFFF4F7F0),
+                            borderRadius: BorderRadius.circular(22),
+                            child: InkWell(
+                              onTap: _isLookingUpFood || _isCapturingMealPhoto
+                                  ? null
+                                  : _openScanOptions,
+                              borderRadius: BorderRadius.circular(22),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 46,
+                                      height: 46,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFE6F0DF),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: const Icon(
+                                        Icons.center_focus_weak_rounded,
+                                        color: Color(0xFF4D6A45),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Quick Scan',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          SizedBox(height: 2),
+                                          Text(
+                                            'Open camera or barcode scanner',
+                                            style: TextStyle(color: Colors.black54),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      _isCapturingMealPhoto
+                                          ? 'Opening...'
+                                          : _isLookingUpFood
+                                              ? 'Loading...'
+                                              : 'Open',
+                                      style: const TextStyle(
+                                        color: Color(0xFF4D6A45),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _isCapturingMealPhoto || _isLookingUpFood
-                                      ? null
-                                      : _captureMealPhoto,
-                                  icon: const Icon(Icons.camera_alt_outlined),
-                                  label: Text(
-                                    _isCapturingMealPhoto
-                                        ? 'Opening Camera...'
-                                        : 'Camera Calorie',
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                           _buildMealPhotoPreview(),
                           const SizedBox(height: 12),

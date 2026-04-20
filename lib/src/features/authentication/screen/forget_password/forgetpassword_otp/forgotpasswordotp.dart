@@ -5,7 +5,7 @@ import 'package:selfcare_projects/src/constants/sizes.dart';
 import 'package:selfcare_projects/src/constants/text_strings.dart';
 
 class ForgotPasswordOTP extends StatefulWidget {
-  const ForgotPasswordOTP({Key? key}) : super(key: key);
+  const ForgotPasswordOTP({super.key});
 
   @override
   _ForgotPasswordOTP createState() => _ForgotPasswordOTP();

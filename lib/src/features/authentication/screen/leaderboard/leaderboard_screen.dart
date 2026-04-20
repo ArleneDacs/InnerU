@@ -50,7 +50,7 @@ class LeaderboardEntry {
 
 // SERVICE CLASS
 class LeaderboardService {
-  List<LeaderboardEntry> _entries = [];
+  final List<LeaderboardEntry> _entries = [];
 
   void addUserActivity(String userName, UserActivity activity) {
     int existingIndex = _entries.indexWhere((entry) => entry.name == userName);
@@ -97,7 +97,7 @@ class LeaderboardService {
 class Leaderboard extends StatefulWidget {
   final bool isLoading;
 
-  Leaderboard({this.isLoading = true});
+  const Leaderboard({super.key, this.isLoading = true});
 
   @override
   _LeaderboardState createState() => _LeaderboardState();
@@ -470,7 +470,7 @@ class _LeaderboardState extends State<Leaderboard> {
                   ),
                 ),
               ),
-            Container(
+            SizedBox(
               height: 220,
               child: isLoading ? _buildSkeletonPodium() : _buildPodium(),
             ),
@@ -1000,12 +1000,12 @@ class ShimmerWidget extends StatefulWidget {
   final double height;
   final bool isCircular;
 
-  const ShimmerWidget.rectangular({
+  const ShimmerWidget.rectangular({super.key, 
     required this.width,
     required this.height,
   }) : isCircular = false;
 
-  const ShimmerWidget.circular({
+  const ShimmerWidget.circular({super.key, 
     required double size,
   })  : width = size,
         height = size,

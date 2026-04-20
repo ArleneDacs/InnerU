@@ -1,19 +1,15 @@
-import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
-import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 class EditProfile extends StatefulWidget {
   const EditProfile({super.key, required this.title});

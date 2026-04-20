@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SleepSettings extends StatefulWidget {
-  const SleepSettings({Key? key}) : super(key: key);
+  const SleepSettings({super.key});
 
   @override
   _SleepSettingsState createState() => _SleepSettingsState();

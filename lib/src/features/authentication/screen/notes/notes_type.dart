@@ -36,7 +36,7 @@ class _NotesTypeState extends State<NotesType> {
   late List<dynamic> noteString;
   late int color;
   bool _isSaving = false;
-  bool _mounted = true;
+  final bool _mounted = true;
   late SnackBar alertContent;
 
   late TextEditingController titleController;
@@ -475,7 +475,7 @@ class _NotesTypeState extends State<NotesType> {
       return;
     }
 
-    final List<XFile>? images = await _picker.pickMultiImage();
+    final List<XFile> images = await _picker.pickMultiImage();
 
     if (images != null && images.isNotEmpty) {
       if (!mounted) return;
