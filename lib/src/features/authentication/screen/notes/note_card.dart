@@ -63,6 +63,10 @@ void showImageDialog(String imageUrl) {
     List<String> imageUrls = widget.note.note
         .where((item) => item["type"] == "image")
         .map<String>((item) => item["value"]!)
+        .where((url) =>
+            url.trim().isNotEmpty &&
+            url != "loading" &&
+            (url.startsWith("http://") || url.startsWith("https://")))
         .toList();
 
     return GestureDetector(

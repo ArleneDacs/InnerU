@@ -8,9 +8,12 @@ import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/today_intake_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
@@ -62,7 +65,7 @@ class App extends StatelessWidget {
             bodyMedium: GoogleFonts.puritan(color: Colors.white70),
           ),
         ),
-        themeMode: ThemeMode.system,
+        themeMode: ThemeMode.light,
         home: GlobalPaddingWrapper(
           child: SplashScreen(),
         ),
@@ -78,6 +81,9 @@ class App extends StatelessWidget {
           '/emotionScreen': (context) => EmotionTrackerPage(),
           '/userprogress': (context) => UserProgressPage(),
           '/communityScreen': (context) => CommunityScreen(),
+          '/calorieTracker': (context) => const CalorieTrackerScreen(),
+          '/todayIntake': (context) => const TodayIntakeScreen(),
+          '/fastingTimer': (context) => const FastingTimerScreen(),
           '/profileSettings': (context) => ProfileSettings(),
           '/todolist': (context) => TodoList(),
           '/login': (context) => LoginScreen(),

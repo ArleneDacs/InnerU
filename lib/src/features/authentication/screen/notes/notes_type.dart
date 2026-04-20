@@ -1,15 +1,14 @@
 import 'dart:io';
-import 'dart:convert'; // Add this for Base64 encoding
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/models/customSnackbar.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class NotesType extends StatefulWidget {
   final Note note;
@@ -119,6 +118,12 @@ class _NotesTypeState extends State<NotesType> {
   }
 
   bool _isFormValid = false;
+  bool _isValidImageUrl(String value) {
+    final url = value.trim();
+    return url.isNotEmpty &&
+        url != "loading" &&
+        (url.startsWith("http://") || url.startsWith("https://"));
+  }
 
   void _validateForm() {
     bool hasTitle = titleController.text.trim().isNotEmpty;
@@ -413,7 +418,7 @@ class _NotesTypeState extends State<NotesType> {
 
     // Ensure images are always uploaded even if only one remains
     for (var imageUrl in uploadedImageUrls) {
-      if (imageUrl.isNotEmpty) {
+      if (_isValidImageUrl(imageUrl)) {
         contentList.add({
           "type": "image",
           "value": imageUrl,
@@ -457,12 +462,23 @@ class _NotesTypeState extends State<NotesType> {
   }
 
   Future<void> pickImage() async {
+    if (!ImageStorageService.isConfigured) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                "Image upload is not configured. Set cloudName/uploadPreset in lib/src/config/cloudinary_config.dart."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
     final List<XFile>? images = await _picker.pickMultiImage();
 
     if (images != null && images.isNotEmpty) {
       if (!mounted) return;
-
-      List<String> newUploadedUrls = [];
 
       for (var image in images) {
         if (!mounted) return;
@@ -473,7 +489,7 @@ class _NotesTypeState extends State<NotesType> {
         });
 
         // Upload the image and get its URL
-        String imageUrl = await uploadImageToFirebase(File(image.path));
+        String imageUrl = await uploadImage(File(image.path));
 
         if (imageUrl.isNotEmpty && mounted) {
           setState(() {
@@ -486,21 +502,29 @@ class _NotesTypeState extends State<NotesType> {
             }
             _validateForm(); // <- Add this line here
           });
+        } else if (mounted) {
+          final reason = ImageStorageService.lastError;
+          setState(() {
+            uploadedImageUrls.remove("loading");
+            _validateForm();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(reason == null || reason.isEmpty
+                  ? "Failed to upload image. Please try again."
+                  : "Failed to upload image: $reason"),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
       }
     }
   }
 
-  Future<String> uploadImageToFirebase(File imageFile) async {
+  Future<String> uploadImage(File imageFile) async {
     try {
-      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-      Reference storageRef =
-          FirebaseStorage.instance.ref().child('notes_images/$fileName.jpg');
-
-      UploadTask uploadTask = storageRef.putFile(imageFile);
-      TaskSnapshot snapshot = await uploadTask;
-
-      return await snapshot.ref.getDownloadURL();
+      final imageUrl = await ImageStorageService.uploadImageFile(imageFile);
+      return imageUrl ?? "";
     } catch (e) {
       print("Error uploading image: $e");
       return "";
@@ -598,16 +622,13 @@ class _NotesTypeState extends State<NotesType> {
           }
         });
 
-    await deleteImageFromFirebase(imageUrl);
+    await deleteImageFromStorage(imageUrl);
   }
 
-  Future<void> deleteImageFromFirebase(String imageUrl) async {
-    try {
-      Reference storageRef = FirebaseStorage.instance.refFromURL(imageUrl);
-      await storageRef.delete();
-    } catch (e) {
-      print("Error deleting image: $e");
-    }
+  Future<void> deleteImageFromStorage(String imageUrl) async {
+    // External unsigned-hosted images are not deleted from the client for safety.
+    // We only remove the URL references from Firestore.
+    return;
   }
 
   void addText(String text) {

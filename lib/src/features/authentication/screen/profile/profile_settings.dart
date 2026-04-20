@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 
 class ProfileSettings extends StatelessWidget {
@@ -21,8 +21,7 @@ class ProfileSettings extends StatelessWidget {
                 "Profile Settings",
                 style: TextStyle(fontSize: 35),
               ),
-
-                SizedBox(height: 70),
+              SizedBox(height: 70),
               _buildSectionTitle("General"),
               _buildButton(
                   context,
@@ -30,6 +29,11 @@ class ProfileSettings extends StatelessWidget {
                   EditProfile(
                     title: 'Edit Profile',
                   )),
+              _buildButton(
+                context,
+                "Step Goal",
+                StepGoalScreen(),
+              ),
               _buildSectionTitle("Audio Settings"),
               _buildButton(context, "Change Meditation Song", MeditationSong()),
               _buildSectionTitle("Account Settings"),
@@ -39,7 +43,6 @@ class ProfileSettings extends StatelessWidget {
                   PrivacyScreen(
                     title: 'Privacy',
                   )),
-             
               SizedBox(height: 10),
             ],
           ),

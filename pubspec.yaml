@@ -58,6 +58,10 @@ dependencies:
   table_calendar: ^3.2.0
   flutter_background_service_android: ^6.3.0
   flutter_background_service: ^5.1.0
+  flutter_map: ^8.3.0
+  geolocator: ^14.0.2
+  latlong2: ^0.9.1
+  mobile_scanner: ^7.2.0
   path_provider: ^2.1.5
   url_launcher: ^6.1.14
   video_player: ^2.5.0

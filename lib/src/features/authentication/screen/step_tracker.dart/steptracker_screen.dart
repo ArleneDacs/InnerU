@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:lottie/lottie.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +23,9 @@ class StepTracker extends StatefulWidget {
 
 class _StepTrackerState extends State<StepTracker>
     with SingleTickerProviderStateMixin {
+  static const int _minimumStepBurst = 3;
+  static const Duration _stepBurstWindow = Duration(seconds: 6);
+
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
   StreamSubscription<StepCount>? _stepCountStream;
@@ -28,8 +33,13 @@ class _StepTrackerState extends State<StepTracker>
   int _steps = 0;
   int _initialSteps = -1;
   int _lastSteps = 0;
+  int _lastSyncedStepCount = -1;
+  int _dailyGoal = 5000;
+  int _pendingStepBurst = 0;
+  int _lastRawStepCount = 0;
   bool _isWalking = false;
   Timer? _checkTimer;
+  Timer? _pendingStepTimer;
 
   @override
   void initState() {
@@ -41,8 +51,46 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<void> _initializeApp() async {
     await _requestPermission();
+    await _loadDailyGoal();
     await _loadSteps();
     _initStepCounter();
+  }
+
+  Future<void> _loadDailyGoal() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final prefs = await SharedPreferences.getInstance();
+
+    if (user == null) {
+      setState(() {
+        _dailyGoal = 5000;
+      });
+      return;
+    }
+
+    final cachedGoal = prefs.getInt('daily_step_goal_${user.uid}');
+    if (cachedGoal != null && cachedGoal > 0) {
+      setState(() {
+        _dailyGoal = cachedGoal;
+      });
+    }
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final dynamic rawGoal = userDoc.data()?['dailyStepGoal'];
+      final int? remoteGoal = rawGoal is int ? rawGoal : null;
+
+      if (remoteGoal != null && remoteGoal > 0 && mounted) {
+        setState(() {
+          _dailyGoal = remoteGoal;
+        });
+        await prefs.setInt('daily_step_goal_${user.uid}', remoteGoal);
+      }
+    } catch (error) {
+      debugPrint("Failed to load step goal: $error");
+    }
   }
 
   Future<void> _loadSteps() async {
@@ -67,6 +115,7 @@ class _StepTrackerState extends State<StepTracker>
     } else {
       _steps = prefs.getInt('saved_steps') ?? 0; // Load today's saved steps
     }
+    _lastRawStepCount = _steps;
 
     _updateStepCount(_steps);
   }
@@ -122,8 +171,8 @@ class _StepTrackerState extends State<StepTracker>
         // Prevent negative step count
         if (newSteps < 0) newSteps = 0;
 
-        if (newSteps != _steps) {
-          _updateStepCount(newSteps);
+        if (newSteps != _lastRawStepCount) {
+          _handleRawStepCount(newSteps);
         }
       },
       onError: (error) {
@@ -154,7 +203,11 @@ class _StepTrackerState extends State<StepTracker>
 
     _stepStreamController.add(_steps);
 
-    if (_steps >= 5000) {
+    if (_shouldSyncProgress()) {
+      await _syncStepProgress();
+    }
+
+    if (_steps >= _dailyGoal) {
       await _saveDailyActivity(steps: true);
     }
 
@@ -195,6 +248,8 @@ class _StepTrackerState extends State<StepTracker>
         'userId': userId,
         'username': username,
         'date': formattedDate,
+        'stepCount': _steps,
+        'stepGoal': _dailyGoal,
         if (meditation) 'meditation': true,
         if (steps) 'steps': true,
       }, SetOptions(merge: true));
@@ -218,17 +273,87 @@ class _StepTrackerState extends State<StepTracker>
     await _saveDailyActivity(steps: true);
   }
 
+  void _handleRawStepCount(int rawSteps) {
+    final delta = rawSteps - _lastRawStepCount;
+    _lastRawStepCount = rawSteps;
+
+    if (delta <= 0) {
+      return;
+    }
+
+    _pendingStepBurst += delta;
+    _pendingStepTimer?.cancel();
+    _pendingStepTimer = Timer(_stepBurstWindow, () {
+      _pendingStepBurst = 0;
+    });
+
+    if (_pendingStepBurst >= _minimumStepBurst) {
+      final confirmedSteps = _steps + _pendingStepBurst;
+      _pendingStepBurst = 0;
+      _pendingStepTimer?.cancel();
+      _updateStepCount(confirmedSteps);
+    }
+  }
+
+  Future<void> _syncStepProgress() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('dailytracker')
+          .doc('$userId-$formattedDate')
+          .set({
+        'stepCount': _steps,
+        'stepGoal': _dailyGoal,
+        'date': formattedDate,
+      }, SetOptions(merge: true));
+      _lastSyncedStepCount = _steps;
+    } catch (error) {
+      debugPrint("Failed to sync step progress: $error");
+    }
+  }
+
+  bool _shouldSyncProgress() {
+    if (_lastSyncedStepCount == -1) return true;
+    if (_steps == 0) return true;
+    if (_steps >= _dailyGoal && _lastSyncedStepCount < _dailyGoal) return true;
+    return (_steps - _lastSyncedStepCount).abs() >= 50;
+  }
+
+  Future<void> _openGoalScreen() async {
+    final result = await Navigator.push<int>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StepGoalScreen(initialGoal: _dailyGoal),
+      ),
+    );
+
+    if (result != null && mounted) {
+      setState(() {
+        _dailyGoal = result;
+      });
+      await _syncStepProgress();
+    }
+  }
+
   @override
   void dispose() {
     _lottieController.dispose();
     _stepCountStream?.cancel();
     _stepStreamController.close();
     _checkTimer?.cancel();
+    _pendingStepTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final double progress =
+        _dailyGoal <= 0 ? 0 : (_steps / _dailyGoal).clamp(0, 1).toDouble();
+
     return Scaffold(
       body: Center(
         child: Column(
@@ -303,28 +428,101 @@ class _StepTrackerState extends State<StepTracker>
               },
             ),
             const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const TrackingScreen(title: ''),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFCF5EA),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.flag_rounded,
+                        color: Color(0xFFCE8F5A),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Daily Goal: $_dailyGoal steps',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _openGoalScreen,
+                        child: const Text('Set Goal'),
+                      ),
+                    ],
                   ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFce8f5a),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: LinearProgressIndicator(
+                      minHeight: 10,
+                      value: progress,
+                      backgroundColor: Colors.white,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFF8BC074),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('$_steps / $_dailyGoal'),
+                      Text('${(progress * 100).round()}% complete'),
+                    ],
+                  ),
+                ],
               ),
-              child: Text(
-                'View Steps',
-                style: GoogleFonts.roboto(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const TrackingScreen(title: ''),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFce8f5a),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
+                  ),
+                  child: Text(
+                    'View Steps',
+                    style: GoogleFonts.roboto(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const StepMapTrackerScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.map_outlined),
+                  label: const Text('Track on Map'),
+                ),
+              ],
             ),
           ],
         ),

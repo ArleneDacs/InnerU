@@ -51,6 +51,8 @@
 		<string>Camera Usage</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Microphone Usage</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>We use your location to show your walking route on the map while you track your steps.</string>
     <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>tel</string>

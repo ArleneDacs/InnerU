@@ -152,13 +152,72 @@ class _ProfilePageState extends State<ProfilePage> {
         .collection('dailytracker')
         .doc(documentId)
         .set({
+      'userId': userId,
       'meditation': false,
       'steps': false,
       'call': false,
       'learning': false,
       'addValue': false,
+      'date': todayDate,
       'lastUpdated': todayDate, // Store last updated date
     });
+  }
+
+  String _taskFieldKey(String task) {
+    switch (task) {
+      case 'Call':
+        return 'call';
+      case 'Steps':
+        return 'steps';
+      case 'Meditation':
+        return 'meditation';
+      case 'Learning':
+        return 'learning';
+      case 'Add Value':
+        return 'addValue';
+      default:
+        return task.toLowerCase();
+    }
+  }
+
+  Future<void> _toggleTodayTask(String task, bool? value) async {
+    if (value == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final documentId = '${user.uid}-$todayDate';
+    final fieldKey = _taskFieldKey(task);
+
+    setState(() {
+      todayTasks[task] = value;
+    });
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('dailytracker')
+          .doc(documentId)
+          .set({
+        'userId': user.uid,
+        'username': username,
+        'date': todayDate,
+        'lastUpdated': todayDate,
+        fieldKey: value,
+      }, SetOptions(merge: true));
+
+      checkAndAssignPoints();
+    } catch (e) {
+      setState(() {
+        todayTasks[task] = !(value);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update $task. Please try again.'),
+        ),
+      );
+    }
   }
 
   Future<Set<int>> _fetchTrackedDays() async {
@@ -201,8 +260,11 @@ class _ProfilePageState extends State<ProfilePage> {
           .get();
 
       if (userDoc.exists) {
+        final dynamic rawProfilePic = userDoc["profilePic"];
+        final String cleanedUrl =
+            rawProfilePic is String ? rawProfilePic.trim() : "";
         setState(() {
-          _profilePicUrl = userDoc["profilePic"]; // URL from Firestore
+          _profilePicUrl = cleanedUrl.isEmpty ? null : cleanedUrl;
         });
       }
     } catch (e) {
@@ -346,7 +408,7 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
               child: Column(
                 children: [
-                  _profilePicUrl == null
+                  (_profilePicUrl == null || _profilePicUrl!.trim().isEmpty)
                       ? Image.asset(
                           'assets/images/avatar.png', // Default image if no profilePic is available
                           width: screenWidth * 0.35,
@@ -438,7 +500,7 @@ class _ProfilePageState extends State<ProfilePage> {
             activeColor: customColor1, // Applied customColor1 here
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            onChanged: null, // Checkbox is no longer tappable
+            onChanged: (value) => _toggleTodayTask(task, value),
           ),
           InkWell(
             onTap: () {

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -13,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 class EditProfile extends StatefulWidget {
@@ -51,8 +51,9 @@ class MyEditProfileState extends State<EditProfile> {
         _phoneController.text = userData["number"] ?? "";
         _currentBirthdate = userData["birthdate"] ?? "";
         _dobController.text = _currentBirthdate;
-        _selectedImage =
-            userData["profilePic"] ?? null; // Use URL instead of base64
+        final dynamic rawProfilePic = userData["profilePic"];
+        final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
+        _selectedImage = cleanedUrl.isEmpty ? null : cleanedUrl;
       });
       return userData;
     });
@@ -85,30 +86,18 @@ class MyEditProfileState extends State<EditProfile> {
     }
   }
 
-  Future<String?> _uploadImageToFirebaseStorage(Uint8List imageBytes) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-
+  Future<String?> _uploadImage(Uint8List imageBytes) async {
     try {
-      Reference storageRef = FirebaseStorage.instance
-          .ref()
-          .child("profile_pictures/${user.uid}.jpg");
-      UploadTask uploadTask = storageRef.putData(
-          imageBytes, SettableMetadata(contentType: "image/jpeg"));
-
-      // Show loading animation while uploading
-      TaskSnapshot snapshot = await uploadTask;
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-
-      await FirebaseFirestore.instance
-          .collection("users")
-          .doc(user.uid)
-          .update({
-        "profilePic": downloadUrl,
-      });
-
-      print("Image uploaded successfully: $downloadUrl");
-      return downloadUrl;
+      final user = FirebaseAuth.instance.currentUser;
+      final fallbackName = user == null ? 'profile.jpg' : '${user.uid}.jpg';
+      final imageUrl = await ImageStorageService.uploadImageBytes(
+        imageBytes,
+        fileName: fallbackName,
+      );
+      if (imageUrl != null) {
+        print("Image uploaded successfully: $imageUrl");
+      }
+      return imageUrl;
     } catch (e) {
       print("Error uploading image: $e");
       return null;
@@ -143,11 +132,41 @@ class MyEditProfileState extends State<EditProfile> {
     try {
       // If a new image is selected, upload it
       if (_selectedImageTemp != null) {
+        if (!ImageStorageService.isConfigured) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  "Image upload is not configured. Set cloudName/uploadPreset in lib/src/config/cloudinary_config.dart."),
+              backgroundColor: Colors.red,
+            ),
+          );
+          setState(() {
+            _isButtonEnabled = true;
+          });
+          return;
+        }
+
         Uint8List imageBytes = await File(_selectedImageTemp!).readAsBytes();
-        String? downloadUrl = await _uploadImageToFirebaseStorage(imageBytes);
+        String? downloadUrl = await _uploadImage(imageBytes);
 
         if (downloadUrl != null) {
           updatedData["profilePic"] = downloadUrl;
+        } else {
+          Navigator.pop(context);
+          final reason = ImageStorageService.lastError;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(reason == null || reason.isEmpty
+                  ? "Profile image upload failed. Please try again."
+                  : "Profile image upload failed: $reason"),
+              backgroundColor: Colors.red,
+            ),
+          );
+          setState(() {
+            _isButtonEnabled = true;
+          });
+          return;
         }
       }
 
@@ -378,7 +397,8 @@ class MyEditProfileState extends State<EditProfile> {
                                 fit: BoxFit.cover,
                               ),
                             )
-                          : _selectedImage != null
+                          : (_selectedImage != null &&
+                                  _selectedImage!.trim().isNotEmpty)
                               ? ClipOval(
                                   child: Image.network(
                                     _selectedImage!,

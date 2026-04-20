@@ -5,11 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
@@ -50,8 +51,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           .get();
 
       if (userDoc.exists) {
+        final dynamic rawProfilePic = userDoc["profilePic"];
+        final String cleanedUrl =
+            rawProfilePic is String ? rawProfilePic.trim() : "";
         setState(() {
-          _profilePic = userDoc["profilePic"]; // Get the profile picture URL
+          _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
         });
       }
     } catch (e) {
@@ -266,7 +270,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         elevation: 0,
         leading: IconButton(
-          icon: _profilePic == null
+          icon: (_profilePic == null || _profilePic!.trim().isEmpty)
               ? Image.asset(
                   'assets/images/avatar.png', // Default image if no profilePic is available
                   width: screenWidth * 0.08,
@@ -399,6 +403,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Color.fromARGB(255, 226, 223, 215),
                               "assets/images/meditation.gif",
                               Meditation(),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Flexible(
+                            child: _buildClickableInfoCard(
+                              context,
+                              "Fasting",
+                              "Track your fast",
+                              CupertinoIcons.timer_fill,
+                              Color.fromARGB(255, 242, 230, 213),
+                              "assets/images/card.png",
+                              const FastingTimerScreen(),
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Flexible(
+                            child: _buildClickableInfoCard(
+                              context,
+                              "Calories",
+                              "Log your meals",
+                              CupertinoIcons.leaf_arrow_circlepath,
+                              Color.fromARGB(255, 228, 238, 224),
+                              "assets/images/card.png",
+                              const CalorieTrackerScreen(),
                             ),
                           ),
                         ],
