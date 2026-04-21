@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
@@ -394,7 +394,7 @@ class _ProfilePageState extends State<ProfilePage> {
           context,
           MaterialPageRoute(
               builder: (context) =>
-                  Setuppage()), // Replace with your actual CurvedNavBar widget
+                  const AuthRoleHome()),
           (route) => false, // Removes all previous routes from the stack
         );
         return false; // Prevent the default back navigation

@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Message {
   Message({
@@ -77,11 +78,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isSending = false;
   bool _isUploadingImage = false;
   String? _currentUserProfilePic;
+  Timestamp? _lastMarkedReadAt;
+  String? _resolvedChatRoomId;
 
   @override
   void initState() {
     super.initState();
-    _markChatAsRead();
+    _resolveChatRoomId().then((_) => _markChatAsRead());
     _loadCurrentUserProfilePic();
   }
 
@@ -89,8 +92,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if ((widget.chatRoomId ?? '').trim().isNotEmpty) {
       return widget.chatRoomId!.trim();
     }
+    if ((_resolvedChatRoomId ?? '').trim().isNotEmpty) {
+      return _resolvedChatRoomId!.trim();
+    }
     final sortedIds = [widget.coach.id, widget.userId]..sort();
     return '${sortedIds[0]}_${sortedIds[1]}';
+  }
+
+  Future<void> _resolveChatRoomId() async {
+    if ((widget.chatRoomId ?? '').trim().isNotEmpty || widget.isGroupChat) {
+      return;
+    }
+
+    try {
+      final roomsSnapshot = await FirebaseFirestore.instance
+          .collection('chatRooms')
+          .where('participants', arrayContains: widget.userId)
+          .get();
+
+      for (final room in roomsSnapshot.docs) {
+        final data = room.data();
+        final participants = List<String>.from(
+          data['participants'] as List? ?? const <String>[],
+        );
+        if (data['isGroupChat'] == true) {
+          continue;
+        }
+        if (participants.contains(widget.coach.id)) {
+          _resolvedChatRoomId = room.id;
+          return;
+        }
+      }
+    } catch (_) {}
   }
 
   String get _chatTitle {
@@ -107,14 +140,44 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _markChatAsRead() async {
     try {
-      final now = Timestamp.now();
+      final roomRef =
+          FirebaseFirestore.instance.collection('chatRooms').doc(getChatRoomId());
+      final roomSnapshot = await roomRef.get();
+      final roomData = roomSnapshot.data() ?? <String, dynamic>{};
+      final readTimestamp = () {
+        final lastMessageTime = roomData['lastMessageTime'];
+        if (lastMessageTime is Timestamp) return lastMessageTime;
+
+        final updatedAt = roomData['updatedAt'];
+        if (updatedAt is Timestamp) return updatedAt;
+
+        return Timestamp.now();
+      }();
+      await roomRef.set({
+        'unreadCounts.${widget.userId}': 0,
+        'lastReadAt.${widget.userId}': readTimestamp,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  Future<void> _markChatAsReadUpTo(Timestamp timestamp) async {
+    if (_lastMarkedReadAt != null &&
+        _lastMarkedReadAt!.millisecondsSinceEpoch >=
+            timestamp.millisecondsSinceEpoch) {
+      return;
+    }
+
+    _lastMarkedReadAt = timestamp;
+
+    try {
       await FirebaseFirestore.instance
           .collection('chatRooms')
           .doc(getChatRoomId())
           .set({
         'unreadCounts.${widget.userId}': 0,
-        'lastReadAt.${widget.userId}': now,
-        'updatedAt': now,
+        'lastReadAt.${widget.userId}': timestamp,
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (_) {}
   }
@@ -405,7 +468,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   final messages = snapshot.data!.docs
                       .map((doc) => Message.fromDocument(doc))
                       .toList();
-                  _markChatAsRead();
+                  final latestMessageDoc = snapshot.data!.docs.last.data();
+                  final latestServerTimestamp = latestMessageDoc['timestamp'];
+                  final latestClientTimestamp = latestMessageDoc['clientTimestamp'];
+                  final latestReadTimestamp =
+                      latestServerTimestamp is Timestamp
+                          ? latestServerTimestamp
+                          : latestClientTimestamp is Timestamp
+                              ? latestClientTimestamp
+                              : Timestamp.fromDate(messages.last.timestamp);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _markChatAsReadUpTo(latestReadTimestamp);
+                  });
                   _scrollToBottom();
 
                   return ListView.builder(
@@ -768,7 +842,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
-class ChatListScreen extends StatelessWidget {
+class ChatListScreen extends StatefulWidget {
   const ChatListScreen({
     super.key,
     required this.userId,
@@ -782,30 +856,104 @@ class ChatListScreen extends StatelessWidget {
   final bool allowGroupChat;
   final String? groupName;
 
+  @override
+  State<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends State<ChatListScreen> {
+  final Map<String, DateTime> _localReadOverrides = <String, DateTime>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalReadOverrides();
+  }
+
+  String _chatReadOverrideKey(String chatRoomId) =>
+      'chat_read_override_${widget.userId}_$chatRoomId';
+
+  Future<void> _loadLocalReadOverrides() async {
+    final prefs = await SharedPreferences.getInstance();
+    final overrides = <String, DateTime>{};
+    final prefix = 'chat_read_override_${widget.userId}_';
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      final rawValue = prefs.getInt(key);
+      if (rawValue == null) continue;
+      final chatRoomId = key.substring(prefix.length);
+      overrides[chatRoomId] = DateTime.fromMillisecondsSinceEpoch(rawValue);
+    }
+    if (!mounted) return;
+    setState(() {
+      _localReadOverrides
+        ..clear()
+        ..addAll(overrides);
+    });
+  }
+
+  Future<void> _setLocalReadOverride(
+    String chatRoomId,
+    Map<String, dynamic> chatData,
+  ) async {
+    final readTimestamp = _resolveReadTimestamp(chatData).toDate();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _chatReadOverrideKey(chatRoomId),
+      readTimestamp.millisecondsSinceEpoch,
+    );
+    if (!mounted) return;
+    setState(() {
+      _localReadOverrides[chatRoomId] = readTimestamp;
+    });
+  }
+
   DateTime? _readTimestampForUser(Map<String, dynamic> chatData) {
     final lastReadAt = Map<String, dynamic>.from(
       chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
     );
-    final rawValue = lastReadAt[userId];
+    final rawValue = lastReadAt[widget.userId];
     if (rawValue is Timestamp) return rawValue.toDate();
     return null;
   }
 
-  int _extractUnreadCount(Map<String, dynamic> chatData) {
+  Timestamp _resolveReadTimestamp(Map<String, dynamic> chatData) {
+    final lastMessageTime = chatData['lastMessageTime'];
+    if (lastMessageTime is Timestamp) return lastMessageTime;
+
+    final updatedAt = chatData['updatedAt'];
+    if (updatedAt is Timestamp) return updatedAt;
+
+    return Timestamp.now();
+  }
+
+  int _extractUnreadCount(String chatRoomId, Map<String, dynamic> chatData) {
+    final lastMessageTime = _resolveChatSortTime(chatData);
+    final lastReadAt = _readTimestampForUser(chatData);
+    final localReadAt = _localReadOverrides[chatRoomId];
+    final effectiveReadAt = [
+      if (lastReadAt != null) lastReadAt,
+      if (localReadAt != null) localReadAt,
+    ].fold<DateTime?>(
+      null,
+      (latest, candidate) =>
+          latest == null || candidate.isAfter(latest) ? candidate : latest,
+    );
+    if (effectiveReadAt != null && !lastMessageTime.isAfter(effectiveReadAt)) {
+      return 0;
+    }
+
     final unreadCounts = Map<String, dynamic>.from(
       chatData['unreadCounts'] as Map? ?? <String, dynamic>{},
     );
-    if (unreadCounts.containsKey(userId)) {
-      final rawValue = unreadCounts[userId];
+    if (unreadCounts.containsKey(widget.userId)) {
+      final rawValue = unreadCounts[widget.userId];
       if (rawValue is int) return rawValue;
       if (rawValue is num) return rawValue.toInt();
     }
     final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
-    final lastMessageTime = _resolveChatSortTime(chatData);
-    final lastReadAt = _readTimestampForUser(chatData);
     if (lastSenderId.isNotEmpty &&
-        lastSenderId != userId &&
-        (lastReadAt == null || lastMessageTime.isAfter(lastReadAt))) {
+        lastSenderId != widget.userId &&
+        (effectiveReadAt == null || lastMessageTime.isAfter(effectiveReadAt))) {
       return 1;
     }
     return 0;
@@ -840,10 +988,9 @@ class ChatListScreen extends StatelessWidget {
   Future<void> _markAllChatsAsRead(BuildContext context) async {
     try {
       final firestore = FirebaseFirestore.instance;
-      final now = Timestamp.now();
       final roomsSnapshot = await firestore
           .collection('chatRooms')
-          .where('participants', arrayContains: userId)
+          .where('participants', arrayContains: widget.userId)
           .get();
 
       if (roomsSnapshot.docs.isEmpty) {
@@ -856,13 +1003,17 @@ class ChatListScreen extends StatelessWidget {
 
       final batch = firestore.batch();
       for (final room in roomsSnapshot.docs) {
+        final readTimestamp = _resolveReadTimestamp(room.data());
         batch.set(room.reference, {
-          'unreadCounts.$userId': 0,
-          'lastReadAt.$userId': now,
+          'unreadCounts.${widget.userId}': 0,
+          'lastReadAt.${widget.userId}': readTimestamp,
         }, SetOptions(merge: true));
       }
 
       await batch.commit();
+      for (final room in roomsSnapshot.docs) {
+        await _setLocalReadOverride(room.id, room.data());
+      }
 
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -877,10 +1028,14 @@ class ChatListScreen extends StatelessWidget {
   }
 
   Future<void> _markChatAsReadById(String chatRoomId) async {
-    final now = Timestamp.now();
-    await FirebaseFirestore.instance.collection('chatRooms').doc(chatRoomId).set({
-      'unreadCounts.$userId': 0,
-      'lastReadAt.$userId': now,
+    final roomRef = FirebaseFirestore.instance.collection('chatRooms').doc(chatRoomId);
+    final roomSnapshot = await roomRef.get();
+    final readTimestamp = _resolveReadTimestamp(
+      roomSnapshot.data() ?? <String, dynamic>{},
+    );
+    await roomRef.set({
+      'unreadCounts.${widget.userId}': 0,
+      'lastReadAt.${widget.userId}': readTimestamp,
     }, SetOptions(merge: true));
   }
 
@@ -888,7 +1043,7 @@ class ChatListScreen extends StatelessWidget {
     final firestore = FirebaseFirestore.instance;
     final menteesSnapshot = await firestore
         .collection('users')
-        .where('coachId', isEqualTo: userId)
+        .where('coachId', isEqualTo: widget.userId)
         .get();
 
     if (menteesSnapshot.docs.isEmpty) {
@@ -899,12 +1054,12 @@ class ChatListScreen extends StatelessWidget {
       return;
     }
 
-    final coachDoc = await firestore.collection('coaches').doc(userId).get();
-    final userDoc = await firestore.collection('users').doc(userId).get();
+    final coachDoc = await firestore.collection('coaches').doc(widget.userId).get();
+    final userDoc = await firestore.collection('users').doc(widget.userId).get();
     final coachData = coachDoc.data() ?? <String, dynamic>{};
     final userData = userDoc.data() ?? <String, dynamic>{};
-    final teamTitle = (groupName ?? '').trim().isNotEmpty
-        ? groupName!.trim()
+    final teamTitle = (widget.groupName ?? '').trim().isNotEmpty
+        ? widget.groupName!.trim()
         : ((coachData['fullName'] as String?)?.trim().isNotEmpty == true
               ? (coachData['fullName'] as String).trim()
               : 'My Team');
@@ -913,9 +1068,9 @@ class ChatListScreen extends StatelessWidget {
             ? (coachData['profilePic'] as String).trim()
             : (userData['profilePic'] as String?)?.trim() ?? '';
 
-    final participantIds = <String>{userId};
-    final participantNames = <String, String>{userId: userName};
-    final participantProfiles = <String, String>{userId: coachProfilePic};
+    final participantIds = <String>{widget.userId};
+    final participantNames = <String, String>{widget.userId: widget.userName};
+    final participantProfiles = <String, String>{widget.userId: coachProfilePic};
 
     for (final mentee in menteesSnapshot.docs) {
       final data = mentee.data();
@@ -927,7 +1082,7 @@ class ChatListScreen extends StatelessWidget {
       participantProfiles[mentee.id] = (data['profilePic'] as String?)?.trim() ?? '';
     }
 
-    final chatRoomId = 'group_$userId';
+    final chatRoomId = 'group_${widget.userId}';
     final unreadCounts = <String, int>{};
     for (final participantId in participantIds) {
       unreadCounts[participantId] = 0;
@@ -942,7 +1097,7 @@ class ChatListScreen extends StatelessWidget {
       'participantNames': participantNames,
       'participantProfiles': participantProfiles,
       'unreadCounts': unreadCounts,
-      'coachId': userId,
+      'coachId': widget.userId,
       'coachName': teamTitle,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -953,13 +1108,13 @@ class ChatListScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (context) => ChatRoomScreen(
           coach: Coach(
-            id: userId,
+            id: widget.userId,
             name: teamTitle,
             profilePic: coachProfilePic,
             backgroundColor: const Color(0xFF90A17D),
           ),
-          userId: userId,
-          userName: userName,
+          userId: widget.userId,
+          userName: widget.userName,
           chatRoomId: chatRoomId,
           chatTitle: teamTitle,
           chatProfilePic: coachProfilePic,
@@ -981,7 +1136,7 @@ class ChatListScreen extends StatelessWidget {
             tooltip: 'Read all',
             onPressed: () => _markAllChatsAsRead(context),
           ),
-          if (allowGroupChat)
+          if (widget.allowGroupChat)
             IconButton(
               icon: const Icon(Icons.groups_2_outlined),
               onPressed: () => _createOrOpenGroupChat(context),
@@ -991,7 +1146,7 @@ class ChatListScreen extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection('chatRooms')
-            .where('participants', arrayContains: userId)
+            .where('participants', arrayContains: widget.userId)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -1040,19 +1195,19 @@ class ChatListScreen extends StatelessWidget {
                 chatData['participantNames'] as Map? ?? {},
               );
               final otherParticipantId = participants.firstWhere(
-                (participantId) => participantId != userId,
+                (participantId) => participantId != widget.userId,
                 orElse: () => chatData['coachId'] as String? ?? '',
               );
               final otherName =
                   chatData['isGroupChat'] == true
                       ? (chatData['groupName'] as String?)?.trim() ?? 'My Team'
                       : participantNames[otherParticipantId] as String? ??
-                          (chatData['coachId'] == userId
+                          (chatData['coachId'] == widget.userId
                               ? chatData['userName'] as String? ?? 'User'
                               : chatData['coachName'] as String? ?? 'Coach');
               final lastMessage = chatData['lastMessage'] as String? ?? '';
               final lastMessageTime = _resolveChatSortTime(chatData);
-              final unreadCount = _extractUnreadCount(chatData);
+              final unreadCount = _extractUnreadCount(chatDoc.id, chatData);
               final isGroupChat = chatData['isGroupChat'] == true;
               final peerProfilePic = _resolvePeerProfilePic(chatData, otherParticipantId);
 
@@ -1117,24 +1272,28 @@ class ChatListScreen extends StatelessWidget {
                       ),
                   ],
                 ),
-                onTap: () {
-                  _markChatAsReadById(chatDoc.id).then((_) {
-                    if (!context.mounted) return;
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChatRoomScreen(
-                          coach: peer,
-                          userId: userId,
-                          userName: userName,
-                          chatRoomId: isGroupChat ? chatDoc.id : null,
-                          chatTitle: isGroupChat ? otherName : null,
-                          chatProfilePic: isGroupChat ? peerProfilePic : null,
-                          isGroupChat: isGroupChat,
-                        ),
+                onTap: () async {
+                  if (!context.mounted) return;
+                  await _setLocalReadOverride(chatDoc.id, chatData);
+                  _markChatAsReadById(chatDoc.id);
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ChatRoomScreen(
+                        coach: peer,
+                        userId: widget.userId,
+                        userName: widget.userName,
+                        chatRoomId: chatDoc.id,
+                        chatTitle: isGroupChat ? otherName : null,
+                        chatProfilePic: isGroupChat ? peerProfilePic : null,
+                        isGroupChat: isGroupChat,
                       ),
-                    );
-                  });
+                    ),
+                  );
+                  await _setLocalReadOverride(chatDoc.id, chatData);
+                  await _markChatAsReadById(chatDoc.id);
+                  if (!mounted) return;
+                  setState(() {});
                 },
               );
             },
@@ -1157,4 +1316,5 @@ class ChatListScreen extends StatelessWidget {
     }
     return DateFormat('MM/dd/yy').format(dateTime);
   }
+
 }

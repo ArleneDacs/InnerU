@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
+  final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
 
   String get _todayDate => DateTime.now().toString().split(' ')[0];
 
@@ -40,6 +41,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchProfilePic();
     fetchQuote();
     _loadTodayEmotion();
+    _loadLocalChatReadOverrides();
+  }
+
+  Future<void> _loadLocalChatReadOverrides() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final overrides = <String, DateTime>{};
+    final prefix = 'chat_read_override_${currentUser.uid}_';
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      final rawValue = prefs.getInt(key);
+      if (rawValue == null) continue;
+      final chatRoomId = key.substring(prefix.length);
+      overrides[chatRoomId] = DateTime.fromMillisecondsSinceEpoch(rawValue);
+    }
+    if (!mounted) return;
+    setState(() {
+      _localChatReadOverrides
+        ..clear()
+        ..addAll(overrides);
+    });
   }
 
   Future<void> _fetchProfilePic() async {
@@ -281,6 +304,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
         var unreadCount = 0;
         for (final doc in snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
           final chatData = doc.data();
+          final localReadTime = _localChatReadOverrides[doc.id];
+          final lastMessageTimeRaw = chatData['lastMessageTime'];
+          final lastMessageTime = lastMessageTimeRaw is Timestamp
+              ? lastMessageTimeRaw.toDate()
+              : DateTime.fromMillisecondsSinceEpoch(0);
+          final lastReadAt = Map<String, dynamic>.from(
+            chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
+          );
+          final lastReadAtRaw = lastReadAt[currentUser.uid];
+          final readTime =
+              lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
+          final effectiveReadTime = [
+            if (readTime != null) readTime,
+            if (localReadTime != null) localReadTime,
+          ].fold<DateTime?>(
+            null,
+            (latest, candidate) =>
+                latest == null || candidate.isAfter(latest) ? candidate : latest,
+          );
+          if (effectiveReadTime != null &&
+              !lastMessageTime.isAfter(effectiveReadTime)) {
+            continue;
+          }
+
           final unreadCounts = Map<String, dynamic>.from(
             chatData['unreadCounts'] as Map? ?? <String, dynamic>{},
           );
@@ -293,20 +340,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             }
           } else {
             final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
-            final lastMessageTimeRaw = chatData['lastMessageTime'];
-            final lastMessageTime = lastMessageTimeRaw is Timestamp
-                ? lastMessageTimeRaw.toDate()
-                : DateTime.fromMillisecondsSinceEpoch(0);
-            final lastReadAt = Map<String, dynamic>.from(
-              chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
-            );
-            final lastReadAtRaw = lastReadAt[currentUser.uid];
-            final readTime =
-                lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
-
             if (lastSenderId.isNotEmpty &&
                 lastSenderId != currentUser.uid &&
-                (readTime == null || lastMessageTime.isAfter(readTime))) {
+                (effectiveReadTime == null ||
+                    lastMessageTime.isAfter(effectiveReadTime))) {
               unreadCount += 1;
             }
           }
@@ -320,7 +357,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onPressed: () async {
                 final username = await _getUsername();
                 if (!context.mounted) return;
-                Navigator.push(
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => ChatListScreen(
@@ -329,6 +366,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 );
+                if (!mounted) return;
+                await _loadLocalChatReadOverrides();
               },
             ),
             if (unreadCount > 0)

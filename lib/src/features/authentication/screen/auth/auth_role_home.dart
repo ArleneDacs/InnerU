@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_dashboard_screen.dart';
 
 class AuthRoleHome extends StatelessWidget {
   const AuthRoleHome({
@@ -34,7 +33,7 @@ class AuthRoleHome extends StatelessWidget {
         final isCoach = preferredCoach || (snapshot.data ?? false);
 
         if (isCoach) {
-          return const CoachDashboardScreen();
+          return const CoachSetuppage();
         }
 
         return const Setuppage();
