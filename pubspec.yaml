@@ -112,7 +112,7 @@ flutter:
     - assets/images/splashscreen.gif
     - assets/images/login-image/login.png
     - assets/images/login-image/signup.png
-    - assets/logo/google.png
+    - assets/logo/Google.png
     - assets/logo/ios.png
     - assets/images/walking.json
     - assets/images/forgot-password.gif

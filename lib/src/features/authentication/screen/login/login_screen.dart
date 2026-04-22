@@ -387,7 +387,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             runSpacing: 8,
                             children: [
                               Image.asset(
-                                "assets/logo/google.png",
+                                "assets/logo/Google.png",
                                 width: context.responsiveValue(30),
                               ),
                               Text(

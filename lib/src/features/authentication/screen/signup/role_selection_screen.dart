@@ -276,7 +276,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Image.asset(
-                                      "assets/logo/google.png",
+                                      "assets/logo/Google.png",
                                       width: context.responsiveValue(28),
                                     ),
                                     SizedBox(width: context.responsiveValue(10)),
