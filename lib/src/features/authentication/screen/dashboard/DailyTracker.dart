@@ -78,6 +78,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
         progressData[userId]![lastUpdated] = {
           'Call': userData['call'] ?? false,
           'Steps': userData['steps'] ?? false,
+          'Exercise': userData['exercise'] ?? false,
           'Meditation': userData['meditation'] ?? false,
           'Learning': userData['learning'] ?? false,
           'Add Value': userData['addValue'] ?? false,
@@ -194,6 +195,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
         {
           'Call': false,
           'Steps': false,
+          'Exercise': false,
           'Meditation': false,
           'Learning': false,
           'Add Value': false,
@@ -337,6 +339,7 @@ class _UserProgressPageState extends State<UserProgressPage> {
         {
           'Call': false,
           'Steps': false,
+          'Exercise': false,
           'Meditation': false,
           'Learning': false,
           'Add Value': false,

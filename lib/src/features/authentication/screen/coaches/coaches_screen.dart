@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'chat_room.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/utils/responsive.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -272,138 +273,178 @@ class _CoachesScreenState extends State<CoachesScreen> {
   }
 
   Stream<List<Coach>> getCoachesStream() {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return Stream.value(const <Coach>[]);
+    }
+
     return FirebaseFirestore.instance
-        .collection('coaches')
+        .collection('users')
+        .doc(currentUser.uid)
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return Coach(
-          id: doc.id,
+        .asyncMap((userSnapshot) async {
+      final userData = userSnapshot.data();
+      final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
+      if (coachId.isEmpty) {
+        return <Coach>[];
+      }
+
+      final coachDoc = await FirebaseFirestore.instance
+          .collection('coaches')
+          .doc(coachId)
+          .get();
+      if (!coachDoc.exists) {
+        return <Coach>[];
+      }
+
+      final data = coachDoc.data() ?? <String, dynamic>{};
+      return [
+        Coach(
+          id: coachDoc.id,
           name: data['fullName'] ?? '',
           phone: data['phonenumber'] ?? '',
           bio: data['bio'] ?? '',
-          profilePic: data['profilePic'] ?? '', // Fetch profile picture URL
+          profilePic: data['profilePic'] ?? '',
           backgroundColor: data['backgroundColor'] == 'green'
               ? const Color(0xFF90A17D)
               : const Color(0xFF6D849A),
-        );
-      }).toList();
+        ),
+      ];
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final heroHeight = context.isTabletWidth ? 320.0 : 220.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Our Coaches'),
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20.0),
-              child: SizedBox(
-                height: 280,
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: Image.asset(
-                    'assets/images/coachpic.png',
-                    width: 400,
-                    height: 300,
+        child: ResponsiveContent(
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.symmetric(
+                  vertical: context.responsiveValue(20),
+                ),
+                child: SizedBox(
+                  height: heroHeight,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: Image.asset(
+                      'assets/images/coachpic.png',
+                      width: context.isTabletWidth ? 520 : 320,
+                      height: context.isTabletWidth ? 360 : 240,
+                    ),
                   ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (value) => setState(() {}),
-                decoration: InputDecoration(
-                  hintText: 'Search',
-                  filled: true,
-                  fillColor: Colors.grey.shade200,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+              Padding(
+                padding: EdgeInsets.all(context.responsiveValue(16)),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'Search',
+                    filled: true,
+                    fillColor: Colors.grey.shade200,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    prefixIcon: const Icon(Icons.search),
                   ),
-                  prefixIcon: const Icon(Icons.search),
                 ),
               ),
-            ),
-            Expanded(
-              child: StreamBuilder<List<Coach>>(
-                stream: getCoachesStream(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return Center(child: CircularProgressIndicator());
-                  }
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return Center(child: Text('No coaches available.'));
-                  }
-
-                  final query = _searchController.text.trim().toLowerCase();
-                  final coaches = snapshot.data!.where((coach) {
-                    if (query.isEmpty) return true;
-                    return coach.name.toLowerCase().contains(query) ||
-                        coach.bio.toLowerCase().contains(query) ||
-                        coach.phone.toLowerCase().contains(query);
-                  }).toList();
-
-                  if (coaches.isEmpty) {
-                    return const Center(child: Text('No coaches match your search.'));
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16.0),
-                    itemCount: coaches.length,
-                    itemBuilder: (context, index) {
-                      final coach = coaches[index];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8.0),
-                        decoration: BoxDecoration(
-                          color: coach.backgroundColor,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.white,
-                            backgroundImage: coach.profilePic.isNotEmpty
-                                ? NetworkImage(
-                                    coach.profilePic) // Load image from URL
-                                : null,
-                            child: coach.profilePic.isEmpty
-                                ? const Icon(Icons.person,
-                                    color: Colors.grey) // Default icon
-                                : null,
-                          ),
-                          title: Text(
-                            coach.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          subtitle: Text(
-                            coach.bio,
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          onTap: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) =>
-                                  CoachProfileDialog(coach: coach),
-                            );
-                          },
-                        ),
+              Expanded(
+                child: StreamBuilder<List<Coach>>(
+                  stream: getCoachesStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Center(
+                        child: Text('No coach assigned to your account yet.'),
                       );
-                    },
-                  );
-                },
+                    }
+
+                    final query = _searchController.text.trim().toLowerCase();
+                    final coaches = snapshot.data!.where((coach) {
+                      if (query.isEmpty) return true;
+                      return coach.name.toLowerCase().contains(query) ||
+                          coach.bio.toLowerCase().contains(query) ||
+                          coach.phone.toLowerCase().contains(query);
+                    }).toList();
+
+                    if (coaches.isEmpty) {
+                      return const Center(
+                        child: Text('No coaches match your search.'),
+                      );
+                    }
+
+                    return ListView.builder(
+                      padding: EdgeInsets.all(context.responsiveValue(16)),
+                      itemCount: coaches.length,
+                      itemBuilder: (context, index) {
+                        final coach = coaches[index];
+                        return Container(
+                          margin: EdgeInsets.only(
+                            bottom: context.responsiveValue(8),
+                          ),
+                          decoration: BoxDecoration(
+                            color: coach.backgroundColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: context.responsiveValue(16),
+                              vertical: context.responsiveValue(6),
+                            ),
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.white,
+                              backgroundImage: coach.profilePic.isNotEmpty
+                                  ? NetworkImage(coach.profilePic)
+                                  : null,
+                              child: coach.profilePic.isEmpty
+                                  ? const Icon(Icons.person, color: Colors.grey)
+                                  : null,
+                            ),
+                            title: Text(
+                              coach.name,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500,
+                                fontSize: context.responsiveFont(16),
+                              ),
+                            ),
+                            subtitle: Text(
+                              coach.bio,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: context.responsiveFont(13),
+                              ),
+                            ),
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) =>
+                                    CoachProfileDialog(coach: coach),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -26,4 +26,30 @@ class UserPreferences {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString("favoriteSong_$username");
   }
+
+  static Future<void> saveFavoriteSongSource(
+    String username,
+    String source,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("favoriteSongSource_$username", source);
+  }
+
+  static Future<String?> loadFavoriteSongSource(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString("favoriteSongSource_$username");
+  }
+
+  static Future<void> saveFavoriteSpotifyUrl(
+    String username,
+    String spotifyUrl,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("favoriteSpotifyUrl_$username", spotifyUrl);
+  }
+
+  static Future<String?> loadFavoriteSpotifyUrl(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString("favoriteSpotifyUrl_$username");
+  }
 }

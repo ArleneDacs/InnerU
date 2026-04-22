@@ -5,6 +5,7 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:selfcare-1476e.firebaseapp.com</string>
+		<string>applinks:vilina-api.valenin.com</string>
 	</array>
 </dict>
 </plist>

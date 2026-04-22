@@ -10,6 +10,7 @@ class UserActivity {
     this.callIntent = 0,
     this.meditationMinutes = 0,
     this.stepsTaken = 0,
+    this.exerciseCount = 0,
     this.valueEntries = 0,
     this.learningEntries = 0,
   });
@@ -17,6 +18,7 @@ class UserActivity {
   final int callIntent;
   final int meditationMinutes;
   final int stepsTaken;
+  final int exerciseCount;
   final int valueEntries;
   final int learningEntries;
 
@@ -24,6 +26,7 @@ class UserActivity {
     return callIntent +
         meditationMinutes +
         (stepsTaken / 200).floor() +
+        (exerciseCount * 10) +
         valueEntries +
         learningEntries;
   }
@@ -244,6 +247,11 @@ class _LeaderboardState extends State<Leaderboard>
                 ['Steps Points', 'steps_points', 'stepsPoints'],
               ) *
               200,
+          exerciseCount: _extractIntValue(
+                taskPoints,
+                ['Exercise Points', 'exercise_points', 'exercisePoints'],
+              ) ~/
+              10,
           valueEntries: _extractIntValue(
             taskPoints,
             ['Add Value Points', 'value_points', 'addValuePoints'],
@@ -442,6 +450,13 @@ class _LeaderboardState extends State<Leaderboard>
                   entry.activity.stepsTaken,
                   '10 pt/200 steps',
                   (entry.activity.stepsTaken / 200).floor(),
+                ),
+                const Divider(),
+                _buildPointsRow(
+                  'Exercise',
+                  entry.activity.exerciseCount,
+                  '10 pt/exercise',
+                  entry.activity.exerciseCount * 10,
                 ),
                 const Divider(),
                 _buildPointsRow(

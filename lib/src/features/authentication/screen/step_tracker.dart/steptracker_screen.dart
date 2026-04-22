@@ -11,6 +11,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class StepTracker extends StatefulWidget {
   const StepTracker({super.key});
@@ -21,9 +22,6 @@ class StepTracker extends StatefulWidget {
 
 class _StepTrackerState extends State<StepTracker>
     with SingleTickerProviderStateMixin {
-  static const int _minimumStepBurst = 3;
-  static const Duration _stepBurstWindow = Duration(seconds: 6);
-
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
   StreamSubscription<StepCount>? _stepCountStream;
@@ -33,11 +31,9 @@ class _StepTrackerState extends State<StepTracker>
   int _lastSteps = 0;
   int _lastSyncedStepCount = -1;
   int _dailyGoal = 5000;
-  int _pendingStepBurst = 0;
   int _lastRawStepCount = 0;
   bool _isWalking = false;
   Timer? _checkTimer;
-  Timer? _pendingStepTimer;
 
   @override
   void initState() {
@@ -122,9 +118,9 @@ class _StepTrackerState extends State<StepTracker>
     PermissionStatus status = await Permission.activityRecognition.request();
 
     if (status.isGranted) {
-      print('Permission granted!');
+      debugPrint('Activity recognition permission granted.');
     } else if (status.isDenied) {
-      print('Permission denied. Ask user to enable it manually.');
+      debugPrint('Activity recognition permission denied.');
       openAppSettings();
     } else if (status.isPermanentlyDenied) {
       openAppSettings();
@@ -279,18 +275,7 @@ class _StepTrackerState extends State<StepTracker>
       return;
     }
 
-    _pendingStepBurst += delta;
-    _pendingStepTimer?.cancel();
-    _pendingStepTimer = Timer(_stepBurstWindow, () {
-      _pendingStepBurst = 0;
-    });
-
-    if (_pendingStepBurst >= _minimumStepBurst) {
-      final confirmedSteps = _steps + _pendingStepBurst;
-      _pendingStepBurst = 0;
-      _pendingStepTimer?.cancel();
-      _updateStepCount(confirmedSteps);
-    }
+    _updateStepCount(rawSteps);
   }
 
   Future<void> _syncStepProgress() async {
@@ -343,7 +328,6 @@ class _StepTrackerState extends State<StepTracker>
     _stepCountStream?.cancel();
     _stepStreamController.close();
     _checkTimer?.cancel();
-    _pendingStepTimer?.cancel();
     super.dispose();
   }
 
@@ -351,178 +335,204 @@ class _StepTrackerState extends State<StepTracker>
   Widget build(BuildContext context) {
     final double progress =
         _dailyGoal <= 0 ? 0 : (_steps / _dailyGoal).clamp(0, 1).toDouble();
+    final animationSize = context.isTabletWidth ? 360.0 : context.screenWidth * 0.7;
 
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Lottie.asset(
-              'assets/images/walking.json',
-              width: 300,
-              height: 300,
-              controller: _lottieController,
-              repeat: false,
-              onLoaded: (composition) {
-                _lottieController.duration = composition.duration;
-                _lottieController.value =
-                    0; // Ensures it starts from frame 0 (idle)
-              },
-            ),
-            const SizedBox(height: 10),
-            Row(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            vertical: context.responsiveValue(20),
+          ),
+          child: ResponsiveContent(
+            child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text(
-                  'Today ',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                Lottie.asset(
+                  'assets/images/walking.json',
+                  width: animationSize.clamp(220, 360),
+                  height: animationSize.clamp(220, 360),
+                  controller: _lottieController,
+                  repeat: false,
+                  onLoaded: (composition) {
+                    _lottieController.duration = composition.duration;
+                    _lottieController.value = 0;
+                  },
                 ),
-                Text(
-                  DateFormat('(MMM dd, yyyy)').format(DateTime.now()),
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey),
+                SizedBox(height: context.responsiveValue(10)),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    Text(
+                      'Today ',
+                      style: TextStyle(
+                        fontSize: context.responsiveFont(15),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      DateFormat('(MMM dd, yyyy)').format(DateTime.now()),
+                      style: TextStyle(
+                        fontSize: context.responsiveFont(15),
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            StreamBuilder<int>(
-              stream: _stepStreamController.stream,
-              initialData: _steps,
-              builder: (context, snapshot) {
-                return ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Color(0xFF8bc074), Color(0xFFce8f5a)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ).createShader(bounds),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        '${snapshot.data ?? 0}',
-                        style: const TextStyle(
-                          fontSize: 60,
-                          fontFamily: 'ralemed',
-                          color: Colors.white,
-                        ),
+                SizedBox(height: context.responsiveValue(10)),
+                StreamBuilder<int>(
+                  stream: _stepStreamController.stream,
+                  initialData: _steps,
+                  builder: (context, snapshot) {
+                    return ShaderMask(
+                      shaderCallback: (bounds) => const LinearGradient(
+                        colors: [Color(0xFF8bc074), Color(0xFFce8f5a)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ).createShader(bounds),
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.end,
+                        spacing: 5,
+                        children: [
+                          Text(
+                            '${snapshot.data ?? 0}',
+                            style: TextStyle(
+                              fontSize: context.responsiveFont(60, min: 0.8, max: 1.15),
+                              fontFamily: 'ralemed',
+                              color: Colors.white,
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.only(
+                              bottom: context.responsiveValue(8),
+                            ),
+                            child: Text(
+                              'steps',
+                              style: TextStyle(
+                                fontSize: context.responsiveFont(22),
+                                fontFamily: 'ralemed',
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 5),
-                      const Text(
-                        'steps',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontFamily: 'ralemed',
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
+                    );
+                  },
+                ),
+                SizedBox(height: context.responsiveValue(10)),
+                Container(
+                  width: double.infinity,
+                  margin: EdgeInsets.symmetric(
+                    horizontal: context.isTabletWidth ? 20 : 0,
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFCF5EA),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Column(
-                children: [
-                  Row(
+                  padding: EdgeInsets.all(context.responsiveValue(18)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFCF5EA),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
                     children: [
-                      const Icon(
-                        Icons.flag_rounded,
-                        color: Color(0xFFCE8F5A),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.flag_rounded,
+                            color: Color(0xFFCE8F5A),
+                          ),
+                          SizedBox(width: context.responsiveValue(10)),
+                          Expanded(
+                            child: Text(
+                              'Daily Goal: $_dailyGoal steps',
+                              style: TextStyle(
+                                fontSize: context.responsiveFont(17),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _openGoalScreen,
+                            child: const Text('Set Goal'),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Daily Goal: $_dailyGoal steps',
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
+                      SizedBox(height: context.responsiveValue(8)),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: LinearProgressIndicator(
+                          minHeight: 10,
+                          value: progress,
+                          backgroundColor: Colors.white,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF8BC074),
                           ),
                         ),
                       ),
-                      TextButton(
-                        onPressed: _openGoalScreen,
-                        child: const Text('Set Goal'),
+                      SizedBox(height: context.responsiveValue(10)),
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        runSpacing: 8,
+                        spacing: 16,
+                        children: [
+                          Text('$_steps / $_dailyGoal'),
+                          Text('${(progress * 100).round()}% complete'),
+                        ],
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: LinearProgressIndicator(
-                      minHeight: 10,
-                      value: progress,
-                      backgroundColor: Colors.white,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        Color(0xFF8BC074),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('$_steps / $_dailyGoal'),
-                      Text('${(progress * 100).round()}% complete'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const TrackingScreen(title: ''),
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFce8f5a),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                  ),
-                  child: Text(
-                    'View Steps',
-                    style: GoogleFonts.roboto(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const StepMapTrackerScreen(),
+                SizedBox(height: context.responsiveValue(16)),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TrackingScreen(title: ''),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFce8f5a),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: context.responsiveValue(20),
+                          vertical: context.responsiveValue(12),
+                        ),
                       ),
-                    );
-                  },
-                  icon: const Icon(Icons.map_outlined),
-                  label: const Text('Track on Map'),
+                      child: Text(
+                        'View Steps',
+                        style: GoogleFonts.roboto(
+                          color: Colors.white,
+                          fontSize: context.responsiveFont(16),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const StepMapTrackerScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('Track on Map'),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );

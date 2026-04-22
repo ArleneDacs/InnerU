@@ -13,6 +13,7 @@ class AudioHelper {
       // Always stop and reset, even if the same song
       await _audioPlayer.stop();
       await _audioPlayer.release();
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
       await Future.delayed(const Duration(milliseconds: 300));
 
       print("Starting new audio: $assetPath");
@@ -40,6 +41,7 @@ class AudioHelper {
 
   static Future<void> stopAudio() async {
     await _audioPlayer.stop();
+    await _audioPlayer.setReleaseMode(ReleaseMode.release);
     playingSong = null;
   }
 }

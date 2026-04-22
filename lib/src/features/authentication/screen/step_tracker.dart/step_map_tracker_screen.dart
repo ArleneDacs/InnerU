@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,8 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class StepMapTrackerScreen extends StatefulWidget {
   const StepMapTrackerScreen({super.key});
@@ -19,9 +22,12 @@ class StepMapTrackerScreen extends StatefulWidget {
 
 class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
-  static const int _minimumStepBurst = 3;
-  static const Duration _stepBurstWindow = Duration(seconds: 6);
-  static const int _maxSharedRoutePoints = 250;
+  static const int _maxSharedRoutePoints = 500;
+  static const double _minMovementMeters = 3;
+  static const double _maxReasonableAccuracyMeters = 35;
+  static const double _maxJumpDistanceMeters = 120;
+  static const double _maxWalkingSpeedMetersPerSecond = 3.2;
+  static const double _minStreetSnapDistanceMeters = 8;
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -40,7 +46,6 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   Duration _elapsed = Duration.zero;
   int? _stepBaseline;
   int _lastRawSessionSteps = 0;
-  int _pendingStepBurst = 0;
   int _sessionSteps = 0;
   double _distanceMeters = 0;
   bool _isTracking = false;
@@ -50,9 +55,11 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   String _currentUsername = 'Walker';
   String? _activeSessionId;
   String? _activeSessionStatus;
+  String? _selectedMarkerUserId;
   List<_WalkSessionMember> _sharedMembers = const [];
   String _statusText = 'Tap start to track your walk on the map.';
-  Timer? _pendingStepTimer;
+  bool _isProcessingPositionUpdate = false;
+  Position? _queuedPositionUpdate;
 
   void _listenToSessionMembers(String? sessionId) {
     _memberSubscription?.cancel();
@@ -94,6 +101,28 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _currentUserId = _auth.currentUser?.uid;
     _loadCurrentUser();
     _listenToWalkSessions();
+    _loadInitialMapPreview();
+  }
+
+  Future<void> _loadInitialMapPreview() async {
+    try {
+      final hasLocationAccess = await _ensureLocationAccess(openSettings: false);
+      if (!hasLocationAccess) return;
+
+      final previewPosition = await _getInitialPosition();
+      final previewPoint =
+          previewPosition == null ? null : _positionToLatLng(previewPosition);
+      if (!mounted || previewPosition == null || previewPoint == null) return;
+
+      setState(() {
+        _currentPosition = previewPosition;
+        _statusText = 'Ready to track. Tap start to begin your walk.';
+      });
+
+      _moveCamera(previewPoint, zoom: 16);
+    } catch (_) {
+      // Keep the default map state if preview location is unavailable.
+    }
   }
 
   bool _isFiniteCoordinate(double value) => value.isFinite;
@@ -113,6 +142,160 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
 
   LatLng? _positionToLatLng(Position position) {
     return _safeLatLng(position.latitude, position.longitude);
+  }
+
+  double _routeDistance(List<LatLng> points) {
+    if (points.length < 2) return 0;
+
+    var total = 0.0;
+    for (var index = 1; index < points.length; index++) {
+      total += _distance(points[index - 1], points[index]);
+    }
+    return total;
+  }
+
+  List<LatLng> _mergeSegmentIntoRoute(
+    List<LatLng> routePoints,
+    List<LatLng> segmentPoints,
+  ) {
+    if (segmentPoints.isEmpty) return routePoints;
+    if (routePoints.isEmpty) return List<LatLng>.from(segmentPoints);
+
+    final merged = List<LatLng>.from(routePoints);
+    final shouldSkipFirstPoint =
+        _distance(merged.last, segmentPoints.first) < 1.5;
+
+    merged.addAll(
+      shouldSkipFirstPoint ? segmentPoints.skip(1) : segmentPoints,
+    );
+    return merged;
+  }
+
+  Future<List<LatLng>> _buildStreetAlignedSegment(
+    LatLng startPoint,
+    LatLng endPoint,
+  ) async {
+    final directDistance = _distance(startPoint, endPoint);
+    if (directDistance < _minStreetSnapDistanceMeters) {
+      return [startPoint, endPoint];
+    }
+
+    final uri = Uri.https(
+      'router.project-osrm.org',
+      '/route/v1/foot/'
+          '${startPoint.longitude.toStringAsFixed(6)},${startPoint.latitude.toStringAsFixed(6)};'
+          '${endPoint.longitude.toStringAsFixed(6)},${endPoint.latitude.toStringAsFixed(6)}',
+      const {
+        'overview': 'full',
+        'geometries': 'geojson',
+        'steps': 'false',
+      },
+    );
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: const {
+          'User-Agent': 'selfcare_projects_step_map_tracker/1.0',
+        },
+      ).timeout(const Duration(seconds: 4));
+
+      if (response.statusCode != 200) {
+        return [startPoint, endPoint];
+      }
+
+      final payload = jsonDecode(response.body);
+      if (payload is! Map<String, dynamic> || payload['code'] != 'Ok') {
+        return [startPoint, endPoint];
+      }
+
+      final routes = payload['routes'];
+      if (routes is! List || routes.isEmpty) {
+        return [startPoint, endPoint];
+      }
+
+      final geometry = (routes.first as Map<String, dynamic>)['geometry'];
+      final coordinates = geometry is Map<String, dynamic>
+          ? geometry['coordinates']
+          : null;
+      if (coordinates is! List || coordinates.length < 2) {
+        return [startPoint, endPoint];
+      }
+
+      final snappedPoints = <LatLng>[];
+      for (final coordinate in coordinates) {
+        if (coordinate is List && coordinate.length >= 2) {
+          final longitude = (coordinate[0] as num?)?.toDouble();
+          final latitude = (coordinate[1] as num?)?.toDouble();
+          if (latitude != null && longitude != null) {
+            final point = _safeLatLng(latitude, longitude);
+            if (point != null) {
+              snappedPoints.add(point);
+            }
+          }
+        }
+      }
+
+      if (snappedPoints.length < 2) {
+        return [startPoint, endPoint];
+      }
+
+      final snappedDistance = _routeDistance(snappedPoints);
+      if (snappedDistance <= 0 ||
+          snappedDistance > directDistance * 3.5 + 30) {
+        return [startPoint, endPoint];
+      }
+
+      return snappedPoints;
+    } catch (_) {
+      return [startPoint, endPoint];
+    }
+  }
+
+  bool _isLikelyGpsSpike(
+    Position position,
+    double segmentDistance,
+  ) {
+    if (segmentDistance > _maxJumpDistanceMeters) {
+      return true;
+    }
+
+    final measuredSpeed = position.speed.isFinite && position.speed > 0
+        ? position.speed
+        : null;
+    if (measuredSpeed != null &&
+        measuredSpeed > _maxWalkingSpeedMetersPerSecond &&
+        segmentDistance > 25) {
+      return true;
+    }
+
+    if (position.accuracy > _maxReasonableAccuracyMeters &&
+        segmentDistance > 20) {
+      return true;
+    }
+
+    return false;
+  }
+
+  void _queuePositionUpdate(Position position) {
+    _queuedPositionUpdate = position;
+    if (_isProcessingPositionUpdate) {
+      return;
+    }
+
+    _drainPositionQueue();
+  }
+
+  Future<void> _drainPositionQueue() async {
+    _isProcessingPositionUpdate = true;
+
+    while (_queuedPositionUpdate != null && mounted) {
+      final nextPosition = _queuedPositionUpdate!;
+      _queuedPositionUpdate = null;
+      await _handlePositionUpdate(nextPosition);
+    }
+
+    _isProcessingPositionUpdate = false;
   }
 
   List<Map<String, double>> _serializeRoutePoints(List<LatLng> points) {
@@ -150,6 +333,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     if (value is DateTime) return value;
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
+
+  int _elapsedSeconds() => _elapsed.inSeconds;
 
   Color _memberColor(String userId) {
     if (userId == _currentUserId) {
@@ -258,6 +443,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         'status': 'accepted',
         'isTracking': _isTracking,
         'stepCount': _sessionSteps,
+        'distanceMeters': _distanceMeters,
+        'elapsedSeconds': _elapsedSeconds(),
         'routePoints': _serializeRoutePoints(_routePoints),
         'currentLocation': currentLocation == null
             ? null
@@ -286,22 +473,17 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       return;
     }
 
-    if (_activeSessionId != null &&
-        (_activeSessionStatus == 'pending' || _activeSessionStatus == 'active')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Finish your current shared walk before inviting another user.'),
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isSessionBusy = true;
     });
 
     try {
-      final sessionRef = _firestore.collection('walk_sessions').doc();
+      final hasReusableSession = _activeSessionId != null &&
+          (_activeSessionStatus == 'pending' ||
+              _activeSessionStatus == 'active');
+      final sessionRef = hasReusableSession
+          ? _firestore.collection('walk_sessions').doc(_activeSessionId)
+          : _firestore.collection('walk_sessions').doc();
       final inviteRef = _firestore
           .collection('users')
           .doc(invitedUserId)
@@ -313,14 +495,36 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
 
       final batch = _firestore.batch();
 
-      batch.set(sessionRef, {
-        'createdBy': userId,
-        'createdByName': _currentUsername,
-        'participantIds': [userId, invitedUserId],
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final existingInvite = await inviteRef.get();
+      final existingMember = await sessionRef
+          .collection('members')
+          .doc(invitedUserId)
+          .get();
+
+      if (existingInvite.exists || existingMember.exists) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$invitedUsername is already in this walk session.'),
+          ),
+        );
+        return;
+      }
+
+      batch.set(
+        sessionRef,
+        {
+          'createdBy': userId,
+          'createdByName': _currentUsername,
+          'participantIds': FieldValue.arrayUnion([userId, invitedUserId]),
+          'status': hasReusableSession
+              ? (_activeSessionStatus ?? 'pending')
+              : 'pending',
+          if (!hasReusableSession) 'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
 
       batch.set(sessionRef.collection('members').doc(userId), {
         'userId': userId,
@@ -328,6 +532,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         'status': 'accepted',
         'isTracking': _isTracking,
         'stepCount': _sessionSteps,
+        'distanceMeters': _distanceMeters,
+        'elapsedSeconds': _elapsedSeconds(),
         'routePoints': _serializeRoutePoints(_routePoints),
         'currentLocation': safeCurrentLocation == null
             ? null
@@ -344,6 +550,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         'status': 'invited',
         'isTracking': false,
         'stepCount': 0,
+        'distanceMeters': 0,
+        'elapsedSeconds': 0,
         'routePoints': const [],
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -364,10 +572,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       if (!mounted) return;
       setState(() {
         _activeSessionId = sessionRef.id;
-        _activeSessionStatus = 'pending';
+        _activeSessionStatus =
+            hasReusableSession ? (_activeSessionStatus ?? 'pending') : 'pending';
       });
       _listenToSessionMembers(sessionRef.id);
-      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Walk invite sent to $invitedUsername.'),
@@ -421,6 +629,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         'status': 'accepted',
         'isTracking': _isTracking,
         'stepCount': _sessionSteps,
+        'distanceMeters': _distanceMeters,
+        'elapsedSeconds': _elapsedSeconds(),
         'routePoints': _serializeRoutePoints(_routePoints),
         'currentLocation': safeCurrentLocation == null
             ? null
@@ -535,6 +745,25 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     }
   }
 
+  Future<bool> _ensureActivityRecognitionAccess() async {
+    final status = await Permission.activityRecognition.request();
+    if (status.isGranted) {
+      return true;
+    }
+
+    if (mounted) {
+      setState(() {
+        _statusText =
+            'Activity recognition permission is needed to show live step counts.';
+      });
+    }
+
+    if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    return false;
+  }
+
   Future<void> _startTracking() async {
     if (_isPreparing || _isTracking) return;
 
@@ -544,8 +773,11 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     });
 
     try {
-      final hasAccess = await _ensureLocationAccess();
-      if (!hasAccess) return;
+      final hasLocationAccess = await _ensureLocationAccess();
+      if (!hasLocationAccess) return;
+
+      final hasActivityAccess = await _ensureActivityRecognitionAccess();
+      if (!hasActivityAccess) return;
 
       final currentPosition = await _getInitialPosition();
       if (currentPosition == null) {
@@ -570,6 +802,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       _positionSubscription?.cancel();
       _stepSubscription?.cancel();
       _elapsedTimer?.cancel();
+      _queuedPositionUpdate = null;
+      _isProcessingPositionUpdate = false;
 
       setState(() {
         _isTracking = true;
@@ -579,7 +813,6 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         _sessionSteps = 0;
         _stepBaseline = null;
         _lastRawSessionSteps = 0;
-        _pendingStepBurst = 0;
         _startedAt = DateTime.now();
         _elapsed = Duration.zero;
         _statusText = 'Tracking your route...';
@@ -620,7 +853,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           distanceFilter: 5,
         ),
       ).listen(
-        _handlePositionUpdate,
+        _queuePositionUpdate,
         onError: (_) {
           if (!mounted) return;
           setState(() {
@@ -674,24 +907,14 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       return;
     }
 
-    _pendingStepBurst += delta;
-    _pendingStepTimer?.cancel();
-    _pendingStepTimer = Timer(_stepBurstWindow, () {
-      _pendingStepBurst = 0;
+    if (!mounted) return;
+    setState(() {
+      _sessionSteps = rawSessionSteps;
     });
-
-    if (_pendingStepBurst >= _minimumStepBurst) {
-      if (!mounted) return;
-      setState(() {
-        _sessionSteps += _pendingStepBurst;
-      });
-      _pendingStepBurst = 0;
-      _pendingStepTimer?.cancel();
-      _syncSharedSessionMember();
-    }
+    _syncSharedSessionMember();
   }
 
-  void _handlePositionUpdate(Position position) {
+  Future<void> _handlePositionUpdate(Position position) async {
     final nextPoint = _positionToLatLng(position);
     if (nextPoint == null) {
       if (!mounted) return;
@@ -703,24 +926,46 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     }
 
     final previousPoint = _routePoints.isNotEmpty ? _routePoints.last : null;
+    var routePointsToAdd = <LatLng>[nextPoint];
+    var segmentDistance = 0.0;
 
     if (previousPoint != null) {
-      final segmentDistance = _distance(previousPoint, nextPoint);
+      segmentDistance = _distance(previousPoint, nextPoint);
 
       // Ignore tiny GPS jitter to keep the route cleaner.
-      if (segmentDistance < 3) {
+      if (segmentDistance < _minMovementMeters) {
         setState(() {
           _currentPosition = position;
         });
         return;
       }
 
-      _distanceMeters += segmentDistance;
+      if (_isLikelyGpsSpike(position, segmentDistance)) {
+        if (!mounted) return;
+        setState(() {
+          _currentPosition = position;
+          _statusText =
+              'Ignoring one noisy GPS jump to keep your route on the street.';
+        });
+        return;
+      }
+
+      routePointsToAdd = await _buildStreetAlignedSegment(
+        previousPoint,
+        nextPoint,
+      );
+      segmentDistance = _routeDistance(routePointsToAdd);
     }
 
+    final updatedRoutePoints = previousPoint == null
+        ? [nextPoint]
+        : _mergeSegmentIntoRoute(_routePoints, routePointsToAdd);
+
+    if (!mounted) return;
     setState(() {
       _currentPosition = position;
-      _routePoints = [..._routePoints, nextPoint];
+      _routePoints = updatedRoutePoints;
+      _distanceMeters += segmentDistance;
       _statusText = 'Tracking your route...';
     });
 
@@ -728,7 +973,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _moveCamera(nextPoint);
   }
 
-  Future<bool> _ensureLocationAccess() async {
+  Future<bool> _ensureLocationAccess({bool openSettings = true}) async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       if (mounted) {
@@ -736,7 +981,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           _statusText = 'Turn on location services to start route tracking.';
         });
       }
-      await Geolocator.openLocationSettings();
+      if (openSettings) {
+        await Geolocator.openLocationSettings();
+      }
       return false;
     }
 
@@ -753,7 +1000,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
               'Location permission is needed to draw your walking route.';
         });
       }
-      if (permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.deniedForever && openSettings) {
         await Geolocator.openAppSettings();
       }
       return false;
@@ -777,8 +1024,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _positionSubscription?.cancel();
     _stepSubscription?.cancel();
     _elapsedTimer?.cancel();
-    _pendingStepTimer?.cancel();
-    _pendingStepBurst = 0;
+    _queuedPositionUpdate = null;
+    _isProcessingPositionUpdate = false;
 
     setState(() {
       _isTracking = false;
@@ -793,7 +1040,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _positionSubscription?.cancel();
     _stepSubscription?.cancel();
     _elapsedTimer?.cancel();
-    _pendingStepTimer?.cancel();
+    _queuedPositionUpdate = null;
+    _isProcessingPositionUpdate = false;
 
     setState(() {
       _isTracking = false;
@@ -803,7 +1051,6 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       _elapsed = Duration.zero;
       _stepBaseline = null;
       _lastRawSessionSteps = 0;
-      _pendingStepBurst = 0;
       _sessionSteps = 0;
       _distanceMeters = 0;
       _statusText = 'Tap start to track your walk on the map.';
@@ -844,6 +1091,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         status: 'accepted',
         isTracking: _isTracking,
         stepCount: _sessionSteps,
+        distanceMeters: _distanceMeters,
+        elapsedSeconds: _elapsedSeconds(),
         currentLocation: currentPoint,
         routePoints: _routePoints,
       ),
@@ -1197,7 +1446,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _positionSubscription?.cancel();
     _stepSubscription?.cancel();
     _elapsedTimer?.cancel();
-    _pendingStepTimer?.cancel();
+    _queuedPositionUpdate = null;
+    _isProcessingPositionUpdate = false;
     super.dispose();
   }
 
@@ -1223,53 +1473,101 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
               member.currentLocation ?? (member.routePoints.isNotEmpty
                   ? member.routePoints.last
                   : null);
+          final isSelected = _selectedMarkerUserId == member.userId;
 
           if (markerPoint == null) return null;
 
           return Marker(
             point: markerPoint,
-            width: 70,
-            height: 70,
-            child: Column(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black12,
-                        blurRadius: 6,
-                        offset: Offset(0, 2),
+            width: 180,
+            height: isSelected ? 132 : 72,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() {
+                  _selectedMarkerUserId = isSelected ? null : member.userId;
+                });
+              },
+              child: Column(
+                children: [
+                  if (isSelected)
+                    Container(
+                      width: 168,
+                      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 8,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    member.username,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  member.username,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedMarkerUserId = null;
+                                  });
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: const Padding(
+                                  padding: EdgeInsets.all(2),
+                                  child: Icon(Icons.close, size: 16),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Steps: ${member.stepCount}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Distance: ${_formatDistance(member.distanceMeters)}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Time: ${_formatDuration(Duration(seconds: member.elapsedSeconds))}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (isSelected) const SizedBox(height: 6),
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: _memberColor(member.userId),
+                    child: Text(
+                      member.username.isEmpty
+                          ? 'W'
+                          : member.username[0].toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: _memberColor(member.userId),
-                  child: Text(
-                    member.username.isEmpty
-                        ? 'W'
-                        : member.username[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         })
@@ -1506,6 +1804,8 @@ class _WalkSessionMember {
     required this.status,
     required this.isTracking,
     required this.stepCount,
+    required this.distanceMeters,
+    required this.elapsedSeconds,
     required this.currentLocation,
     required this.routePoints,
   });
@@ -1515,6 +1815,8 @@ class _WalkSessionMember {
   final String status;
   final bool isTracking;
   final int stepCount;
+  final double distanceMeters;
+  final int elapsedSeconds;
   final LatLng? currentLocation;
   final List<LatLng> routePoints;
 
@@ -1535,6 +1837,8 @@ class _WalkSessionMember {
       status: (data['status'] as String?) ?? 'accepted',
       isTracking: (data['isTracking'] as bool?) ?? false,
       stepCount: (data['stepCount'] as num?)?.toInt() ?? 0,
+      distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
+      elapsedSeconds: (data['elapsedSeconds'] as num?)?.toInt() ?? 0,
       currentLocation: currentLocation,
       routePoints: routeParser(data['routePoints']),
     );

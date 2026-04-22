@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({
@@ -106,6 +107,7 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final topSpacing = context.screenHeight * 0.12;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -120,186 +122,197 @@ class _SignupScreenState extends State<SignupScreen> {
               fit: BoxFit.cover,
             ),
           ),
-          SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 130),
-                    const Text(
-                      "Create an Account",
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'Parisienne',
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE8F6F3),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: const Color(0xFF59BDB3).withOpacity(0.3),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(
+                top: 12,
+                bottom: MediaQuery.viewInsetsOf(context).bottom + 24,
+              ),
+              child: ResponsiveContent(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(height: topSpacing.clamp(72, 130)),
+                      Text(
+                        "Create an Account",
+                        style: TextStyle(
+                          fontSize: context.responsiveFont(26),
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Parisienne',
                         ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            CupertinoIcons.person_crop_circle_badge_checkmark,
-                            color: Color(0xFF3E9189),
-                            size: 18,
+                      SizedBox(height: context.responsiveValue(14)),
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: context.responsiveValue(14),
+                          vertical: context.responsiveValue(10),
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F6F3),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFF59BDB3).withOpacity(0.3),
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "Selected role: ${widget.selectedRole == 'coach' ? 'Coach' : 'User'}",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF245A55),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              CupertinoIcons.person_crop_circle_badge_checkmark,
+                              color: Color(0xFF3E9189),
+                              size: 18,
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    TextFormField(
-                      controller: _usernameController,
-                      maxLength: 20,
-                      decoration: const InputDecoration(
-                        labelText: "Username",
-                        counterText: "",
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Username cannot be empty";
-                        }
-                        if (value.length > 20) {
-                          return "Username must be at most 20 characters";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(labelText: "Email"),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Email cannot be empty";
-                        }
-                        if (!_isValidEmail(value)) {
-                          return "Invalid email format!";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _numberController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(labelText: "Phone Number"),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Phone number cannot be empty";
-                        }
-                        if (!_isValidPhoneNumber(value)) {
-                          return "Invalid phone number!";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: !_isPasswordVisible,
-                      decoration: InputDecoration(
-                        labelText: "Password",
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _isPasswordVisible
-                                ? CupertinoIcons.eye_slash
-                                : CupertinoIcons.eye,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _isPasswordVisible = !_isPasswordVisible;
-                            });
-                          },
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Password cannot be empty.";
-                        }
-                        if (!_isValidPassword(value)) {
-                          return "Weak password! Use upper, lower, digit and 8+ chars.";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _retypepassController,
-                      obscureText: !_isPasswordVisible,
-                      decoration: InputDecoration(
-                        labelText: "Re-type Password",
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _isPasswordVisible
-                                ? CupertinoIcons.eye_slash
-                                : CupertinoIcons.eye,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _isPasswordVisible = !_isPasswordVisible;
-                            });
-                          },
-                        ),
-                      ),
-                      validator: (value) => value != _passwordController.text
-                          ? "Passwords do not match!"
-                          : null,
-                    ),
-                    const SizedBox(height: 25),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                          backgroundColor: const Color.fromARGB(255, 89, 189, 179),
-                        ),
-                        onPressed: _isLoading ? null : _handleSignup,
-                        child: _isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : Text(
-                                "Register",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDarkMode ? Colors.white : Colors.black,
-                                ),
+                            SizedBox(width: context.responsiveValue(8)),
+                            Text(
+                              "Selected role: ${widget.selectedRole == 'coach' ? 'Coach' : 'User'}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF245A55),
                               ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("Back to role selection"),
-                    ),
-                    const SizedBox(height: 15),
-                  ],
+                      SizedBox(height: context.responsiveValue(18)),
+                      TextFormField(
+                        controller: _usernameController,
+                        maxLength: 20,
+                        decoration: const InputDecoration(
+                          labelText: "Username",
+                          counterText: "",
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Username cannot be empty";
+                          }
+                          if (value.length > 20) {
+                            return "Username must be at most 20 characters";
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(10)),
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(labelText: "Email"),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Email cannot be empty";
+                          }
+                          if (!_isValidEmail(value)) {
+                            return "Invalid email format!";
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(10)),
+                      TextFormField(
+                        controller: _numberController,
+                        keyboardType: TextInputType.phone,
+                        decoration:
+                            const InputDecoration(labelText: "Phone Number"),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Phone number cannot be empty";
+                          }
+                          if (!_isValidPhoneNumber(value)) {
+                            return "Invalid phone number!";
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(10)),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: !_isPasswordVisible,
+                        decoration: InputDecoration(
+                          labelText: "Password",
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordVisible
+                                  ? CupertinoIcons.eye_slash
+                                  : CupertinoIcons.eye,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordVisible = !_isPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Password cannot be empty.";
+                          }
+                          if (!_isValidPassword(value)) {
+                            return "Weak password! Use upper, lower, digit and 8+ chars.";
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(10)),
+                      TextFormField(
+                        controller: _retypepassController,
+                        obscureText: !_isPasswordVisible,
+                        decoration: InputDecoration(
+                          labelText: "Re-type Password",
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordVisible
+                                  ? CupertinoIcons.eye_slash
+                                  : CupertinoIcons.eye,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordVisible = !_isPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: (value) => value != _passwordController.text
+                            ? "Passwords do not match!"
+                            : null,
+                      ),
+                      SizedBox(height: context.responsiveValue(25)),
+                      SizedBox(
+                        width: double.infinity,
+                        height:
+                            context.responsiveValue(50, min: 0.95, max: 1.05),
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            backgroundColor:
+                                const Color.fromARGB(255, 89, 189, 179),
+                          ),
+                          onPressed: _isLoading ? null : _handleSignup,
+                          child: _isLoading
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                              : Text(
+                                  "Register",
+                                  style: TextStyle(
+                                    fontSize: context.responsiveFont(12),
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        isDarkMode ? Colors.white : Colors.black,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      SizedBox(height: context.responsiveValue(8)),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Back to role selection"),
+                      ),
+                      SizedBox(height: context.responsiveValue(15)),
+                    ],
+                  ),
                 ),
               ),
             ),

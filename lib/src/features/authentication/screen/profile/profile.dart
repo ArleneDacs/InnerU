@@ -64,6 +64,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Map<String, bool> todayTasks = {
     'Call': false,
     'Steps': false,
+    'Exercise': false,
     'Meditation': false,
     'Learning': false,
     'Add Value': false,
@@ -121,6 +122,7 @@ class _ProfilePageState extends State<ProfilePage> {
           setState(() {
             todayTasks['Meditation'] = data['meditation'] ?? false;
             todayTasks['Steps'] = data['steps'] ?? false;
+            todayTasks['Exercise'] = data['exercise'] ?? false;
             todayTasks['Call'] = data['call'] ?? false;
             todayTasks['Learning'] = data['learning'] ?? false;
             todayTasks['Add Value'] = data['addValue'] ?? false;
@@ -146,6 +148,7 @@ class _ProfilePageState extends State<ProfilePage> {
       todayTasks = {
         'Call': false,
         'Steps': false,
+        'Exercise': false,
         'Meditation': false,
         'Learning': false,
         'Add Value': false,
@@ -161,6 +164,7 @@ class _ProfilePageState extends State<ProfilePage> {
       'userId': userId,
       'meditation': false,
       'steps': false,
+      'exercise': false,
       'call': false,
       'learning': false,
       'addValue': false,
@@ -177,6 +181,8 @@ class _ProfilePageState extends State<ProfilePage> {
         return 'steps';
       case 'Meditation':
         return 'meditation';
+      case 'Exercise':
+        return 'exercise';
       case 'Learning':
         return 'learning';
       case 'Add Value':
@@ -210,6 +216,7 @@ class _ProfilePageState extends State<ProfilePage> {
         'date': todayDate,
         'lastUpdated': todayDate,
         fieldKey: value,
+        if (fieldKey == 'exercise') 'exerciseCount': value ? 1 : 0,
       }, SetOptions(merge: true));
 
       checkAndAssignPoints();
@@ -308,6 +315,7 @@ class _ProfilePageState extends State<ProfilePage> {
           // Get actual activity counts from dailytracker (if available)
           int meditationMinutes = data['meditationMinutes'] ?? 0;
           int stepsTaken = data['stepCount'] ?? 0;
+          int exerciseCount = data['exerciseCount'] ?? 0;
           int callsMade = data['callCount'] ?? 0;
           int learningEntries = data['learningCount'] ?? 0;
           int valueEntries = data['valueCount'] ?? 0;
@@ -316,6 +324,7 @@ class _ProfilePageState extends State<ProfilePage> {
           Map<String, bool> taskCompletion = {
             'Meditation': data['meditation'] ?? false,
             'Steps': data['steps'] ?? false,
+            'Exercise': data['exercise'] ?? false,
             'Call': data['call'] ?? false,
             'Learning': data['learning'] ?? false,
             'Add Value': data['addValue'] ?? false,
@@ -325,6 +334,7 @@ class _ProfilePageState extends State<ProfilePage> {
           Map<String, int> taskPoints = {
             'Meditation Points': meditationMinutes, // 1 point per minute
             'Steps Points': (stepsTaken / 200).floor(), // 1 point per 200 steps
+            'Exercise Points': exerciseCount * 10,
             'Call Points': callsMade, // 1 point per call
             'Learning Points': learningEntries, // 1 point per entry
             'Add Value Points': valueEntries, // 1 point per entry
@@ -336,6 +346,9 @@ class _ProfilePageState extends State<ProfilePage> {
           }
           if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
             taskPoints['Steps Points'] = 10;
+          }
+          if (exerciseCount == 0 && taskCompletion['Exercise'] == true) {
+            taskPoints['Exercise Points'] = 10;
           }
           if (callsMade == 0 && taskCompletion['Call'] == true) {
             taskPoints['Call Points'] = 10;
@@ -364,6 +377,7 @@ class _ProfilePageState extends State<ProfilePage> {
             'activityCounts': {
               'meditationMinutes': meditationMinutes,
               'stepsTaken': stepsTaken,
+              'exerciseCount': exerciseCount,
               'callsMade': callsMade,
               'learningEntries': learningEntries,
               'valueEntries': valueEntries,
@@ -470,6 +484,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   SizedBox(height: 16),
                   _buildTaskRow('Call', todayTasks),
                   _buildTaskRow('Steps', todayTasks),
+                  _buildTaskRow('Exercise', todayTasks),
                   _buildTaskRow('Meditation', todayTasks),
                   _buildTaskRow('Learning', todayTasks),
                   _buildTaskRow('Add Value', todayTasks),
@@ -686,6 +701,7 @@ class _ProfilePageState extends State<ProfilePage> {
     Map<String, bool> selectedDateTasks = {
       'Call': false,
       'Steps': false,
+      'Exercise': false,
       'Meditation': false,
       'Learning': false,
       'Add Value': false,
@@ -702,6 +718,7 @@ class _ProfilePageState extends State<ProfilePage> {
         selectedDateTasks = {
           'Call': data['call'] ?? false,
           'Steps': data['steps'] ?? false,
+          'Exercise': data['exercise'] ?? false,
           'Meditation': data['meditation'] ?? false,
           'Learning': data['learning'] ?? false,
           'Add Value': data['addValue'] ?? false,

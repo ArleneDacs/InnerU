@@ -38,6 +38,7 @@ class TimeProvider extends ChangeNotifier {
     _timer?.cancel();
     _timer = null;
     _isRunning = false;
+    AudioHelper.stopAudio();
     notifyListeners();
   }
 
@@ -47,6 +48,7 @@ class TimeProvider extends ChangeNotifier {
     _remainingTime = _initialTime;
     _isRunning = false;
     AudioHelper.stopAudio();
+    notifyListeners();
   }
 
   void setTime(int seconds) {
