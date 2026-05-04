@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 
 class FastingTimerScreen extends StatefulWidget {
   const FastingTimerScreen({super.key});
@@ -54,7 +55,15 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         });
 
         if (_startTime != null && _endTime != null) {
+          await FastingNotificationService.instance
+              .scheduleFastingCompleteNotification(
+            endsAt: _endTime!,
+            targetHours: _selectedHours,
+          );
           _startTicker();
+        } else {
+          await FastingNotificationService.instance
+              .cancelFastingCompleteNotification();
         }
       }
     } catch (error) {
@@ -73,6 +82,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final end = now.add(Duration(hours: _selectedHours));
 
     try {
+      await FastingNotificationService.instance.ensurePermissions();
       await _fastingRef.set({
         'targetHours': _selectedHours,
         'startTime': Timestamp.fromDate(now),
@@ -84,7 +94,15 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         _startTime = now;
         _endTime = end;
       });
+      await FastingNotificationService.instance
+          .scheduleFastingCompleteNotification(
+        endsAt: end,
+        targetHours: _selectedHours,
+      );
       _startTicker();
+      _showSnackBar(
+        'Fasting started. You will get a device notification when it ends.',
+      );
     } catch (_) {
       _showSnackBar('Failed to start fasting timer.');
     }
@@ -120,6 +138,8 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
       }, SetOptions(merge: true));
 
       _timer?.cancel();
+      await FastingNotificationService.instance
+          .cancelFastingCompleteNotification();
       setState(() {
         _startTime = null;
         _endTime = null;

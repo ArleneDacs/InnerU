@@ -37,6 +37,8 @@
 	<string>Allow InnerU to access the microphone when media features need audio input.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Allow InnerU to read motion activity so step tracking works on iPhone.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Allow InnerU to notify you when your fasting timer is complete.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Allow InnerU to save images you create or edit.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

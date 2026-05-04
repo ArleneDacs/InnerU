@@ -34,11 +34,13 @@ import 'package:selfcare_projects/src/features/meditation_song/meditation_song.d
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/utils/theme/theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await FastingNotificationService.instance.initialize();
 
   runApp(const App());
 }
