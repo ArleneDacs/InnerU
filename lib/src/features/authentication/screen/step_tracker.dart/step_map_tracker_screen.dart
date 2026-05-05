@@ -12,15 +12,9 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 
-class StepMapTrackerScreen extends StatefulWidget {
-  const StepMapTrackerScreen({super.key});
-
-  @override
-  State<StepMapTrackerScreen> createState() => _StepMapTrackerScreenState();
-}
-
-class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
+class _StepMapTrackingController extends ChangeNotifier {
   static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
   static const int _maxSharedRoutePoints = 500;
   static const double _minMovementMeters = 3;
@@ -29,100 +23,49 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   static const double _maxWalkingSpeedMetersPerSecond = 3.2;
   static const double _minStreetSnapDistanceMeters = 8;
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  static final _StepMapTrackingController instance =
+      _StepMapTrackingController._();
+
+  _StepMapTrackingController._();
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final MapController _mapController = MapController();
   final Distance _distance = const Distance();
 
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sessionSubscription;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _memberSubscription;
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription<StepCount>? _stepSubscription;
   Timer? _elapsedTimer;
 
-  List<LatLng> _routePoints = [];
-  Position? _currentPosition;
-  DateTime? _startedAt;
-  Duration _elapsed = Duration.zero;
-  int? _stepBaseline;
-  int _lastRawSessionSteps = 0;
-  int _sessionSteps = 0;
-  double _distanceMeters = 0;
-  bool _isTracking = false;
-  bool _isPreparing = false;
-  bool _isSessionBusy = false;
-  String? _currentUserId;
-  String _currentUsername = 'Walker';
-  String? _activeSessionId;
-  String? _activeSessionStatus;
-  String? _selectedMarkerUserId;
-  List<_WalkSessionMember> _sharedMembers = const [];
-  String _statusText = 'Tap start to track your walk on the map.';
+  List<LatLng> routePoints = [];
+  Position? currentPosition;
+  DateTime? startedAt;
+  Duration elapsed = Duration.zero;
+  int? stepBaseline;
+  int lastRawSessionSteps = 0;
+  int sessionSteps = 0;
+  double distanceMeters = 0;
+  bool isTracking = false;
+  bool isPreparing = false;
+  String statusText = 'Tap start to track your walk on the map.';
   bool _isProcessingPositionUpdate = false;
   Position? _queuedPositionUpdate;
+  String? currentUserId;
+  String currentUsername = 'Walker';
+  String? activeSessionId;
+  int _lastNotificationElapsedSeconds = -1;
 
-  void _listenToSessionMembers(String? sessionId) {
-    _memberSubscription?.cancel();
+  LatLng get defaultCenter => _defaultCenter;
+  int get elapsedSeconds => elapsed.inSeconds;
 
-    if (sessionId == null || sessionId.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _sharedMembers = const [];
-        });
-      }
-      return;
-    }
-
-    _memberSubscription = _firestore
-        .collection('walk_sessions')
-        .doc(sessionId)
-        .collection('members')
-        .snapshots()
-        .listen((snapshot) {
-      final members = snapshot.docs
-          .map((doc) => _WalkSessionMember.fromFirestore(
-                doc.data(),
-                _deserializeRoutePoints,
-              ))
-          .toList();
-
-      if (!mounted) return;
-      setState(() {
-        _sharedMembers = members;
-      });
-    }, onError: (error) {
-      debugPrint('Failed to listen to session members: $error');
-    });
+  void updateUser({
+    required String? userId,
+    required String username,
+  }) {
+    currentUserId = userId;
+    currentUsername = username;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _currentUserId = _auth.currentUser?.uid;
-    _loadCurrentUser();
-    _listenToWalkSessions();
-    _loadInitialMapPreview();
-  }
-
-  Future<void> _loadInitialMapPreview() async {
-    try {
-      final hasLocationAccess = await _ensureLocationAccess(openSettings: false);
-      if (!hasLocationAccess) return;
-
-      final previewPosition = await _getInitialPosition();
-      final previewPoint =
-          previewPosition == null ? null : _positionToLatLng(previewPosition);
-      if (!mounted || previewPosition == null || previewPoint == null) return;
-
-      setState(() {
-        _currentPosition = previewPosition;
-        _statusText = 'Ready to track. Tap start to begin your walk.';
-      });
-
-      _moveCamera(previewPoint, zoom: 16);
-    } catch (_) {
-      // Keep the default map state if preview location is unavailable.
-    }
+  void updateActiveSession(String? sessionId) {
+    activeSessionId = sessionId;
   }
 
   bool _isFiniteCoordinate(double value) => value.isFinite;
@@ -133,15 +76,26 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   bool _isValidLongitude(double value) =>
       _isFiniteCoordinate(value) && value >= -180 && value <= 180;
 
-  LatLng? _safeLatLng(double latitude, double longitude) {
+  LatLng? safeLatLng(double latitude, double longitude) {
     if (!_isValidLatitude(latitude) || !_isValidLongitude(longitude)) {
       return null;
     }
     return LatLng(latitude, longitude);
   }
 
-  LatLng? _positionToLatLng(Position position) {
-    return _safeLatLng(position.latitude, position.longitude);
+  LatLng? positionToLatLng(Position position) {
+    return safeLatLng(position.latitude, position.longitude);
+  }
+
+  List<Map<String, double>> serializeRoutePoints(List<LatLng> points) {
+    final start = math.max(0, points.length - _maxSharedRoutePoints);
+    return points
+        .sublist(start)
+        .map((point) => {
+              'latitude': point.latitude,
+              'longitude': point.longitude,
+            })
+        .toList();
   }
 
   double _routeDistance(List<LatLng> points) {
@@ -155,13 +109,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   }
 
   List<LatLng> _mergeSegmentIntoRoute(
-    List<LatLng> routePoints,
+    List<LatLng> existingRoutePoints,
     List<LatLng> segmentPoints,
   ) {
-    if (segmentPoints.isEmpty) return routePoints;
-    if (routePoints.isEmpty) return List<LatLng>.from(segmentPoints);
+    if (segmentPoints.isEmpty) return existingRoutePoints;
+    if (existingRoutePoints.isEmpty) return List<LatLng>.from(segmentPoints);
 
-    final merged = List<LatLng>.from(routePoints);
+    final merged = List<LatLng>.from(existingRoutePoints);
     final shouldSkipFirstPoint =
         _distance(merged.last, segmentPoints.first) < 1.5;
 
@@ -228,7 +182,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           final longitude = (coordinate[0] as num?)?.toDouble();
           final latitude = (coordinate[1] as num?)?.toDouble();
           if (latitude != null && longitude != null) {
-            final point = _safeLatLng(latitude, longitude);
+            final point = safeLatLng(latitude, longitude);
             if (point != null) {
               snappedPoints.add(point);
             }
@@ -277,6 +231,220 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     return false;
   }
 
+  void _emit() {
+    notifyListeners();
+  }
+
+  Future<void> loadInitialMapPreview() async {
+    if (isTracking || currentPosition != null) return;
+
+    try {
+      final hasLocationAccess =
+          await _ensureLocationAccess(openSettings: false);
+      if (!hasLocationAccess) return;
+
+      final previewPosition = await _getInitialPosition();
+      final previewPoint =
+          previewPosition == null ? null : positionToLatLng(previewPosition);
+      if (previewPosition == null || previewPoint == null) return;
+
+      currentPosition = previewPosition;
+      statusText = 'Ready to track. Tap start to begin your walk.';
+      _emit();
+    } catch (_) {
+      // Keep the default map state if preview location is unavailable.
+    }
+  }
+
+  Future<Position?> _getInitialPosition() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+    } on TimeoutException {
+      return Geolocator.getLastKnownPosition();
+    } on LocationServiceDisabledException {
+      rethrow;
+    } catch (_) {
+      return Geolocator.getLastKnownPosition();
+    }
+  }
+
+  Future<bool> _ensureActivityRecognitionAccess() async {
+    final status = await Permission.activityRecognition.request();
+    if (status.isGranted) {
+      return true;
+    }
+
+    statusText =
+        'Activity recognition permission is needed to show live step counts.';
+    _emit();
+
+    if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    return false;
+  }
+
+  Future<bool> _ensureLocationAccess({bool openSettings = true}) async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      statusText = 'Turn on location services to start route tracking.';
+      _emit();
+      if (openSettings) {
+        await Geolocator.openLocationSettings();
+      }
+      return false;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      statusText =
+          'Location permission is needed to draw your walking route.';
+      _emit();
+      if (permission == LocationPermission.deniedForever && openSettings) {
+        await Geolocator.openAppSettings();
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> startTracking() async {
+    if (isPreparing || isTracking) return;
+
+    isPreparing = true;
+    statusText = 'Checking location permissions...';
+    _emit();
+
+    try {
+      final hasLocationAccess = await _ensureLocationAccess();
+      if (!hasLocationAccess) return;
+
+      final hasActivityAccess = await _ensureActivityRecognitionAccess();
+      if (!hasActivityAccess) return;
+
+      final latestPosition = await _getInitialPosition();
+      if (latestPosition == null) {
+        statusText =
+            'We could not get your location yet. Step outside or turn on GPS, then try again.';
+        _emit();
+        return;
+      }
+
+      final startPoint = positionToLatLng(latestPosition);
+      if (startPoint == null) {
+        statusText =
+            'Your device returned an invalid location. Please wait a moment and try again.';
+        _emit();
+        return;
+      }
+
+      await _positionSubscription?.cancel();
+      await _stepSubscription?.cancel();
+      _elapsedTimer?.cancel();
+      _queuedPositionUpdate = null;
+      _isProcessingPositionUpdate = false;
+
+      isTracking = true;
+      currentPosition = latestPosition;
+      routePoints = [startPoint];
+      distanceMeters = 0;
+      sessionSteps = 0;
+      stepBaseline = null;
+      lastRawSessionSteps = 0;
+      startedAt = DateTime.now();
+      elapsed = Duration.zero;
+      statusText = 'Tracking your route...';
+      _emit();
+      await FastingNotificationService.instance.ensurePermissions();
+      await _updateWalkTrackingNotification(force: true);
+
+      await syncSharedSessionMember();
+
+      _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (startedAt == null) return;
+        elapsed = DateTime.now().difference(startedAt!);
+        _emit();
+        _updateWalkTrackingNotification();
+      });
+
+      _stepSubscription = Pedometer.stepCountStream.listen(
+        (event) {
+          if (!isTracking) return;
+
+          stepBaseline ??= event.steps;
+          final rawSessionSteps =
+              ((event.steps - (stepBaseline ?? event.steps)).clamp(0, 1000000))
+                  .toInt();
+          _handleRawSessionStepCount(rawSessionSteps);
+        },
+        onError: (_) {
+          statusText =
+              'Route tracking is running, but live step updates are unavailable right now.';
+          _emit();
+        },
+      );
+
+      _positionSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5,
+        ),
+      ).listen(
+        _queuePositionUpdate,
+        onError: (_) {
+          statusText = 'Unable to update your location right now.';
+          _emit();
+        },
+      );
+    } on LocationServiceDisabledException {
+      statusText = 'Location services are off. Please turn GPS on and try again.';
+      _emit();
+    } on PermissionDeniedException {
+      statusText =
+          'Location permission was denied. Please allow it to start map tracking.';
+      _emit();
+    } on TimeoutException {
+      statusText =
+          'Getting your first GPS fix took too long. Please try again in an open area.';
+      _emit();
+    } on MissingPluginException {
+      statusText =
+          'Map tracking needs a full app rebuild after adding location support. Please stop the app and run it again.';
+      _emit();
+    } catch (error) {
+      debugPrint('Step map tracker start failed: $error');
+      statusText = 'Could not start tracking: $error';
+      _emit();
+    } finally {
+      isPreparing = false;
+      _emit();
+    }
+  }
+
+  void _handleRawSessionStepCount(int rawSessionSteps) {
+    final delta = rawSessionSteps - lastRawSessionSteps;
+    lastRawSessionSteps = rawSessionSteps;
+
+    if (delta <= 0) {
+      return;
+    }
+
+    sessionSteps = rawSessionSteps;
+    _emit();
+    syncSharedSessionMember();
+  }
+
   void _queuePositionUpdate(Position position) {
     _queuedPositionUpdate = position;
     if (_isProcessingPositionUpdate) {
@@ -289,13 +457,311 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   Future<void> _drainPositionQueue() async {
     _isProcessingPositionUpdate = true;
 
-    while (_queuedPositionUpdate != null && mounted) {
+    while (_queuedPositionUpdate != null) {
       final nextPosition = _queuedPositionUpdate!;
       _queuedPositionUpdate = null;
       await _handlePositionUpdate(nextPosition);
     }
 
     _isProcessingPositionUpdate = false;
+  }
+
+  Future<void> _handlePositionUpdate(Position position) async {
+    final nextPoint = positionToLatLng(position);
+    if (nextPoint == null) {
+      statusText =
+          'Skipping one invalid location update. Tracking will continue.';
+      _emit();
+      return;
+    }
+
+    final previousPoint = routePoints.isNotEmpty ? routePoints.last : null;
+    var routePointsToAdd = <LatLng>[nextPoint];
+    var segmentDistance = 0.0;
+
+    if (previousPoint != null) {
+      segmentDistance = _distance(previousPoint, nextPoint);
+
+      if (segmentDistance < _minMovementMeters) {
+        currentPosition = position;
+        _emit();
+        return;
+      }
+
+      if (_isLikelyGpsSpike(position, segmentDistance)) {
+        currentPosition = position;
+        statusText =
+            'Ignoring one noisy GPS jump to keep your route on the street.';
+        _emit();
+        return;
+      }
+
+      routePointsToAdd = await _buildStreetAlignedSegment(
+        previousPoint,
+        nextPoint,
+      );
+      segmentDistance = _routeDistance(routePointsToAdd);
+    }
+
+    routePoints = previousPoint == null
+        ? [nextPoint]
+        : _mergeSegmentIntoRoute(routePoints, routePointsToAdd);
+    currentPosition = position;
+    distanceMeters += segmentDistance;
+    statusText = 'Tracking your route...';
+    _emit();
+
+    await syncSharedSessionMember();
+  }
+
+  Future<void> syncSharedSessionMember() async {
+    final userId = currentUserId;
+    final sessionId = activeSessionId;
+    if (userId == null || sessionId == null) return;
+
+    final livePosition = currentPosition == null
+        ? null
+        : positionToLatLng(currentPosition!);
+
+    try {
+      await _firestore
+          .collection('walk_sessions')
+          .doc(sessionId)
+          .collection('members')
+          .doc(userId)
+          .set({
+        'userId': userId,
+        'username': currentUsername,
+        'status': 'accepted',
+        'isTracking': isTracking,
+        'stepCount': sessionSteps,
+        'distanceMeters': distanceMeters,
+        'elapsedSeconds': elapsedSeconds,
+        'routePoints': serializeRoutePoints(routePoints),
+        'currentLocation': livePosition == null
+            ? null
+            : GeoPoint(livePosition.latitude, livePosition.longitude),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await _firestore.collection('walk_sessions').doc(sessionId).set({
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (error) {
+      debugPrint('Failed to sync shared walk session: $error');
+    }
+  }
+
+  Future<void> stopTracking() async {
+    await _positionSubscription?.cancel();
+    await _stepSubscription?.cancel();
+    _elapsedTimer?.cancel();
+    _positionSubscription = null;
+    _stepSubscription = null;
+    _queuedPositionUpdate = null;
+    _isProcessingPositionUpdate = false;
+
+    isTracking = false;
+    statusText = routePoints.length > 1
+        ? 'Session complete. You can review the route on screen or start again.'
+        : 'Tracking stopped.';
+    _lastNotificationElapsedSeconds = -1;
+    _emit();
+    await FastingNotificationService.instance.cancelWalkTrackingNotification();
+    await syncSharedSessionMember();
+  }
+
+  Future<void> resetSession() async {
+    await stopTracking();
+    routePoints = [];
+    currentPosition = null;
+    startedAt = null;
+    elapsed = Duration.zero;
+    stepBaseline = null;
+    lastRawSessionSteps = 0;
+    sessionSteps = 0;
+    distanceMeters = 0;
+    statusText = 'Tap start to track your walk on the map.';
+    _lastNotificationElapsedSeconds = -1;
+    _emit();
+    await syncSharedSessionMember();
+  }
+
+  Future<void> _updateWalkTrackingNotification({bool force = false}) async {
+    if (!isTracking) return;
+
+    final elapsedSecondsNow = elapsed.inSeconds;
+    final shouldUpdate = force ||
+        _lastNotificationElapsedSeconds == -1 ||
+        elapsedSecondsNow - _lastNotificationElapsedSeconds >= 15 ||
+        elapsedSecondsNow == 0;
+
+    if (!shouldUpdate) {
+      return;
+    }
+
+    _lastNotificationElapsedSeconds = elapsedSecondsNow;
+    await FastingNotificationService.instance.showWalkTrackingNotification(
+      stepCount: sessionSteps,
+      distanceMeters: distanceMeters,
+      elapsed: elapsed,
+    );
+  }
+}
+
+class StepMapTrackerScreen extends StatefulWidget {
+  const StepMapTrackerScreen({super.key});
+
+  @override
+  State<StepMapTrackerScreen> createState() => _StepMapTrackerScreenState();
+}
+
+class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
+  static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
+  static const int _maxSharedRoutePoints = 500;
+  static const String _streetTileUrl =
+      'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  static const String _satelliteTileUrl =
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final MapController _mapController = MapController();
+  final _StepMapTrackingController _trackingController =
+      _StepMapTrackingController.instance;
+
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sessionSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _memberSubscription;
+  Timer? _routeReplayTimer;
+
+  List<LatLng> _routePoints = [];
+  Position? _currentPosition;
+  DateTime? _startedAt;
+  Duration _elapsed = Duration.zero;
+  int _sessionSteps = 0;
+  double _distanceMeters = 0;
+  bool _isTracking = false;
+  bool _isPreparing = false;
+  bool _isSessionBusy = false;
+  String? _currentUserId;
+  String _currentUsername = 'Walker';
+  String? _activeSessionId;
+  String? _activeSessionStatus;
+  String? _selectedMarkerUserId;
+  _RecordedWalk? _selectedRecordedWalk;
+  List<_WalkSessionMember> _sharedMembers = const [];
+  String _statusText = 'Tap start to track your walk on the map.';
+  bool _useSatelliteTiles = true;
+  bool _isReplayingRecordedWalk = false;
+  int _replayRouteIndex = 0;
+  List<LatLng> _replayRoutePoints = const [];
+  LatLng? _replayCurrentPoint;
+
+  void _listenToSessionMembers(String? sessionId) {
+    _memberSubscription?.cancel();
+
+    if (sessionId == null || sessionId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _sharedMembers = const [];
+        });
+      }
+      return;
+    }
+
+    _memberSubscription = _firestore
+        .collection('walk_sessions')
+        .doc(sessionId)
+        .collection('members')
+        .snapshots()
+        .listen((snapshot) {
+      final members = snapshot.docs
+          .map((doc) => _WalkSessionMember.fromFirestore(
+                doc.data(),
+                _deserializeRoutePoints,
+              ))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _sharedMembers = members;
+      });
+    }, onError: (error) {
+      debugPrint('Failed to listen to session members: $error');
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _currentUserId = _auth.currentUser?.uid;
+    _trackingController.addListener(_handleTrackingControllerChanged);
+    _applyTrackingState(notify: false);
+    _trackingController.updateUser(
+      userId: _currentUserId,
+      username: _currentUsername,
+    );
+    _loadCurrentUser();
+    _listenToWalkSessions();
+    _loadInitialMapPreview();
+  }
+
+  Future<void> _loadInitialMapPreview() async {
+    await _trackingController.loadInitialMapPreview();
+  }
+
+  void _handleTrackingControllerChanged() {
+    if (!mounted) return;
+    _applyTrackingState();
+  }
+
+  void _applyTrackingState({bool notify = true}) {
+    final currentPosition = _trackingController.currentPosition;
+    final shouldMoveCamera = currentPosition != null;
+
+    final updateState = () {
+      _routePoints = List<LatLng>.from(_trackingController.routePoints);
+      _currentPosition = currentPosition;
+      _startedAt = _trackingController.startedAt;
+      _elapsed = _trackingController.elapsed;
+      _sessionSteps = _trackingController.sessionSteps;
+      _distanceMeters = _trackingController.distanceMeters;
+      _isTracking = _trackingController.isTracking;
+      _isPreparing = _trackingController.isPreparing;
+      _statusText = _trackingController.statusText;
+    };
+
+    if (notify && mounted) {
+      setState(updateState);
+    } else {
+      updateState();
+    }
+
+    if (shouldMoveCamera) {
+      final point = _positionToLatLng(currentPosition!);
+      if (point != null) {
+        _moveCamera(point, zoom: _isTracking ? 17 : 16);
+      }
+    }
+  }
+
+  bool _isFiniteCoordinate(double value) => value.isFinite;
+
+  bool _isValidLatitude(double value) =>
+      _isFiniteCoordinate(value) && value >= -90 && value <= 90;
+
+  bool _isValidLongitude(double value) =>
+      _isFiniteCoordinate(value) && value >= -180 && value <= 180;
+
+  LatLng? _safeLatLng(double latitude, double longitude) {
+    if (!_isValidLatitude(latitude) || !_isValidLongitude(longitude)) {
+      return null;
+    }
+    return LatLng(latitude, longitude);
+  }
+
+  LatLng? _positionToLatLng(Position position) {
+    return _safeLatLng(position.latitude, position.longitude);
   }
 
   List<Map<String, double>> _serializeRoutePoints(List<LatLng> points) {
@@ -366,6 +832,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
             ? (_auth.currentUser?.email?.split('@').first ?? 'Walker')
             : username;
       });
+      _trackingController.updateUser(
+        userId: _currentUserId,
+        username: _currentUsername,
+      );
     } catch (error) {
       debugPrint('Failed to load current user: $error');
     }
@@ -401,6 +871,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           _activeSessionStatus = null;
           _sharedMembers = const [];
         });
+        _trackingController.updateActiveSession(null);
         _listenToSessionMembers(null);
         return;
       }
@@ -417,47 +888,19 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         _activeSessionId = nextSessionId;
         _activeSessionStatus = nextStatus;
       });
+      _trackingController.updateActiveSession(nextSessionId);
     }, onError: (error) {
       debugPrint('Failed to listen to walk sessions: $error');
     });
   }
 
   Future<void> _syncSharedSessionMember() async {
-    final userId = _currentUserId;
-    final sessionId = _activeSessionId;
-    if (userId == null || sessionId == null) return;
-
-    final currentLocation = _currentPosition == null
-        ? null
-        : _positionToLatLng(_currentPosition!);
-
-    try {
-      await _firestore
-          .collection('walk_sessions')
-          .doc(sessionId)
-          .collection('members')
-          .doc(userId)
-          .set({
-        'userId': userId,
-        'username': _currentUsername,
-        'status': 'accepted',
-        'isTracking': _isTracking,
-        'stepCount': _sessionSteps,
-        'distanceMeters': _distanceMeters,
-        'elapsedSeconds': _elapsedSeconds(),
-        'routePoints': _serializeRoutePoints(_routePoints),
-        'currentLocation': currentLocation == null
-            ? null
-            : GeoPoint(currentLocation.latitude, currentLocation.longitude),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      await _firestore.collection('walk_sessions').doc(sessionId).set({
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (error) {
-      debugPrint('Failed to sync shared walk session: $error');
-    }
+    _trackingController.updateUser(
+      userId: _currentUserId,
+      username: _currentUsername,
+    );
+    _trackingController.updateActiveSession(_activeSessionId);
+    await _trackingController.syncSharedSessionMember();
   }
 
   Future<void> _createWalkInvite(Map<String, dynamic> invitedUser) async {
@@ -575,6 +1018,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         _activeSessionStatus =
             hasReusableSession ? (_activeSessionStatus ?? 'pending') : 'pending';
       });
+      _trackingController.updateActiveSession(sessionRef.id);
       _listenToSessionMembers(sessionRef.id);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -652,6 +1096,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         _activeSessionId = sessionId;
         _activeSessionStatus = 'active';
       });
+      _trackingController.updateActiveSession(sessionId);
       _listenToSessionMembers(sessionId);
     } catch (error) {
       if (!mounted) return;
@@ -728,285 +1173,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     }
   }
 
-  Future<Position?> _getInitialPosition() async {
-    try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 15),
-        ),
-      );
-    } on TimeoutException {
-      return Geolocator.getLastKnownPosition();
-    } on LocationServiceDisabledException {
-      rethrow;
-    } catch (_) {
-      return Geolocator.getLastKnownPosition();
-    }
-  }
-
-  Future<bool> _ensureActivityRecognitionAccess() async {
-    final status = await Permission.activityRecognition.request();
-    if (status.isGranted) {
-      return true;
-    }
-
-    if (mounted) {
-      setState(() {
-        _statusText =
-            'Activity recognition permission is needed to show live step counts.';
-      });
-    }
-
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-    }
-    return false;
-  }
-
   Future<void> _startTracking() async {
-    if (_isPreparing || _isTracking) return;
-
-    setState(() {
-      _isPreparing = true;
-      _statusText = 'Checking location permissions...';
-    });
-
-    try {
-      final hasLocationAccess = await _ensureLocationAccess();
-      if (!hasLocationAccess) return;
-
-      final hasActivityAccess = await _ensureActivityRecognitionAccess();
-      if (!hasActivityAccess) return;
-
-      final currentPosition = await _getInitialPosition();
-      if (currentPosition == null) {
-        if (!mounted) return;
-        setState(() {
-          _statusText =
-              'We could not get your location yet. Step outside or turn on GPS, then try again.';
-        });
-        return;
-      }
-
-      final startPoint = _positionToLatLng(currentPosition);
-      if (startPoint == null) {
-        if (!mounted) return;
-        setState(() {
-          _statusText =
-              'Your device returned an invalid location. Please wait a moment and try again.';
-        });
-        return;
-      }
-
-      _positionSubscription?.cancel();
-      _stepSubscription?.cancel();
-      _elapsedTimer?.cancel();
-      _queuedPositionUpdate = null;
-      _isProcessingPositionUpdate = false;
-
-      setState(() {
-        _isTracking = true;
-        _currentPosition = currentPosition;
-        _routePoints = [startPoint];
-        _distanceMeters = 0;
-        _sessionSteps = 0;
-        _stepBaseline = null;
-        _lastRawSessionSteps = 0;
-        _startedAt = DateTime.now();
-        _elapsed = Duration.zero;
-        _statusText = 'Tracking your route...';
-      });
-
-      await _syncSharedSessionMember();
-      _moveCamera(startPoint, zoom: 17);
-
-      _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted || _startedAt == null) return;
-        setState(() {
-          _elapsed = DateTime.now().difference(_startedAt!);
-        });
-      });
-
-      _stepSubscription = Pedometer.stepCountStream.listen(
-        (event) {
-          if (!mounted || !_isTracking) return;
-
-          _stepBaseline ??= event.steps;
-          final rawSessionSteps =
-              ((event.steps - (_stepBaseline ?? event.steps)).clamp(0, 1000000))
-                  .toInt();
-          _handleRawSessionStepCount(rawSessionSteps);
-        },
-        onError: (_) {
-          if (!mounted) return;
-          setState(() {
-            _statusText =
-                'Route tracking is running, but live step updates are unavailable right now.';
-          });
-        },
-      );
-
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 5,
-        ),
-      ).listen(
-        _queuePositionUpdate,
-        onError: (_) {
-          if (!mounted) return;
-          setState(() {
-            _statusText = 'Unable to update your location right now.';
-          });
-        },
-      );
-    } on LocationServiceDisabledException {
-      if (!mounted) return;
-      setState(() {
-        _statusText = 'Location services are off. Please turn GPS on and try again.';
-      });
-    } on PermissionDeniedException {
-      if (!mounted) return;
-      setState(() {
-        _statusText =
-            'Location permission was denied. Please allow it to start map tracking.';
-      });
-    } on TimeoutException {
-      if (!mounted) return;
-      setState(() {
-        _statusText =
-            'Getting your first GPS fix took too long. Please try again in an open area.';
-      });
-    } on MissingPluginException {
-      if (!mounted) return;
-      setState(() {
-        _statusText =
-            'Map tracking needs a full app rebuild after adding location support. Please stop the app and run it again.';
-      });
-    } catch (error) {
-      debugPrint('Step map tracker start failed: $error');
-      if (!mounted) return;
-      setState(() {
-        _statusText = 'Could not start tracking: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isPreparing = false;
-        });
-      }
-    }
-  }
-
-  void _handleRawSessionStepCount(int rawSessionSteps) {
-    final delta = rawSessionSteps - _lastRawSessionSteps;
-    _lastRawSessionSteps = rawSessionSteps;
-
-    if (delta <= 0) {
-      return;
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _sessionSteps = rawSessionSteps;
-    });
-    _syncSharedSessionMember();
-  }
-
-  Future<void> _handlePositionUpdate(Position position) async {
-    final nextPoint = _positionToLatLng(position);
-    if (nextPoint == null) {
-      if (!mounted) return;
-      setState(() {
-        _statusText =
-            'Skipping one invalid location update. Tracking will continue.';
-      });
-      return;
-    }
-
-    final previousPoint = _routePoints.isNotEmpty ? _routePoints.last : null;
-    var routePointsToAdd = <LatLng>[nextPoint];
-    var segmentDistance = 0.0;
-
-    if (previousPoint != null) {
-      segmentDistance = _distance(previousPoint, nextPoint);
-
-      // Ignore tiny GPS jitter to keep the route cleaner.
-      if (segmentDistance < _minMovementMeters) {
-        setState(() {
-          _currentPosition = position;
-        });
-        return;
-      }
-
-      if (_isLikelyGpsSpike(position, segmentDistance)) {
-        if (!mounted) return;
-        setState(() {
-          _currentPosition = position;
-          _statusText =
-              'Ignoring one noisy GPS jump to keep your route on the street.';
-        });
-        return;
-      }
-
-      routePointsToAdd = await _buildStreetAlignedSegment(
-        previousPoint,
-        nextPoint,
-      );
-      segmentDistance = _routeDistance(routePointsToAdd);
-    }
-
-    final updatedRoutePoints = previousPoint == null
-        ? [nextPoint]
-        : _mergeSegmentIntoRoute(_routePoints, routePointsToAdd);
-
-    if (!mounted) return;
-    setState(() {
-      _currentPosition = position;
-      _routePoints = updatedRoutePoints;
-      _distanceMeters += segmentDistance;
-      _statusText = 'Tracking your route...';
-    });
-
-    _syncSharedSessionMember();
-    _moveCamera(nextPoint);
-  }
-
-  Future<bool> _ensureLocationAccess({bool openSettings = true}) async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted) {
-        setState(() {
-          _statusText = 'Turn on location services to start route tracking.';
-        });
-      }
-      if (openSettings) {
-        await Geolocator.openLocationSettings();
-      }
-      return false;
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      if (mounted) {
-        setState(() {
-          _statusText =
-              'Location permission is needed to draw your walking route.';
-        });
-      }
-      if (permission == LocationPermission.deniedForever && openSettings) {
-        await Geolocator.openAppSettings();
-      }
-      return false;
-    }
-
-    return true;
+    _trackingController.updateUser(
+      userId: _currentUserId,
+      username: _currentUsername,
+    );
+    _trackingController.updateActiveSession(_activeSessionId);
+    await _trackingController.startTracking();
   }
 
   void _moveCamera(LatLng point, {double zoom = 16}) {
@@ -1020,42 +1193,69 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     });
   }
 
-  void _stopTracking() {
-    _positionSubscription?.cancel();
-    _stepSubscription?.cancel();
-    _elapsedTimer?.cancel();
-    _queuedPositionUpdate = null;
-    _isProcessingPositionUpdate = false;
+  LatLng _routeCenter(List<LatLng> points) {
+    if (points.isEmpty) return _defaultCenter;
 
-    setState(() {
-      _isTracking = false;
-      _statusText = _routePoints.length > 1
-          ? 'Session complete. You can review the route on screen or start again.'
-          : 'Tracking stopped.';
-    });
-    _syncSharedSessionMember();
+    var minLat = points.first.latitude;
+    var maxLat = points.first.latitude;
+    var minLng = points.first.longitude;
+    var maxLng = points.first.longitude;
+
+    for (final point in points.skip(1)) {
+      minLat = math.min(minLat, point.latitude);
+      maxLat = math.max(maxLat, point.latitude);
+      minLng = math.min(minLng, point.longitude);
+      maxLng = math.max(maxLng, point.longitude);
+    }
+
+    return LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
   }
 
-  void _resetSession() {
-    _positionSubscription?.cancel();
-    _stepSubscription?.cancel();
-    _elapsedTimer?.cancel();
-    _queuedPositionUpdate = null;
-    _isProcessingPositionUpdate = false;
+  double _routeOverviewZoom(List<LatLng> points) {
+    if (points.length < 2) return 16.8;
 
-    setState(() {
-      _isTracking = false;
-      _routePoints = [];
-      _currentPosition = null;
-      _startedAt = null;
-      _elapsed = Duration.zero;
-      _stepBaseline = null;
-      _lastRawSessionSteps = 0;
-      _sessionSteps = 0;
-      _distanceMeters = 0;
-      _statusText = 'Tap start to track your walk on the map.';
-    });
-    _syncSharedSessionMember();
+    var minLat = points.first.latitude;
+    var maxLat = points.first.latitude;
+    var minLng = points.first.longitude;
+    var maxLng = points.first.longitude;
+
+    for (final point in points.skip(1)) {
+      minLat = math.min(minLat, point.latitude);
+      maxLat = math.max(maxLat, point.latitude);
+      minLng = math.min(minLng, point.longitude);
+      maxLng = math.max(maxLng, point.longitude);
+    }
+
+    final latSpan = (maxLat - minLat).abs();
+    final lngSpan = (maxLng - minLng).abs();
+    final span = math.max(latSpan, lngSpan);
+
+    if (span < 0.0012) return 17.8;
+    if (span < 0.0025) return 17.0;
+    if (span < 0.005) return 16.2;
+    if (span < 0.012) return 15.4;
+    return 14.6;
+  }
+
+  double _replayZoomForProgress(double progress) {
+    final eased = math.sin(progress * math.pi);
+    return 16.2 + (eased * 1.2);
+  }
+
+  void _moveReplayCamera(LatLng point, double progress) {
+    _moveCamera(point, zoom: _replayZoomForProgress(progress));
+  }
+
+  Future<void> _stopTracking() async {
+    final shouldSave = _isTracking && _routePoints.length > 1;
+    await _trackingController.stopTracking();
+    if (shouldSave) {
+      await _saveRecordedWalk();
+    }
+  }
+
+  Future<void> _resetSession() async {
+    await _trackingController.resetSession();
   }
 
   String _formatDuration(Duration duration) {
@@ -1070,6 +1270,322 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       return '${(meters / 1000).toStringAsFixed(2)} km';
     }
     return '${meters.toStringAsFixed(0)} m';
+  }
+
+  String _formatRecordedWalkDate(DateTime dateTime) {
+    final month = _monthLabel(dateTime.month);
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$month $day, ${dateTime.year} at $hour:$minute';
+  }
+
+  String _monthLabel(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return months[(month - 1).clamp(0, 11)];
+  }
+
+  void _resetRecordedWalkReplay({bool clearSelection = false}) {
+    _routeReplayTimer?.cancel();
+    _routeReplayTimer = null;
+
+    if (!mounted) return;
+    setState(() {
+      _isReplayingRecordedWalk = false;
+      _replayRouteIndex = 0;
+      _replayRoutePoints = const [];
+      _replayCurrentPoint = null;
+      if (clearSelection) {
+        _selectedRecordedWalk = null;
+      }
+    });
+  }
+
+  void _startRecordedWalkReplay() {
+    final walk = _selectedRecordedWalk;
+    if (walk == null || walk.routePoints.length < 2) {
+      return;
+    }
+
+    _routeReplayTimer?.cancel();
+
+    final totalPoints = walk.routePoints.length;
+    final intervalMs = (18000 / totalPoints).round().clamp(90, 450);
+
+    setState(() {
+      _isReplayingRecordedWalk = true;
+      _replayRouteIndex = 1;
+      _replayRoutePoints = walk.routePoints.take(1).toList();
+      _replayCurrentPoint = walk.routePoints.first;
+    });
+    _moveReplayCamera(walk.routePoints.first, 0);
+
+    _routeReplayTimer = Timer.periodic(
+      Duration(milliseconds: intervalMs),
+      (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+
+        if (_selectedRecordedWalk == null ||
+            _replayRouteIndex >= walk.routePoints.length) {
+          timer.cancel();
+          setState(() {
+            _isReplayingRecordedWalk = false;
+            _replayRoutePoints = List<LatLng>.from(walk.routePoints);
+            _replayCurrentPoint = walk.routePoints.last;
+          });
+          return;
+        }
+
+        final nextPoint = walk.routePoints[_replayRouteIndex];
+        final nextIndex = _replayRouteIndex + 1;
+        final progress = (nextIndex / walk.routePoints.length).clamp(0.0, 1.0);
+        setState(() {
+          _replayRouteIndex = nextIndex;
+          _replayRoutePoints =
+              walk.routePoints.take(_replayRouteIndex).toList();
+          _replayCurrentPoint = nextPoint;
+        });
+        _moveReplayCamera(nextPoint, progress);
+      },
+    );
+  }
+
+  Future<void> _saveRecordedWalk() async {
+    final userId = _currentUserId;
+    final startedAt = _startedAt;
+    if (userId == null || startedAt == null || _routePoints.length < 2) {
+      return;
+    }
+
+    final endedAt = DateTime.now();
+    final docId = '${startedAt.millisecondsSinceEpoch}';
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('recorded_walks')
+          .doc(docId)
+          .set({
+        'userId': userId,
+        'username': _currentUsername,
+        'startedAt': Timestamp.fromDate(startedAt),
+        'endedAt': Timestamp.fromDate(endedAt),
+        'stepCount': _sessionSteps,
+        'distanceMeters': _distanceMeters,
+        'elapsedSeconds': _elapsedSeconds(),
+        'routePoints': _serializeRoutePoints(_routePoints),
+      }, SetOptions(merge: true));
+    } catch (error) {
+      debugPrint('Failed to save recorded walk: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to save this walk recording: $error'),
+        ),
+      );
+    }
+  }
+
+  void _openRecordedWalk(_RecordedWalk walk) {
+    _routeReplayTimer?.cancel();
+    setState(() {
+      _selectedRecordedWalk = walk;
+      _isReplayingRecordedWalk = false;
+      _replayRouteIndex = 0;
+      _replayRoutePoints = const [];
+      _replayCurrentPoint = null;
+    });
+
+    if (walk.routePoints.isNotEmpty) {
+      _moveCamera(
+        _routeCenter(walk.routePoints),
+        zoom: _routeOverviewZoom(walk.routePoints),
+      );
+    }
+  }
+
+  void _showRecordedWalksSheet() {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _firestore
+                  .collection('users')
+                  .doc(userId)
+                  .collection('recorded_walks')
+                  .orderBy('endedAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                final walks = (snapshot.data?.docs ?? [])
+                    .map((doc) => _RecordedWalk.fromFirestore(
+                          id: doc.id,
+                          data: doc.data(),
+                          routeParser: _deserializeRoutePoints,
+                          timestampParser: _timestampToDateTime,
+                        ))
+                    .where((walk) => walk.routePoints.length > 1)
+                    .toList();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Recorded Walks',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Open any saved walk to preview its route on the map.',
+                      style: TextStyle(fontSize: 14, color: Colors.black87),
+                    ),
+                    const SizedBox(height: 16),
+                    if (walks.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 28),
+                        child: Text('No recorded walks yet.'),
+                      )
+                    else
+                      SizedBox(
+                        height: 360,
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: walks.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final walk = walks[index];
+                            final isSelected =
+                                _selectedRecordedWalk?.id == walk.id;
+
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: CircleAvatar(
+                                backgroundColor: const Color(0xFF6D849A),
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              ),
+                              title: Text(_formatRecordedWalkDate(walk.endedAt)),
+                              subtitle: Text(
+                                '${_formatDistance(walk.distanceMeters)} | ${walk.stepCount} steps | ${_formatDuration(Duration(seconds: walk.elapsedSeconds))}',
+                              ),
+                              trailing: Wrap(
+                                spacing: 4,
+                                children: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _openRecordedWalk(walk);
+                                    },
+                                    child: Text(isSelected ? 'Opened' : 'Open'),
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _deleteRecordedWalk(walk),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Color(0xFFB96D40),
+                                    ),
+                                    tooltip: 'Delete replay',
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteRecordedWalk(_RecordedWalk walk) async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    final shouldDelete = await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('Delete Walk Replay'),
+              content: const Text(
+                'Do you want to permanently delete this recorded walk replay?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Delete'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!shouldDelete) return;
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('recorded_walks')
+          .doc(walk.id)
+          .delete();
+
+      if (!mounted) return;
+      if (_selectedRecordedWalk?.id == walk.id) {
+        _resetRecordedWalkReplay(clearSelection: true);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recorded walk deleted.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete recorded walk: $error'),
+        ),
+      );
+    }
   }
 
   List<_WalkSessionMember> _displayMembers() {
@@ -1100,115 +1616,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   }
 
   Widget _buildSharedSessionOverlay() {
-    final memberNames = _sharedMembers
-        .map((member) => member.username)
-        .where((name) => name.trim().isNotEmpty)
-        .join(', ');
-
-    if (_activeSessionId == null) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.94),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 12,
-              offset: Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Walk Together',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Invite another user and share your walk map in real time.',
-                    style: TextStyle(fontSize: 13, color: Colors.black87),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
-              onPressed: _isSessionBusy ? null : _openInviteSheet,
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('Invite'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final isPending = _activeSessionStatus == 'pending';
-    final isActive = _activeSessionStatus == 'active';
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.94),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isActive ? Icons.groups_rounded : Icons.schedule_rounded,
-                color: const Color(0xFFCE8F5A),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  isActive ? 'Shared Walk Live' : 'Walk Invite Pending',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (isActive || isPending)
-                TextButton(
-                  onPressed: _endSharedWalk,
-                  child: const Text('End'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            memberNames.isEmpty
-                ? (isPending
-                    ? 'Waiting for the other walker to join.'
-                    : 'Your shared walk is connected.')
-                : 'Walkers: $memberNames',
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-          if (isPending) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'The session will become live as soon as the invited user accepts.',
-              style: TextStyle(fontSize: 12, color: Colors.black54),
-            ),
-          ],
-        ],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildPendingInvitesOverlay() {
@@ -1441,13 +1849,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
 
   @override
   void dispose() {
+    _routeReplayTimer?.cancel();
+    _trackingController.removeListener(_handleTrackingControllerChanged);
     _sessionSubscription?.cancel();
     _memberSubscription?.cancel();
-    _positionSubscription?.cancel();
-    _stepSubscription?.cancel();
-    _elapsedTimer?.cancel();
-    _queuedPositionUpdate = null;
-    _isProcessingPositionUpdate = false;
     super.dispose();
   }
 
@@ -1573,179 +1978,240 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         })
         .whereType<Marker>()
         .toList();
+    final replayRoutePoints = _isReplayingRecordedWalk &&
+            _replayRoutePoints.length > 1
+        ? _replayRoutePoints
+        : _selectedRecordedWalk?.routePoints ?? const <LatLng>[];
+    final recordedWalkGuidePolyline = _selectedRecordedWalk != null &&
+            _selectedRecordedWalk!.routePoints.length > 1
+        ? Polyline(
+            points: _selectedRecordedWalk!.routePoints,
+            strokeWidth: 8,
+            color: const Color(0x552E5BFF),
+          )
+        : null;
+    final recordedWalkPolylineShadow = replayRoutePoints.length > 1
+        ? Polyline(
+            points: replayRoutePoints,
+            strokeWidth: 9,
+            color: const Color(0x663B2A1F),
+          )
+        : null;
+    final recordedWalkPolyline = replayRoutePoints.length > 1
+        ? Polyline(
+            points: replayRoutePoints,
+            strokeWidth: 5.5,
+            color: const Color(0xFF2E5BFF),
+          )
+        : null;
+    final recordedWalkMarkers = _selectedRecordedWalk == null
+        ? const <Marker>[]
+        : [
+            if (_selectedRecordedWalk!.routePoints.isNotEmpty &&
+                !_isReplayingRecordedWalk)
+              Marker(
+                point: _selectedRecordedWalk!.routePoints.first,
+                width: 96,
+                height: 48,
+                child: _RouteBadge(
+                  label: 'Start',
+                  color: const Color(0xFF2E8B57),
+                ),
+              ),
+            if (_selectedRecordedWalk!.routePoints.isNotEmpty &&
+                !_isReplayingRecordedWalk)
+              Marker(
+                point: _selectedRecordedWalk!.routePoints.last,
+                width: 96,
+                height: 48,
+                child: _RouteBadge(
+                  label: 'End',
+                  color: const Color(0xFFB96D40),
+                ),
+              ),
+            if (_replayCurrentPoint != null)
+              Marker(
+                point: _replayCurrentPoint!,
+                width: 110,
+                height: 52,
+                child: const _RouteBadge(
+                  label: 'Replay',
+                  color: Color(0xFF2E5BFF),
+                ),
+              ),
+          ];
+    final pendingInvitesOverlay = _buildPendingInvitesOverlay();
+    final sharedSessionOverlay = _buildSharedSessionOverlay();
+    final dockStatusText = _selectedRecordedWalk == null
+        ? _statusText
+        : (_isReplayingRecordedWalk
+            ? 'Replaying the street route with follow zoom.'
+            : 'Recorded walk ready. Replay to follow the route with cinematic zoom.');
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Step Map Tracker'),
         actions: [
           IconButton(
+            onPressed: _showRecordedWalksSheet,
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Recorded walks',
+          ),
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _useSatelliteTiles = !_useSatelliteTiles;
+              });
+            },
+            icon: Icon(
+              _useSatelliteTiles
+                  ? Icons.layers_clear_rounded
+                  : Icons.satellite_alt_rounded,
+            ),
+            tooltip: _useSatelliteTiles
+                ? 'Switch to street map'
+                : 'Switch to satellite map',
+          ),
+          IconButton(
             onPressed: _isSessionBusy ? null : _openInviteSheet,
             icon: const Icon(Icons.person_add_alt_1),
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: Stack(
+          Positioned.fill(
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: initialCenter,
+                initialZoom: _currentPosition == null ? 11 : 16,
+              ),
               children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: initialCenter,
-                    initialZoom: _currentPosition == null ? 11 : 16,
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.selfcare_projects',
-                    ),
-                    if (polylines.isNotEmpty)
-                      PolylineLayer(
-                        polylines: polylines,
-                      ),
-                    if (markers.isNotEmpty)
-                      MarkerLayer(
-                        markers: markers,
-                      ),
-                  ],
+                TileLayer(
+                  urlTemplate:
+                      _useSatelliteTiles ? _satelliteTileUrl : _streetTileUrl,
+                  userAgentPackageName: 'com.example.selfcare_projects',
                 ),
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  child: Column(
-                    children: [
-                      _buildPendingInvitesOverlay(),
-                      const SizedBox(height: 10),
-                      _buildSharedSessionOverlay(),
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.94),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black12,
-                              blurRadius: 12,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                _StatTile(
-                                  label: 'Steps',
-                                  value: '$_sessionSteps',
-                                ),
-                                const SizedBox(width: 10),
-                                _StatTile(
-                                  label: 'Distance',
-                                  value: _formatDistance(_distanceMeters),
-                                ),
-                                const SizedBox(width: 10),
-                                _StatTile(
-                                  label: 'Time',
-                                  value: _formatDuration(_elapsed),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              _statusText,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                if (recordedWalkGuidePolyline != null)
+                  PolylineLayer(
+                    polylines: [recordedWalkGuidePolyline],
                   ),
-                ),
-                if (_sharedMembers.isNotEmpty)
-                  Positioned(
-                    bottom: 86,
-                    left: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.92),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        '${_sharedMembers.where((member) => member.isTracking).length} walkers live',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
+                if (recordedWalkPolylineShadow != null)
+                  PolylineLayer(
+                    polylines: [recordedWalkPolylineShadow],
                   ),
-                Positioned(
-                  bottom: 16,
-                  right: 16,
-                  child: FloatingActionButton.small(
-                    backgroundColor: Colors.white,
-                    onPressed: markers.isEmpty
-                        ? null
-                        : () => _moveCamera(markers.last.point, zoom: 17),
-                    child: const Icon(
-                      Icons.my_location,
-                      color: Color(0xFFCE8F5A),
-                    ),
+                if (recordedWalkPolyline != null)
+                  PolylineLayer(
+                    polylines: [recordedWalkPolyline],
                   ),
-                ),
+                if (polylines.isNotEmpty)
+                  PolylineLayer(
+                    polylines: polylines,
+                  ),
+                if (recordedWalkMarkers.isNotEmpty)
+                  MarkerLayer(
+                    markers: recordedWalkMarkers,
+                  ),
+                if (markers.isNotEmpty)
+                  MarkerLayer(
+                    markers: markers,
+                  ),
               ],
             ),
           ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isTracking ? _stopTracking : _startTracking,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isTracking
-                            ? const Color(0xFF6D849A)
-                            : const Color(0xFFCE8F5A),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: Text(
-                        _isPreparing
-                            ? 'Preparing...'
-                            : _isTracking
-                                ? 'Stop Tracking'
-                                : 'Start Tracking',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                pendingInvitesOverlay,
+                if (pendingInvitesOverlay is! SizedBox)
+                  const SizedBox(height: 8),
+                sharedSessionOverlay,
+                if (_useSatelliteTiles || _selectedRecordedWalk != null)
+                  const SizedBox(height: 8),
+                if (_useSatelliteTiles)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _MapPill(
+                      icon: Icons.satellite_alt_rounded,
+                      label: 'Satellite view',
+                      dark: true,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: _resetSession,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: const Text('Reset'),
+                if (_selectedRecordedWalk != null) ...[
+                  if (_useSatelliteTiles) const SizedBox(height: 8),
+                  _ReplaySummaryCard(
+                    title: 'Recorded Walk',
+                    subtitle:
+                        '${_formatRecordedWalkDate(_selectedRecordedWalk!.endedAt)} | ${_formatDistance(_selectedRecordedWalk!.distanceMeters)} | street replay',
+                    isReplaying: _isReplayingRecordedWalk,
+                    onClose: () =>
+                        _resetRecordedWalkReplay(clearSelection: true),
+                    onReplay: _isReplayingRecordedWalk
+                        ? () => _resetRecordedWalkReplay()
+                        : _startRecordedWalkReplay,
                   ),
                 ],
+              ],
+            ),
+          ),
+          if (_sharedMembers.isNotEmpty)
+            Positioned(
+              left: 16,
+              bottom: 206,
+              child: _MapPill(
+                icon: Icons.groups_rounded,
+                label:
+                    '${_sharedMembers.where((member) => member.isTracking).length} walkers live',
+              ),
+            ),
+          Positioned(
+            right: 16,
+            bottom: 206,
+            child: FloatingActionButton.small(
+              backgroundColor: Colors.white,
+              onPressed: markers.isEmpty
+                  ? null
+                  : () => _moveCamera(markers.last.point, zoom: 17),
+              child: const Icon(
+                Icons.my_location,
+                color: Color(0xFFCE8F5A),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: SafeArea(
+              top: false,
+              child: _BottomTrackerDock(
+                steps: '$_sessionSteps',
+                distance: _formatDistance(_distanceMeters),
+                time: _formatDuration(_elapsed),
+                statusText: dockStatusText,
+                viewingRecordedWalk: _selectedRecordedWalk != null,
+                replayEnabled: _selectedRecordedWalk != null,
+                isReplaying: _isReplayingRecordedWalk,
+                onReplay: _selectedRecordedWalk == null
+                    ? null
+                    : (_isReplayingRecordedWalk
+                        ? () => _resetRecordedWalkReplay()
+                        : _startRecordedWalkReplay),
+                onStartStop: _selectedRecordedWalk != null
+                    ? null
+                    : (_isTracking ? _stopTracking : _startTracking),
+                startStopLabel: _isPreparing
+                    ? 'Preparing...'
+                    : _isTracking
+                        ? 'Stop Tracking'
+                        : 'Start Tracking',
+                isTracking: _isTracking,
+                onReset: _selectedRecordedWalk != null ? null : _resetSession,
               ),
             ),
           ),
@@ -1797,6 +2263,293 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+class _MapPill extends StatelessWidget {
+  const _MapPill({
+    required this.icon,
+    required this.label,
+    this.dark = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor =
+        dark ? Colors.black.withOpacity(0.58) : Colors.white.withOpacity(0.94);
+    final foregroundColor = dark ? Colors.white : Colors.black87;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: dark
+            ? null
+            : const [
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: foregroundColor),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: foregroundColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplaySummaryCard extends StatelessWidget {
+  const _ReplaySummaryCard({
+    required this.title,
+    required this.subtitle,
+    required this.isReplaying,
+    required this.onClose,
+    required this.onReplay,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool isReplaying;
+  final VoidCallback onClose;
+  final VoidCallback onReplay;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.94),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onReplay,
+            child: Text(isReplaying ? 'Stop Replay' : 'Replay'),
+          ),
+          TextButton(
+            onPressed: onClose,
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomTrackerDock extends StatelessWidget {
+  const _BottomTrackerDock({
+    required this.steps,
+    required this.distance,
+    required this.time,
+    required this.statusText,
+    required this.viewingRecordedWalk,
+    required this.replayEnabled,
+    required this.isReplaying,
+    required this.onReplay,
+    required this.onStartStop,
+    required this.startStopLabel,
+    required this.isTracking,
+    required this.onReset,
+  });
+
+  final String steps;
+  final String distance;
+  final String time;
+  final String statusText;
+  final bool viewingRecordedWalk;
+  final bool replayEnabled;
+  final bool isReplaying;
+  final VoidCallback? onReplay;
+  final VoidCallback? onStartStop;
+  final String startStopLabel;
+  final bool isTracking;
+  final VoidCallback? onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.96),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              _StatTile(label: 'Steps', value: steps),
+              const SizedBox(width: 8),
+              _StatTile(label: 'Distance', value: distance),
+              const SizedBox(width: 8),
+              _StatTile(label: 'Time', value: time),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (viewingRecordedWalk) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onReplay,
+                    icon: Icon(
+                      isReplaying
+                          ? Icons.pause_circle_outline_rounded
+                          : Icons.play_circle_outline_rounded,
+                    ),
+                    label: Text(
+                      isReplaying
+                          ? 'Stop Route Replay'
+                          : 'Replay Recorded Walk',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              statusText,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: onStartStop,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isTracking
+                        ? const Color(0xFF6D849A)
+                        : const Color(0xFFCE8F5A),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    startStopLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: onReset,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 14,
+                  ),
+                ),
+                child: const Text('Reset'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteBadge extends StatelessWidget {
+  const _RouteBadge({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _WalkSessionMember {
   const _WalkSessionMember({
     required this.userId,
@@ -1840,6 +2593,40 @@ class _WalkSessionMember {
       distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
       elapsedSeconds: (data['elapsedSeconds'] as num?)?.toInt() ?? 0,
       currentLocation: currentLocation,
+      routePoints: routeParser(data['routePoints']),
+    );
+  }
+}
+
+class _RecordedWalk {
+  const _RecordedWalk({
+    required this.id,
+    required this.endedAt,
+    required this.stepCount,
+    required this.distanceMeters,
+    required this.elapsedSeconds,
+    required this.routePoints,
+  });
+
+  final String id;
+  final DateTime endedAt;
+  final int stepCount;
+  final double distanceMeters;
+  final int elapsedSeconds;
+  final List<LatLng> routePoints;
+
+  factory _RecordedWalk.fromFirestore({
+    required String id,
+    required Map<String, dynamic> data,
+    required List<LatLng> Function(dynamic rawRoutePoints) routeParser,
+    required DateTime Function(dynamic value) timestampParser,
+  }) {
+    return _RecordedWalk(
+      id: id,
+      endedAt: timestampParser(data['endedAt']),
+      stepCount: (data['stepCount'] as num?)?.toInt() ?? 0,
+      distanceMeters: (data['distanceMeters'] as num?)?.toDouble() ?? 0,
+      elapsedSeconds: (data['elapsedSeconds'] as num?)?.toInt() ?? 0,
       routePoints: routeParser(data['routePoints']),
     );
   }

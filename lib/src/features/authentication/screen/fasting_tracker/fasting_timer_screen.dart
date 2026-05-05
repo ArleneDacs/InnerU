@@ -17,13 +17,14 @@ class FastingTimerScreen extends StatefulWidget {
 class _FastingTimerScreenState extends State<FastingTimerScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final List<int> _fastingPlans = const [12, 14, 16, 18, 20];
+  final List<int> _fastingPlans = const [12, 14, 16, 18, 20, 24];
 
   Timer? _timer;
   int _selectedHours = 16;
   DateTime? _startTime;
   DateTime? _endTime;
   bool _isLoading = true;
+  int _lastOngoingNotificationMinute = -1;
 
   @override
   void initState() {
@@ -55,15 +56,10 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         });
 
         if (_startTime != null && _endTime != null) {
-          await FastingNotificationService.instance
-              .scheduleFastingCompleteNotification(
-            endsAt: _endTime!,
-            targetHours: _selectedHours,
-          );
+          await _syncFastingNotifications();
           _startTicker();
         } else {
-          await FastingNotificationService.instance
-              .cancelFastingCompleteNotification();
+          await _clearFastingNotifications();
         }
       }
     } catch (error) {
@@ -82,7 +78,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final end = now.add(Duration(hours: _selectedHours));
 
     try {
-      await FastingNotificationService.instance.ensurePermissions();
       await _fastingRef.set({
         'targetHours': _selectedHours,
         'startTime': Timestamp.fromDate(now),
@@ -94,16 +89,15 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         _startTime = now;
         _endTime = end;
       });
-      await FastingNotificationService.instance
-          .scheduleFastingCompleteNotification(
-        endsAt: end,
-        targetHours: _selectedHours,
-      );
       _startTicker();
+      final notificationsReady = await _syncFastingNotifications();
       _showSnackBar(
-        'Fasting started. You will get a device notification when it ends.',
+        notificationsReady
+            ? 'Fasting started. You will get a device notification when it ends.'
+            : 'Fasting started, but notifications are unavailable right now.',
       );
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Failed to start fasting timer: $error');
       _showSnackBar('Failed to start fasting timer.');
     }
   }
@@ -138,13 +132,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
       }, SetOptions(merge: true));
 
       _timer?.cancel();
-      await FastingNotificationService.instance
-          .cancelFastingCompleteNotification();
+      await _clearFastingNotifications();
+      _lastOngoingNotificationMinute = -1;
       setState(() {
         _startTime = null;
         _endTime = null;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Failed to end fasting timer: $error');
       _showSnackBar('Failed to end fasting timer.');
     }
   }
@@ -156,9 +151,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
 
       if (_endTime != null && DateTime.now().isAfter(_endTime!)) {
         _timer?.cancel();
+        _clearFastingNotifications();
+        _lastOngoingNotificationMinute = -1;
       }
 
       setState(() {});
+      _updateFastingOngoingNotification();
     });
   }
 
@@ -210,6 +208,57 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
+  }
+
+  Future<void> _updateFastingOngoingNotification({bool force = false}) async {
+    if (_startTime == null || _endTime == null) return;
+
+    final remaining = _remainingTime();
+    final elapsed = _elapsedTime();
+    final elapsedMinute = elapsed.inMinutes;
+    if (!force && elapsedMinute == _lastOngoingNotificationMinute) {
+      return;
+    }
+
+    _lastOngoingNotificationMinute = elapsedMinute;
+    try {
+      await FastingNotificationService.instance.showFastingOngoingNotification(
+        targetHours: _selectedHours,
+        elapsed: elapsed,
+        remaining: remaining,
+      );
+    } catch (error) {
+      debugPrint('Failed to update fasting ongoing notification: $error');
+    }
+  }
+
+  Future<bool> _syncFastingNotifications() async {
+    if (_endTime == null) return false;
+
+    try {
+      await FastingNotificationService.instance.ensurePermissions();
+      await FastingNotificationService.instance
+          .scheduleFastingCompleteNotification(
+        endsAt: _endTime!,
+        targetHours: _selectedHours,
+      );
+      await _updateFastingOngoingNotification(force: true);
+      return true;
+    } catch (error) {
+      debugPrint('Failed to sync fasting notifications: $error');
+      return false;
+    }
+  }
+
+  Future<void> _clearFastingNotifications() async {
+    try {
+      await FastingNotificationService.instance
+          .cancelFastingCompleteNotification();
+      await FastingNotificationService.instance
+          .cancelFastingOngoingNotification();
+    } catch (error) {
+      debugPrint('Failed to clear fasting notifications: $error');
+    }
   }
 
   @override

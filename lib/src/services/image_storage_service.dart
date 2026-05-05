@@ -24,10 +24,33 @@ class ImageStorageService {
 
   static Uri get _uploadUri =>
       Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
+  static Uri get _videoUploadUri =>
+      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/video/upload');
 
   static Future<String?> uploadImageBytes(
     Uint8List bytes, {
     String fileName = 'upload.jpg',
+  }) async {
+    return _uploadBytes(
+      bytes,
+      fileName: fileName,
+      uploadUri: _uploadUri,
+    );
+  }
+
+  static Future<String?> uploadVideoFile(File file) async {
+    final bytes = await file.readAsBytes();
+    return _uploadBytes(
+      bytes,
+      fileName: file.uri.pathSegments.last,
+      uploadUri: _videoUploadUri,
+    );
+  }
+
+  static Future<String?> _uploadBytes(
+    Uint8List bytes, {
+    required String fileName,
+    required Uri uploadUri,
   }) async {
     lastError = null;
     if (!isConfigured) {
@@ -38,7 +61,7 @@ class ImageStorageService {
     }
 
     try {
-      final request = http.MultipartRequest('POST', _uploadUri)
+      final request = http.MultipartRequest('POST', uploadUri)
         ..fields['upload_preset'] = uploadPreset
         ..files.add(
           http.MultipartFile.fromBytes(
@@ -78,6 +101,10 @@ class ImageStorageService {
 
   static Future<String?> uploadImageFile(File file) async {
     final bytes = await file.readAsBytes();
-    return uploadImageBytes(bytes, fileName: file.uri.pathSegments.last);
+    return _uploadBytes(
+      bytes,
+      fileName: file.uri.pathSegments.last,
+      uploadUri: _uploadUri,
+    );
   }
 }

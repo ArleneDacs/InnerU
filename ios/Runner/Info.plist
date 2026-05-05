@@ -38,7 +38,7 @@
 	<key>NSMotionUsageDescription</key>
 	<string>Allow InnerU to read motion activity so step tracking works on iPhone.</string>
 	<key>NSUserNotificationsUsageDescription</key>
-	<string>Allow InnerU to notify you when your fasting timer is complete.</string>
+	<string>Allow InnerU to notify you about fasting reminders and ongoing walk tracking.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Allow InnerU to save images you create or edit.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
