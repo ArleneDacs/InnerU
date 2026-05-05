@@ -36,16 +36,17 @@ class FastingNotificationService {
       ),
     );
 
-    await _notifications.initialize(initializationSettings);
+    await _notifications.initialize(
+      settings: initializationSettings,
+    );
     _initialized = true;
   }
 
   Future<void> ensurePermissions() async {
     await initialize();
 
-    final androidPlugin = _notifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestNotificationsPermission();
 
     final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
@@ -70,11 +71,12 @@ class FastingNotificationService {
     }
 
     await _notifications.zonedSchedule(
-      fastingCompleteNotificationId,
-      'Fasting complete',
-      'Your $targetHours-hour fast is done. Time to check in and break your fast.',
-      tz.TZDateTime.from(endsAt, tz.local),
-      const NotificationDetails(
+      id: fastingCompleteNotificationId,
+      title: 'Fasting complete',
+      body:
+          'Your $targetHours-hour fast is done. Time to check in and break your fast.',
+      scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -84,16 +86,15 @@ class FastingNotificationService {
         ),
         iOS: DarwinNotificationDetails(),
       ),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: null,
       payload: 'fasting_complete',
     );
   }
 
   Future<void> cancelFastingCompleteNotification() async {
     await initialize();
-    await _notifications.cancel(fastingCompleteNotificationId);
+    await _notifications.cancel(id: fastingCompleteNotificationId);
   }
 
   Future<void> _configureLocalTimezone() async {

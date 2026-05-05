@@ -15,13 +15,27 @@ class RoleSelectionScreen extends StatefulWidget {
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   String _selectedRole = 'user';
   bool _isLoading = false;
+  bool _acceptedTerms = false;
 
   Future<void> _handleGoogleSignup() async {
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please accept the Terms and Conditions."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
-    final error = await AuthService().signUpWithGoogle(role: _selectedRole);
+    final error = await AuthService().signUpWithGoogle(
+      role: _selectedRole,
+      termsAccepted: _acceptedTerms,
+    );
 
     if (!mounted) return;
 
@@ -130,15 +144,17 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         ),
                         child: LayoutBuilder(
                           builder: (context, constraints) {
-                            final segmentWidth = (constraints.maxWidth - 12) / 2;
+                            final segmentWidth =
+                                (constraints.maxWidth - 12) / 2;
 
                             return Stack(
                               children: [
                                 AnimatedPositioned(
                                   duration: const Duration(milliseconds: 220),
                                   curve: Curves.easeOut,
-                                  left:
-                                      _selectedRole == 'user' ? 0 : segmentWidth,
+                                  left: _selectedRole == 'user'
+                                      ? 0
+                                      : segmentWidth,
                                   top: 0,
                                   bottom: 0,
                                   child: Container(
@@ -220,6 +236,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         ),
                       ),
                       SizedBox(height: contentSpacing),
+                      _buildTermsAgreement(context),
+                      SizedBox(height: context.responsiveValue(16)),
                       SizedBox(
                         width: double.infinity,
                         height:
@@ -270,7 +288,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                               ? const SizedBox(
                                   width: 22,
                                   height: 22,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -279,7 +298,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                       "assets/logo/Google.png",
                                       width: context.responsiveValue(28),
                                     ),
-                                    SizedBox(width: context.responsiveValue(10)),
+                                    SizedBox(
+                                        width: context.responsiveValue(10)),
                                     const Text(
                                       "Continue with Google",
                                       style: TextStyle(
@@ -337,6 +357,97 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTermsAgreement(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(context.responsiveValue(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFDCE5D4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Checkbox(
+            value: _acceptedTerms,
+            activeColor: const Color(0xFF59BDB3),
+            onChanged: _isLoading
+                ? null
+                : (value) {
+                    setState(() {
+                      _acceptedTerms = value ?? false;
+                    });
+                  },
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: GestureDetector(
+                onTap: _showTermsAndConditions,
+                child: const Text.rich(
+                  TextSpan(
+                    text: "I agree to InnerU's ",
+                    children: [
+                      TextSpan(
+                        text: "Terms and Conditions",
+                        style: TextStyle(
+                          color: Color(0xFF3E9189),
+                          decoration: TextDecoration.underline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      TextSpan(text: "."),
+                    ],
+                  ),
+                  style: TextStyle(height: 1.35),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showTermsAndConditions() {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("InnerU Terms and Conditions"),
+        content: const SingleChildScrollView(
+          child: Text(
+            "Last updated: May 5, 2026\n\n"
+            "By creating an InnerU account, you agree to use the app as a self-care companion for personal wellness tracking, reflection, community support, and coach communication.\n\n"
+            "InnerU is not a medical, mental health, nutrition, or emergency service. Information from fasting, calories, sleep, steps, meditation, mood tracking, journaling, coaches, or community posts is for general self-care only and should not replace advice from qualified professionals. If you feel unsafe, unwell, or in crisis, contact local emergency services or a trusted professional immediately.\n\n"
+            "You are responsible for the accuracy of the information you enter, including food intake, fasting times, sleep sessions, mood check-ins, notes, and profile details. You should choose goals that are safe for your health and personal circumstances.\n\n"
+            "Be respectful in community posts, comments, coach chats, and shared notes. Do not harass others, post harmful advice, share illegal content, impersonate someone, or upload content that violates another person's privacy or rights.\n\n"
+            "Coaches may provide support and accountability, but coach conversations in InnerU do not create a medical provider relationship unless separately agreed outside the app. Do not use coach chat for emergencies.\n\n"
+            "InnerU may store account details, wellness records, mood entries, notes, chat data, points, and app preferences to provide the service. You agree that this data may be used to show your progress, personalize your experience, support community features, and maintain your account.\n\n"
+            "You must keep your login details secure. You are responsible for activity under your account. If you believe your account has been accessed without permission, change your password or contact support.\n\n"
+            "InnerU may change, suspend, or remove features when needed to improve safety, reliability, or the user experience. Continued use of the app means you accept the latest terms.\n\n"
+            "If you do not agree with these terms, do not create an account or use InnerU.",
+            style: TextStyle(height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Close"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _acceptedTerms = true;
+              });
+            },
+            child: const Text("I Agree"),
+          ),
+        ],
       ),
     );
   }
