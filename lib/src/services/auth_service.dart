@@ -17,8 +17,12 @@ class AuthService {
     required String number,
     required String retypepassword,
     required String role,
+    required bool termsAccepted,
   }) async {
     try {
+      if (!termsAccepted) {
+        return "You must accept the Terms and Conditions to create an account.";
+      }
       final result = await _auth.fetchSignInMethodsForEmail(email);
       if (result.isNotEmpty) return "This email is already in use.";
       if (password != retypepassword) return "Passwords do not match.";
@@ -75,8 +79,12 @@ class AuthService {
 
   Future<String?> signUpWithGoogle({
     required String role,
+    required bool termsAccepted,
   }) async {
     try {
+      if (!termsAccepted) {
+        return "You must accept the Terms and Conditions to create an account.";
+      }
       final user = await _authenticateWithGoogle();
       if (user == null) return userCancelledGoogleFlow;
 
@@ -170,6 +178,9 @@ class AuthService {
       "isCoach": role == 'coach',
       "emailVerified": emailVerified,
       "photoURL": photoUrl,
+      "termsAccepted": true,
+      "termsVersion": "2026-05-05",
+      "termsAcceptedAt": FieldValue.serverTimestamp(),
       "createdAt": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
