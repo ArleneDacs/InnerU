@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SleepTracker extends StatefulWidget {
@@ -69,7 +70,12 @@ class _SleepTrackerState extends State<SleepTracker> {
 
     if (_activeSleepStart != null) {
       _startTicker();
+      await _scheduleWakeNotification();
+    } else {
+      await FastingNotificationService.instance.cancelSleepWakeNotification();
     }
+
+    await _scheduleBedtimeReminder();
   }
 
   Future<void> _saveSettings() async {
@@ -82,6 +88,8 @@ class _SleepTrackerState extends State<SleepTracker> {
     await prefs.setInt(_goalKey, _selectedSleepGoal);
     await prefs.setInt(_bedtimeHourKey, _selectedBedtime.hour);
     await prefs.setInt(_bedtimeMinuteKey, _selectedBedtime.minute);
+    await _scheduleBedtimeReminder();
+    await _scheduleWakeNotification();
 
     if (!mounted) return;
     setState(() {
@@ -99,6 +107,7 @@ class _SleepTrackerState extends State<SleepTracker> {
       _activeSleepStart = start;
     });
     _startTicker();
+    await _scheduleWakeNotification();
     _showSnackBar('Sleep session started. Rest well.');
   }
 
@@ -122,6 +131,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     );
 
     _ticker?.cancel();
+    await FastingNotificationService.instance.cancelSleepWakeNotification();
 
     setState(() {
       _activeSleepStart = null;
@@ -140,6 +150,26 @@ class _SleepTrackerState extends State<SleepTracker> {
         setState(() {});
       }
     });
+  }
+
+  Future<void> _scheduleBedtimeReminder() async {
+    await FastingNotificationService.instance.ensurePermissions();
+    await FastingNotificationService.instance.scheduleDailySleepBedtimeReminder(
+      hour: _selectedBedtime.hour,
+      minute: _selectedBedtime.minute,
+    );
+  }
+
+  Future<void> _scheduleWakeNotification() async {
+    final start = _activeSleepStart;
+    if (start == null) return;
+
+    await FastingNotificationService.instance.ensurePermissions();
+    await FastingNotificationService.instance.scheduleSleepWakeNotification(
+      wakesAt: start.add(Duration(hours: _selectedSleepGoal)),
+      goalHours: _selectedSleepGoal,
+      mode: _selectedMode,
+    );
   }
 
   Future<void> _pickBedtime() async {
@@ -178,7 +208,8 @@ class _SleepTrackerState extends State<SleepTracker> {
             _history.take(7).length;
     final progress = _activeSleepStart == null
         ? 0.0
-        : (activeDuration.inMinutes / (_selectedSleepGoal * 60)).clamp(0.0, 1.0);
+        : (activeDuration.inMinutes / (_selectedSleepGoal * 60))
+            .clamp(0.0, 1.0);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F4EF),
@@ -540,7 +571,8 @@ class _SleepTrackerState extends State<SleepTracker> {
                                   ),
                                   child: Icon(
                                     hitGoal
-                                        ? CupertinoIcons.check_mark_circled_solid
+                                        ? CupertinoIcons
+                                            .check_mark_circled_solid
                                         : CupertinoIcons.moon_zzz_fill,
                                     color: hitGoal
                                         ? const Color(0xFF2E7D32)
@@ -550,7 +582,8 @@ class _SleepTrackerState extends State<SleepTracker> {
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         _formatDuration(session.duration),
@@ -609,7 +642,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.78),
+        color: Colors.white.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(

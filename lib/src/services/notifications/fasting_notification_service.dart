@@ -13,6 +13,11 @@ class FastingNotificationService {
   static const int fastingCompleteNotificationId = 4001;
   static const int fastingOngoingNotificationId = 4003;
   static const int walkTrackingNotificationId = 4002;
+  static const int meditationCompleteNotificationId = 5001;
+  static const int dailyMeditationReminderNotificationId = 5002;
+  static const int dailySleepBedtimeReminderNotificationId = 7001;
+  static const int sleepWakeNotificationId = 7002;
+  static const int _todoNotificationBaseId = 600000;
   static const String _channelId = 'fasting_complete_channel';
   static const String _channelName = 'Fasting reminders';
   static const String _channelDescription =
@@ -25,6 +30,23 @@ class FastingNotificationService {
   static const String _fastingOngoingChannelName = 'Fasting in progress';
   static const String _fastingOngoingChannelDescription =
       'Shows when a fasting timer is currently running.';
+  static const String _meditationChannelId = 'meditation_reminders_channel';
+  static const String _meditationChannelName = 'Meditation reminders';
+  static const String _meditationChannelDescription =
+      'Reminds you to meditate and alerts you when meditation is complete.';
+  static const String _todoChannelId = 'todo_reminders_channel';
+  static const String _todoChannelName = 'To-do reminders';
+  static const String _todoChannelDescription =
+      'Reminds you when a to-do task is due.';
+  static const String _sleepBedtimeChannelId = 'sleep_bedtime_channel';
+  static const String _sleepBedtimeChannelName = 'Sleep bedtime reminders';
+  static const String _sleepBedtimeChannelDescription =
+      'Reminds you when it is time to prepare for sleep.';
+  static const String _sleepWakeAlarmChannelId = 'sleep_wake_alarm_channel';
+  static const String _sleepWakeVibrateChannelId = 'sleep_wake_vibrate_channel';
+  static const String _sleepWakeSilentChannelId = 'sleep_wake_silent_channel';
+  static const String _sleepWakeChannelDescription =
+      'Alerts you when your sleep goal is complete.';
 
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
@@ -131,6 +153,308 @@ class FastingNotificationService {
   Future<void> cancelFastingCompleteNotification() async {
     await initialize();
     await _notifications.cancel(id: fastingCompleteNotificationId);
+  }
+
+  Future<void> scheduleMeditationCompleteNotification({
+    required DateTime endsAt,
+  }) async {
+    await initialize();
+
+    if (!endsAt.isAfter(DateTime.now())) {
+      await cancelMeditationCompleteNotification();
+      return;
+    }
+
+    try {
+      await _notifications.zonedSchedule(
+        id: meditationCompleteNotificationId,
+        title: 'Meditation complete',
+        body:
+            'Your meditation session is over. Take a soft breath before moving on.',
+        scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _meditationChannelId,
+            _meditationChannelName,
+            channelDescription: _meditationChannelDescription,
+            importance: Importance.max,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'meditation_complete',
+      );
+    } catch (error) {
+      debugPrint(
+        'Exact meditation notification scheduling failed, retrying inexact: $error',
+      );
+      await _notifications.zonedSchedule(
+        id: meditationCompleteNotificationId,
+        title: 'Meditation complete',
+        body:
+            'Your meditation session is over. Take a soft breath before moving on.',
+        scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _meditationChannelId,
+            _meditationChannelName,
+            channelDescription: _meditationChannelDescription,
+            importance: Importance.max,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'meditation_complete',
+      );
+    }
+  }
+
+  Future<void> showMeditationCompleteNotification() async {
+    await initialize();
+
+    await _notifications.show(
+      id: meditationCompleteNotificationId,
+      title: 'Meditation complete',
+      body:
+          'Your meditation session is over. Take a soft breath before moving on.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _meditationChannelId,
+          _meditationChannelName,
+          channelDescription: _meditationChannelDescription,
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      payload: 'meditation_complete',
+    );
+  }
+
+  Future<void> cancelMeditationCompleteNotification() async {
+    await initialize();
+    await _notifications.cancel(id: meditationCompleteNotificationId);
+  }
+
+  Future<void> scheduleDailyMeditationReminder({
+    int hour = 20,
+    int minute = 0,
+  }) async {
+    await initialize();
+
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduledDate = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      hour,
+      minute,
+    );
+
+    if (!scheduledDate.isAfter(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+
+    await _notifications.zonedSchedule(
+      id: dailyMeditationReminderNotificationId,
+      title: 'Time to meditate',
+      body: 'A short mindful pause can help your day feel lighter.',
+      scheduledDate: scheduledDate,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _meditationChannelId,
+          _meditationChannelName,
+          channelDescription: _meditationChannelDescription,
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+      payload: 'daily_meditation_reminder',
+    );
+  }
+
+  Future<void> scheduleTodoDueNotification({
+    required String taskId,
+    required String title,
+    required DateTime dueDate,
+  }) async {
+    await initialize();
+
+    final now = tz.TZDateTime.now(tz.local);
+    final today = DateTime(now.year, now.month, now.day);
+    final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+
+    if (dueDay.isBefore(today)) {
+      await cancelTodoDueNotification(taskId);
+      return;
+    }
+
+    var scheduledDate = tz.TZDateTime(
+      tz.local,
+      dueDate.year,
+      dueDate.month,
+      dueDate.day,
+      9,
+    );
+
+    if (!scheduledDate.isAfter(now)) {
+      scheduledDate = now.add(const Duration(minutes: 1));
+    }
+
+    await _notifications.zonedSchedule(
+      id: _todoNotificationId(taskId),
+      title: 'Task due today',
+      body: title.trim().isEmpty ? 'You have a task due today.' : title.trim(),
+      scheduledDate: scheduledDate,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _todoChannelId,
+          _todoChannelName,
+          channelDescription: _todoChannelDescription,
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: null,
+      payload: 'todo_due:$taskId',
+    );
+  }
+
+  Future<void> cancelTodoDueNotification(String taskId) async {
+    await initialize();
+    await _notifications.cancel(id: _todoNotificationId(taskId));
+  }
+
+  Future<void> scheduleDailySleepBedtimeReminder({
+    required int hour,
+    required int minute,
+  }) async {
+    await initialize();
+
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduledDate = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      hour,
+      minute,
+    );
+
+    if (!scheduledDate.isAfter(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+
+    await _notifications.zonedSchedule(
+      id: dailySleepBedtimeReminderNotificationId,
+      title: 'Bedtime reminder',
+      body: 'It is time to wind down and start your sleep routine.',
+      scheduledDate: scheduledDate,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _sleepBedtimeChannelId,
+          _sleepBedtimeChannelName,
+          channelDescription: _sleepBedtimeChannelDescription,
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+      payload: 'sleep_bedtime_reminder',
+    );
+  }
+
+  Future<void> scheduleSleepWakeNotification({
+    required DateTime wakesAt,
+    required int goalHours,
+    required String mode,
+  }) async {
+    await initialize();
+
+    if (!wakesAt.isAfter(DateTime.now())) {
+      await cancelSleepWakeNotification();
+      return;
+    }
+
+    final normalizedMode = mode.trim().toLowerCase();
+    final isSilent = normalizedMode == 'silent';
+    final isVibrate = normalizedMode == 'vibrate';
+    final androidDetails = AndroidNotificationDetails(
+      isSilent
+          ? _sleepWakeSilentChannelId
+          : isVibrate
+              ? _sleepWakeVibrateChannelId
+              : _sleepWakeAlarmChannelId,
+      isSilent
+          ? 'Sleep wake silent'
+          : isVibrate
+              ? 'Sleep wake vibrate'
+              : 'Sleep wake alarm',
+      channelDescription: _sleepWakeChannelDescription,
+      importance: isSilent ? Importance.low : Importance.max,
+      priority: isSilent ? Priority.low : Priority.high,
+      playSound: !isSilent && !isVibrate,
+      enableVibration: !isSilent,
+      category: AndroidNotificationCategory.alarm,
+    );
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: false,
+      presentSound: !isSilent && !isVibrate,
+      interruptionLevel: isSilent
+          ? InterruptionLevel.passive
+          : InterruptionLevel.timeSensitive,
+    );
+
+    try {
+      await _notifications.zonedSchedule(
+        id: sleepWakeNotificationId,
+        title: 'Wake up',
+        body: 'Your $goalHours-hour sleep goal is complete.',
+        scheduledDate: tz.TZDateTime.from(wakesAt, tz.local),
+        notificationDetails: NotificationDetails(
+          android: androidDetails,
+          iOS: iosDetails,
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'sleep_wake',
+      );
+    } catch (error) {
+      debugPrint(
+        'Exact sleep wake notification scheduling failed, retrying inexact: $error',
+      );
+      await _notifications.zonedSchedule(
+        id: sleepWakeNotificationId,
+        title: 'Wake up',
+        body: 'Your $goalHours-hour sleep goal is complete.',
+        scheduledDate: tz.TZDateTime.from(wakesAt, tz.local),
+        notificationDetails: NotificationDetails(
+          android: androidDetails,
+          iOS: iosDetails,
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'sleep_wake',
+      );
+    }
+  }
+
+  Future<void> cancelSleepWakeNotification() async {
+    await initialize();
+    await _notifications.cancel(id: sleepWakeNotificationId);
   }
 
   Future<void> showFastingOngoingNotification({
@@ -250,6 +574,14 @@ class FastingNotificationService {
   Future<void> cancelWalkTrackingNotification() async {
     await initialize();
     await _notifications.cancel(id: walkTrackingNotificationId);
+  }
+
+  int _todoNotificationId(String taskId) {
+    var hash = 0;
+    for (final codeUnit in taskId.codeUnits) {
+      hash = ((hash * 31) + codeUnit) & 0x7fffffff;
+    }
+    return _todoNotificationBaseId + (hash % 1000000);
   }
 
   String _formatDuration(Duration duration) {
