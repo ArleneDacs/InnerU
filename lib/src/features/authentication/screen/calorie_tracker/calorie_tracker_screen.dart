@@ -5,11 +5,13 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/barcode_scanner_screen.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:selfcare_projects/src/services/ollama_nutrition_service.dart';
 
 class CalorieTrackerScreen extends StatefulWidget {
   const CalorieTrackerScreen({super.key});
@@ -142,6 +144,20 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     'slice',
     'serving',
   ];
+  static const Map<String, String> _measurementUnitLabels = {
+    'piece': 'pc',
+    'g': 'g',
+    'kg': 'kg',
+    'oz': 'oz',
+    'lb': 'lb',
+    'ml': 'ml',
+    'liter': 'l',
+    'cup': 'cup',
+    'tbsp': 'tbsp',
+    'tsp': 'tsp',
+    'slice': 'sl',
+    'serving': 'srv',
+  };
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -161,12 +177,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   bool _isLookingUpFood = false;
   bool _isSearchingSuggestions = false;
   bool _isCapturingMealPhoto = false;
+  bool _isAnalyzingMealPhoto = false;
+  bool _isCheckingOllamaStatus = false;
   bool _showPresetFoods = false;
   bool _showGoalHintBubble = false;
+  bool? _isOllamaReachable;
   String _selectedMealType = 'Breakfast';
   String _selectedMeasurementUnit = 'piece';
   String _selectedHistoryDateKey = '';
+  late DateTime _historyWeekStart;
   String? _mealPhotoPath;
+  String _ollamaStatusMessage =
+      'Saved foods are reused first. AI is only used for new foods.';
   List<_NutritionLookupResult> _onlineSuggestions = [];
 
   String get _userId => _auth.currentUser!.uid;
@@ -178,12 +200,19 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       .collection('calorie_logs')
       .doc(_todayKey);
 
+  CollectionReference<Map<String, dynamic>> get _foodMemoryRef => _firestore
+      .collection('users')
+      .doc(_userId)
+      .collection('food_memory');
+
   @override
   void initState() {
     super.initState();
     _selectedHistoryDateKey = _todayKey;
+    _historyWeekStart = _startOfWeekSunday(DateTime.now());
     _loadGoal();
     _showGoalHint();
+    _refreshOllamaStatus();
   }
 
   void _showGoalHint() {
@@ -278,6 +307,35 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _refreshOllamaStatus() async {
+    if (_isCheckingOllamaStatus) return;
+
+    setState(() {
+      _isCheckingOllamaStatus = true;
+    });
+
+    try {
+      final status = await OllamaNutritionService.instance.checkStatus();
+      if (!mounted) return;
+      setState(() {
+        _isOllamaReachable = status.isReachable;
+        _ollamaStatusMessage = status.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isOllamaReachable = false;
+        _ollamaStatusMessage =
+            'Saved foods and regular nutrition lookup are still available.';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingOllamaStatus = false;
+      });
+    }
   }
 
   Future<void> _saveGoalValue(int goal) async {
@@ -537,9 +595,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       if (!mounted) return;
       setState(() {
         _mealPhotoPath = image.path;
+        _selectedMeasurementUnit = 'g';
       });
 
-      await _promptCameraMealLabel();
+      final autoDetected = await _analyzeCapturedMealPhoto(image.path);
+      if (!autoDetected) {
+        await _promptCameraMealLabel();
+      }
     } catch (_) {
       _showSnackBar('Could not open the camera.');
     } finally {
@@ -586,6 +648,143 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     await _ensureNutritionForMeal(mealName);
   }
 
+  Future<bool> _analyzeCapturedMealPhoto(String imagePath) async {
+    if (_isAnalyzingMealPhoto) return false;
+
+    setState(() {
+      _isAnalyzingMealPhoto = true;
+    });
+
+    final labeler = ImageLabeler(
+      options: ImageLabelerOptions(confidenceThreshold: 0.65),
+    );
+
+    try {
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final labels = await labeler.processImage(inputImage);
+      final detectedMealName = await _bestDetectedMealName(labels);
+      if (!mounted || detectedMealName == null || detectedMealName.isEmpty) {
+        return false;
+      }
+
+      _mealController.text = detectedMealName;
+      _handleMealNameChanged(detectedMealName);
+      final nutrition = await _ensureNutritionForMeal(detectedMealName);
+
+      if (!mounted) return false;
+      if (nutrition != null ||
+          (int.tryParse(_calorieController.text.trim()) ?? 0) > 0) {
+        final reusedSavedFood =
+            nutrition?.subtitle == 'Saved from your previous logs';
+        _showSnackBar(
+          reusedSavedFood
+              ? 'Matched $detectedMealName from your saved food history.'
+              : 'Detected $detectedMealName and filled calories automatically.',
+        );
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      debugPrint('Meal photo analysis failed: $error');
+      return false;
+    } finally {
+      await labeler.close();
+      if (mounted) {
+        setState(() {
+          _isAnalyzingMealPhoto = false;
+        });
+      }
+    }
+  }
+
+  Future<String?> _bestDetectedMealName(List<ImageLabel> labels) async {
+    if (labels.isEmpty) return null;
+
+    const ignoredLabels = {
+      'food',
+      'dish',
+      'cuisine',
+      'ingredient',
+      'tableware',
+      'table',
+      'recipe',
+      'plate',
+      'produce',
+      'meal',
+      'superfood',
+    };
+
+    final candidates = labels
+        .map((label) => label.label.trim())
+        .where((label) => label.isNotEmpty)
+        .map((label) => label.toLowerCase())
+        .where((label) => !ignoredLabels.contains(label))
+        .toList();
+
+    for (final candidate in candidates) {
+      final cached = await _lookupFoodMemory(candidate);
+      if (cached != null) {
+        _applyOnlineSuggestion(cached);
+        return cached.displayName;
+      }
+    }
+
+    for (final candidate in candidates) {
+      final preset = _findPresetFood(candidate);
+      if (preset != null) {
+        return preset.name;
+      }
+    }
+
+    for (final candidate in candidates) {
+      try {
+        final suggestions = await _fetchOnlineSuggestions(candidate, limit: 1);
+        if (suggestions.isNotEmpty) {
+          return suggestions.first.displayName;
+        }
+      } catch (_) {
+        // Keep trying other labels or fall back to manual input.
+      }
+    }
+
+    final ollamaEstimate = await _estimateMealWithOllama(_mealPhotoPath);
+    if (ollamaEstimate != null) {
+      final result = _NutritionLookupResult(
+        displayName: ollamaEstimate.mealName,
+        calories: ollamaEstimate.calories,
+        protein: ollamaEstimate.protein,
+        carbs: ollamaEstimate.carbs,
+        fat: ollamaEstimate.fat,
+        subtitle: 'Estimated by local AI',
+      );
+      _applyOnlineSuggestion(result);
+      await _saveFoodMemory(
+        ollamaEstimate.mealName,
+        result,
+        source: 'ollama_image_estimate',
+      );
+      return result.displayName;
+    }
+
+    return null;
+  }
+
+  Future<OllamaNutritionEstimate?> _estimateMealWithOllama(
+    String? imagePath,
+  ) async {
+    if (imagePath == null || imagePath.isEmpty) return null;
+
+    try {
+      return await OllamaNutritionService.instance.estimateNutritionFromImage(
+        imagePath: imagePath,
+      );
+    } catch (error) {
+      debugPrint('Ollama image estimate failed: $error');
+      return null;
+    }
+  }
+
   Future<String?> _uploadMealPhotoIfNeeded() async {
     final photoPath = _mealPhotoPath;
     if (photoPath == null || photoPath.isEmpty) return null;
@@ -620,6 +819,68 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     });
   }
 
+  String _foodMemoryKey(String mealName) {
+    return mealName
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  Future<_NutritionLookupResult?> _lookupFoodMemory(String mealName) async {
+    final key = _foodMemoryKey(mealName);
+    if (key.isEmpty) return null;
+
+    try {
+      final snapshot = await _foodMemoryRef.doc(key).get();
+      final data = snapshot.data();
+      if (data == null) return null;
+
+      final calories = (data['calories'] as num?)?.toInt();
+      if (calories == null || calories <= 0) return null;
+
+      return _NutritionLookupResult(
+        displayName: (data['displayName'] as String?)?.trim().isNotEmpty == true
+            ? (data['displayName'] as String).trim()
+            : mealName,
+        calories: calories,
+        protein: (data['protein'] as num?)?.toInt() ?? 0,
+        carbs: (data['carbs'] as num?)?.toInt() ?? 0,
+        fat: (data['fat'] as num?)?.toInt() ?? 0,
+        subtitle: 'Saved from your previous logs',
+      );
+    } catch (error) {
+      debugPrint('Food memory lookup failed: $error');
+      return null;
+    }
+  }
+
+  Future<void> _saveFoodMemory(
+    String mealName,
+    _NutritionLookupResult nutrition, {
+    String source = 'manual',
+  }) async {
+    final key = _foodMemoryKey(mealName);
+    if (key.isEmpty) return;
+
+    try {
+      await _foodMemoryRef.doc(key).set({
+        'key': key,
+        'displayName': nutrition.displayName,
+        'lookupName': mealName.trim(),
+        'calories': nutrition.calories,
+        'protein': nutrition.protein,
+        'carbs': nutrition.carbs,
+        'fat': nutrition.fat,
+        'source': source,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (error) {
+      debugPrint('Failed to save food memory: $error');
+    }
+  }
+
   Future<void> _addMeal() async {
     final mealName = _mealController.text.trim();
     if (mealName.isEmpty) {
@@ -643,6 +904,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
 
     try {
+      await _saveFoodMemory(
+        mealName,
+        _NutritionLookupResult(
+          displayName: mealName,
+          calories: calories,
+          protein: protein,
+          carbs: carbs,
+          fat: fat,
+        ),
+        source: 'meal_log',
+      );
+
       final photoUrl = await _uploadMealPhotoIfNeeded();
       final quantity = double.tryParse(_quantityController.text.trim());
 
@@ -979,6 +1252,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final existingCalories = int.tryParse(_calorieController.text.trim());
     if (existingCalories != null && existingCalories > 0) return null;
 
+    final cached = await _lookupFoodMemory(mealName);
+    if (cached != null) {
+      _applyOnlineSuggestion(cached);
+      return cached;
+    }
+
     final measuredAmount = _calculateAmountFromFields(mealName);
     if (measuredAmount != null) {
       _applyFoodAmount(measuredAmount);
@@ -1030,6 +1309,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       if (suggestions.isEmpty) return null;
       final result = suggestions.first;
       _applyOnlineSuggestion(result);
+      await _saveFoodMemory(mealName, result, source: 'online_lookup');
       return result;
     } on TimeoutException {
       _showSnackBar('Food lookup timed out. You can still enter calories manually.');
@@ -1244,6 +1524,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   DateTime _startOfWeekSunday(DateTime date) {
     final offset = date.weekday % 7;
     return DateTime(date.year, date.month, date.day).subtract(Duration(days: offset));
+  }
+
+  String _historyWeekLabel(DateTime weekStart) {
+    final weekEnd = weekStart.add(const Duration(days: 6));
+    if (weekStart.month == weekEnd.month) {
+      return '${DateFormat('MMMM').format(weekStart)} ${weekStart.year}';
+    }
+    if (weekStart.year == weekEnd.year) {
+      return '${DateFormat('MMM').format(weekStart)} - ${DateFormat('MMM').format(weekEnd)} ${weekStart.year}';
+    }
+    return '${DateFormat('MMM yyyy').format(weekStart)} - ${DateFormat('MMM yyyy').format(weekEnd)}';
   }
 
   @override
@@ -1560,7 +1851,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     List<QueryDocumentSnapshot<Map<String, dynamic>>> dayDocs,
   ) {
     final now = DateTime.now();
-    final weekStart = _startOfWeekSunday(now);
+    final currentWeekStart = _startOfWeekSunday(now);
+    final weekStart = _historyWeekStart;
+    final canGoNext = weekStart.isBefore(currentWeekStart);
     final logsByDate = {
       for (final doc in dayDocs) doc.id: doc.data(),
     };
@@ -1589,12 +1882,35 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
               const Spacer(),
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _historyWeekStart = weekStart.subtract(const Duration(days: 7));
+                  });
+                },
+                icon: const Icon(Icons.chevron_left_rounded),
+                visualDensity: VisualDensity.compact,
+                color: const Color(0xFF4D6A45),
+              ),
               Text(
-                DateFormat('MMMM yyyy').format(now),
+                _historyWeekLabel(weekStart),
                 style: const TextStyle(
                   color: Colors.black54,
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+              IconButton(
+                onPressed: canGoNext
+                    ? () {
+                        setState(() {
+                          _historyWeekStart =
+                              weekStart.add(const Duration(days: 7));
+                        });
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_right_rounded),
+                visualDensity: VisualDensity.compact,
+                color: const Color(0xFF4D6A45),
               ),
             ],
           ),
@@ -1613,6 +1929,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   onTap: () {
                     setState(() {
                       _selectedHistoryDateKey = key;
+                      _historyWeekStart = _startOfWeekSunday(date);
                     });
                   },
                   child: AnimatedContainer(
@@ -1758,17 +2075,32 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
   Widget _numberField(
     TextEditingController controller,
-    String hint, {
-    String? helper,
+    String label, {
+    String? hint,
+    String? suffix,
+    String? previewSuffix,
   }) {
+    final rawValue = controller.text.trim();
+    final previewValue = rawValue.isEmpty
+        ? null
+        : previewSuffix == null || previewSuffix.isEmpty
+            ? rawValue
+            : '$rawValue $previewSuffix';
+
     return Expanded(
       child: TextField(
         controller: controller,
         keyboardType: TextInputType.number,
+        onChanged: (_) {
+          if (!mounted) return;
+          setState(() {});
+        },
         decoration: InputDecoration(
-          hintText: hint,
-          helperText: helper,
-          helperMaxLines: 1,
+          labelText: label,
+          hintText: hint ?? label,
+          helperText: previewValue,
+          helperMaxLines: previewValue == null ? null : 1,
+          suffixText: suffix,
           filled: true,
           fillColor: const Color(0xFFF8FAF5),
           border: OutlineInputBorder(
@@ -1818,9 +2150,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Text(
-              'Meal photo ready. Add a food name and we will fill calories automatically.',
+              _isAnalyzingMealPhoto
+                  ? 'Analyzing your meal photo and filling calories...'
+                  : 'Meal photo ready. We will auto-fill calories when the food is detected.',
             ),
           ),
           IconButton(
@@ -1831,6 +2165,124 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             },
             icon: const Icon(Icons.close),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCapturedMealFieldsHint() {
+    if (_mealPhotoPath == null || _mealPhotoPath!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F7F0),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Captured meal',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF4D6A45),
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Check the Food Name first, then enter the Grams so calories match the portion more accurately.',
+            style: TextStyle(
+              color: Colors.black54,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOllamaStatusBanner() {
+    final bool isReady = _isOllamaReachable == true;
+    final Color tint = isReady
+        ? const Color(0xFFE6F3E0)
+        : const Color(0xFFF5F0DE);
+    final Color iconColor = isReady
+        ? const Color(0xFF4D6A45)
+        : const Color(0xFF8B6F2D);
+    final String title = _isCheckingOllamaStatus
+        ? 'Checking AI calorie assist'
+        : isReady
+            ? 'AI calorie assist is ready'
+            : 'Using saved foods and regular lookup';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: tint,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _isCheckingOllamaStatus
+                ? const Padding(
+                    padding: EdgeInsets.all(9),
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  )
+                : Icon(
+                    isReady
+                        ? Icons.auto_awesome_rounded
+                        : Icons.inventory_2_outlined,
+                    color: iconColor,
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _isCheckingOllamaStatus
+                      ? 'Saved foods are reused first while we check the AI connection.'
+                      : _ollamaStatusMessage,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!_isCheckingOllamaStatus)
+            IconButton(
+              onPressed: _refreshOllamaStatus,
+              tooltip: 'Refresh AI status',
+              icon: const Icon(Icons.refresh_rounded),
+              color: iconColor,
+              visualDensity: VisualDensity.compact,
+            ),
         ],
       ),
     );
@@ -2042,7 +2494,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 .doc(_userId)
                 .collection('calorie_logs')
                 .orderBy(FieldPath.documentId, descending: true)
-                .limit(14)
+                .limit(90)
                 .snapshots(),
             builder: (context, historySnapshot) {
               final dayDocs = historySnapshot.data?.docs ?? [];
@@ -2122,6 +2574,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         children: [
                           _buildMealTypeSelector(),
                           const SizedBox(height: 12),
+                          _buildCapturedMealFieldsHint(),
                           Autocomplete<_PresetFood>(
                             optionsBuilder: (textEditingValue) {
                               final query = textEditingValue.text.trim().toLowerCase();
@@ -2148,9 +2601,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                   _handleMealNameChanged(value);
                                 },
                                   decoration: InputDecoration(
-                                    hintText: 'Meal or snack',
+                                    labelText: _mealPhotoPath == null
+                                        ? 'Food Name'
+                                        : 'Food Name',
+                                    hintText: _mealPhotoPath == null
+                                        ? 'Meal or snack'
+                                        : 'Detected food name',
                                     helperText:
-                                      'Use food name plus quantity/unit below for better accuracy.',
+                                      _mealPhotoPath == null
+                                          ? 'Use food name plus quantity/unit below for better accuracy.'
+                                          : 'Review the detected food name before saving.',
                                     filled: true,
                                   fillColor: const Color(0xFFF8FAF5),
                                   border: OutlineInputBorder(
@@ -2178,8 +2638,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                     _handleMealNameChanged(_mealController.text.trim());
                                   },
                                   decoration: InputDecoration(
-                                    hintText: 'Quantity',
-                                    helperText: 'Example: 2, 150, 0.5',
+                                    labelText: _mealPhotoPath == null
+                                        ? 'Quantity'
+                                        : 'Quantity',
+                                    hintText: _mealPhotoPath == null
+                                        ? 'Enter amount'
+                                        : 'Enter amount',
                                     filled: true,
                                     fillColor: const Color(0xFFF8FAF5),
                                     border: OutlineInputBorder(
@@ -2198,7 +2662,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                 child: DropdownButtonFormField<String>(
                                   initialValue: _selectedMeasurementUnit,
                                   decoration: InputDecoration(
-                                    labelText: 'Measurement',
+                                    labelText: _mealPhotoPath == null
+                                        ? 'Measurement'
+                                        : 'Unit',
                                     filled: true,
                                     fillColor: const Color(0xFFF8FAF5),
                                     border: OutlineInputBorder(
@@ -2213,7 +2679,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                   items: _measurementUnits.map((unit) {
                                     return DropdownMenuItem<String>(
                                       value: unit,
-                                      child: Text(unit),
+                                      child: Text(
+                                        _measurementUnitLabels[unit] ?? unit,
+                                      ),
                                     );
                                   }).toList(),
                                   onChanged: (value) {
@@ -2269,6 +2737,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               ),
                             ),
                           ],
+                          const SizedBox(height: 12),
+                          _buildOllamaStatusBanner(),
                           const SizedBox(height: 12),
                           Material(
                             color: const Color(0xFFF4F7F0),
@@ -2340,13 +2810,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               _numberField(
                                 _calorieController,
                                 'Calories',
-                                helper: 'Example: 200 cal',
+                                hint: '200',
+                                suffix: 'cal',
+                                previewSuffix: 'cal',
                               ),
                               const SizedBox(width: 10),
                               _numberField(
                                 _proteinController,
                                 'Protein',
-                                helper: 'Example: 20 g',
+                                hint: '20',
+                                suffix: 'g',
+                                previewSuffix: 'g protein',
                               ),
                             ],
                           ),
@@ -2356,13 +2830,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               _numberField(
                                 _carbController,
                                 'Carbs',
-                                helper: 'Example: 30 g',
+                                hint: '30',
+                                suffix: 'g',
+                                previewSuffix: 'g carbs',
                               ),
                               const SizedBox(width: 10),
                               _numberField(
                                 _fatController,
                                 'Fat',
-                                helper: 'Example: 10 g',
+                                hint: '10',
+                                suffix: 'g',
+                                previewSuffix: 'g fat',
                               ),
                             ],
                           ),

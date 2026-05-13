@@ -25,19 +25,33 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with TickerProviderStateMixin {
   String quote = "Your daily inspiration...";
   String author = "Unknown";
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
+  final Set<String> _pressedTiles = <String>{};
+  final GlobalKey _dashboardStackKey = GlobalKey();
+  late final AnimationController _introController;
+  late final AnimationController _tileTransitionController;
+  _DashboardTileTransition? _activeTileTransition;
 
   String get _todayDate => DateTime.now().toString().split(' ')[0];
 
   @override
   void initState() {
     super.initState();
+    _introController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 950),
+    )..forward();
+    _tileTransitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
     _fetchProfilePic();
     fetchQuote();
     _loadTodayEmotion();
@@ -145,11 +159,526 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Text(
       title,
       style: const TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.35,
+        color: Color(0xFF24311F),
       ),
     );
+  }
+
+  Widget _buildIntroMotion({
+    required Widget child,
+    required double start,
+    required double end,
+    double yOffset = 0.04,
+  }) {
+    final animation = CurvedAnimation(
+      parent: _introController,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (context, child) {
+        final value = animation.value;
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, (1 - value) * 36 * yOffset * 4),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Future<Coach?> _loadAssignedCoach(String coachId) async {
+    final firestore = FirebaseFirestore.instance;
+
+    final coachDoc = await firestore.collection('coaches').doc(coachId).get();
+    if (coachDoc.exists) {
+      final data = coachDoc.data() ?? <String, dynamic>{};
+      return Coach(
+        id: coachDoc.id,
+        name: (data['fullName'] as String?)?.trim().isNotEmpty == true
+            ? (data['fullName'] as String).trim()
+            : ((data['username'] as String?)?.trim().isNotEmpty == true
+                ? (data['username'] as String).trim()
+                : 'My Coach'),
+        phone: (data['phone'] as String?)?.trim().isNotEmpty == true
+            ? (data['phone'] as String).trim()
+            : ((data['phonenumber'] as String?)?.trim() ?? ''),
+        bio: (data['bio'] as String?)?.trim() ?? 'Your support coach',
+        profilePic: (data['profilePic'] as String?)?.trim() ?? '',
+        backgroundColor: const Color(0xFFDCE5D4),
+      );
+    }
+
+    final userDoc = await firestore.collection('users').doc(coachId).get();
+    final userData = userDoc.data();
+    if (userData == null) return null;
+
+    final role = (userData['role'] as String?)?.toLowerCase().trim();
+    final isCoach = userData['isCoach'] == true || role == 'coach';
+    if (!isCoach) return null;
+
+    return Coach(
+      id: userDoc.id,
+      name: (userData['fullName'] as String?)?.trim().isNotEmpty == true
+          ? (userData['fullName'] as String).trim()
+          : ((userData['username'] as String?)?.trim().isNotEmpty == true
+              ? (userData['username'] as String).trim()
+              : 'My Coach'),
+      phone: (userData['phone'] as String?)?.trim().isNotEmpty == true
+          ? (userData['phone'] as String).trim()
+          : ((userData['phonenumber'] as String?)?.trim() ?? ''),
+      bio: (userData['bio'] as String?)?.trim() ?? 'Your support coach',
+      profilePic: (userData['profilePic'] as String?)?.trim() ?? '',
+      backgroundColor: const Color(0xFFDCE5D4),
+    );
+  }
+
+  Widget _buildBackdropOrb({
+    required double size,
+    required List<Color> colors,
+  }) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: colors,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTileFace({
+    required String title,
+    required String description,
+    required IconData icon,
+    required Color color,
+    bool isPressed = false,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      height: 184,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withOpacity(0.72)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.82),
+            Color.alphaBlend(const Color(0x1FFFFFFF), color),
+            Color.alphaBlend(
+              const Color(0x40FFFFFF),
+              color,
+            ),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
+            blurRadius: isPressed ? 16 : 26,
+            offset: Offset(0, isPressed ? 8 : 14),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -28,
+            right: -18,
+            child: Container(
+              width: 126,
+              height: 126,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.white.withOpacity(0.36),
+                    Colors.white.withOpacity(0.02),
+                  ],
+                ),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -18,
+            left: -14,
+            child: Transform.rotate(
+              angle: -0.45,
+              child: Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.06),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 58,
+            right: 42,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(32),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.1),
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.06),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 18,
+            right: 18,
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.62),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white.withOpacity(0.6)),
+              ),
+              child: Icon(
+                icon,
+                color: const Color(0xFF53654C),
+                size: 27,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.38),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    "Daily practice",
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                      color: Color(0xFF697960),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1F2A1A),
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    height: 1.45,
+                    color: Color(0xFF43523D),
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const Text(
+                      "Open",
+                      style: TextStyle(
+                        color: Color(0xFF506149),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.56),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 15,
+                        color: Color(0xFF506149),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runTileTransition({
+    required BuildContext tileContext,
+    required String tileKey,
+    required String title,
+    required String description,
+    required IconData icon,
+    required Color color,
+    required Widget destinationPage,
+    int? setupIndex,
+  }) async {
+    if (_activeTileTransition != null) return;
+
+    final stackContext = _dashboardStackKey.currentContext;
+    if (stackContext == null) return;
+
+    final tileBox = tileContext.findRenderObject() as RenderBox?;
+    final stackBox = stackContext.findRenderObject() as RenderBox?;
+    if (tileBox == null || stackBox == null) return;
+
+    final topLeft = stackBox.globalToLocal(tileBox.localToGlobal(Offset.zero));
+    final rect = topLeft & tileBox.size;
+
+    setState(() {
+      _pressedTiles.remove(tileKey);
+      _activeTileTransition = _DashboardTileTransition(
+        tileKey: tileKey,
+        rect: rect,
+        title: title,
+        description: description,
+        icon: icon,
+        color: color,
+      );
+    });
+
+    await _tileTransitionController.forward(from: 0);
+    if (!mounted) return;
+
+    final targetPage =
+        setupIndex != null ? Setuppage(initialIndex: setupIndex) : destinationPage;
+
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 360),
+        reverseTransitionDuration: const Duration(milliseconds: 260),
+        pageBuilder: (context, animation, secondaryAnimation) => targetPage,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 1.02, end: 1).animate(curved),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return;
+    _tileTransitionController.reset();
+    setState(() {
+      _activeTileTransition = null;
+    });
+  }
+
+  Widget _buildTileTransitionOverlay() {
+    final transition = _activeTileTransition;
+    if (transition == null) {
+      return const SizedBox.shrink();
+    }
+
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _tileTransitionController,
+        builder: (context, child) {
+          final t = Curves.easeInOutCubic.transform(_tileTransitionController.value);
+          final size = MediaQuery.of(context).size;
+          final targetWidth = size.width.clamp(280.0, 420.0) * 0.82;
+          final targetHeight = 260.0;
+          final targetRect = Rect.fromCenter(
+            center: Offset(size.width / 2, size.height / 2),
+            width: targetWidth,
+            height: targetHeight,
+          );
+          final moveT = Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
+          final scatterT = ((t - 0.58) / 0.42).clamp(0.0, 1.0);
+          final currentRect = Rect.lerp(transition.rect, targetRect, moveT)!;
+          final overlayOpacity = Tween<double>(begin: 0, end: 0.22).transform(t);
+          final tileOpacity = scatterT > 0
+              ? (1 - Curves.easeInCubic.transform(scatterT)).clamp(0.0, 1.0)
+                  .toDouble()
+              : 1.0;
+          final turns = scatterT > 0
+              ? Tween<double>(begin: 0, end: 1.12).transform(
+                  Curves.easeInOutCubic.transform(scatterT),
+                )
+              : 0.0;
+          final scaleBoost = scatterT > 0
+              ? Tween<double>(begin: 1.0, end: 1.12).transform(
+                  Curves.easeInOut.transform(scatterT),
+                )
+              : 1.0;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Opacity(
+                  opacity: overlayOpacity,
+                  child: Container(color: const Color(0xFF24311F)),
+                ),
+              ),
+              Positioned(
+                left: currentRect.left,
+                top: currentRect.top,
+                width: currentRect.width,
+                height: currentRect.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Opacity(
+                      opacity: tileOpacity,
+                      child: Transform.scale(
+                        scale: scaleBoost,
+                        child: Transform.rotate(
+                          angle: turns * 3.141592653589793 * 2,
+                          child: child,
+                        ),
+                      ),
+                    ),
+                    if (scatterT > 0)
+                      ..._buildTileScatterFragments(
+                        size: currentRect.size,
+                        color: transition.color,
+                        progress: scatterT,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+        child: _buildTileFace(
+          title: transition.title,
+          description: transition.description,
+          icon: transition.icon,
+          color: transition.color,
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildTileScatterFragments({
+    required Size size,
+    required Color color,
+    required double progress,
+  }) {
+    const fragments = [
+      (ax: -0.34, ay: -0.22, size: 26.0, radius: 10.0, dx: -120.0, dy: -88.0, rot: -0.9),
+      (ax: 0.28, ay: -0.18, size: 20.0, radius: 8.0, dx: 128.0, dy: -96.0, rot: 1.1),
+      (ax: -0.18, ay: 0.08, size: 22.0, radius: 9.0, dx: -96.0, dy: 24.0, rot: 0.8),
+      (ax: 0.16, ay: 0.16, size: 18.0, radius: 8.0, dx: 90.0, dy: 46.0, rot: -1.2),
+      (ax: -0.04, ay: 0.26, size: 24.0, radius: 10.0, dx: -18.0, dy: 136.0, rot: 1.0),
+      (ax: 0.34, ay: 0.02, size: 16.0, radius: 7.0, dx: 144.0, dy: 8.0, rot: 1.4),
+    ];
+
+    final eased = Curves.easeOutCubic.transform(progress);
+    final fade = (1 - Curves.easeInQuad.transform(progress))
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final center = Offset(size.width / 2, size.height / 2);
+
+    return fragments.map((fragment) {
+      final start = Offset(
+        center.dx + size.width * fragment.ax,
+        center.dy + size.height * fragment.ay,
+      );
+      final end = Offset(
+        start.dx + fragment.dx,
+        start.dy + fragment.dy,
+      );
+      final current = Offset.lerp(start, end, eased)!;
+
+      return Positioned(
+        left: current.dx - (fragment.size / 2),
+        top: current.dy - (fragment.size / 2),
+        child: Opacity(
+          opacity: fade,
+          child: Transform.rotate(
+            angle: fragment.rot * Curves.easeInOut.transform(progress) * 3.141592653589793,
+            child: Container(
+              width: fragment.size,
+              height: fragment.size,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(fragment.radius),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.84),
+                    Color.alphaBlend(const Color(0x33FFFFFF), color),
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withOpacity(0.14),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    _introController.dispose();
+    _tileTransitionController.dispose();
+    super.dispose();
   }
 
   Future<String> _getUsername() async {
@@ -485,12 +1014,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final horizontalPadding = screenWidth > 600 ? 28.0 : 20.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7F2),
+      backgroundColor: const Color(0xFFF7F6F1),
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
@@ -502,54 +1030,124 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           _buildInboxAction(),
-          IconButton(
-            icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
-            onPressed: () => BottomSheetWidget.show(context),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.76),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE8E2D6)),
+              ),
+              child: IconButton(
+                icon: const Icon(CupertinoIcons.line_horizontal_3, size: 24),
+                color: const Color(0xFF42523B),
+                onPressed: () => BottomSheetWidget.show(context),
+              ),
+            ),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(horizontalPadding, 8, horizontalPadding, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FutureBuilder<String>(
-              future: _getUsername(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.done &&
-                    snapshot.hasData) {
-                  UserPreferences.saveUsername(snapshot.data!);
-                }
-
-                final username = snapshot.connectionState == ConnectionState.waiting
-                    ? "there"
-                    : snapshot.data ?? "there";
-
-                return _buildWelcomeHero(
-                  context,
-                  username: username,
-                  quote: quote,
-                  author: author,
-                );
-              },
+      body: Stack(
+        key: _dashboardStackKey,
+        children: [
+          Positioned(
+            top: -56,
+            right: -36,
+            child: _buildBackdropOrb(
+              size: 220,
+              colors: [
+                const Color(0xFFFFF4E7).withOpacity(0.95),
+                const Color(0xFFFFF4E7).withOpacity(0),
+              ],
             ),
-            const SizedBox(height: 22),
-            _buildSectionTitle("Today's focus"),
-            const SizedBox(height: 6),
-            Text(
-              "Small actions, steady progress.",
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.black54,
-              ),
+          ),
+          Positioned(
+            top: 180,
+            left: -70,
+            child: _buildBackdropOrb(
+              size: 240,
+              colors: [
+                const Color(0xFFDDEBDD).withOpacity(0.82),
+                const Color(0xFFDDEBDD).withOpacity(0),
+              ],
             ),
-            const SizedBox(height: 16),
-            _buildActionRows(context),
-            const SizedBox(height: 28),
-            _buildCoachSection(context),
-            _buildMoodSection(context),
-            const SizedBox(height: 12),
-          ],
-        ),
+          ),
+          Positioned(
+            bottom: 80,
+            right: -58,
+            child: _buildBackdropOrb(
+              size: 190,
+              colors: [
+                const Color(0xFFE9E1F2).withOpacity(0.48),
+                const Color(0xFFE9E1F2).withOpacity(0),
+              ],
+            ),
+          ),
+          SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(horizontalPadding, 8, horizontalPadding, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildIntroMotion(
+                  start: 0.0,
+                  end: 0.42,
+                  child: FutureBuilder<String>(
+                    future: _getUsername(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.done &&
+                          snapshot.hasData) {
+                        UserPreferences.saveUsername(snapshot.data!);
+                      }
+
+                      final username = snapshot.connectionState == ConnectionState.waiting
+                          ? "there"
+                          : snapshot.data ?? "there";
+
+                      return _buildWelcomeHero(
+                        context,
+                        username: username,
+                        quote: quote,
+                        author: author,
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+                _buildIntroMotion(
+                  start: 0.1,
+                  end: 0.42,
+                  child: _buildQuickOverviewSection(),
+                ),
+                const SizedBox(height: 28),
+                _buildIntroMotion(
+                  start: 0.18,
+                  end: 0.62,
+                  child: _buildScrollableFeatureRail(context),
+                ),
+                const SizedBox(height: 28),
+                _buildIntroMotion(
+                  start: 0.28,
+                  end: 0.74,
+                  child: _buildDailyInsightsSection(),
+                ),
+                const SizedBox(height: 28),
+                _buildIntroMotion(
+                  start: 0.36,
+                  end: 0.82,
+                  child: _buildCoachSection(context),
+                ),
+                const SizedBox(height: 28),
+                _buildIntroMotion(
+                  start: 0.48,
+                  end: 1.0,
+                  child: _buildMoodSection(context),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+          _buildTileTransitionOverlay(),
+        ],
       ),
     );
   }
@@ -564,47 +1162,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(36),
+        border: Border.all(color: Colors.white.withOpacity(0.38)),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF90A17D),
-            Color(0xFFE6D1A9),
+            Color(0xFF9CB58F),
+            Color(0xFFC9B395),
+            Color(0xFFF2E4D0),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF90A17D).withOpacity(0.22),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
+            color: const Color(0xFF90A783).withOpacity(0.28),
+            blurRadius: 40,
+            offset: const Offset(0, 18),
           ),
         ],
       ),
       child: Stack(
         children: [
           Positioned(
-            top: -18,
-            right: -10,
+            top: -24,
+            right: -12,
             child: Container(
-              width: 110,
-              height: 110,
+              width: 146,
+              height: 146,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withOpacity(0.18),
                 shape: BoxShape.circle,
               ),
             ),
           ),
           Positioned(
-            bottom: -34,
-            left: -18,
+            bottom: -42,
+            left: -22,
             child: Container(
-              width: 120,
-              height: 120,
+              width: 138,
+              height: 138,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.12),
+                color: const Color(0xFFFFF7ED).withOpacity(0.26),
                 shape: BoxShape.circle,
               ),
             ),
@@ -612,49 +1212,106 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Text(
-                  "Daily reset",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.28),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: Colors.white.withOpacity(0.3)),
+                          ),
+                          child: const Text(
+                            "Daily reset",
+                            style: TextStyle(
+                              color: Color(0xFF355033),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "Hello, $username",
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: const Color(0xFF24311F),
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.8,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Your dashboard is ready with the habits that keep today balanced.",
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: const Color(0xFF42563E),
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                "Hello, $username",
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.6,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Make today feel lighter with one mindful habit at a time.",
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: Colors.white.withOpacity(0.88),
-                  height: 1.45,
-                ),
+                  const SizedBox(width: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.22),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Colors.white.withOpacity(0.28)),
+                    ),
+                    child: Column(
+                      children: const [
+                        Icon(
+                          CupertinoIcons.sun_max_fill,
+                          color: Color(0xFF4C5E44),
+                          size: 20,
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          "Today",
+                          style: TextStyle(
+                            color: Color(0xFF4C5E44),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildHeroStatChip(
+                      icon: CupertinoIcons.heart_fill,
+                      label: currentUserEmotion == null ? "Mood check" : "Mood logged",
+                      value: currentUserEmotion == null ? "Pending" : currentUserEmotion!,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildHeroStatChip(
+                      icon: CupertinoIcons.sparkles,
+                      label: "Focus",
+                      value: "5 routines",
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.16),
-                  ),
+                  color: Colors.white.withOpacity(0.34),
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: Colors.white.withOpacity(0.42)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,13 +1321,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Icon(
                           CupertinoIcons.quote_bubble_fill,
                           size: 18,
-                          color: Colors.white,
+                          color: Color(0xFF4F6047),
                         ),
                         SizedBox(width: 8),
                         Text(
                           "Today's note",
                           style: TextStyle(
-                            color: Colors.white,
+                            color: Color(0xFF4F6047),
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -680,17 +1338,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Text(
                       quote,
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        height: 1.45,
+                        color: Color(0xFF24311F),
+                        fontSize: 16,
+                        height: 1.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       author,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.82),
+                      style: const TextStyle(
+                        color: Color(0xFF61715B),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -705,195 +1363,454 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildHeroStatChip({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.24),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.24),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: const Color(0xFF42563E), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF52644D),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF24311F),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(
+    String title, {
+    required String subtitle,
+    String? actionLabel,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSectionTitle(title),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Color(0xFF5E6E57),
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (actionLabel != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              actionLabel,
+              style: const TextStyle(
+                color: Color(0xFF708467),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildGlassSectionCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(20),
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.white.withOpacity(0.74)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.92),
+            const Color(0xFFF6F1E8).withOpacity(0.88),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFD0D8C8).withOpacity(0.22),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildQuickOverviewSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          "Overview",
+          subtitle: "A quick scan of what matters most today.",
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildMiniOverviewCard(
+                icon: CupertinoIcons.heart_text_square_fill,
+                title: "Mood",
+                value: currentUserEmotion == null ? "Check in" : currentUserEmotion!,
+                accent: const Color(0xFFE8DCC9),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildMiniOverviewCard(
+                icon: CupertinoIcons.chat_bubble_2_fill,
+                title: "Support",
+                value: "Coach ready",
+                accent: const Color(0xFFDCE6D6),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMiniOverviewCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color accent,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.82),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.84)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.26),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: const Color(0xFF4A5E45), size: 21),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF65745E),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF24311F),
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildClickableInfoCard(
     BuildContext context,
+    String tileKey,
     String title,
     String description,
     IconData icon,
     Color color,
-    String imagePath,
     Widget destinationPage,
     {int? setupIndex,}
   ) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final cardWidth = ((screenWidth - 54) / 2).clamp(150.0, 220.0);
+    final cardWidth = (screenWidth * 0.72).clamp(220.0, 310.0);
+    final isPressed = _pressedTiles.contains(tileKey);
+    final isTransitioning = _activeTileTransition?.tileKey == tileKey;
 
     return SizedBox(
       width: cardWidth,
-      child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => setupIndex != null
-                  ? Setuppage(initialIndex: setupIndex)
-                  : destinationPage,
+      child: Opacity(
+        opacity: isTransitioning ? 0 : 1,
+        child: AnimatedScale(
+          scale: isPressed ? 0.97 : 1,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: AnimatedSlide(
+            offset: isPressed ? const Offset(0, 0.012) : Offset.zero,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: Builder(
+              builder: (tileContext) => GestureDetector(
+                onTapDown: (_) {
+                  setState(() {
+                    _pressedTiles.add(tileKey);
+                  });
+                },
+                onTapCancel: () {
+                  setState(() {
+                    _pressedTiles.remove(tileKey);
+                  });
+                },
+                onTapUp: (_) {
+                  setState(() {
+                    _pressedTiles.remove(tileKey);
+                  });
+                },
+                onTap: () {
+                  _runTileTransition(
+                    tileContext: tileContext,
+                    tileKey: tileKey,
+                    title: title,
+                    description: description,
+                    icon: icon,
+                    color: color,
+                    destinationPage: destinationPage,
+                    setupIndex: setupIndex,
+                  );
+                },
+                child: _buildTileFace(
+                  title: title,
+                  description: description,
+                  icon: icon,
+                  color: color,
+                  isPressed: isPressed,
+                ),
+              ),
             ),
-          );
-        },
-        child: Container(
-          height: 196,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
-              ),
-            ],
-            image: DecorationImage(
-              image: AssetImage(imagePath),
-              fit: BoxFit.cover,
-            ),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white.withOpacity(0.12),
-                        Colors.black.withOpacity(0.08),
-                        Colors.black.withOpacity(0.34),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 14,
-                left: 14,
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.82),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(icon, color: const Color(0xFF2D3A25), size: 18),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: const Text(
-                        "Wellness",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.35,
-                        color: Colors.white.withOpacity(0.82),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActionRows(BuildContext context) {
+  Widget _buildScrollableFeatureRail(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildClickableInfoCard(
-              context,
-              "Steps",
-              "Track your movement",
-              CupertinoIcons.flame_fill,
-              const Color(0xFFDDE7D5),
-              "assets/images/steps.gif",
-              StepTracker(),
-              setupIndex: 1,
-            ),
-            const SizedBox(width: 14),
-            _buildClickableInfoCard(
-              context,
-              "Meditate",
-              "Clear your mind",
-              CupertinoIcons.sparkles,
-              const Color(0xFFE8E3D8),
-              "assets/images/meditation.gif",
-              Meditation(),
-              setupIndex: 0,
-            ),
-          ],
+        _buildSectionHeader(
+          "Today's focus",
+          subtitle: "Scroll through the routines that keep your day steady.",
+          actionLabel: "Swipe",
         ),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildClickableInfoCard(
-              context,
-              "Fasting",
-              "Stay on your plan",
-              CupertinoIcons.timer_fill,
-              const Color(0xFFF2E5D2),
-              "assets/images/fasting.gif",
-              const FastingTimerScreen(),
-            ),
-            const SizedBox(width: 14),
-            _buildClickableInfoCard(
-              context,
-              "Calories",
-              "Log what you eat",
-              CupertinoIcons.leaf_arrow_circlepath,
-              const Color(0xFFE1EDDF),
-              "assets/images/calories1.gif",
-              const CalorieTrackerScreen(),
-            ),
-          ],
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 184,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            children: [
+              _buildClickableInfoCard(
+                context,
+                'steps_tile',
+                "Steps",
+                "Track your movement and keep your body active.",
+                CupertinoIcons.flame_fill,
+                const Color(0xFFDDE7D5),
+                StepTracker(),
+                setupIndex: 1,
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'meditate_tile',
+                "Meditate",
+                "Create a calm reset with a short guided session.",
+                CupertinoIcons.sparkles,
+                const Color(0xFFE8E3D8),
+                Meditation(),
+                setupIndex: 0,
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'fasting_tile',
+                "Fasting",
+                "Stay on your plan and watch the timer clearly.",
+                CupertinoIcons.timer_fill,
+                const Color(0xFFF2E5D2),
+                const FastingTimerScreen(),
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'calories_tile',
+                "Calories",
+                "Log meals and stay aware of your intake.",
+                CupertinoIcons.leaf_arrow_circlepath,
+                const Color(0xFFE1EDDF),
+                const CalorieTrackerScreen(),
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'sleep_tile',
+                "Sleep",
+                "Protect your recovery and spot your rest patterns.",
+                CupertinoIcons.moon_zzz_fill,
+                const Color(0xFFDDE4F0),
+                const SleepTracker(),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 14),
-        Center(
-          child: _buildClickableInfoCard(
-            context,
-            "Sleep",
-            "Protect your rest",
-            CupertinoIcons.moon_zzz_fill,
-            const Color(0xFFDDE4F0),
-            "assets/images/sleep.gif",
-            const SleepTracker(),
+      ],
+    );
+  }
+
+  Widget _buildDailyInsightsSection() {
+    final moodTitle = currentUserEmotion == null ? "Mood check-in" : "Mood is logged";
+    final moodText = currentUserEmotion == null
+        ? "Take a quick moment to label how you feel. It helps make the rest of your tracking more meaningful."
+        : "You marked yourself as $currentUserEmotion today. Keep the rest of your habits light and realistic.";
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          "Wellness cues",
+          subtitle: "Small, accurate reminders that fit a balanced day.",
+        ),
+        const SizedBox(height: 16),
+        _buildGlassSectionCard(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              _buildInsightRow(
+                icon: CupertinoIcons.drop_fill,
+                title: "Hydrate early",
+                description: "A glass of water after waking is a simple way to support energy and focus.",
+                color: const Color(0xFFDDEAF3),
+              ),
+              const SizedBox(height: 14),
+              _buildInsightRow(
+                icon: CupertinoIcons.figure_walk,
+                title: "Move in short bursts",
+                description: "Short walks and regular movement breaks are easier to sustain than waiting for one perfect workout.",
+                color: const Color(0xFFDDE7D5),
+              ),
+              const SizedBox(height: 14),
+              _buildInsightRow(
+                icon: CupertinoIcons.heart_fill,
+                title: moodTitle,
+                description: moodText,
+                color: const Color(0xFFF0E1D0),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInsightRow({
+    required IconData icon,
+    required String title,
+    required String description,
+    required Color color,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Icon(icon, color: const Color(0xFF4B5D45), size: 22),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF24311F),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                description,
+                style: const TextStyle(
+                  color: Color(0xFF5E6E57),
+                  height: 1.45,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -918,60 +1835,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final userData = userSnapshot.data?.data();
         final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
-        if (coachId.isEmpty) {
-          return const SizedBox.shrink();
-        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            _buildSectionHeader(
               'My Coach',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+              subtitle: 'Support that feels close and easy to reach.',
+            ),
+            const SizedBox(height: 14),
+            if (coachId.isEmpty)
+              _buildNoCoachCard()
+            else
+              FutureBuilder<Coach?>(
+                future: _loadAssignedCoach(coachId),
+                builder: (context, coachSnapshot) {
+                  if (coachSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final coach = coachSnapshot.data;
+                  if (coach == null) {
+                    return _buildNoCoachCard(
+                      title: 'Coach details unavailable',
+                      message:
+                          'Your coach is assigned, but the profile details could not be loaded yet.',
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildAssignedCoachCard(context, coach: coach),
+                    ],
+                  );
+                },
               ),
-            ),
-            const Divider(thickness: 1, height: 12),
-            const SizedBox(height: 8),
-            FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              future: FirebaseFirestore.instance
-                  .collection('coaches')
-                  .doc(coachId)
-                  .get(),
-              builder: (context, coachSnapshot) {
-                if (coachSnapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (!coachSnapshot.hasData || !coachSnapshot.data!.exists) {
-                  return const SizedBox.shrink();
-                }
-
-                final coachData = coachSnapshot.data!.data()!;
-                final coach = Coach(
-                  id: coachSnapshot.data!.id,
-                  name: (coachData['fullName'] as String?)?.trim().isNotEmpty ==
-                          true
-                      ? (coachData['fullName'] as String).trim()
-                      : 'My Coach',
-                  phone: (coachData['phone'] as String?)?.trim() ?? '',
-                  bio: (coachData['bio'] as String?)?.trim() ?? 'Your support coach',
-                  profilePic: (coachData['profilePic'] as String?)?.trim() ?? '',
-                  backgroundColor: const Color(0xFFDCE5D4),
-                );
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildAssignedCoachCard(context, coach: coach),
-                  ],
-                );
-              },
-            ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildNoCoachCard({
+    String title = 'No coach yet',
+    String message = 'You do not have a coach assigned yet. Once you connect with one, they will appear here.',
+  }) {
+    return _buildGlassSectionCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE9EEE4),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(
+              CupertinoIcons.person_crop_circle_badge_plus,
+              color: Color(0xFF6C7E62),
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF24311F),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: Color(0xFF667460),
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -979,20 +1931,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     BuildContext context, {
     required Coach coach,
   }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+    return _buildGlassSectionCard(
       child: Column(
         children: [
           Row(
@@ -1017,6 +1956,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
+                        color: Color(0xFF24311F),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -1025,7 +1965,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: const TextStyle(
                         fontSize: 13,
                         height: 1.35,
-                        color: Colors.black54,
+                        color: Color(0xFF667460),
                       ),
                     ),
                   ],
@@ -1044,6 +1984,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       builder: (context) => CoachProfileDialog(coach: coach),
                     );
                   },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF52624A),
+                    side: BorderSide(
+                      color: const Color(0xFFD8D4C9).withOpacity(0.92),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                   child: const Text('View profile'),
                 ),
               ),
@@ -1054,7 +2004,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: const Icon(Icons.chat_bubble_outline, size: 18),
                   label: const Text('Message'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF90A17D),
+                    elevation: 0,
+                    backgroundColor: const Color(0xFF7E9471),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -1074,86 +2025,192 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle("How do you feel today?"),
-        const SizedBox(height: 10),
-        currentUserEmotion == null
-            ? Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildEmojiMood(
-                    emoji: "😀",
-                    onTap: () => selectEmotion("happy"),
-                  ),
-                  _buildEmojiMood(
-                    emoji: "😐",
-                    onTap: () => selectEmotion("neutral"),
-                  ),
-                  _buildEmojiMood(
-                    emoji: "😔",
-                    onTap: () => selectEmotion("sad"),
-                  ),
-                  _buildEmojiMood(
-                    emoji: "😡",
-                    onTap: () => selectEmotion("angry"),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  Text(
-                    "Today I'm feeling $currentUserEmotion",
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+        _buildSectionHeader(
+          "Mood check-in",
+          subtitle: "Keep track of how today feels, not just what you finish.",
+        ),
+        const SizedBox(height: 14),
+        _buildGlassSectionCard(
+          child: currentUserEmotion == null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Choose the mood that feels closest right now.",
+                      style: TextStyle(
+                        color: Color(0xFF5E6E57),
+                        height: 1.45,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => EmotionTrackerPage(),
-                        ),
-                      );
-                    },
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
                       children: [
-                        Text(
-                          "Track Your Emotions",
-                          style: TextStyle(fontSize: 14, color: Colors.blue),
+                        _buildMoodChoice(
+                          icon: CupertinoIcons.smiley_fill,
+                          label: "Happy",
+                          color: const Color(0xFFF5DEB0),
+                          onTap: () => selectEmotion("happy"),
                         ),
-                        SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          size: 14,
-                          color: Colors.blue,
+                        _buildMoodChoice(
+                          icon: CupertinoIcons.minus_circle_fill,
+                          label: "Neutral",
+                          color: const Color(0xFFE6E4DE),
+                          onTap: () => selectEmotion("neutral"),
+                        ),
+                        _buildMoodChoice(
+                          icon: CupertinoIcons.cloud_rain_fill,
+                          label: "Sad",
+                          color: const Color(0xFFDCE6F3),
+                          onTap: () => selectEmotion("sad"),
+                        ),
+                        _buildMoodChoice(
+                          icon: CupertinoIcons.flame_fill,
+                          label: "Angry",
+                          color: const Color(0xFFF2D2C6),
+                          onTap: () => selectEmotion("angry"),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDDE7D5),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.heart_fill,
+                            color: Color(0xFF5E7652),
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            "Today you're feeling $currentUserEmotion",
+                            style: const TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF24311F),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
+                      style: TextStyle(
+                        color: Color(0xFF5E6E57),
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => EmotionTrackerPage(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF6E8464),
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            "Track Your Emotions",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(width: 6),
+                          Icon(
+                            Icons.arrow_forward_ios,
+                            size: 14,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ],
     );
   }
 
-  Widget _buildEmojiMood({
-    required String emoji,
+  Widget _buildMoodChoice({
+    required IconData icon,
+    required String label,
+    required Color color,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 56,
-        height: 56,
-        alignment: Alignment.center,
-        child: Text(
-          emoji,
-          style: const TextStyle(fontSize: 36),
+        width: 110,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withOpacity(0.76)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(icon, color: const Color(0xFF4A5E45), size: 26),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF30402A),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+
+class _DashboardTileTransition {
+  const _DashboardTileTransition({
+    required this.tileKey,
+    required this.rect,
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.color,
+  });
+
+  final String tileKey;
+  final Rect rect;
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color color;
 }
