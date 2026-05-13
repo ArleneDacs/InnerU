@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 
@@ -24,13 +25,25 @@ class _MeditationState extends State<Meditation> {
   String? favoriteSpotifyUrl;
   String? favoriteSpotifyTrackId;
   bool _spotifyConnecting = false;
+  bool _completionAlertHandled = false;
   String? playingSong;
   String? favoriteSongPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleDailyMeditationReminder();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     loadFavorite();
+  }
+
+  Future<void> _scheduleDailyMeditationReminder() async {
+    await FastingNotificationService.instance.ensurePermissions();
+    await FastingNotificationService.instance.scheduleDailyMeditationReminder();
   }
 
   Future<void> loadFavorite() async {
@@ -64,7 +77,8 @@ class _MeditationState extends State<Meditation> {
 
     if (username != null) {
       final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final docRef = firestore.collection('dailytracker').doc('$userId-$formattedDate');
+      final docRef =
+          firestore.collection('dailytracker').doc('$userId-$formattedDate');
 
       await docRef.set({
         'userId': userId,
@@ -78,6 +92,34 @@ class _MeditationState extends State<Meditation> {
 
   void _onMeditationComplete() async {
     await _saveDailyActivity(meditation: true);
+  }
+
+  Future<void> _scheduleMeditationCompletionAlert(
+    TimeProvider timeProvider,
+  ) async {
+    if (timeProvider.remainingTime <= 0) return;
+
+    _completionAlertHandled = false;
+    await FastingNotificationService.instance.ensurePermissions();
+    await FastingNotificationService.instance
+        .scheduleMeditationCompleteNotification(
+      endsAt: DateTime.now().add(Duration(seconds: timeProvider.remainingTime)),
+    );
+  }
+
+  Future<void> _cancelMeditationCompletionAlert() async {
+    await FastingNotificationService.instance
+        .cancelMeditationCompleteNotification();
+  }
+
+  Future<void> _handleMeditationCompleteAlert() async {
+    if (_completionAlertHandled) return;
+    _completionAlertHandled = true;
+
+    await FastingNotificationService.instance
+        .cancelMeditationCompleteNotification();
+    await FastingNotificationService.instance
+        .showMeditationCompleteNotification();
   }
 
   String? _getSongPath(String songTitle) {
@@ -131,6 +173,7 @@ class _MeditationState extends State<Meditation> {
       if (timeProvider.isRunning) {
         timeProvider.pauseTimer();
         await _pauseSpotifyPlayer();
+        await _cancelMeditationCompletionAlert();
       } else {
         final trackUri = _spotifyUriFromTrackId(favoriteSpotifyTrackId);
         if (trackUri == null) {
@@ -152,6 +195,7 @@ class _MeditationState extends State<Meditation> {
         }
 
         try {
+          await _scheduleMeditationCompletionAlert(timeProvider);
           await SpotifyNativeService.instance.playTrack(trackUri);
           timeProvider.startTimer();
           if (!mounted) return;
@@ -159,6 +203,7 @@ class _MeditationState extends State<Meditation> {
             playingSong = favoriteSong;
           });
         } catch (error) {
+          await _cancelMeditationCompletionAlert();
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -191,9 +236,13 @@ class _MeditationState extends State<Meditation> {
       );
     }
 
-    timeProvider.isRunning
-        ? timeProvider.pauseTimer()
-        : timeProvider.startTimer();
+    if (timeProvider.isRunning) {
+      timeProvider.pauseTimer();
+      await _cancelMeditationCompletionAlert();
+    } else {
+      await _scheduleMeditationCompletionAlert(timeProvider);
+      timeProvider.startTimer();
+    }
   }
 
   Future<void> _openMusicSelector() async {
@@ -263,6 +312,7 @@ class _MeditationState extends State<Meditation> {
       timeProvider.stopTimer();
       _stopSpotifyPlayer();
       _onMeditationComplete();
+      _handleMeditationCompleteAlert();
     }
 
     return Scaffold(
@@ -302,6 +352,7 @@ class _MeditationState extends State<Meditation> {
                     timeProvider.stopTimer();
                     AudioHelper.stopAudio();
                     _stopSpotifyPlayer();
+                    _cancelMeditationCompletionAlert();
                     setState(() {
                       playingSong = null;
                     });
@@ -327,10 +378,9 @@ class _MeditationState extends State<Meditation> {
                 ),
                 IconButton(
                   onPressed: null,
-                  tooltip:
-                      favoriteSongSource == "spotify"
-                          ? 'Native Spotify playback is active for this track'
-                          : 'Open on Spotify',
+                  tooltip: favoriteSongSource == "spotify"
+                      ? 'Native Spotify playback is active for this track'
+                      : 'Open on Spotify',
                   icon: const Icon(Icons.open_in_new),
                 ),
               ],

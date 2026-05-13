@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,12 +39,7 @@ class TodoList extends StatelessWidget {
 }
 
 // Task model
-enum TaskTag {
-  personal,
-  professional,
-  contribution,
-  none
-}
+enum TaskTag { personal, professional, contribution, none }
 
 extension TaskTagExtension on TaskTag {
   String get displayName {
@@ -86,18 +81,18 @@ extension TaskTagExtension on TaskTag {
         return Colors.grey;
     }
   }
-  
+
   // background tag colors
   Color get lightColor {
     switch (this) {
       case TaskTag.personal:
-        return Color(0xFF7AF1FF); 
+        return Color(0xFF7AF1FF);
       case TaskTag.professional:
-        return Color(0xFFFCE0AC); 
+        return Color(0xFFFCE0AC);
       case TaskTag.contribution:
-        return Color(0xFFBBD1A2); 
+        return Color(0xFFBBD1A2);
       case TaskTag.none:
-        return Color(0xFFF5F5F5); 
+        return Color(0xFFF5F5F5);
     }
   }
 }
@@ -110,7 +105,7 @@ class Task {
   bool isCompleted;
   DateTime dueDate;
   TaskTag tag;
-  
+
   Task({
     required this.id,
     required this.title,
@@ -119,29 +114,28 @@ class Task {
     this.isCompleted = false,
     this.tag = TaskTag.none,
   });
-  
+
   // Convert to and from JSON
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'title': title,
-    'description': description,
-    'isCompleted': isCompleted,
-    'dueDate': dueDate.toIso8601String(),
-    'tag': tag.index,
-  };
-  
+        'id': id,
+        'title': title,
+        'description': description,
+        'isCompleted': isCompleted,
+        'dueDate': dueDate.toIso8601String(),
+        'tag': tag.index,
+      };
+
   factory Task.fromJson(Map<String, dynamic> json) => Task(
-    id: json['id'],
-    title: json['title'],
-    description: json['description'] ?? '',
-    isCompleted: json['isCompleted'] ?? false,
-    dueDate: DateTime.parse(json['dueDate']),
-    tag: TaskTag.values[json['tag'] ?? TaskTag.none.index],
-  );
+        id: json['id'],
+        title: json['title'],
+        description: json['description'] ?? '',
+        isCompleted: json['isCompleted'] ?? false,
+        dueDate: DateTime.parse(json['dueDate']),
+        tag: TaskTag.values[json['tag'] ?? TaskTag.none.index],
+      );
 }
 
 class FirestoreRepository {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String? get userId {
@@ -214,16 +208,16 @@ class FirestoreRepository {
       print('Error deleting task: $e');
     }
   }
-  
+
   // Optional: Migration from local storage to Firestore
   Future<void> migrateFromLocalStorage() async {
     try {
       final localTasks = await TodoRepository.loadTasks();
-      
+
       for (final task in localTasks) {
         await addTask(task);
       }
-      
+
       print('Migration completed successfully!');
     } catch (e) {
       print('Error during migration: $e');
@@ -249,7 +243,7 @@ class TodoRepository {
       if (!await file.exists()) {
         return [];
       }
-      
+
       final contents = await file.readAsString();
       final List<dynamic> jsonList = json.decode(contents);
       return jsonList.map((json) => Task.fromJson(json)).toList();
@@ -275,7 +269,7 @@ class TodoListScreen extends StatefulWidget {
   const TodoListScreen({super.key});
 
   @override
-  _TodoListScreenState createState() => _TodoListScreenState();
+  State<TodoListScreen> createState() => _TodoListScreenState();
 }
 
 class _TodoListScreenState extends State<TodoListScreen> {
@@ -284,10 +278,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
   int _currentTabIndex = 0;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  
+
   // Create an instance of FirestoreRepository with fallback
   late final FirestoreRepository _repository;
-  
+
   // Constructor with repository initialization
   _TodoListScreenState() {
     try {
@@ -315,14 +309,16 @@ class _TodoListScreenState extends State<TodoListScreen> {
     setState(() {
       _isLoading = true;
     });
-    
+
     // Load tasks from Firestore instead of local storage
     final tasks = await _repository.loadTasks();
-    
+
     setState(() {
       _tasks = tasks;
       _isLoading = false;
     });
+
+    await _syncTaskNotifications(tasks);
   }
 
   void _addTask(Task task) async {
@@ -330,14 +326,16 @@ class _TodoListScreenState extends State<TodoListScreen> {
       if (task.id.isEmpty) {
         task.id = DateTime.now().millisecondsSinceEpoch.toString();
       }
-      
+
       // Add to Firestore first
       await _repository.addTask(task);
-      
+      await _scheduleTaskNotification(task);
+
       // Then reload tasks to ensure UI is in sync with database
       await _loadTasks();
     } catch (e) {
       print('Error adding task: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to add task. Please try again.')),
       );
@@ -349,10 +347,11 @@ class _TodoListScreenState extends State<TodoListScreen> {
     setState(() {
       _tasks.removeWhere((task) => task.id == id);
     });
-    
+
     try {
       // Then delete from Firestore
       await _repository.deleteTask(id);
+      await _cancelTaskNotification(id);
       print('Task deleted successfully with ID: $id');
     } catch (e) {
       print('Error deleting task: $e');
@@ -370,15 +369,20 @@ class _TodoListScreenState extends State<TodoListScreen> {
         final task = _tasks[index];
         // Toggle the completion status
         task.isCompleted = !task.isCompleted;
-        
+
         // Update the task in Firestore
         await _repository.updateTask(task);
-        
+        if (task.isCompleted) {
+          await _cancelTaskNotification(task.id);
+        } else {
+          await _scheduleTaskNotification(task);
+        }
+
         // Update the UI immediately for better user experience
         setState(() {
           _tasks[index] = task;
         });
-        
+
         print('Task completion toggled: $id, New status: ${task.isCompleted}');
       } else {
         print('Task not found with ID: $id');
@@ -390,22 +394,52 @@ class _TodoListScreenState extends State<TodoListScreen> {
     }
   }
 
+  Future<void> _syncTaskNotifications(List<Task> tasks) async {
+    await FastingNotificationService.instance.ensurePermissions();
+    for (final task in tasks) {
+      if (task.isCompleted) {
+        await _cancelTaskNotification(task.id);
+      } else {
+        await _scheduleTaskNotification(task);
+      }
+    }
+  }
+
+  Future<void> _scheduleTaskNotification(Task task) async {
+    if (task.isCompleted) {
+      await _cancelTaskNotification(task.id);
+      return;
+    }
+
+    await FastingNotificationService.instance.ensurePermissions();
+    await FastingNotificationService.instance.scheduleTodoDueNotification(
+      taskId: task.id,
+      title: task.title,
+      dueDate: task.dueDate,
+    );
+  }
+
+  Future<void> _cancelTaskNotification(String taskId) async {
+    await FastingNotificationService.instance.cancelTodoDueNotification(taskId);
+  }
+
   // Show migration dialog - useful for first-time setup
   void _showMigrationDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Migrate Data'),
-        content: const Text('Would you like to migrate your existing tasks to Firebase Firestore?'),
+        content: const Text(
+            'Would you like to migrate your existing tasks to Firebase Firestore?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('CANCEL'),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
-              
+              Navigator.pop(dialogContext);
+
               // Show loading indicator
               showDialog(
                 context: context,
@@ -414,16 +448,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   child: CircularProgressIndicator(),
                 ),
               );
-              
+
               // Perform migration
               await _repository.migrateFromLocalStorage();
-              
+              if (!mounted) return;
+
               // Dismiss loading indicator
               Navigator.pop(context);
-              
+
               // Reload tasks
               _loadTasks();
-              
+
               // Show success message
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Migration completed!')),
@@ -438,31 +473,35 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   List<Task> _getFilteredTasks() {
     final List<Task> filteredTasks;
-    
+
     // First filter by search query
     final searchFiltered = _searchQuery.isEmpty
         ? _tasks
-        : _tasks.where((task) => 
-            task.title.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
-    
+        : _tasks
+            .where((task) =>
+                task.title.toLowerCase().contains(_searchQuery.toLowerCase()))
+            .toList();
+
     // Then filter by tab
     switch (_currentTabIndex) {
       case 0: // All
         filteredTasks = searchFiltered;
         break;
       case 1: // Pending
-        filteredTasks = searchFiltered.where((task) => !task.isCompleted).toList();
+        filteredTasks =
+            searchFiltered.where((task) => !task.isCompleted).toList();
         break;
       case 2: // Completed
-        filteredTasks = searchFiltered.where((task) => task.isCompleted).toList();
+        filteredTasks =
+            searchFiltered.where((task) => task.isCompleted).toList();
         break;
       default:
         filteredTasks = searchFiltered;
     }
-    
+
     // Sort by due date (closest first)
     filteredTasks.sort((a, b) => a.dueDate.compareTo(b.dueDate));
-    
+
     return filteredTasks;
   }
 
@@ -499,22 +538,28 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           hintText: '',
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           counterText: '${titleController.text.length}/60',
                           helperText: 'Maximum 60 characters',
                         ),
                         autofocus: true,
                         maxLength: 60,
-                        buildCounter: (BuildContext context, {required int currentLength, required bool isFocused, required int? maxLength}) {
+                        buildCounter: (BuildContext context,
+                            {required int currentLength,
+                            required bool isFocused,
+                            required int? maxLength}) {
                           return null;
                         },
                         onChanged: (text) {
@@ -525,14 +570,15 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Description field with chat icon
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
                       padding: const EdgeInsets.only(top: 12),
-                      child: Icon(Icons.chat_bubble_outline, color: Colors.brown[400], size: 28),
+                      child: Icon(Icons.chat_bubble_outline,
+                          color: Colors.brown[400], size: 28),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -543,7 +589,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              vertical: 16, horizontal: 12),
                         ),
                         maxLines: 3,
                       ),
@@ -555,7 +602,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.local_offer_outlined, color: Colors.brown[400], size: 28),
+                    Icon(Icons.local_offer_outlined,
+                        color: Colors.brown[400], size: 28),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Container(
@@ -574,15 +622,20 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                 value: tag,
                                 // Improve layout of dropdown items to prevent overflow
                                 child: Padding(
-                                  padding: const EdgeInsets.only(right: 8.0), // Add padding to prevent overflow
+                                  padding: const EdgeInsets.only(
+                                      right:
+                                          8.0), // Add padding to prevent overflow
                                   child: Row(
-                                    mainAxisSize: MainAxisSize.min, // Use minimum space needed
+                                    mainAxisSize: MainAxisSize
+                                        .min, // Use minimum space needed
                                     children: [
                                       Container(
                                         width: 12,
                                         height: 12,
                                         decoration: BoxDecoration(
-                                          color: tag == TaskTag.none ? Colors.grey : tag.color,
+                                          color: tag == TaskTag.none
+                                              ? Colors.grey
+                                              : tag.color,
                                           shape: BoxShape.circle,
                                         ),
                                       ),
@@ -590,8 +643,11 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                       // Use Flexible to allow text to wrap or shrink if needed
                                       Flexible(
                                         child: Text(
-                                          tag == TaskTag.none ? 'No Tag' : tag.displayName,
-                                          overflow: TextOverflow.ellipsis, // Handle text overflow
+                                          tag == TaskTag.none
+                                              ? 'No Tag'
+                                              : tag.displayName,
+                                          overflow: TextOverflow
+                                              .ellipsis, // Handle text overflow
                                         ),
                                       ),
                                     ],
@@ -614,12 +670,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Due date selection
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.calendar_today, color: Colors.brown[400], size: 28),
+                    Icon(Icons.calendar_today,
+                        color: Colors.brown[400], size: 28),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -660,7 +717,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
           ),
           actions: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -683,7 +741,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFEFD199), // Gold/beige color
+                          backgroundColor:
+                              const Color(0xFFEFD199), // Gold/beige color
                           foregroundColor: Colors.white,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -739,7 +798,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredTasks = _getFilteredTasks();
-    
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(50),
@@ -752,7 +811,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildCategoryButton('All', 0),
-              _buildCategoryButton('Pending', 1, badge: _tasks.where((task) => !task.isCompleted).length),
+              _buildCategoryButton('Pending', 1,
+                  badge: _tasks.where((task) => !task.isCompleted).length),
               _buildCategoryButton('Completed', 2),
             ],
           ),
@@ -777,7 +837,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                       ),
                       filled: true,
                       fillColor: const Color(0xFFEFEEEE),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 8, horizontal: 16),
                       suffixIcon: _searchQuery.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, color: Colors.grey),
@@ -827,9 +888,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           itemCount: filteredTasks.length,
                           itemBuilder: (context, index) {
                             final task = filteredTasks[index];
-                            final bool isOverdue = !task.isCompleted && 
-                                task.dueDate.isBefore(DateTime.now().subtract(const Duration(days: 1)));
-                            
+
                             return GestureDetector(
                               onHorizontalDragEnd: (details) {
                                 if (details.primaryVelocity! < 0) {
@@ -837,19 +896,23 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                     context: context,
                                     builder: (context) => AlertDialog(
                                       title: const Text('Delete Task'),
-                                      content: const Text('Are you sure you want to delete this task?'),
+                                      content: const Text(
+                                          'Are you sure you want to delete this task?'),
                                       actions: [
                                         TextButton(
-                                          onPressed: () => Navigator.pop(context),
+                                          onPressed: () =>
+                                              Navigator.pop(context),
                                           child: const Text('CANCEL'),
                                         ),
                                         TextButton(
                                           onPressed: () {
                                             Navigator.pop(context);
                                             _deleteTask(task.id);
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
                                               SnackBar(
-                                                content: const Text('Task deleted'),
+                                                content:
+                                                    const Text('Task deleted'),
                                                 action: SnackBarAction(
                                                   label: 'UNDO',
                                                   onPressed: () {
@@ -903,24 +966,29 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                       fontWeight: task.isCompleted
                                           ? FontWeight.normal
                                           : FontWeight.bold,
-                                      color: task.isCompleted
-                                          ? Colors.grey
-                                          : null,
+                                      color:
+                                          task.isCompleted ? Colors.grey : null,
                                     ),
                                     overflow: TextOverflow.ellipsis,
                                     maxLines: 2,
                                   ),
                                   subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       if (task.description.isNotEmpty)
                                         Padding(
-                                          padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
+                                          padding: const EdgeInsets.only(
+                                              bottom: 8.0, top: 4.0),
                                           child: Text(
                                             task.description,
                                             style: TextStyle(
-                                              color: task.isCompleted ? Colors.grey : Colors.black87,
-                                              decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                                              color: task.isCompleted
+                                                  ? Colors.grey
+                                                  : Colors.black87,
+                                              decoration: task.isCompleted
+                                                  ? TextDecoration.lineThrough
+                                                  : null,
                                             ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
@@ -928,7 +996,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                         ),
                                       // Due date in its own row
                                       Padding(
-                                        padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                                        padding: const EdgeInsets.only(
+                                            top: 4.0, bottom: 4.0),
                                         child: Row(
                                           children: [
                                             Icon(
@@ -938,7 +1007,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              DateFormat('MMM d, yyyy').format(task.dueDate),
+                                              DateFormat('MMM d, yyyy')
+                                                  .format(task.dueDate),
                                               style: TextStyle(
                                                 color: Colors.grey.shade700,
                                                 fontSize: 14,
@@ -950,15 +1020,18 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                       // Task tag in its own row
                                       if (task.tag != TaskTag.none)
                                         Padding(
-                                          padding: const EdgeInsets.only(top: 2.0, bottom: 4.0),
+                                          padding: const EdgeInsets.only(
+                                              top: 2.0, bottom: 4.0),
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 8,
                                               vertical: 4,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: task.tag.color.withOpacity(0.2),
-                                              borderRadius: BorderRadius.circular(16),
+                                              color: task.tag.color
+                                                  .withValues(alpha: 0.2),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
                                             ),
                                             child: Text(
                                               task.tag.displayName,
@@ -987,24 +1060,30 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                       IconButton(
                                         icon: const Icon(Icons.delete_outline),
                                         onPressed: () async {
-                                          final shouldDelete = await showDialog<bool>(
+                                          final shouldDelete =
+                                              await showDialog<bool>(
                                             context: context,
                                             builder: (context) => AlertDialog(
                                               title: const Text('Delete Task'),
-                                              content: const Text('Are you sure you want to delete this task?'),
+                                              content: const Text(
+                                                  'Are you sure you want to delete this task?'),
                                               actions: [
                                                 TextButton(
-                                                  onPressed: () => Navigator.pop(context, false),
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context, false),
                                                   child: const Text('CANCEL'),
                                                 ),
                                                 TextButton(
-                                                  onPressed: () => Navigator.pop(context, true),
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context, true),
                                                   child: const Text('DELETE'),
                                                 ),
                                               ],
                                             ),
                                           );
-                                          
+
                                           if (shouldDelete == true) {
                                             _deleteTask(task.id);
                                           }
@@ -1090,22 +1169,28 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           hintText: '',
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Colors.deepPurple, width: 2),
+                            borderSide: const BorderSide(
+                                color: Colors.deepPurple, width: 2),
                           ),
                           counterText: '${titleController.text.length}/60',
                           helperText: 'Maximum 60 characters',
                         ),
                         autofocus: true,
                         maxLength: 60,
-                        buildCounter: (BuildContext context, {required int currentLength, required bool isFocused, required int? maxLength}) {
+                        buildCounter: (BuildContext context,
+                            {required int currentLength,
+                            required bool isFocused,
+                            required int? maxLength}) {
                           return null;
                         },
                         onChanged: (text) {
@@ -1116,14 +1201,15 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Description field with chat icon
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
                       padding: const EdgeInsets.only(top: 12),
-                      child: Icon(Icons.chat_bubble_outline, color: Colors.brown[400], size: 28),
+                      child: Icon(Icons.chat_bubble_outline,
+                          color: Colors.brown[400], size: 28),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1134,7 +1220,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              vertical: 16, horizontal: 12),
                         ),
                         maxLines: 3,
                       ),
@@ -1146,7 +1233,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.local_offer_outlined, color: Colors.brown[400], size: 28),
+                    Icon(Icons.local_offer_outlined,
+                        color: Colors.brown[400], size: 28),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Container(
@@ -1172,14 +1260,18 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                         width: 12,
                                         height: 12,
                                         decoration: BoxDecoration(
-                                          color: tag == TaskTag.none ? Colors.grey : tag.color,
+                                          color: tag == TaskTag.none
+                                              ? Colors.grey
+                                              : tag.color,
                                           shape: BoxShape.circle,
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Flexible(
                                         child: Text(
-                                          tag == TaskTag.none ? 'No Tag' : tag.displayName,
+                                          tag == TaskTag.none
+                                              ? 'No Tag'
+                                              : tag.displayName,
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
@@ -1202,12 +1294,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Due date selection
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.calendar_today, color: Colors.brown[400], size: 28),
+                    Icon(Icons.calendar_today,
+                        color: Colors.brown[400], size: 28),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1248,7 +1341,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
           ),
           actions: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -1267,7 +1361,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                               isCompleted: task.isCompleted,
                               tag: selectedTag,
                             );
-                            
+
                             _updateTask(updatedTask);
                             Navigator.pop(context);
                           }
@@ -1330,7 +1424,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
     try {
       // Update in Firestore
       await _repository.updateTask(task);
-      
+      await _scheduleTaskNotification(task);
+
       // Update local state for immediate UI feedback
       setState(() {
         final index = _tasks.indexWhere((t) => t.id == task.id);
@@ -1338,15 +1433,18 @@ class _TodoListScreenState extends State<TodoListScreen> {
           _tasks[index] = task;
         }
       });
-      
+
       // Show a confirmation message
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Task updated successfully')),
       );
     } catch (e) {
       print('Error updating task: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update task. Please try again.')),
+        const SnackBar(
+            content: Text('Failed to update task. Please try again.')),
       );
       // If update fails, reload tasks to ensure UI is in sync with database
       await _loadTasks();
@@ -1355,16 +1453,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   Widget _buildCategoryButton(String category, int index, {int? badge}) {
     bool isSelected = index == _currentTabIndex;
-    
+
     double buttonWidth;
     if (category == 'All') {
       buttonWidth = 80;
     } else if (category == 'Pending') {
       buttonWidth = 120;
-    } else { // Completed
+    } else {
+      // Completed
       buttonWidth = 120;
     }
-    
+
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -1379,7 +1478,12 @@ class _TodoListScreenState extends State<TodoListScreen> {
           color: isSelected ? const Color(0xFF90A17D) : Colors.white,
           borderRadius: BorderRadius.circular(28),
           boxShadow: isSelected
-              ? [BoxShadow(color: const Color(0xFF90A17D).withOpacity(0.4), blurRadius: 5, offset: const Offset(0, 2))]
+              ? [
+                  BoxShadow(
+                      color: const Color(0xFF90A17D).withValues(alpha: 0.4),
+                      blurRadius: 5,
+                      offset: const Offset(0, 2))
+                ]
               : [],
         ),
         child: Center(
@@ -1389,8 +1493,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
               Text(
                 category,
                 style: TextStyle(
-                   color: isSelected ? Colors.white : Colors.black54,
-                   fontWeight: FontWeight.bold,
+                  color: isSelected ? Colors.white : Colors.black54,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
               if (badge != null && badge > 0) ...[
@@ -1399,9 +1503,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: isSelected 
-                      ? Colors.white.withOpacity(0.3) 
-                      : const Color(0xFF90A17D),
+                    color: isSelected
+                        ? Colors.white.withValues(alpha: 0.3)
+                        : const Color(0xFF90A17D),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
