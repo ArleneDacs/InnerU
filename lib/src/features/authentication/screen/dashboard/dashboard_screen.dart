@@ -1209,101 +1209,43 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
       child: Stack(
         children: [
-          Positioned(
-            top: -24,
-            right: -12,
-            child: Container(
-              width: 146,
-              height: 146,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -42,
-            left: -22,
-            child: Container(
-              width: 138,
-              height: 138,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7ED).withOpacity(0.26),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.28),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: Colors.white.withOpacity(0.3)),
-                          ),
-                          child: const Text(
-                            "Daily reset",
-                            style: TextStyle(
-                              color: Color(0xFF355033),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          "Hello, $username",
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            color: const Color(0xFF24311F),
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.8,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          "Your dashboard is ready with the habits that keep today balanced.",
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: const Color(0xFF42563E),
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.28),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white.withOpacity(0.3)),
+                    ),
+                    child: const Text(
+                      "Daily reset",
+                      style: TextStyle(
+                        color: Color(0xFF355033),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.22),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white.withOpacity(0.28)),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Hello, $username",
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: const Color(0xFF24311F),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.8,
                     ),
-                    child: Column(
-                      children: const [
-                        Icon(
-                          CupertinoIcons.sun_max_fill,
-                          color: Color(0xFF4C5E44),
-                          size: 20,
-                        ),
-                        SizedBox(height: 6),
-                        Text(
-                          "Today",
-                          style: TextStyle(
-                            color: Color(0xFF4C5E44),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Your dashboard is ready with the habits that keep today balanced.",
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: const Color(0xFF42563E),
+                      height: 1.5,
                     ),
                   ),
                 ],
@@ -1721,7 +1663,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFE8E3D8),
                 Meditation(),
                 setupIndex: 0,
-                backgroundImage: 'assets/images/meditation.gif',
+                backgroundImage: 'assets/images/meditate.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(

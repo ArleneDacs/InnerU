@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
@@ -25,7 +26,8 @@ class CoachDashboardScreen extends StatefulWidget {
   State<CoachDashboardScreen> createState() => _CoachDashboardScreenState();
 }
 
-class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
+class _CoachDashboardScreenState extends State<CoachDashboardScreen>
+    with TickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -34,6 +36,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
   String _quote = 'Your daily inspiration...';
   String _author = 'Unknown';
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
+  final Set<String> _pressedTiles = <String>{};
+  final GlobalKey _dashboardStackKey = GlobalKey();
+  late final AnimationController _tileTransitionController;
+  _CoachDashboardTileTransition? _activeTileTransition;
 
   String get _userId => _auth.currentUser!.uid;
 
@@ -51,9 +57,19 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _tileTransitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
     _loadTodayEmotion();
     _fetchQuote();
     _loadLocalChatReadOverrides();
+  }
+
+  @override
+  void dispose() {
+    _tileTransitionController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadLocalChatReadOverrides() async {
@@ -576,50 +592,49 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
                 builder: (context, menteeSnapshot) {
                   final mentees = menteeSnapshot.data?.docs ?? [];
 
-                  return SingleChildScrollView(
-                    padding: EdgeInsets.fromLTRB(
-                      horizontalPadding,
-                      8,
-                      horizontalPadding,
-                      24,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHero(
-                          displayName: displayName,
-                          teamName: teamName,
-                          coachData: coachData,
-                          menteeCount: mentees.length,
-                          userData: userData,
-                          quote: _quote,
-                          author: _author,
+                  return Stack(
+                    key: _dashboardStackKey,
+                    children: [
+                      SingleChildScrollView(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontalPadding,
+                          8,
+                          horizontalPadding,
+                          24,
                         ),
-                        const SizedBox(height: 22),
-                        _buildSectionTitle("Today's focus"),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Lead by example and keep your habits visible.',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Colors.black54,
-                              ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildHero(
+                              displayName: displayName,
+                              teamName: teamName,
+                              coachData: coachData,
+                              menteeCount: mentees.length,
+                              userData: userData,
+                              quote: _quote,
+                              author: _author,
+                            ),
+                            const SizedBox(height: 22),
+                            _buildScrollableFeatureRail(context),
+                            const SizedBox(height: 28),
+                            _buildSectionTitle('Coach tools'),
+                            const SizedBox(height: 12),
+                            _buildNavigationCards(
+                              context,
+                              teamName: teamName,
+                              userData: userData,
+                              coachData: coachData,
+                              mentees: mentees,
+                            ),
+                            const SizedBox(height: 24),
+                            _buildMoodSection(context),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        _buildActionRows(context),
-                        const SizedBox(height: 28),
-                        _buildSectionTitle('Coach tools'),
-                        const SizedBox(height: 12),
-                        _buildNavigationCards(
-                          context,
-                          teamName: teamName,
-                          userData: userData,
-                          coachData: coachData,
-                          mentees: mentees,
-                        ),
-                        const SizedBox(height: 24),
-                        _buildMoodSection(context),
-                      ],
-                    ),
+                      ),
+                      Positioned.fill(
+                        child: _buildTileTransitionOverlay(),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -810,190 +825,579 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
 
   Widget _buildClickableInfoCard(
     BuildContext context,
+    String tileKey,
     String title,
     String description,
     IconData icon,
     Color color,
-    String imagePath,
-    Widget destinationPage,
-  ) {
+    Widget destinationPage, {
+    int? setupIndex,
+    String? backgroundImage,
+  }) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final cardWidth = ((screenWidth - 54) / 2).clamp(150.0, 220.0);
+    final cardWidth = (screenWidth * 0.72).clamp(220.0, 310.0);
+    final isPressed = _pressedTiles.contains(tileKey);
+    final isTransitioning = _activeTileTransition?.tileKey == tileKey;
 
     return SizedBox(
       width: cardWidth,
-      child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => destinationPage),
-          );
-        },
-        child: Container(
-          height: 196,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
+      child: Opacity(
+        opacity: isTransitioning ? 0 : 1,
+        child: AnimatedScale(
+          scale: isPressed ? 0.97 : 1,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: AnimatedSlide(
+            offset: isPressed ? const Offset(0, 0.012) : Offset.zero,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: Builder(
+              builder: (tileContext) => GestureDetector(
+                onTapDown: (_) {
+                  setState(() {
+                    _pressedTiles.add(tileKey);
+                  });
+                },
+                onTapCancel: () {
+                  setState(() {
+                    _pressedTiles.remove(tileKey);
+                  });
+                },
+                onTapUp: (_) {
+                  setState(() {
+                    _pressedTiles.remove(tileKey);
+                  });
+                },
+                onTap: () {
+                  _runTileTransition(
+                    tileContext: tileContext,
+                    tileKey: tileKey,
+                    title: title,
+                    description: description,
+                    icon: icon,
+                    color: color,
+                    destinationPage: destinationPage,
+                    setupIndex: setupIndex,
+                  );
+                },
+                child: _buildTileFace(
+                  title: title,
+                  description: description,
+                  icon: icon,
+                  color: color,
+                  isPressed: isPressed,
+                  backgroundImage: backgroundImage,
+                ),
               ),
-            ],
-            image: DecorationImage(
-              image: AssetImage(imagePath),
-              fit: BoxFit.cover,
             ),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white.withOpacity(0.12),
-                        Colors.black.withOpacity(0.08),
-                        Colors.black.withOpacity(0.34),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 14,
-                left: 14,
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.82),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(icon, color: const Color(0xFF2D3A25), size: 18),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: const Text(
-                        'Wellness',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.35,
-                        color: Colors.white.withOpacity(0.82),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActionRows(BuildContext context) {
+  Widget _buildScrollableFeatureRail(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildClickableInfoCard(
-              context,
-              'Steps',
-              'Track your movement',
-              CupertinoIcons.flame_fill,
-              const Color(0xFFDDE7D5),
-              'assets/images/steps.gif',
-              StepTracker(),
-            ),
-            const SizedBox(width: 14),
-            _buildClickableInfoCard(
-              context,
-              'Meditate',
-              'Clear your mind',
-              CupertinoIcons.sparkles,
-              const Color(0xFFE8E3D8),
-              'assets/images/meditation.gif',
-              Meditation(),
-            ),
-          ],
+        _buildSectionTitle("Today's focus"),
+        const SizedBox(height: 6),
+        Text(
+          'Lead by example and keep your habits visible.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Colors.black54,
+              ),
         ),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildClickableInfoCard(
-              context,
-              'Fasting',
-              'Stay on your plan',
-              CupertinoIcons.timer_fill,
-              const Color(0xFFF2E5D2),
-              'assets/images/fasting.gif',
-              const FastingTimerScreen(),
-            ),
-            const SizedBox(width: 14),
-            _buildClickableInfoCard(
-              context,
-              'Calories',
-              'Log what you eat',
-              CupertinoIcons.leaf_arrow_circlepath,
-              const Color(0xFFE1EDDF),
-              'assets/images/calories1.gif',
-              const CalorieTrackerScreen(),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Center(
-          child: _buildClickableInfoCard(
-            context,
-            'Sleep',
-            'Protect your rest',
-            CupertinoIcons.moon_zzz_fill,
-            const Color(0xFFDDE4F0),
-            'assets/images/sleep.gif',
-            const SleepTracker(),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 184,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            children: [
+              _buildClickableInfoCard(
+                context,
+                'steps_tile',
+                'Steps',
+                'Track your movement and keep your coaching energy active.',
+                CupertinoIcons.flame_fill,
+                const Color(0xFFDDE7D5),
+                StepTracker(),
+                setupIndex: 1,
+                backgroundImage: 'assets/images/steps.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'meditate_tile',
+                'Meditate',
+                'Reset your attention before guiding someone else.',
+                CupertinoIcons.sparkles,
+                const Color(0xFFE8E3D8),
+                Meditation(),
+                setupIndex: 0,
+                backgroundImage: 'assets/images/meditate.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'fasting_tile',
+                'Fasting',
+                'Stay on your plan and model consistency for your mentees.',
+                CupertinoIcons.timer_fill,
+                const Color(0xFFF2E5D2),
+                const FastingTimerScreen(),
+                setupIndex: 2,
+                backgroundImage: 'assets/images/fasting.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'calories_tile',
+                'Calories',
+                'Log meals and keep nutrition choices visible.',
+                CupertinoIcons.leaf_arrow_circlepath,
+                const Color(0xFFE1EDDF),
+                const CalorieTrackerScreen(),
+                setupIndex: 3,
+                backgroundImage: 'assets/images/calorie.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
+                'sleep_tile',
+                'Sleep',
+                'Protect your recovery so your coaching stays steady.',
+                CupertinoIcons.moon_zzz_fill,
+                const Color(0xFFDDE4F0),
+                const SleepTracker(),
+                setupIndex: 4,
+                backgroundImage: 'assets/images/sleep.gif',
+              ),
+            ],
           ),
         ),
       ],
     );
+  }
+
+  Widget _buildTileFace({
+    required String title,
+    required String description,
+    required IconData icon,
+    required Color color,
+    bool isPressed = false,
+    String? backgroundImage,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      height: 184,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withOpacity(0.72)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.82),
+            Color.alphaBlend(const Color(0x1FFFFFFF), color),
+            Color.alphaBlend(const Color(0x40FFFFFF), color),
+          ],
+        ),
+        image: backgroundImage != null
+            ? DecorationImage(
+                image: AssetImage(backgroundImage),
+                fit: BoxFit.cover,
+                opacity: 0.3,
+              )
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
+            blurRadius: isPressed ? 16 : 26,
+            offset: Offset(0, isPressed ? 8 : 14),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -28,
+            right: -18,
+            child: Container(
+              width: 126,
+              height: 126,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.white.withOpacity(0.36),
+                    Colors.white.withOpacity(0.02),
+                  ],
+                ),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -18,
+            left: -14,
+            child: Transform.rotate(
+              angle: -0.45,
+              child: Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(0.3),
+                      Colors.white.withOpacity(0.06),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 58,
+            right: 42,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(32),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.1),
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.06),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 18,
+            right: 18,
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.62),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white.withOpacity(0.6)),
+              ),
+              child: Icon(
+                icon,
+                color: const Color(0xFF53654C),
+                size: 27,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.38),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Coach practice',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                      color: Color(0xFF697960),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1F2A1A),
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    height: 1.45,
+                    color: Color(0xFF43523D),
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const Text(
+                      'Open',
+                      style: TextStyle(
+                        color: Color(0xFF506149),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.56),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 15,
+                        color: Color(0xFF506149),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runTileTransition({
+    required BuildContext tileContext,
+    required String tileKey,
+    required String title,
+    required String description,
+    required IconData icon,
+    required Color color,
+    required Widget destinationPage,
+    int? setupIndex,
+  }) async {
+    if (_activeTileTransition != null) return;
+
+    final stackContext = _dashboardStackKey.currentContext;
+    if (stackContext == null) return;
+
+    final tileBox = tileContext.findRenderObject() as RenderBox?;
+    final stackBox = stackContext.findRenderObject() as RenderBox?;
+    if (tileBox == null || stackBox == null) return;
+
+    final topLeft = stackBox.globalToLocal(tileBox.localToGlobal(Offset.zero));
+    final rect = topLeft & tileBox.size;
+
+    setState(() {
+      _pressedTiles.remove(tileKey);
+      _activeTileTransition = _CoachDashboardTileTransition(
+        tileKey: tileKey,
+        rect: rect,
+        title: title,
+        description: description,
+        icon: icon,
+        color: color,
+      );
+    });
+
+    await _tileTransitionController.forward(from: 0);
+    if (!mounted) return;
+
+    final targetPage = setupIndex != null
+        ? CoachSetuppage(initialIndex: setupIndex)
+        : destinationPage;
+
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 360),
+        reverseTransitionDuration: const Duration(milliseconds: 260),
+        pageBuilder: (context, animation, secondaryAnimation) => targetPage,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 1.02, end: 1).animate(curved),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return;
+    _tileTransitionController.reset();
+    setState(() {
+      _activeTileTransition = null;
+    });
+  }
+
+  Widget _buildTileTransitionOverlay() {
+    final transition = _activeTileTransition;
+    if (transition == null) {
+      return const SizedBox.shrink();
+    }
+
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _tileTransitionController,
+        builder: (context, child) {
+          final t = Curves.easeInOutCubic.transform(_tileTransitionController.value);
+          final size = MediaQuery.of(context).size;
+          final targetWidth = size.width.clamp(280.0, 420.0) * 0.82;
+          final targetHeight = 260.0;
+          final targetRect = Rect.fromCenter(
+            center: Offset(size.width / 2, size.height / 2),
+            width: targetWidth,
+            height: targetHeight,
+          );
+          final moveT = Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
+          final scatterT = ((t - 0.58) / 0.42).clamp(0.0, 1.0);
+          final currentRect = Rect.lerp(transition.rect, targetRect, moveT)!;
+          final overlayOpacity = Tween<double>(begin: 0, end: 0.22).transform(t);
+          final tileOpacity = scatterT > 0
+              ? (1 - Curves.easeInCubic.transform(scatterT)).clamp(0.0, 1.0).toDouble()
+              : 1.0;
+          final turns = scatterT > 0
+              ? Tween<double>(begin: 0, end: 1.12).transform(
+                  Curves.easeInOutCubic.transform(scatterT),
+                )
+              : 0.0;
+          final scaleBoost = scatterT > 0
+              ? Tween<double>(begin: 1.0, end: 1.12).transform(
+                  Curves.easeInOut.transform(scatterT),
+                )
+              : 1.0;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Opacity(
+                  opacity: overlayOpacity,
+                  child: Container(color: const Color(0xFF24311F)),
+                ),
+              ),
+              Positioned(
+                left: currentRect.left,
+                top: currentRect.top,
+                width: currentRect.width,
+                height: currentRect.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Opacity(
+                      opacity: tileOpacity,
+                      child: Transform.scale(
+                        scale: scaleBoost,
+                        child: Transform.rotate(
+                          angle: turns * 3.141592653589793 * 2,
+                          child: child,
+                        ),
+                      ),
+                    ),
+                    if (scatterT > 0)
+                      ..._buildTileScatterFragments(
+                        size: currentRect.size,
+                        color: transition.color,
+                        progress: scatterT,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+        child: _buildTileFace(
+          title: transition.title,
+          description: transition.description,
+          icon: transition.icon,
+          color: transition.color,
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildTileScatterFragments({
+    required Size size,
+    required Color color,
+    required double progress,
+  }) {
+    const fragments = [
+      (ax: -0.34, ay: -0.22, size: 26.0, radius: 10.0, dx: -120.0, dy: -88.0, rot: -0.9),
+      (ax: 0.28, ay: -0.18, size: 20.0, radius: 8.0, dx: 128.0, dy: -96.0, rot: 1.1),
+      (ax: -0.18, ay: 0.08, size: 22.0, radius: 9.0, dx: -96.0, dy: 24.0, rot: 0.8),
+      (ax: 0.16, ay: 0.16, size: 18.0, radius: 8.0, dx: 90.0, dy: 46.0, rot: -1.2),
+      (ax: -0.04, ay: 0.26, size: 24.0, radius: 10.0, dx: -18.0, dy: 136.0, rot: 1.0),
+      (ax: 0.34, ay: 0.02, size: 16.0, radius: 7.0, dx: 144.0, dy: 8.0, rot: 1.4),
+    ];
+
+    final eased = Curves.easeOutCubic.transform(progress);
+    final fade = (1 - Curves.easeInQuad.transform(progress)).clamp(0.0, 1.0).toDouble();
+    final center = Offset(size.width / 2, size.height / 2);
+
+    return fragments.map((fragment) {
+      final start = Offset(
+        center.dx + size.width * fragment.ax,
+        center.dy + size.height * fragment.ay,
+      );
+      final end = Offset(
+        start.dx + fragment.dx,
+        start.dy + fragment.dy,
+      );
+      final current = Offset.lerp(start, end, eased)!;
+
+      return Positioned(
+        left: current.dx - (fragment.size / 2),
+        top: current.dy - (fragment.size / 2),
+        child: Opacity(
+          opacity: fade,
+          child: Transform.rotate(
+            angle: fragment.rot * Curves.easeInOut.transform(progress) * 3.141592653589793,
+            child: Container(
+              width: fragment.size,
+              height: fragment.size,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(fragment.radius),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.84),
+                    Color.alphaBlend(const Color(0x33FFFFFF), color),
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withOpacity(0.14),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList();
   }
 
   Widget _buildNavigationCards(
@@ -2406,6 +2810,24 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       ),
     );
   }
+}
+
+class _CoachDashboardTileTransition {
+  const _CoachDashboardTileTransition({
+    required this.tileKey,
+    required this.rect,
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.color,
+  });
+
+  final String tileKey;
+  final Rect rect;
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color color;
 }
 
 class _OverviewChip extends StatelessWidget {
