@@ -199,7 +199,6 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final verticalTopSpace = context.screenHeight * 0.1;
-    final heroBottomInset = context.isTabletWidth ? 80.0 : 24.0;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -207,13 +206,10 @@ class _LoginScreenState extends State<LoginScreen> {
         children: [
           Align(
             alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: EdgeInsets.only(bottom: heroBottomInset),
-              child: Image.asset(
-                "assets/images/login-image/login.png",
-                width: double.infinity,
-                fit: BoxFit.contain,
-              ),
+            child: Image.asset(
+              "assets/images/login-image/login.png",
+              width: double.infinity,
+              fit: BoxFit.contain,
             ),
           ),
           SafeArea(

@@ -300,13 +300,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ],
         ),
-        image: backgroundImage != null
-            ? DecorationImage(
-                image: AssetImage(backgroundImage),
-                fit: BoxFit.cover,
-                opacity: 0.3,
-              )
-            : null,
         boxShadow: [
           BoxShadow(
             color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
@@ -317,6 +310,20 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
       child: Stack(
         children: [
+          if (backgroundImage != null)
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: Opacity(
+                  opacity: 0.3,
+                  child: Image.asset(
+                    backgroundImage,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             top: -28,
             right: -18,
@@ -1651,7 +1658,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFDDE7D5),
                 StepTracker(),
                 setupIndex: 1,
-                backgroundImage: 'assets/images/dashboard_header.png',
+                backgroundImage: 'assets/images/steps.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -1663,7 +1670,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFE8E3D8),
                 Meditation(),
                 setupIndex: 0,
-                backgroundImage: 'assets/images/meditate.gif',
+                backgroundImage: 'assets/images/meditate1.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -1675,7 +1682,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFF2E5D2),
                 const FastingTimerScreen(),
                 setupIndex: 2,
-                backgroundImage: 'assets/images/forest_birds.jpg',
+                backgroundImage: 'assets/images/fasting.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -1687,7 +1694,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFE1EDDF),
                 const CalorieTrackerScreen(),
                 setupIndex: 3,
-                backgroundImage: 'assets/images/calories1.gif',
+                backgroundImage: 'assets/images/calorie.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -1699,7 +1706,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFDDE4F0),
                 const SleepTracker(),
                 setupIndex: 4,
-                backgroundImage: 'assets/images/sleeping.png',
+                backgroundImage: 'assets/images/sleep.gif',
               ),
             ],
           ),

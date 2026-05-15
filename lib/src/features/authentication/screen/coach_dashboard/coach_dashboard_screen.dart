@@ -32,6 +32,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _isSavingProfile = false;
+  String? selectedEmotion;
   String? _currentUserEmotion;
   String _quote = 'Your daily inspiration...';
   String _author = 'Unknown';
@@ -211,13 +212,14 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
   Future<void> _selectEmotion(String emotion) async {
     final username = await _getUsername();
-    await _saveEmotionToDatabase(context, emotion, username);
-    await _saveEmotionToSharedPreferences(emotion);
 
-    if (!mounted) return;
     setState(() {
+      selectedEmotion = emotion;
       _currentUserEmotion = emotion;
     });
+
+    await _saveEmotionToDatabase(context, emotion, username);
+    await _saveEmotionToSharedPreferences(emotion);
   }
 
   Future<void> _showCoachProfileDialog({
@@ -415,6 +417,48 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         fontWeight: FontWeight.w700,
         letterSpacing: -0.2,
       ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, {String? subtitle}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle(title),
+        if (subtitle != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: Colors.black54,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGlassSectionCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(20),
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withOpacity(0.7)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 
@@ -627,13 +671,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                               mentees: mentees,
                             ),
                             const SizedBox(height: 24),
-                            _buildMoodSection(context),
+                            _buildUnifiedMoodSection(context),
                           ],
                         ),
                       ),
                       Positioned.fill(
                         child: _buildTileTransitionOverlay(),
                       ),
+                      if (selectedEmotion != null)
+                        Positioned.fill(
+                          child: _buildMoodEffectsOverlay(selectedEmotion!),
+                        ),
                     ],
                   );
                 },
@@ -924,7 +972,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const Color(0xFFDDE7D5),
                 StepTracker(),
                 setupIndex: 1,
-                backgroundImage: 'assets/images/dashboard_header.png',
+                backgroundImage: 'assets/images/steps.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -936,7 +984,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const Color(0xFFE8E3D8),
                 Meditation(),
                 setupIndex: 0,
-                backgroundImage: 'assets/images/meditate.gif',
+                backgroundImage: 'assets/images/meditate1.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -948,7 +996,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const Color(0xFFF2E5D2),
                 const FastingTimerScreen(),
                 setupIndex: 2,
-                backgroundImage: 'assets/images/forest_birds.jpg',
+                backgroundImage: 'assets/images/fasting.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -960,7 +1008,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const Color(0xFFE1EDDF),
                 const CalorieTrackerScreen(),
                 setupIndex: 3,
-                backgroundImage: 'assets/images/calories1.gif',
+                backgroundImage: 'assets/images/calorie.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
@@ -972,7 +1020,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const Color(0xFFDDE4F0),
                 const SleepTracker(),
                 setupIndex: 4,
-                backgroundImage: 'assets/images/sleeping.png',
+                backgroundImage: 'assets/images/sleep.gif',
               ),
             ],
           ),
@@ -1005,13 +1053,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             Color.alphaBlend(const Color(0x40FFFFFF), color),
           ],
         ),
-        image: backgroundImage != null
-            ? DecorationImage(
-                image: AssetImage(backgroundImage),
-                fit: BoxFit.cover,
-                opacity: 0.3,
-              )
-            : null,
         boxShadow: [
           BoxShadow(
             color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
@@ -1022,6 +1063,20 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       ),
       child: Stack(
         children: [
+          if (backgroundImage != null)
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: Opacity(
+                  opacity: 0.3,
+                  child: Image.asset(
+                    backgroundImage,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             top: -28,
             right: -18,
@@ -1591,6 +1646,377 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildUnifiedMoodSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          "Mood check-in",
+          subtitle: "Keep track of how today feels, not just what you finish.",
+        ),
+        const SizedBox(height: 14),
+        _buildGlassSectionCard(
+          child: _currentUserEmotion == null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Choose the mood that feels closest right now.",
+                      style: TextStyle(
+                        color: Color(0xFF5E6E57),
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: _buildUnifiedMoodChoice(
+                              icon: CupertinoIcons.smiley_fill,
+                              label: "Happy",
+                              color: const Color(0xFFF5DEB0),
+                              onTap: () => _selectEmotion("happy"),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            child: _buildUnifiedMoodChoice(
+                              icon: CupertinoIcons.minus_circle_fill,
+                              label: "Neutral",
+                              color: const Color(0xFFE6E4DE),
+                              onTap: () => _selectEmotion("neutral"),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            child: _buildUnifiedMoodChoice(
+                              icon: CupertinoIcons.cloud_rain_fill,
+                              label: "Sad",
+                              color: const Color(0xFFDCE6F3),
+                              onTap: () => _selectEmotion("sad"),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 8.0),
+                            child: _buildUnifiedMoodChoice(
+                              icon: CupertinoIcons.flame_fill,
+                              label: "Angry",
+                              color: const Color(0xFFF2D2C6),
+                              onTap: () => _selectEmotion("angry"),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDDE7D5),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.heart_fill,
+                            color: Color(0xFF5E7652),
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            "Today you're feeling $_currentUserEmotion",
+                            style: const TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF24311F),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
+                      style: TextStyle(
+                        color: Color(0xFF5E6E57),
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => EmotionTrackerPage(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF6E8464),
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            "Track Your Emotions",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(width: 6),
+                          Icon(
+                            Icons.arrow_forward_ios,
+                            size: 14,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUnifiedMoodChoice({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withOpacity(0.76)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(icon, color: const Color(0xFF4A5E45), size: 26),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF30402A),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMoodOverlay(String emotion) {
+    switch (emotion.toLowerCase()) {
+      case 'happy':
+        return Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: MediaQuery.of(context).size.width / 2,
+              child: Image.asset('assets/images/confetti_left.gif', fit: BoxFit.cover),
+            ),
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: MediaQuery.of(context).size.width / 2,
+              child: Image.asset('assets/images/confetti_right.gif', fit: BoxFit.cover),
+            ),
+          ],
+        );
+      case 'sad':
+        return Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage('assets/images/rain.jpg'),
+              fit: BoxFit.cover,
+              opacity: 0.3,
+            ),
+          ),
+        );
+      case 'angry':
+        return Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage('assets/images/night_firepit.jpg'),
+              fit: BoxFit.cover,
+              opacity: 0.3,
+            ),
+          ),
+        );
+      case 'neutral':
+        return Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage('assets/images/ocean_waves.jpg'),
+              fit: BoxFit.cover,
+              opacity: 0.3,
+            ),
+          ),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildMoodEffectsOverlay(String emotion) {
+    final message = _getMoodPopupMessage(emotion);
+    final title = emotion[0].toUpperCase() + emotion.substring(1);
+
+    return Stack(
+      children: [
+        _buildMoodOverlay(emotion),
+        Container(
+          color: Colors.black.withOpacity(0.24),
+        ),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22.0),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.98),
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.18),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE8F0E5),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Icon(
+                                _getMoodPopupIcon(emotion),
+                                color: const Color(0xFF4A5E45),
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                "$title mood selected",
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            selectedEmotion = null;
+                          });
+                        },
+                        child: const Icon(
+                          Icons.close,
+                          size: 22,
+                          color: Color(0xFF4A5E45),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.5,
+                      color: Color(0xFF4A5E45),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _getMoodPopupMessage(String emotion) {
+    switch (emotion.toLowerCase()) {
+      case 'happy':
+        return 'Keep the joy going. Continue being happy every day and spread positivity to others.';
+      case 'sad':
+        return 'It is okay to feel sad. Take a deep breath, be kind to yourself, and let this moment pass.';
+      case 'angry':
+        return 'Your feelings matter. Release the tension, stay calm, and choose a peaceful next step.';
+      case 'neutral':
+        return 'A calm mood is balanced energy. Keep the steady pace and enjoy the little wins today.';
+      default:
+        return 'Your emotion is noted. Keep moving forward with care and positivity.';
+    }
+  }
+
+  IconData _getMoodPopupIcon(String emotion) {
+    switch (emotion.toLowerCase()) {
+      case 'happy':
+        return CupertinoIcons.smiley_fill;
+      case 'sad':
+        return CupertinoIcons.cloud_rain_fill;
+      case 'angry':
+        return CupertinoIcons.flame_fill;
+      case 'neutral':
+        return CupertinoIcons.moon_fill;
+      default:
+        return CupertinoIcons.heart_fill;
+    }
   }
 
   Widget _buildEmptyStateCard(String message) {
