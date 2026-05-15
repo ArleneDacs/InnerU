@@ -68,7 +68,7 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
         actionCodeSettings: ActionCodeSettings(
           url: EmailLinkAuthService.continueUrl,
           handleCodeInApp: true,
-          androidPackageName: 'com.example.selfcare_projects',
+          androidPackageName: 'com.valenin.inneru',
           androidInstallApp: false,
           androidMinimumVersion: '21',
           iOSBundleId: 'com.example.selfcareProjects',

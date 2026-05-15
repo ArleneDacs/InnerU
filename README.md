@@ -14,3 +14,32 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Android release signing
+
+Play Console rejects APKs and AABs signed with the debug key. This project expects
+an Android release keystore configured through `android/key.properties`.
+
+1. Generate an upload keystore:
+
+```powershell
+keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+```
+
+2. Create `android/key.properties` from [`android/key.properties.example`](android/key.properties.example) and set the real values:
+
+```properties
+storePassword=your-keystore-password
+keyPassword=your-key-password
+keyAlias=upload
+storeFile=../upload-keystore.jks
+```
+
+3. Build a release artifact:
+
+```powershell
+flutter build appbundle --release
+```
+
+If `android/key.properties` is missing, release builds now fail immediately instead
+of producing an artifact that may be signed incorrectly.

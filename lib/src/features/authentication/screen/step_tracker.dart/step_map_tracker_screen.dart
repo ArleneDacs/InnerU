@@ -2091,7 +2091,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                 TileLayer(
                   urlTemplate:
                       _useSatelliteTiles ? _satelliteTileUrl : _streetTileUrl,
-                  userAgentPackageName: 'com.example.selfcare_projects',
+                  userAgentPackageName: 'com.valenin.inneru',
                 ),
                 if (recordedWalkGuidePolyline != null)
                   PolylineLayer(

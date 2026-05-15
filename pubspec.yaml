@@ -129,7 +129,25 @@ flutter:
     - assets/images/card.png
     - assets/images/alert.png
     - assets/images/star1.png
-    - assets/images/
+    - assets/images/logout.png
+    - assets/images/forest_birds.jpg
+    - assets/images/ocean_waves.jpg
+    - assets/images/rain.jpg
+    - assets/images/night_firepit.jpg
+    - assets/images/coachpic.png
+    - assets/images/lottie_writing.json
+    - assets/images/lottie_meditation.json
+    - assets/images/milestone1.jpg
+    - assets/images/milestone2.jpg
+    - assets/images/milestone3.jpg
+    - assets/images/milestone4.jpg
+    - assets/images/sleeping.png
+    - assets/images/confetti_left.gif
+    - assets/images/confetti_right.gif
+    - assets/images/crown.png
+    - assets/images/dashboard_header.png
+    - assets/images/calories1.gif
+    - assets/images/meditate.gif
     - assets/audio/
 
   fonts:

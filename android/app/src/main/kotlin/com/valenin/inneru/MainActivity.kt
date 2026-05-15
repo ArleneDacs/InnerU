@@ -1,4 +1,4 @@
-package com.example.selfcare_projects
+package com.valenin.inneru
 
 import io.flutter.embedding.android.FlutterActivity
 
