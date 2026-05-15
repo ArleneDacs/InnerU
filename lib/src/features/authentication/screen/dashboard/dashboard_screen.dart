@@ -1670,7 +1670,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const Color(0xFFE8E3D8),
                 Meditation(),
                 setupIndex: 0,
-                backgroundImage: 'assets/images/meditate1.gif',
+                backgroundImage: 'assets/images/meditate.gif',
               ),
               const SizedBox(width: 14),
               _buildClickableInfoCard(
