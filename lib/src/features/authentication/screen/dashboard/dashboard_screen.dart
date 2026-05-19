@@ -105,8 +105,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           .get();
 
       if (userDoc.exists) {
-        final rawProfilePic = userDoc["profilePic"];
+        final rawProfilePic = userDoc.data()?["profilePic"];
         final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
+        if (!mounted) return;
         setState(() {
           _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
         });
@@ -415,7 +416,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(999),
@@ -521,8 +523,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     await _tileTransitionController.forward(from: 0);
     if (!mounted) return;
 
-    final targetPage =
-        setupIndex != null ? Setuppage(initialIndex: setupIndex) : destinationPage;
+    final targetPage = setupIndex != null
+        ? Setuppage(initialIndex: setupIndex)
+        : destinationPage;
 
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -562,7 +565,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: AnimatedBuilder(
         animation: _tileTransitionController,
         builder: (context, child) {
-          final t = Curves.easeInOutCubic.transform(_tileTransitionController.value);
+          final t =
+              Curves.easeInOutCubic.transform(_tileTransitionController.value);
           final size = MediaQuery.of(context).size;
           final targetWidth = size.width.clamp(280.0, 420.0) * 0.82;
           final targetHeight = 260.0;
@@ -571,12 +575,15 @@ class _DashboardScreenState extends State<DashboardScreen>
             width: targetWidth,
             height: targetHeight,
           );
-          final moveT = Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
+          final moveT =
+              Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
           final scatterT = ((t - 0.58) / 0.42).clamp(0.0, 1.0);
           final currentRect = Rect.lerp(transition.rect, targetRect, moveT)!;
-          final overlayOpacity = Tween<double>(begin: 0, end: 0.22).transform(t);
+          final overlayOpacity =
+              Tween<double>(begin: 0, end: 0.22).transform(t);
           final tileOpacity = scatterT > 0
-              ? (1 - Curves.easeInCubic.transform(scatterT)).clamp(0.0, 1.0)
+              ? (1 - Curves.easeInCubic.transform(scatterT))
+                  .clamp(0.0, 1.0)
                   .toDouble()
               : 1.0;
           final turns = scatterT > 0
@@ -644,18 +651,65 @@ class _DashboardScreenState extends State<DashboardScreen>
     required double progress,
   }) {
     const fragments = [
-      (ax: -0.34, ay: -0.22, size: 26.0, radius: 10.0, dx: -120.0, dy: -88.0, rot: -0.9),
-      (ax: 0.28, ay: -0.18, size: 20.0, radius: 8.0, dx: 128.0, dy: -96.0, rot: 1.1),
-      (ax: -0.18, ay: 0.08, size: 22.0, radius: 9.0, dx: -96.0, dy: 24.0, rot: 0.8),
-      (ax: 0.16, ay: 0.16, size: 18.0, radius: 8.0, dx: 90.0, dy: 46.0, rot: -1.2),
-      (ax: -0.04, ay: 0.26, size: 24.0, radius: 10.0, dx: -18.0, dy: 136.0, rot: 1.0),
-      (ax: 0.34, ay: 0.02, size: 16.0, radius: 7.0, dx: 144.0, dy: 8.0, rot: 1.4),
+      (
+        ax: -0.34,
+        ay: -0.22,
+        size: 26.0,
+        radius: 10.0,
+        dx: -120.0,
+        dy: -88.0,
+        rot: -0.9
+      ),
+      (
+        ax: 0.28,
+        ay: -0.18,
+        size: 20.0,
+        radius: 8.0,
+        dx: 128.0,
+        dy: -96.0,
+        rot: 1.1
+      ),
+      (
+        ax: -0.18,
+        ay: 0.08,
+        size: 22.0,
+        radius: 9.0,
+        dx: -96.0,
+        dy: 24.0,
+        rot: 0.8
+      ),
+      (
+        ax: 0.16,
+        ay: 0.16,
+        size: 18.0,
+        radius: 8.0,
+        dx: 90.0,
+        dy: 46.0,
+        rot: -1.2
+      ),
+      (
+        ax: -0.04,
+        ay: 0.26,
+        size: 24.0,
+        radius: 10.0,
+        dx: -18.0,
+        dy: 136.0,
+        rot: 1.0
+      ),
+      (
+        ax: 0.34,
+        ay: 0.02,
+        size: 16.0,
+        radius: 7.0,
+        dx: 144.0,
+        dy: 8.0,
+        rot: 1.4
+      ),
     ];
 
     final eased = Curves.easeOutCubic.transform(progress);
-    final fade = (1 - Curves.easeInQuad.transform(progress))
-        .clamp(0.0, 1.0)
-        .toDouble();
+    final fade =
+        (1 - Curves.easeInQuad.transform(progress)).clamp(0.0, 1.0).toDouble();
     final center = Offset(size.width / 2, size.height / 2);
 
     return fragments.map((fragment) {
@@ -675,7 +729,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: Opacity(
           opacity: fade,
           child: Transform.rotate(
-            angle: fragment.rot * Curves.easeInOut.transform(progress) * 3.141592653589793,
+            angle: fragment.rot *
+                Curves.easeInOut.transform(progress) *
+                3.141592653589793,
             child: Container(
               width: fragment.size,
               height: fragment.size,
@@ -745,7 +801,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         return;
       }
 
-      final response = await http.get(Uri.parse("https://zenquotes.io/api/random"));
+      final response =
+          await http.get(Uri.parse("https://zenquotes.io/api/random"));
 
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
@@ -861,7 +918,8 @@ class _DashboardScreenState extends State<DashboardScreen>
           .snapshots(),
       builder: (context, snapshot) {
         var unreadCount = 0;
-        for (final doc in snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+        for (final doc in snapshot.data?.docs ??
+            <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
           final chatData = doc.data();
           final localReadTime = _localChatReadOverrides[doc.id];
           final lastMessageTimeRaw = chatData['lastMessageTime'];
@@ -879,8 +937,9 @@ class _DashboardScreenState extends State<DashboardScreen>
             if (localReadTime != null) localReadTime,
           ].fold<DateTime?>(
             null,
-            (latest, candidate) =>
-                latest == null || candidate.isAfter(latest) ? candidate : latest,
+            (latest, candidate) => latest == null || candidate.isAfter(latest)
+                ? candidate
+                : latest,
           );
           if (effectiveReadTime != null &&
               !lastMessageTime.isAfter(effectiveReadTime)) {
@@ -898,7 +957,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               unreadCount += rawValue.toInt();
             }
           } else {
-            final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
+            final lastSenderId =
+                (chatData['lastSenderId'] as String?)?.trim() ?? '';
             if (lastSenderId.isNotEmpty &&
                 lastSenderId != currentUser.uid &&
                 (effectiveReadTime == null ||
@@ -934,7 +994,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 right: 6,
                 top: 6,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: const Color(0xFFE56B6F),
                     borderRadius: BorderRadius.circular(999),
@@ -1009,7 +1070,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFFEEF3E8),
                     borderRadius: BorderRadius.circular(999),
@@ -1114,7 +1176,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
           SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(horizontalPadding, 8, horizontalPadding, 24),
+            padding: EdgeInsets.fromLTRB(
+                horizontalPadding, 8, horizontalPadding, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1129,9 +1192,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         UserPreferences.saveUsername(snapshot.data!);
                       }
 
-                      final username = snapshot.connectionState == ConnectionState.waiting
-                          ? "there"
-                          : snapshot.data ?? "there";
+                      final username =
+                          snapshot.connectionState == ConnectionState.waiting
+                              ? "there"
+                              : snapshot.data ?? "there";
 
                       return _buildWelcomeHero(
                         context,
@@ -1177,7 +1241,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
           _buildTileTransitionOverlay(),
-          if (selectedEmotion != null) Positioned.fill(child: _buildMoodEffectsOverlay(selectedEmotion!)),
+          if (selectedEmotion != null)
+            Positioned.fill(child: _buildMoodEffectsOverlay(selectedEmotion!)),
         ],
       ),
     );
@@ -1223,7 +1288,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.28),
                       borderRadius: BorderRadius.circular(999),
@@ -1263,8 +1329,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                   Expanded(
                     child: _buildHeroStatChip(
                       icon: CupertinoIcons.heart_fill,
-                      label: currentUserEmotion == null ? "Mood check" : "Mood logged",
-                      value: currentUserEmotion == null ? "Pending" : currentUserEmotion!,
+                      label: currentUserEmotion == null
+                          ? "Mood check"
+                          : "Mood logged",
+                      value: currentUserEmotion == null
+                          ? "Pending"
+                          : currentUserEmotion!,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1478,7 +1548,9 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: _buildMiniOverviewCard(
                 icon: CupertinoIcons.heart_fill,
                 title: "Mood",
-                value: currentUserEmotion == null ? "Check in" : "${_getEmojiForEmotion(currentUserEmotion!)} $currentUserEmotion",
+                value: currentUserEmotion == null
+                    ? "Check in"
+                    : "${_getEmojiForEmotion(currentUserEmotion!)} $currentUserEmotion",
                 accent: const Color(0xFFE8DCC9),
                 onTap: () => Navigator.pushNamed(context, '/emotionScreen'),
               ),
@@ -1568,9 +1640,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     String description,
     IconData icon,
     Color color,
-    Widget destinationPage,
-    {int? setupIndex, String? backgroundImage,}
-  ) {
+    Widget destinationPage, {
+    int? setupIndex,
+    String? backgroundImage,
+  }) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = (screenWidth * 0.72).clamp(220.0, 310.0);
     final isPressed = _pressedTiles.contains(tileKey);
@@ -1713,7 +1786,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildDailyInsightsSection() {
-    final moodTitle = currentUserEmotion == null ? "Mood check-in" : "Mood is logged";
+    final moodTitle =
+        currentUserEmotion == null ? "Mood check-in" : "Mood is logged";
     final moodText = currentUserEmotion == null
         ? "Take a quick moment to label how you feel. It helps make the rest of your tracking more meaningful."
         : "You marked yourself as $currentUserEmotion today. Keep the rest of your habits light and realistic.";
@@ -1733,14 +1807,16 @@ class _DashboardScreenState extends State<DashboardScreen>
               _buildInsightRow(
                 icon: CupertinoIcons.drop_fill,
                 title: "Hydrate early",
-                description: "A glass of water after waking is a simple way to support energy and focus.",
+                description:
+                    "A glass of water after waking is a simple way to support energy and focus.",
                 color: const Color(0xFFDDEAF3),
               ),
               const SizedBox(height: 14),
               _buildInsightRow(
                 icon: CupertinoIcons.person,
                 title: "Move in short bursts",
-                description: "Short walks and regular movement breaks are easier to sustain than waiting for one perfect workout.",
+                description:
+                    "Short walks and regular movement breaks are easier to sustain than waiting for one perfect workout.",
                 color: const Color(0xFFDDE7D5),
               ),
               const SizedBox(height: 14),
@@ -1836,7 +1912,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               FutureBuilder<Coach?>(
                 future: _loadAssignedCoach(coachId),
                 builder: (context, coachSnapshot) {
-                  if (coachSnapshot.connectionState == ConnectionState.waiting) {
+                  if (coachSnapshot.connectionState ==
+                      ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
@@ -1865,7 +1942,8 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildNoCoachCard({
     String title = 'No coach yet',
-    String message = 'You do not have a coach assigned yet. Once you connect with one, they will appear here.',
+    String message =
+        'You do not have a coach assigned yet. Once you connect with one, they will appear here.',
   }) {
     return _buildGlassSectionCard(
       child: Row(
@@ -1986,7 +2064,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => _openCoachChat(context: context, coach: coach),
+                  onPressed: () =>
+                      _openCoachChat(context: context, coach: coach),
                   icon: const Icon(Icons.chat_bubble_outline, size: 18),
                   label: const Text('Message'),
                   style: ElevatedButton.styleFrom(
@@ -2044,7 +2123,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                         Expanded(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 4.0),
                             child: _buildMoodChoice(
                               icon: CupertinoIcons.minus_circle_fill,
                               label: "Neutral",
@@ -2055,7 +2135,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                         Expanded(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 4.0),
                             child: _buildMoodChoice(
                               icon: CupertinoIcons.cloud_rain_fill,
                               label: "Sad",
@@ -2201,29 +2282,20 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildMoodOverlay(String emotion) {
     switch (emotion.toLowerCase()) {
       case 'happy':
-        return Stack(
-          children: [
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: MediaQuery.of(context).size.width / 2,
-              child: Image.asset('assets/images/confetti_left.gif', fit: BoxFit.cover),
+        return Container(
+          decoration: BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage('assets/images/happy.gif'),
+              fit: BoxFit.cover,
+              opacity: 0.3,
             ),
-            Positioned(
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: MediaQuery.of(context).size.width / 2,
-              child: Image.asset('assets/images/confetti_right.gif', fit: BoxFit.cover),
-            ),
-          ],
+          ),
         );
       case 'sad':
         return Container(
           decoration: BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/rain.jpg'),
+              image: AssetImage('assets/images/rain.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -2233,7 +2305,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         return Container(
           decoration: BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/night_firepit.jpg'),
+              image: AssetImage('assets/images/angry.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -2243,7 +2315,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         return Container(
           decoration: BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/ocean_waves.jpg'),
+              image: AssetImage('assets/images/neutral.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -2377,7 +2449,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         return CupertinoIcons.heart_fill;
     }
   }
-
 }
 
 class _DashboardTileTransition {

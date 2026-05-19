@@ -38,6 +38,11 @@ post_install do |installer|
 
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+      if target.name == 'spotify_sdk'
+        # The plugin podspec pins simulator builds to x86_64, which breaks
+        # Apple Silicon simulator builds when Xcode expects arm64 support.
+        config.build_settings['VALID_ARCHS[sdk=iphonesimulator*]'] = '$(ARCHS_STANDARD)'
+      end
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
         'PERMISSION_CAMERA=1',

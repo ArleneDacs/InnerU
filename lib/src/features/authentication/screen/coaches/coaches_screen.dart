@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'chat_room.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
+import 'package:selfcare_projects/src/utils/phone_launcher.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,8 +52,16 @@ class CoachProfileDialog extends StatelessWidget {
     required this.coach,
   });
 
-  void _launchDialer(String phoneNumber) async {
-    final Uri url = Uri(scheme: 'tel', path: phoneNumber);
+  Future<void> _launchDialer(BuildContext context, String phoneNumber) async {
+    final normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    if (normalizedPhoneNumber.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('This coach does not have a valid phone number yet.'),
+        ),
+      );
+      return;
+    }
 
     // Get current date dynamically in the format 'yyyy-MM-dd'
     String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -77,9 +85,14 @@ class CoachProfileDialog extends StatelessWidget {
           // Use UID instead of username for Firestore document ID
           String documentId = '$userId-$formattedDate';
 
-          // Try to launch the phone dialer
-          if (await canLaunchUrl(url)) {
-            await launchUrl(url);
+          bool launched = false;
+          try {
+            launched = await launchPhoneNumber(normalizedPhoneNumber);
+          } catch (e) {
+            debugPrint("Error launching dialer: $e");
+          }
+
+          if (launched) {
             debugPrint("Dialer launched successfully");
 
             // Update or create Firestore document using UID instead of username
@@ -97,6 +110,16 @@ class CoachProfileDialog extends StatelessWidget {
                 "Firestore updated successfully: 'call' field set to true");
           } else {
             debugPrint("Could not launch dialer");
+            if (!context.mounted) {
+              return;
+            }
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(
+                content: Text(
+                  "Couldn't open the dialer on this device. If you're using the iPhone simulator, the Phone app isn't available there.",
+                ),
+              ),
+            );
           }
         } else {
           debugPrint("Error: User document not found for userId: $userId");
@@ -138,10 +161,11 @@ class CoachProfileDialog extends StatelessWidget {
                     color: Colors.white,
                   ),
                   onPressed: () async {
-                    Navigator.pop(context);
+                    final navigator = Navigator.of(context);
+                    final messenger = ScaffoldMessenger.maybeOf(context);
                     final currentUser = FirebaseAuth.instance.currentUser;
                     if (currentUser == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger?.showSnackBar(
                         const SnackBar(content: Text('Please log in first.')),
                       );
                       return;
@@ -154,16 +178,17 @@ class CoachProfileDialog extends StatelessWidget {
                           .doc(currentUser.uid)
                           .get();
                       final data = userDoc.data();
-                      userName = (data?['username'] as String?)?.trim().isNotEmpty ==
-                              true
-                          ? (data!['username'] as String)
-                          : (currentUser.email?.split('@').first ?? 'User');
+                      userName =
+                          (data?['username'] as String?)?.trim().isNotEmpty ==
+                                  true
+                              ? (data!['username'] as String)
+                              : (currentUser.email?.split('@').first ?? 'User');
                     } catch (_) {
                       userName = currentUser.email?.split('@').first ?? 'User';
                     }
 
-                    Navigator.push(
-                      context,
+                    navigator.pop();
+                    navigator.push(
                       MaterialPageRoute(
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
@@ -202,8 +227,10 @@ class CoachProfileDialog extends StatelessWidget {
             ),
             GestureDetector(
               onTap: () {
-                _launchDialer(coach
-                    .phone); // Call the launcher with the coach's phone number
+                _launchDialer(
+                    context,
+                    coach
+                        .phone); // Call the launcher with the coach's phone number
               },
               child: Text(
                 coach.phone.isNotEmpty ? coach.phone : 'No phone available',

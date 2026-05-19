@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,7 +13,6 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'dart:async';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class StepTracker extends StatefulWidget {
@@ -21,7 +23,7 @@ class StepTracker extends StatefulWidget {
 }
 
 class _StepTrackerState extends State<StepTracker>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
   StreamSubscription<StepCount>? _stepCountStream;
@@ -33,21 +35,29 @@ class _StepTrackerState extends State<StepTracker>
   int _dailyGoal = 5000;
   int _lastRawStepCount = 0;
   bool _isWalking = false;
+  bool _stepCounterInitialized = false;
   Timer? _checkTimer;
+
+  // iOS exposes motion access as sensors, while Android uses activity recognition.
+  Permission get _stepPermission =>
+      Platform.isIOS ? Permission.sensors : Permission.activityRecognition;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _lottieController = AnimationController(vsync: this);
     _stepStreamController = StreamController<int>.broadcast();
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
-    await _requestPermission();
+    final hasPermission = await _requestPermission();
     await _loadDailyGoal();
     await _loadSteps();
-    _initStepCounter();
+    if (hasPermission) {
+      _initStepCounter();
+    }
   }
 
   Future<void> _loadDailyGoal() async {
@@ -114,17 +124,22 @@ class _StepTrackerState extends State<StepTracker>
     _updateStepCount(_steps);
   }
 
-  Future<void> _requestPermission() async {
-    PermissionStatus status = await Permission.activityRecognition.request();
+  Future<bool> _requestPermission() async {
+    PermissionStatus status = await _stepPermission.status;
+    if (!status.isGranted) {
+      status = await _stepPermission.request();
+    }
 
     if (status.isGranted) {
-      debugPrint('Activity recognition permission granted.');
-    } else if (status.isDenied) {
-      debugPrint('Activity recognition permission denied.');
-      openAppSettings();
-    } else if (status.isPermanentlyDenied) {
-      openAppSettings();
+      debugPrint('Step tracking permission granted.');
+      return true;
     }
+
+    debugPrint('Step tracking permission not granted: $status');
+    if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    return false;
   }
 
   Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
@@ -147,6 +162,9 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   void _initStepCounter() async {
+    if (_stepCounterInitialized) return;
+    _stepCounterInitialized = true;
+
     SharedPreferences prefs = await SharedPreferences.getInstance();
     _initialSteps = prefs.getInt('initial_steps') ?? -1;
 
@@ -263,10 +281,6 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
-  Future<void> _saveStepCompletion() async {
-    await _saveDailyActivity(steps: true);
-  }
-
   void _handleRawStepCount(int rawSteps) {
     final delta = rawSteps - _lastRawStepCount;
     _lastRawStepCount = rawSteps;
@@ -322,8 +336,25 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
+  Future<void> _resumeStepCounterIfNeeded() async {
+    if (!mounted || _stepCounterInitialized) return;
+
+    final hasPermission = await _requestPermission();
+    if (!mounted || !hasPermission) return;
+
+    _initStepCounter();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _resumeStepCounterIfNeeded();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _lottieController.dispose();
     _stepCountStream?.cancel();
     _stepStreamController.close();
@@ -335,7 +366,8 @@ class _StepTrackerState extends State<StepTracker>
   Widget build(BuildContext context) {
     final double progress =
         _dailyGoal <= 0 ? 0 : (_steps / _dailyGoal).clamp(0, 1).toDouble();
-    final animationSize = context.isTabletWidth ? 360.0 : context.screenWidth * 0.7;
+    final animationSize =
+        context.isTabletWidth ? 360.0 : context.screenWidth * 0.7;
 
     return Scaffold(
       body: SafeArea(
@@ -401,7 +433,8 @@ class _StepTrackerState extends State<StepTracker>
                           Text(
                             '${snapshot.data ?? 0}',
                             style: TextStyle(
-                              fontSize: context.responsiveFont(60, min: 0.8, max: 1.15),
+                              fontSize: context.responsiveFont(60,
+                                  min: 0.8, max: 1.15),
                               fontFamily: 'ralemed',
                               color: Colors.white,
                             ),
@@ -496,7 +529,8 @@ class _StepTrackerState extends State<StepTracker>
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const TrackingScreen(title: ''),
+                            builder: (context) =>
+                                const TrackingScreen(title: ''),
                           ),
                         );
                       },

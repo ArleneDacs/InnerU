@@ -329,10 +329,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             'Saved foods and regular nutrition lookup are still available.';
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isCheckingOllamaStatus = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isCheckingOllamaStatus = false;
+        });
+      }
     }
   }
 
@@ -369,19 +370,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   Future<void> _editGoalFromProgressCard(int currentGoal) async {
-    final controller = TextEditingController(
-      text: (currentGoal > 0 ? currentGoal : _dailyGoal).toString(),
-    );
-
+    var goalText = (currentGoal > 0 ? currentGoal : _dailyGoal).toString();
     final parsedGoal = await showDialog<int>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Set Daily Calorie Goal'),
-          content: TextField(
-            controller: controller,
+          content: TextFormField(
+            initialValue: goalText,
             keyboardType: TextInputType.number,
             autofocus: true,
+            onChanged: (value) => goalText = value,
             decoration: const InputDecoration(
               hintText: 'Ex. 2200',
               helperText: 'This is your target calorie intake for the day.',
@@ -395,7 +394,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             FilledButton(
               onPressed: () => Navigator.pop(
                 context,
-                int.tryParse(controller.text.trim()),
+                int.tryParse(goalText.trim()),
               ),
               child: const Text('Save'),
             ),
@@ -404,23 +403,32 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       },
     );
 
-    if (parsedGoal == null) return;
+    if (parsedGoal == null || !mounted) return;
     await _saveGoalValue(parsedGoal);
   }
 
   Future<void> _openCalorieCalculator() async {
-    final ageController = TextEditingController();
-    final weightController = TextEditingController();
-    final heightController = TextEditingController();
     String selectedSex = 'Male';
     double activityMultiplier = 1.375;
     String activityLabel = 'Lightly active';
+    var ageText = '';
+    var weightText = '';
+    var heightText = '';
 
     final result = await showDialog<int>(
       context: context,
       builder: (context) {
+        String? validationMessage;
+
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            void clearValidation() {
+              if (validationMessage == null) return;
+              setDialogState(() {
+                validationMessage = null;
+              });
+            }
+
             return AlertDialog(
               title: const Text('Calorie Intake Calculator'),
               content: SingleChildScrollView(
@@ -439,31 +447,44 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         if (value == null) return;
                         setDialogState(() {
                           selectedSex = value;
+                          validationMessage = null;
                         });
                       },
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: ageController,
+                    TextFormField(
+                      initialValue: ageText,
                       keyboardType: TextInputType.number,
+                      onChanged: (value) {
+                        ageText = value;
+                        clearValidation();
+                      },
                       decoration: const InputDecoration(
                         labelText: 'Age',
                         hintText: 'Ex. 24',
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: weightController,
+                    TextFormField(
+                      initialValue: weightText,
                       keyboardType: TextInputType.number,
+                      onChanged: (value) {
+                        weightText = value;
+                        clearValidation();
+                      },
                       decoration: const InputDecoration(
                         labelText: 'Weight (kg)',
                         hintText: 'Ex. 65',
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: heightController,
+                    TextFormField(
+                      initialValue: heightText,
                       keyboardType: TextInputType.number,
+                      onChanged: (value) {
+                        heightText = value;
+                        clearValidation();
+                      },
                       decoration: const InputDecoration(
                         labelText: 'Height (cm)',
                         hintText: 'Ex. 170',
@@ -495,6 +516,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         if (value == null) return;
                         setDialogState(() {
                           activityLabel = value;
+                          validationMessage = null;
                           activityMultiplier = switch (value) {
                             'Sedentary' => 1.2,
                             'Moderately active' => 1.55,
@@ -504,6 +526,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         });
                       },
                     ),
+                    if (validationMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        validationMessage!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -514,11 +547,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    final age = double.tryParse(ageController.text.trim());
-                    final weight =
-                        double.tryParse(weightController.text.trim());
-                    final height =
-                        double.tryParse(heightController.text.trim());
+                    final age = double.tryParse(ageText.trim());
+                    final weight = double.tryParse(weightText.trim());
+                    final height = double.tryParse(heightText.trim());
 
                     if (age == null ||
                         weight == null ||
@@ -526,18 +557,20 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         age <= 0 ||
                         weight <= 0 ||
                         height <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Enter valid age, weight, and height.'),
-                        ),
-                      );
+                      setDialogState(() {
+                        validationMessage =
+                            'Enter valid age, weight, and height.';
+                      });
                       return;
                     }
 
                     final bmr = selectedSex == 'Male'
                         ? 10 * weight + 6.25 * height - 5 * age + 5
                         : 10 * weight + 6.25 * height - 5 * age - 161;
-                    Navigator.pop(context, (bmr * activityMultiplier).round());
+                    Navigator.pop(
+                      context,
+                      (bmr * activityMultiplier).round(),
+                    );
                   },
                   child: const Text('Calculate'),
                 ),
@@ -572,7 +605,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       },
     );
 
-    if (shouldUse != true) return;
+    if (shouldUse != true || !mounted) return;
     await _saveGoalValue(result);
     if (!mounted) return;
     _showSnackBar('Daily goal updated to $result kcal.');
@@ -600,6 +633,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       });
 
       final autoDetected = await _analyzeCapturedMealPhoto(image.path);
+      if (!mounted || autoDetected) return;
       if (!autoDetected) {
         await _promptCameraMealLabel();
       }
@@ -615,16 +649,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   Future<void> _promptCameraMealLabel() async {
-    final controller = TextEditingController(text: _mealController.text.trim());
+    var mealNameText = _mealController.text.trim();
     final mealName = await showDialog<String>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('What food is this?'),
-          content: TextField(
-            controller: controller,
+          content: TextFormField(
+            initialValue: mealNameText,
             autofocus: true,
             textCapitalization: TextCapitalization.words,
+            onChanged: (value) => mealNameText = value,
             decoration: const InputDecoration(
               hintText: 'Ex. Chicken burger, fries, milk tea',
             ),
@@ -635,7 +670,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               child: const Text('Later'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              onPressed: () => Navigator.pop(context, mealNameText.trim()),
               child: const Text('Use This'),
             ),
           ],
@@ -839,6 +874,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _clearMealComposer() {
+    if (!mounted) return;
+
     _mealController.clear();
     _quantityController.clear();
     _calorieController.clear();
@@ -926,10 +963,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
 
     final lookedUpNutrition = await _ensureNutritionForMeal(mealName);
+    if (!mounted) return;
+
     final calories = int.tryParse(_calorieController.text.trim());
     final protein = int.tryParse(_proteinController.text.trim()) ?? 0;
     final carbs = int.tryParse(_carbController.text.trim()) ?? 0;
     final fat = int.tryParse(_fatController.text.trim()) ?? 0;
+    final quantity = double.tryParse(_quantityController.text.trim());
 
     if (calories == null || calories <= 0) {
       _showSnackBar(
@@ -952,9 +992,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         ),
         source: 'meal_log',
       );
+      if (!mounted) return;
 
       final photoUrl = await _uploadMealPhotoIfNeeded();
-      final quantity = double.tryParse(_quantityController.text.trim());
+      if (!mounted) return;
 
       await _dayRef.set({
         'dailyGoal': _dailyGoal,
@@ -976,8 +1017,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       });
 
       await _refreshDailyTotals();
+      if (!mounted) return;
+
       _clearMealComposer();
-      FocusScope.of(context).unfocus();
+      FocusManager.instance.primaryFocus?.unfocus();
     } catch (_) {
       _showSnackBar('Failed to add meal.');
     }
@@ -1027,6 +1070,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _applyPresetFood(_PresetFood preset) {
+    if (!mounted) return;
+
     _mealController.text = preset.name;
     _calorieController.text = preset.calories.toString();
     _proteinController.text = preset.protein.toString();
@@ -1038,6 +1083,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _applyFoodAmount(_CalculatedFoodAmount calculated) {
+    if (!mounted) return;
+
     _mealController.text = calculated.displayName;
     _calorieController.text = calculated.calories.toString();
     _proteinController.text = calculated.protein.toString();
@@ -1251,6 +1298,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _handleMealNameChanged(String value) {
+    if (!mounted) return;
+
     final measuredAmount = _calculateAmountFromFields(value);
     if (measuredAmount != null) {
       _applyFoodAmount(measuredAmount);
@@ -1298,6 +1347,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     if (existingCalories != null && existingCalories > 0) return null;
 
     final cached = await _lookupFoodMemory(mealName);
+    if (!mounted) return null;
     if (cached != null) {
       _applyOnlineSuggestion(cached);
       return cached;
@@ -1345,12 +1395,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   Future<_NutritionLookupResult?> _lookupFoodOnline(String mealName) async {
     if (_isLookingUpFood) return null;
 
+    if (!mounted) return null;
     setState(() {
       _isLookingUpFood = true;
     });
 
     try {
       final suggestions = await _fetchOnlineSuggestions(mealName, limit: 1);
+      if (!mounted) return null;
       if (suggestions.isEmpty) return null;
       final result = suggestions.first;
       _applyOnlineSuggestion(result);
@@ -1460,6 +1512,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _isSearchingSuggestions = true;
     });
@@ -1483,6 +1536,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _applyOnlineSuggestion(_NutritionLookupResult suggestion) {
+    if (!mounted) return;
+
     _mealController.text = suggestion.displayName;
     _calorieController.text = suggestion.calories.toString();
     _proteinController.text = suggestion.protein.toString();
@@ -1502,7 +1557,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       ),
     );
 
-    if (barcode == null || barcode.isEmpty) return;
+    if (!mounted || barcode == null || barcode.isEmpty) return;
 
     setState(() {
       _isLookingUpFood = true;
@@ -1542,6 +1597,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         return;
       }
 
+      if (!mounted) return;
       _applyOnlineSuggestion(result);
     } on TimeoutException {
       _showSnackBar('Barcode lookup timed out. Please try again.');
@@ -1565,7 +1621,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(content: Text(message)),
     );
   }

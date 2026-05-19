@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -52,6 +53,10 @@ class _StepMapTrackingController extends ChangeNotifier {
   String currentUsername = 'Walker';
   String? activeSessionId;
   int _lastNotificationElapsedSeconds = -1;
+
+  // iOS exposes motion access as sensors, while Android uses activity recognition.
+  Permission get _stepPermission =>
+      Platform.isIOS ? Permission.sensors : Permission.activityRecognition;
 
   LatLng get defaultCenter => _defaultCenter;
   int get elapsedSeconds => elapsed.inSeconds;
@@ -169,9 +174,8 @@ class _StepMapTrackingController extends ChangeNotifier {
       }
 
       final geometry = (routes.first as Map<String, dynamic>)['geometry'];
-      final coordinates = geometry is Map<String, dynamic>
-          ? geometry['coordinates']
-          : null;
+      final coordinates =
+          geometry is Map<String, dynamic> ? geometry['coordinates'] : null;
       if (coordinates is! List || coordinates.length < 2) {
         return [startPoint, endPoint];
       }
@@ -195,8 +199,7 @@ class _StepMapTrackingController extends ChangeNotifier {
       }
 
       final snappedDistance = _routeDistance(snappedPoints);
-      if (snappedDistance <= 0 ||
-          snappedDistance > directDistance * 3.5 + 30) {
+      if (snappedDistance <= 0 || snappedDistance > directDistance * 3.5 + 30) {
         return [startPoint, endPoint];
       }
 
@@ -214,9 +217,8 @@ class _StepMapTrackingController extends ChangeNotifier {
       return true;
     }
 
-    final measuredSpeed = position.speed.isFinite && position.speed > 0
-        ? position.speed
-        : null;
+    final measuredSpeed =
+        position.speed.isFinite && position.speed > 0 ? position.speed : null;
     if (measuredSpeed != null &&
         measuredSpeed > _maxWalkingSpeedMetersPerSecond &&
         segmentDistance > 25) {
@@ -274,7 +276,11 @@ class _StepMapTrackingController extends ChangeNotifier {
   }
 
   Future<bool> _ensureActivityRecognitionAccess() async {
-    final status = await Permission.activityRecognition.request();
+    var status = await _stepPermission.status;
+    if (!status.isGranted) {
+      status = await _stepPermission.request();
+    }
+
     if (status.isGranted) {
       return true;
     }
@@ -307,8 +313,7 @@ class _StepMapTrackingController extends ChangeNotifier {
 
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      statusText =
-          'Location permission is needed to draw your walking route.';
+      statusText = 'Location permission is needed to draw your walking route.';
       _emit();
       if (permission == LocationPermission.deniedForever && openSettings) {
         await Geolocator.openAppSettings();
@@ -408,7 +413,8 @@ class _StepMapTrackingController extends ChangeNotifier {
         },
       );
     } on LocationServiceDisabledException {
-      statusText = 'Location services are off. Please turn GPS on and try again.';
+      statusText =
+          'Location services are off. Please turn GPS on and try again.';
       _emit();
     } on PermissionDeniedException {
       statusText =
@@ -519,9 +525,8 @@ class _StepMapTrackingController extends ChangeNotifier {
     final sessionId = activeSessionId;
     if (userId == null || sessionId == null) return;
 
-    final livePosition = currentPosition == null
-        ? null
-        : positionToLatLng(currentPosition!);
+    final livePosition =
+        currentPosition == null ? null : positionToLatLng(currentPosition!);
 
     try {
       await _firestore
@@ -939,10 +944,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       final batch = _firestore.batch();
 
       final existingInvite = await inviteRef.get();
-      final existingMember = await sessionRef
-          .collection('members')
-          .doc(invitedUserId)
-          .get();
+      final existingMember =
+          await sessionRef.collection('members').doc(invitedUserId).get();
 
       if (existingInvite.exists || existingMember.exists) {
         if (!mounted) return;
@@ -1015,8 +1018,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
       if (!mounted) return;
       setState(() {
         _activeSessionId = sessionRef.id;
-        _activeSessionStatus =
-            hasReusableSession ? (_activeSessionStatus ?? 'pending') : 'pending';
+        _activeSessionStatus = hasReusableSession
+            ? (_activeSessionStatus ?? 'pending')
+            : 'pending';
       });
       _trackingController.updateActiveSession(sessionRef.id);
       _listenToSessionMembers(sessionRef.id);
@@ -1062,33 +1066,42 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           ? null
           : _positionToLatLng(_currentPosition!);
 
-      batch.set(sessionRef, {
-        'status': 'active',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          sessionRef,
+          {
+            'status': 'active',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      batch.set(sessionRef.collection('members').doc(userId), {
-        'userId': userId,
-        'username': _currentUsername,
-        'status': 'accepted',
-        'isTracking': _isTracking,
-        'stepCount': _sessionSteps,
-        'distanceMeters': _distanceMeters,
-        'elapsedSeconds': _elapsedSeconds(),
-        'routePoints': _serializeRoutePoints(_routePoints),
-        'currentLocation': safeCurrentLocation == null
-            ? null
-            : GeoPoint(
-                safeCurrentLocation.latitude,
-                safeCurrentLocation.longitude,
-              ),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          sessionRef.collection('members').doc(userId),
+          {
+            'userId': userId,
+            'username': _currentUsername,
+            'status': 'accepted',
+            'isTracking': _isTracking,
+            'stepCount': _sessionSteps,
+            'distanceMeters': _distanceMeters,
+            'elapsedSeconds': _elapsedSeconds(),
+            'routePoints': _serializeRoutePoints(_routePoints),
+            'currentLocation': safeCurrentLocation == null
+                ? null
+                : GeoPoint(
+                    safeCurrentLocation.latitude,
+                    safeCurrentLocation.longitude,
+                  ),
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      batch.set(inviteRef, {
-        'status': 'accepted',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          inviteRef,
+          {
+            'status': 'accepted',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
       await batch.commit();
       if (!mounted) return;
@@ -1128,20 +1141,29 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
           .collection('walkInvites')
           .doc(sessionId);
 
-      batch.set(sessionRef, {
-        'status': 'declined',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          sessionRef,
+          {
+            'status': 'declined',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      batch.set(sessionRef.collection('members').doc(userId), {
-        'status': 'declined',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          sessionRef.collection('members').doc(userId),
+          {
+            'status': 'declined',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      batch.set(inviteRef, {
-        'status': 'declined',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          inviteRef,
+          {
+            'status': 'declined',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
       await batch.commit();
     } catch (error) {
@@ -1183,7 +1205,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   }
 
   void _moveCamera(LatLng point, {double zoom = 16}) {
-    if (!_isValidLatitude(point.latitude) || !_isValidLongitude(point.longitude)) {
+    if (!_isValidLatitude(point.latitude) ||
+        !_isValidLongitude(point.longitude)) {
       return;
     }
 
@@ -1478,8 +1501,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                         child: ListView.separated(
                           shrinkWrap: true,
                           itemCount: walks.length,
-                          separatorBuilder: (_, __) =>
-                              const Divider(height: 1),
+                          separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final walk = walks[index];
                             final isSelected =
@@ -1494,7 +1516,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                                   style: const TextStyle(color: Colors.white),
                                 ),
                               ),
-                              title: Text(_formatRecordedWalkDate(walk.endedAt)),
+                              title:
+                                  Text(_formatRecordedWalkDate(walk.endedAt)),
                               subtitle: Text(
                                 '${_formatDistance(walk.distanceMeters)} | ${walk.stepCount} steps | ${_formatDuration(Duration(seconds: walk.elapsedSeconds))}',
                               ),
@@ -1596,9 +1619,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     final userId = _currentUserId;
     if (userId == null) return const [];
 
-    final currentPoint = _currentPosition == null
-        ? null
-        : _positionToLatLng(_currentPosition!);
+    final currentPoint =
+        _currentPosition == null ? null : _positionToLatLng(_currentPosition!);
 
     return [
       _WalkSessionMember(
@@ -1778,15 +1800,14 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                                   })
                               .where((user) => user['id'] != userId)
                               .where((user) {
-                                if (searchQuery.isEmpty) return true;
-                                final username =
-                                    (user['username'] as String).toLowerCase();
-                                final email =
-                                    (user['email'] as String).toLowerCase();
-                                return username.contains(searchQuery) ||
-                                    email.contains(searchQuery);
-                              })
-                              .toList();
+                            if (searchQuery.isEmpty) return true;
+                            final username =
+                                (user['username'] as String).toLowerCase();
+                            final email =
+                                (user['email'] as String).toLowerCase();
+                            return username.contains(searchQuery) ||
+                                email.contains(searchQuery);
+                          }).toList();
 
                           if (users.isEmpty) {
                             return const Center(
@@ -1800,10 +1821,12 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                           return ListView.separated(
                             shrinkWrap: true,
                             itemCount: users.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final user = users[index];
-                              final username = (user['username'] as String).trim();
+                              final username =
+                                  (user['username'] as String).trim();
                               final email = (user['email'] as String).trim();
 
                               return ListTile(
@@ -1823,8 +1846,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
                                 title: Text(
                                   username.isEmpty ? 'Unnamed user' : username,
                                 ),
-                                subtitle:
-                                    email.isEmpty ? null : Text(email),
+                                subtitle: email.isEmpty ? null : Text(email),
                                 trailing: TextButton(
                                   onPressed: _isSessionBusy
                                       ? null
@@ -1874,10 +1896,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         .toList();
     final markers = membersToDisplay
         .map((member) {
-          final markerPoint =
-              member.currentLocation ?? (member.routePoints.isNotEmpty
-                  ? member.routePoints.last
-                  : null);
+          final markerPoint = member.currentLocation ??
+              (member.routePoints.isNotEmpty ? member.routePoints.last : null);
           final isSelected = _selectedMarkerUserId == member.userId;
 
           if (markerPoint == null) return null;
@@ -1978,10 +1998,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
         })
         .whereType<Marker>()
         .toList();
-    final replayRoutePoints = _isReplayingRecordedWalk &&
-            _replayRoutePoints.length > 1
-        ? _replayRoutePoints
-        : _selectedRecordedWalk?.routePoints ?? const <LatLng>[];
+    final replayRoutePoints =
+        _isReplayingRecordedWalk && _replayRoutePoints.length > 1
+            ? _replayRoutePoints
+            : _selectedRecordedWalk?.routePoints ?? const <LatLng>[];
     final recordedWalkGuidePolyline = _selectedRecordedWalk != null &&
             _selectedRecordedWalk!.routePoints.length > 1
         ? Polyline(
@@ -2050,7 +2070,21 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Step Map Tracker'),
+        centerTitle: false,
+        titleSpacing: 0,
+        title: LayoutBuilder(
+          builder: (context, constraints) {
+            final useCompactTitle = constraints.maxWidth < 210;
+            return Text(
+              useCompactTitle ? 'Step Map' : 'Step Map Tracker',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontSize: useCompactTitle ? 28 : 30,
+                  ),
+            );
+          },
+        ),
         actions: [
           IconButton(
             onPressed: _showRecordedWalksSheet,

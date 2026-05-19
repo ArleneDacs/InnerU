@@ -36,6 +36,7 @@ class _StepGoalScreenState extends State<StepGoalScreen> {
   Future<void> _saveGoal() async {
     final user = FirebaseAuth.instance.currentUser;
     final int? parsedGoal = int.tryParse(_goalController.text.trim());
+    var didPop = false;
 
     if (user == null || parsedGoal == null) {
       _showError('Enter a valid step goal first.');
@@ -60,11 +61,12 @@ class _StepGoalScreenState extends State<StepGoalScreen> {
       await prefs.setInt('daily_step_goal_${user.uid}', parsedGoal);
 
       if (!mounted) return;
+      didPop = true;
       Navigator.pop(context, parsedGoal);
     } catch (e) {
       _showError('Failed to save your step goal. Please try again.');
     } finally {
-      if (mounted) {
+      if (mounted && !didPop) {
         setState(() {
           _isSaving = false;
         });

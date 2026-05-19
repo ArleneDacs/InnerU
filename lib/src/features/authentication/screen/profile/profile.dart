@@ -299,15 +299,16 @@ class _ProfilePageState extends State<ProfilePage> {
     if (user == null) return;
 
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+      final userDoc = await FirebaseFirestore.instance
           .collection("users")
           .doc(user.uid)
           .get();
 
       if (userDoc.exists) {
-        final dynamic rawProfilePic = userDoc["profilePic"];
+        final dynamic rawProfilePic = userDoc.data()?["profilePic"];
         final String cleanedUrl =
             rawProfilePic is String ? rawProfilePic.trim() : "";
+        if (!mounted) return;
         setState(() {
           _profilePicUrl = cleanedUrl.isEmpty ? null : cleanedUrl;
         });
