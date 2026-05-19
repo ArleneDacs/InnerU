@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
@@ -16,6 +18,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   String _selectedRole = 'user';
   bool _isLoading = false;
   bool _acceptedTerms = false;
+
+  bool get _supportsAppleSignIn =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<void> _handleGoogleSignup() async {
     if (!_acceptedTerms) {
@@ -68,9 +73,63 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     );
   }
 
+  Future<void> _handleAppleSignup() async {
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please accept the Terms and Conditions."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    final error = await AuthService().signUpWithApple(
+      role: _selectedRole,
+      termsAccepted: _acceptedTerms,
+    );
+
+    if (!mounted) return;
+
+    if (error == AuthService.userCancelledAppleFlow) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+
+    if (error == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AuthRoleHome(preferredRole: _selectedRole),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final contentSpacing = context.responsiveValue(28);
+    final authOptionsLabel = _supportsAppleSignIn
+        ? "email, Google, or Apple"
+        : "email or Google";
 
     return Scaffold(
       body: Stack(
@@ -120,7 +179,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       ),
                       SizedBox(height: context.responsiveValue(10)),
                       Text(
-                        "Slide between User and Coach, then continue with email or Google.",
+                        "Slide between User and Coach, then continue with $authOptionsLabel.",
                         style: TextStyle(
                           fontSize: context.responsiveFont(15),
                           color: Colors.black54,
@@ -311,6 +370,51 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                 ),
                         ),
                       ),
+                      if (_supportsAppleSignIn) ...[
+                        SizedBox(height: context.responsiveValue(16)),
+                        SizedBox(
+                          width: double.infinity,
+                          height:
+                              context.responsiveValue(52, min: 0.95, max: 1.05),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  ignoring: _isLoading,
+                                  child: Opacity(
+                                    opacity: _isLoading ? 0.72 : 1,
+                                    child: apple_sign_in.SignInWithAppleButton(
+                                      onPressed: _handleAppleSignup,
+                                      text: "Continue with Apple",
+                                      height: context.responsiveValue(
+                                        52,
+                                        min: 0.95,
+                                        max: 1.05,
+                                      ),
+                                      borderRadius: BorderRadius.circular(28),
+                                      iconAlignment:
+                                          apple_sign_in.IconAlignment.left,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (_isLoading)
+                                const Positioned.fill(
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

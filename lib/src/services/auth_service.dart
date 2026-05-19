@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class AuthService {
   static const String userCancelledGoogleFlow = "__google_cancelled__";
+  static const String userCancelledAppleFlow = "__apple_cancelled__";
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -119,6 +124,85 @@ class AuthService {
     }
   }
 
+  Future<String?> signInWithApple() async {
+    try {
+      final user = await _authenticateWithApple();
+      if (user == null) return userCancelledAppleFlow;
+
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (!userDoc.exists) {
+        await _auth.signOut();
+        return "No account found. Please sign up first.";
+      }
+
+      return null;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        return userCancelledAppleFlow;
+      }
+      return e.message;
+    } on SignInWithAppleNotSupportedException {
+      return "Sign in with Apple is not available on this device.";
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'account-exists-with-different-credential') {
+        return "Account already exists with a different sign-in method.";
+      }
+      return e.message ?? "Apple sign-in failed.";
+    } catch (e) {
+      return "Apple sign-in failed. Please try again.";
+    }
+  }
+
+  Future<String?> signUpWithApple({
+    required String role,
+    required bool termsAccepted,
+  }) async {
+    try {
+      if (!termsAccepted) {
+        return "You must accept the Terms and Conditions to create an account.";
+      }
+
+      final user = await _authenticateWithApple();
+      if (user == null) return userCancelledAppleFlow;
+
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (userDoc.exists) {
+        await _auth.signOut();
+        return "Account already used. Please login instead.";
+      }
+
+      final fallbackName = (user.displayName?.trim().isNotEmpty ?? false)
+          ? user.displayName!.trim()
+          : (user.email?.split('@').first ?? 'User');
+
+      await _createOrUpdateUserDocument(
+        uid: user.uid,
+        email: user.email ?? '',
+        username: fallbackName,
+        number: '',
+        role: role,
+        emailVerified: true,
+        photoUrl: user.photoURL,
+      );
+
+      return null;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        return userCancelledAppleFlow;
+      }
+      return e.message;
+    } on SignInWithAppleNotSupportedException {
+      return "Sign in with Apple is not available on this device.";
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'account-exists-with-different-credential') {
+        return "Account already exists with a different sign-in method.";
+      }
+      return e.message ?? "Apple sign-up failed.";
+    } catch (e) {
+      return "Apple sign-up failed. Please try again.";
+    }
+  }
+
   Future<void> signOutGoogle() async {
     await _auth.signOut();
     await _googleSignIn.signOut();
@@ -158,6 +242,47 @@ class AuthService {
 
     final userCredential = await _auth.signInWithCredential(credential);
     return userCredential.user;
+  }
+
+  Future<User?> _authenticateWithApple() async {
+    final rawNonce = generateNonce();
+    final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+
+    final appleCredential = await SignInWithApple.getAppleIDCredential(
+      scopes: const [
+        AppleIDAuthorizationScopes.email,
+        AppleIDAuthorizationScopes.fullName,
+      ],
+      nonce: hashedNonce,
+    );
+
+    final identityToken = appleCredential.identityToken;
+    if (identityToken == null || identityToken.isEmpty) {
+      throw StateError('Apple identity token is missing.');
+    }
+
+    final oauthCredential = OAuthProvider('apple.com').credential(
+      idToken: identityToken,
+      rawNonce: rawNonce,
+    );
+
+    final userCredential = await _auth.signInWithCredential(oauthCredential);
+    final user = userCredential.user;
+
+    final fullNameParts = [
+      appleCredential.givenName?.trim(),
+      appleCredential.familyName?.trim(),
+    ].whereType<String>().where((value) => value.isNotEmpty).toList();
+    final fullName = fullNameParts.join(' ').trim();
+
+    if (user != null &&
+        fullName.isNotEmpty &&
+        (user.displayName?.trim().isEmpty ?? true)) {
+      await user.updateDisplayName(fullName);
+      await user.reload();
+    }
+
+    return _auth.currentUser ?? userCredential.user;
   }
 
   Future<void> _createOrUpdateUserDocument({

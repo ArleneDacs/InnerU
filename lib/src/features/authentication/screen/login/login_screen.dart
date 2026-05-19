@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgetpassword_otp/forgotpasswordotp.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/forget_password/forgotpassword_mail/forgotpasswordmail.dart';
@@ -22,6 +24,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+
+  bool get _supportsAppleSignIn =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
@@ -191,6 +196,37 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _handleAppleLogin() async {
+    setState(() {
+      _isLoading = true;
+      _loginError = null;
+    });
+
+    final error = await AuthService().signInWithApple();
+
+    if (!mounted) return;
+
+    if (error == AuthService.userCancelledAppleFlow) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+
+    if (error == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const AuthRoleHome()),
+      );
+      return;
+    }
+
+    setState(() {
+      _loginError = error;
       _isLoading = false;
     });
   }
@@ -396,6 +432,51 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
+                      if (_supportsAppleSignIn) ...[
+                        SizedBox(height: context.responsiveValue(16)),
+                        SizedBox(
+                          width: double.infinity,
+                          height:
+                              context.responsiveValue(50, min: 0.95, max: 1.05),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  ignoring: _isLoading,
+                                  child: Opacity(
+                                    opacity: _isLoading ? 0.72 : 1,
+                                    child: apple_sign_in.SignInWithAppleButton(
+                                      onPressed: _handleAppleLogin,
+                                      height: context.responsiveValue(
+                                        50,
+                                        min: 0.95,
+                                        max: 1.05,
+                                      ),
+                                      text: "Sign in with Apple",
+                                      borderRadius: BorderRadius.circular(8),
+                                      iconAlignment:
+                                          apple_sign_in.IconAlignment.left,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (_isLoading)
+                                const Positioned.fill(
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                       SizedBox(height: context.responsiveValue(30)),
                       Wrap(
                         alignment: WrapAlignment.center,

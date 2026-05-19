@@ -7,5 +7,9 @@
 		<string>applinks:selfcare-1476e.firebaseapp.com</string>
 		<string>applinks:vilina-api.valenin.com</string>
 	</array>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
 </dict>
 </plist>

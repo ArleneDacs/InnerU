@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,8 +19,11 @@ class UserProgressPage extends StatefulWidget {
 }
 
 class _UserProgressPageState extends State<UserProgressPage> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<Map<String, dynamic>> users = [];
   Map<String, Map<String, Map<String, bool>>> userProgressData = {};
+  final Map<String, String> _usernameCache = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _trackerSubscription;
   String currentUserId = '';
   String currentUserName = '';
   int selectedMonth = DateTime.now().month;
@@ -34,71 +39,150 @@ class _UserProgressPageState extends State<UserProgressPage> {
   Future<void> fetchCurrentUserId() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (userDoc.exists) {
-        setState(() {
-          currentUserId = user.uid;
-          currentUserName = userDoc['username'];
-        });
-        fetchUsersAndProgress();
-      }
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final currentUsername =
+          _normalizedUsername(userDoc.data()?['username']) ?? '';
+
+      if (!mounted) return;
+
+      setState(() {
+        currentUserId = user.uid;
+        currentUserName = currentUsername;
+      });
+
+      fetchUsersAndProgress();
     }
   }
 
   void fetchUsersAndProgress() {
-    FirebaseFirestore.instance
-        .collection('dailytracker')
-        .snapshots()
-        .listen((trackerSnapshot) {
-      Set<String> uniqueUserIds = {};
-      Map<String, Map<String, Map<String, bool>>> progressData = {};
-      Map<String, String> userIdToUsername = {};
-      List<Map<String, dynamic>> tempUsers = [];
+    _trackerSubscription?.cancel();
+    _trackerSubscription =
+        _firestore.collection('dailytracker').snapshots().listen(
+      (trackerSnapshot) async {
+        Set<String> uniqueUserIds = {};
+        Map<String, Map<String, Map<String, bool>>> progressData = {};
+        Map<String, String> userIdToUsername = {};
+        List<Map<String, dynamic>> tempUsers = [];
 
-      for (var doc in trackerSnapshot.docs) {
-        Map<String, dynamic> userData = doc.data();
-        String? userId = userData['userId'];
+        for (var doc in trackerSnapshot.docs) {
+          final userData = doc.data();
+          final userId = (userData['userId'] as String?)?.trim();
 
-        if (userId == null || userId == currentUserId) continue;
+          if (userId == null || userId.isEmpty || userId == currentUserId) {
+            continue;
+          }
 
-        String username = userData['username'] ?? 'Unknown';
-        userIdToUsername[userId] = username;
+          final trackerUsername = _normalizedUsername(userData['username']);
+          if (trackerUsername != null) {
+            userIdToUsername[userId] = trackerUsername;
+            _usernameCache[userId] = trackerUsername;
+          }
 
-        if (!uniqueUserIds.contains(userId)) {
           uniqueUserIds.add(userId);
+
+          final trackerDate = _resolveTrackerDate(userData);
+          progressData.putIfAbsent(userId, () => {});
+          progressData[userId]![trackerDate] = {
+            'Call': userData['call'] ?? false,
+            'Steps': userData['steps'] ?? false,
+            'Exercise': userData['exercise'] ?? false,
+            'Meditation': userData['meditation'] ?? false,
+            'Learning': userData['learning'] ?? false,
+            'Add Value': userData['addValue'] ?? false,
+          };
         }
 
-        String lastUpdated = userData['lastUpdated'] ??
-            DateFormat('yyyy-MM-dd').format(DateTime.now());
+        final resolvedUsernames =
+            await _resolveUsernames(uniqueUserIds, userIdToUsername);
 
-        progressData.putIfAbsent(userId, () => {});
-        progressData[userId]![lastUpdated] = {
-          'Call': userData['call'] ?? false,
-          'Steps': userData['steps'] ?? false,
-          'Exercise': userData['exercise'] ?? false,
-          'Meditation': userData['meditation'] ?? false,
-          'Learning': userData['learning'] ?? false,
-          'Add Value': userData['addValue'] ?? false,
-        };
-      }
+        for (var userId in uniqueUserIds) {
+          tempUsers.add({
+            'userId': userId,
+            'username': resolvedUsernames[userId] ?? 'Unknown',
+          });
+        }
 
-      for (var userId in uniqueUserIds) {
-        tempUsers.add({
-          'userId': userId,
-          'username': userIdToUsername[userId] ?? 'Unknown'
+        if (!mounted) return;
+
+        setState(() {
+          users = tempUsers
+            ..sort((a, b) => (a['username'] as String)
+                .toLowerCase()
+                .compareTo((b['username'] as String).toLowerCase()));
+          userProgressData = progressData;
+          isLoading = false;
         });
+      },
+    );
+  }
+
+  String? _normalizedUsername(dynamic value) {
+    if (value is! String) return null;
+
+    final username = value.trim();
+    if (username.isEmpty ||
+        username == 'Unknown' ||
+        username == 'Unknown User') {
+      return null;
+    }
+
+    return username;
+  }
+
+  String _resolveTrackerDate(Map<String, dynamic> userData) {
+    final rawDate = userData['lastUpdated'] ?? userData['date'];
+    final trackerDate = rawDate is String ? rawDate.trim() : '';
+
+    if (trackerDate.isNotEmpty) {
+      return trackerDate;
+    }
+
+    return DateFormat('yyyy-MM-dd').format(DateTime.now());
+  }
+
+  Future<Map<String, String>> _resolveUsernames(
+    Set<String> userIds,
+    Map<String, String> trackerUsernames,
+  ) async {
+    final resolvedUsernames = <String, String>{...trackerUsernames};
+    final missingUserIds = <String>[];
+
+    for (final userId in userIds) {
+      final cachedUsername = _usernameCache[userId];
+      if (cachedUsername != null && cachedUsername.isNotEmpty) {
+        resolvedUsernames[userId] = cachedUsername;
+        continue;
       }
 
-      setState(() {
-        users = tempUsers
-          ..sort((a, b) => a['username'].compareTo(b['username']));
-        userProgressData = progressData;
-        isLoading = false;
-      });
-    });
+      if (!resolvedUsernames.containsKey(userId)) {
+        missingUserIds.add(userId);
+      }
+    }
+
+    if (missingUserIds.isEmpty) {
+      return resolvedUsernames;
+    }
+
+    final userDocs = await Future.wait(
+      missingUserIds
+          .map((userId) => _firestore.collection('users').doc(userId).get()),
+    );
+
+    for (final userDoc in userDocs) {
+      final username = _normalizedUsername(userDoc.data()?['username']);
+      if (username == null) continue;
+
+      _usernameCache[userDoc.id] = username;
+      resolvedUsernames[userDoc.id] = username;
+    }
+
+    return resolvedUsernames;
+  }
+
+  @override
+  void dispose() {
+    _trackerSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -312,7 +396,8 @@ class _UserProgressPageState extends State<UserProgressPage> {
           },
         ),
         Text(
-            DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth)),
+            DateFormat('MMMM yyyy')
+                .format(DateTime(selectedYear, selectedMonth)),
             style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,

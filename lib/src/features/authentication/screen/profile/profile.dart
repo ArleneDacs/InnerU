@@ -142,6 +142,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void resetDailyTracker(String todayDate, String userId) async {
     String documentId = '$userId-$todayDate'; // Use UID for document ID
+    final trackerUsername = await _resolveTrackerUsername(userId);
 
     // Reset task values
     setState(() {
@@ -157,10 +158,7 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     // Save the reset tracker to Firestore
-    await FirebaseFirestore.instance
-        .collection('dailytracker')
-        .doc(documentId)
-        .set({
+    final trackerData = <String, dynamic>{
       'userId': userId,
       'meditation': false,
       'steps': false,
@@ -170,7 +168,41 @@ class _ProfilePageState extends State<ProfilePage> {
       'addValue': false,
       'date': todayDate,
       'lastUpdated': todayDate, // Store last updated date
-    });
+    };
+
+    if (trackerUsername != null) {
+      trackerData['username'] = trackerUsername;
+    }
+
+    await FirebaseFirestore.instance
+        .collection('dailytracker')
+        .doc(documentId)
+        .set(trackerData);
+  }
+
+  Future<String?> _resolveTrackerUsername(String userId) async {
+    final cachedUsername = username.trim();
+    if (cachedUsername.isNotEmpty && cachedUsername != 'Loading...') {
+      return cachedUsername;
+    }
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      final dynamic rawUsername = userDoc.data()?['username'];
+      final resolvedUsername = rawUsername is String ? rawUsername.trim() : '';
+
+      if (resolvedUsername.isEmpty) {
+        return null;
+      }
+
+      return resolvedUsername;
+    } catch (e) {
+      print("Error resolving tracker username: $e");
+      return null;
+    }
   }
 
   String _taskFieldKey(String task) {
@@ -406,9 +438,7 @@ class _ProfilePageState extends State<ProfilePage> {
       onWillPop: () async {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(
-              builder: (context) =>
-                  const AuthRoleHome()),
+          MaterialPageRoute(builder: (context) => const AuthRoleHome()),
           (route) => false, // Removes all previous routes from the stack
         );
         return false; // Prevent the default back navigation

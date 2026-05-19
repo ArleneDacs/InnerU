@@ -71,7 +71,7 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
           androidPackageName: 'com.valenin.inneru',
           androidInstallApp: false,
           androidMinimumVersion: '21',
-          iOSBundleId: 'com.example.selfcareProjects',
+          iOSBundleId: 'com.valenin.inneru',
         ),
       );
 

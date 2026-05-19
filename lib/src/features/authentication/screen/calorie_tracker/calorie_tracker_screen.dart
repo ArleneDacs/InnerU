@@ -200,10 +200,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       .collection('calorie_logs')
       .doc(_todayKey);
 
-  CollectionReference<Map<String, dynamic>> get _foodMemoryRef => _firestore
-      .collection('users')
-      .doc(_userId)
-      .collection('food_memory');
+  CollectionReference<Map<String, dynamic>> get _foodMemoryRef =>
+      _firestore.collection('users').doc(_userId).collection('food_memory');
 
   @override
   void initState() {
@@ -434,7 +432,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                       decoration: const InputDecoration(labelText: 'Sex'),
                       items: const [
                         DropdownMenuItem(value: 'Male', child: Text('Male')),
-                        DropdownMenuItem(value: 'Female', child: Text('Female')),
+                        DropdownMenuItem(
+                            value: 'Female', child: Text('Female')),
                       ],
                       onChanged: (value) {
                         if (value == null) return;
@@ -516,8 +515,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 FilledButton(
                   onPressed: () {
                     final age = double.tryParse(ageController.text.trim());
-                    final weight = double.tryParse(weightController.text.trim());
-                    final height = double.tryParse(heightController.text.trim());
+                    final weight =
+                        double.tryParse(weightController.text.trim());
+                    final height =
+                        double.tryParse(heightController.text.trim());
 
                     if (age == null ||
                         weight == null ||
@@ -655,41 +656,48 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       _isAnalyzingMealPhoto = true;
     });
 
-    final labeler = ImageLabeler(
-      options: ImageLabelerOptions(confidenceThreshold: 0.65),
-    );
-
     try {
-      final inputImage = InputImage.fromFilePath(imagePath);
-      final labels = await labeler.processImage(inputImage);
-      final detectedMealName = await _bestDetectedMealName(labels);
-      if (!mounted || detectedMealName == null || detectedMealName.isEmpty) {
+      if (Platform.isIOS) {
+        return await _tryAutofillMealFromFallbackImageAnalysis(imagePath);
+      }
+
+      final labeler = ImageLabeler(
+        options: ImageLabelerOptions(confidenceThreshold: 0.65),
+      );
+
+      try {
+        final inputImage = InputImage.fromFilePath(imagePath);
+        final labels = await labeler.processImage(inputImage);
+        final detectedMealName = await _bestDetectedMealName(labels);
+        if (!mounted || detectedMealName == null || detectedMealName.isEmpty) {
+          return false;
+        }
+
+        _mealController.text = detectedMealName;
+        _handleMealNameChanged(detectedMealName);
+        final nutrition = await _ensureNutritionForMeal(detectedMealName);
+
+        if (!mounted) return false;
+        if (nutrition != null ||
+            (int.tryParse(_calorieController.text.trim()) ?? 0) > 0) {
+          final reusedSavedFood =
+              nutrition?.subtitle == 'Saved from your previous logs';
+          _showSnackBar(
+            reusedSavedFood
+                ? 'Matched $detectedMealName from your saved food history.'
+                : 'Detected $detectedMealName and filled calories automatically.',
+          );
+          return true;
+        }
+
         return false;
+      } finally {
+        await labeler.close();
       }
-
-      _mealController.text = detectedMealName;
-      _handleMealNameChanged(detectedMealName);
-      final nutrition = await _ensureNutritionForMeal(detectedMealName);
-
-      if (!mounted) return false;
-      if (nutrition != null ||
-          (int.tryParse(_calorieController.text.trim()) ?? 0) > 0) {
-        final reusedSavedFood =
-            nutrition?.subtitle == 'Saved from your previous logs';
-        _showSnackBar(
-          reusedSavedFood
-              ? 'Matched $detectedMealName from your saved food history.'
-              : 'Detected $detectedMealName and filled calories automatically.',
-        );
-        return true;
-      }
-
-      return false;
     } catch (error) {
       debugPrint('Meal photo analysis failed: $error');
-      return false;
+      return await _tryAutofillMealFromFallbackImageAnalysis(imagePath);
     } finally {
-      await labeler.close();
       if (mounted) {
         setState(() {
           _isAnalyzingMealPhoto = false;
@@ -750,14 +758,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
     final ollamaEstimate = await _estimateMealWithOllama(_mealPhotoPath);
     if (ollamaEstimate != null) {
-      final result = _NutritionLookupResult(
-        displayName: ollamaEstimate.mealName,
-        calories: ollamaEstimate.calories,
-        protein: ollamaEstimate.protein,
-        carbs: ollamaEstimate.carbs,
-        fat: ollamaEstimate.fat,
-        subtitle: 'Estimated by local AI',
-      );
+      final result = _nutritionResultFromOllamaEstimate(ollamaEstimate);
       _applyOnlineSuggestion(result);
       await _saveFoodMemory(
         ollamaEstimate.mealName,
@@ -768,6 +769,41 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
 
     return null;
+  }
+
+  Future<bool> _tryAutofillMealFromFallbackImageAnalysis(
+      String imagePath) async {
+    final ollamaEstimate = await _estimateMealWithOllama(imagePath);
+    if (!mounted || ollamaEstimate == null) return false;
+
+    final result = _nutritionResultFromOllamaEstimate(ollamaEstimate);
+    _mealController.text = result.displayName;
+    _handleMealNameChanged(result.displayName);
+    _applyOnlineSuggestion(result);
+    await _saveFoodMemory(
+      result.displayName,
+      result,
+      source: 'ollama_image_estimate',
+    );
+
+    if (!mounted) return false;
+    _showSnackBar(
+      'Estimated ${result.displayName} from your photo and filled calories automatically.',
+    );
+    return true;
+  }
+
+  _NutritionLookupResult _nutritionResultFromOllamaEstimate(
+    OllamaNutritionEstimate ollamaEstimate,
+  ) {
+    return _NutritionLookupResult(
+      displayName: ollamaEstimate.mealName,
+      calories: ollamaEstimate.calories,
+      protein: ollamaEstimate.protein,
+      carbs: ollamaEstimate.carbs,
+      fat: ollamaEstimate.fat,
+      subtitle: 'Estimated by local AI',
+    );
   }
 
   Future<OllamaNutritionEstimate?> _estimateMealWithOllama(
@@ -794,7 +830,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       final bytes = await File(photoPath).readAsBytes();
       return await ImageStorageService.uploadImageBytes(
         bytes,
-        fileName: 'meal_${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        fileName:
+            'meal_${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
     } catch (_) {
       return null;
@@ -1037,7 +1074,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       return 'liter';
     }
     if (normalized == 'cups') return 'cup';
-    if (normalized == 'tablespoons' || normalized == 'tablespoon') return 'tbsp';
+    if (normalized == 'tablespoons' || normalized == 'tablespoon')
+      return 'tbsp';
     if (normalized == 'teaspoons' || normalized == 'teaspoon') return 'tsp';
     if (normalized == 'slices') return 'slice';
     if (normalized == 'pieces' || normalized == 'pcs' || normalized == 'pc') {
@@ -1048,7 +1086,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     return normalized;
   }
 
-  double _measurementMultiplier(String unit, double quantity, _PresetFood preset) {
+  double _measurementMultiplier(
+      String unit, double quantity, _PresetFood preset) {
     switch (_normalizeMeasurementUnit(unit)) {
       case 'g':
         return quantity / preset.gramsPerUnit;
@@ -1063,13 +1102,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       case 'liter':
         return (quantity * 1000) / preset.gramsPerUnit;
       case 'cup':
-        return quantity * (preset.defaultUnit == 'cup' ? 1 : 240 / preset.gramsPerUnit);
+        return quantity *
+            (preset.defaultUnit == 'cup' ? 1 : 240 / preset.gramsPerUnit);
       case 'tbsp':
-        return quantity * (preset.defaultUnit == 'tbsp' ? 1 : 15 / preset.gramsPerUnit);
+        return quantity *
+            (preset.defaultUnit == 'tbsp' ? 1 : 15 / preset.gramsPerUnit);
       case 'tsp':
-        return quantity * (preset.defaultUnit == 'tsp' ? 1 : 5 / preset.gramsPerUnit);
+        return quantity *
+            (preset.defaultUnit == 'tsp' ? 1 : 5 / preset.gramsPerUnit);
       case 'slice':
-        return quantity * (preset.defaultUnit == 'slice' ? 1 : 30 / preset.gramsPerUnit);
+        return quantity *
+            (preset.defaultUnit == 'slice' ? 1 : 30 / preset.gramsPerUnit);
       case 'serving':
       case 'piece':
       default:
@@ -1196,7 +1239,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         : quantity.toString();
 
     return _CalculatedFoodAmount(
-      displayName: '$quantityLabel ${unit.isEmpty ? preset.defaultUnit : unit} ${preset.name}',
+      displayName:
+          '$quantityLabel ${unit.isEmpty ? preset.defaultUnit : unit} ${preset.name}',
       quantityLabel: quantityLabel,
       unit: _normalizeMeasurementUnit(unit.isEmpty ? preset.defaultUnit : unit),
       calories: (preset.calories * multiplier).round(),
@@ -1248,7 +1292,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
-  Future<_NutritionLookupResult?> _ensureNutritionForMeal(String mealName) async {
+  Future<_NutritionLookupResult?> _ensureNutritionForMeal(
+      String mealName) async {
     final existingCalories = int.tryParse(_calorieController.text.trim());
     if (existingCalories != null && existingCalories > 0) return null;
 
@@ -1312,7 +1357,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       await _saveFoodMemory(mealName, result, source: 'online_lookup');
       return result;
     } on TimeoutException {
-      _showSnackBar('Food lookup timed out. You can still enter calories manually.');
+      _showSnackBar(
+          'Food lookup timed out. You can still enter calories manually.');
     } catch (_) {
       // leave manual entry available
     } finally {
@@ -1364,19 +1410,21 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     return suggestions;
   }
 
-  _NutritionLookupResult? _nutritionFromProductMap(Map<String, dynamic> product) {
+  _NutritionLookupResult? _nutritionFromProductMap(
+      Map<String, dynamic> product) {
     final nutriments = product['nutriments'];
     if (nutriments is! Map<String, dynamic>) return null;
 
-    final servingCalories = (nutriments['energy-kcal_serving'] as num?)?.toDouble();
+    final servingCalories =
+        (nutriments['energy-kcal_serving'] as num?)?.toDouble();
     final servingProtein = (nutriments['proteins_serving'] as num?)?.toDouble();
     final servingCarbs =
         (nutriments['carbohydrates_serving'] as num?)?.toDouble();
     final servingFat = (nutriments['fat_serving'] as num?)?.toDouble();
-    final hundredCalories = (nutriments['energy-kcal_100g'] as num?)?.toDouble();
+    final hundredCalories =
+        (nutriments['energy-kcal_100g'] as num?)?.toDouble();
     final hundredProtein = (nutriments['proteins_100g'] as num?)?.toDouble();
-    final hundredCarbs =
-        (nutriments['carbohydrates_100g'] as num?)?.toDouble();
+    final hundredCarbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble();
     final hundredFat = (nutriments['fat_100g'] as num?)?.toDouble();
 
     final calories = servingCalories ?? hundredCalories;
@@ -1508,7 +1556,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
   }
 
-  int _weeklyTotal(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, String key) {
+  int _weeklyTotal(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, String key) {
     return docs.fold<int>(
       0,
       (sum, doc) => sum + ((doc.data()[key] as num?)?.toInt() ?? 0),
@@ -1523,7 +1572,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
   DateTime _startOfWeekSunday(DateTime date) {
     final offset = date.weekday % 7;
-    return DateTime(date.year, date.month, date.day).subtract(Duration(days: offset));
+    return DateTime(date.year, date.month, date.day)
+        .subtract(Duration(days: offset));
   }
 
   String _historyWeekLabel(DateTime weekStart) {
@@ -1629,9 +1679,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               const Spacer(),
               InkWell(
                 borderRadius: BorderRadius.circular(16),
-                onTap: _isSavingGoal ? null : () => _editGoalFromProgressCard(currentGoal),
+                onTap: _isSavingGoal
+                    ? null
+                    : () => _editGoalFromProgressCard(currentGoal),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: RichText(
                     text: TextSpan(
                       style: const TextStyle(
@@ -1661,7 +1714,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               alignment: Alignment.centerRight,
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 230),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF4D6A45),
                   borderRadius: BorderRadius.circular(18),
@@ -1728,7 +1782,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     const SizedBox(height: 8),
                     Text(
                       totalCalories.toString(),
-                      style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                          fontSize: 34, fontWeight: FontWeight.w800),
                     ),
                     const Text(
                       'Calories',
@@ -1745,7 +1800,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   bottom: 18,
                   child: Text(
                     '0%',
-                    style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                        fontWeight: FontWeight.w700),
                   ),
                 ),
                 Positioned(
@@ -1753,7 +1811,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   bottom: 18,
                   child: Text(
                     '$progressPercent%',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                        fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
@@ -1790,7 +1851,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
           const SizedBox(height: 4),
           Text(
             '$mealCount meal entries logged today',
-            style: const TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -1829,7 +1893,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1885,7 +1950,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               IconButton(
                 onPressed: () {
                   setState(() {
-                    _historyWeekStart = weekStart.subtract(const Duration(days: 7));
+                    _historyWeekStart =
+                        weekStart.subtract(const Duration(days: 7));
                   });
                 },
                 icon: const Icon(Icons.chevron_left_rounded),
@@ -1921,7 +1987,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               final key = DateFormat('yyyy-MM-dd').format(date);
               final isSelected = key == _selectedHistoryDateKey;
               final data = logsByDate[key];
-              final dayCalories = (data?['totalCalories'] as num?)?.toInt() ?? 0;
+              final dayCalories =
+                  (data?['totalCalories'] as num?)?.toInt() ?? 0;
               final isToday = key == _todayKey;
 
               return Expanded(
@@ -1937,7 +2004,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFFE8F0DF) : const Color(0xFFF8FAF5),
+                      color: isSelected
+                          ? const Color(0xFFE8F0DF)
+                          : const Color(0xFFF8FAF5),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: isSelected
@@ -1952,7 +2021,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: isSelected ? const Color(0xFF4D6A45) : Colors.black45,
+                            color: isSelected
+                                ? const Color(0xFF4D6A45)
+                                : Colors.black45,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -1961,7 +2032,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
-                            color: isSelected ? const Color(0xFF20351D) : Colors.black87,
+                            color: isSelected
+                                ? const Color(0xFF20351D)
+                                : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -1978,17 +2051,29 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                         if (isToday) ...[
                           const SizedBox(height: 6),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            constraints: const BoxConstraints(
+                              minWidth: 34,
+                              maxWidth: 42,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: const Color(0xFF4D6A45),
                               borderRadius: BorderRadius.circular(999),
                             ),
-                            child: const Text(
-                              'Today',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
+                            child: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Today',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ),
@@ -2011,7 +2096,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final carbs = (data?['totalCarbs'] as num?)?.toInt() ?? 0;
     final fat = (data?['totalFat'] as num?)?.toInt() ?? 0;
     final water = (data?['waterGlasses'] as num?)?.toInt() ?? 0;
-    final selectedDate = DateTime.tryParse(_selectedHistoryDateKey) ?? DateTime.now();
+    final selectedDate =
+        DateTime.tryParse(_selectedHistoryDateKey) ?? DateTime.now();
 
     return Container(
       width: double.infinity,
@@ -2209,12 +2295,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
   Widget _buildOllamaStatusBanner() {
     final bool isReady = _isOllamaReachable == true;
-    final Color tint = isReady
-        ? const Color(0xFFE6F3E0)
-        : const Color(0xFFF5F0DE);
-    final Color iconColor = isReady
-        ? const Color(0xFF4D6A45)
-        : const Color(0xFF8B6F2D);
+    final Color tint =
+        isReady ? const Color(0xFFE6F3E0) : const Color(0xFFF5F0DE);
+    final Color iconColor =
+        isReady ? const Color(0xFF4D6A45) : const Color(0xFF8B6F2D);
     final String title = _isCheckingOllamaStatus
         ? 'Checking AI calorie assist'
         : isReady
@@ -2318,7 +2402,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     required int waterGlasses,
     required int waterGoal,
   }) {
-    final progress = waterGoal <= 0 ? 0.0 : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
+    final progress = waterGoal <= 0
+        ? 0.0
+        : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
 
     return Container(
       width: double.infinity,
@@ -2346,7 +2432,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               const Spacer(),
               Text(
                 '$waterGlasses/$waterGoal glasses',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.black54),
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black54),
               ),
             ],
           ),
@@ -2357,7 +2446,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               value: progress,
               minHeight: 10,
               backgroundColor: Colors.white,
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF69A9D5)),
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(Color(0xFF69A9D5)),
             ),
           ),
           const SizedBox(height: 12),
@@ -2365,7 +2455,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: waterGlasses <= 0 ? null : () => _setWaterGlasses(waterGlasses - 1),
+                  onPressed: waterGlasses <= 0
+                      ? null
+                      : () => _setWaterGlasses(waterGlasses - 1),
                   icon: const Icon(Icons.remove),
                   label: const Text('Remove Glass'),
                 ),
@@ -2380,7 +2472,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  icon: const Icon(Icons.water_drop_outlined, color: Colors.white),
+                  icon: const Icon(Icons.water_drop_outlined,
+                      color: Colors.white),
                   label: const Text(
                     'Add Glass',
                     style: TextStyle(color: Colors.white),
@@ -2421,7 +2514,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             children: [
               Text(
                 title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
               if (trailing != null) ...[
                 const Spacer(),
@@ -2438,17 +2532,31 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final weekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
+    final weekStart =
+        DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
     final weekStartKey = DateFormat('yyyy-MM-dd').format(weekStart);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Food Calories'),
+        titleSpacing: 4,
+        title: const Text(
+          'Food Calories',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+            color: Colors.black87,
+          ),
+        ),
         elevation: 0,
         scrolledUnderElevation: 0,
         actions: [
           IconButton(
-            onPressed: _isLookingUpFood || _isCapturingMealPhoto ? null : _openScanOptions,
+            onPressed: _isLookingUpFood || _isCapturingMealPhoto
+                ? null
+                : _openScanOptions,
             style: IconButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF4D6A45),
@@ -2476,14 +2584,17 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         stream: _dayRef.snapshots(),
         builder: (context, daySnapshot) {
           final dayData = daySnapshot.data?.data() ?? {};
-          final currentGoal = (dayData['dailyGoal'] as num?)?.toInt() ?? _dailyGoal;
-          final totalCalories = (dayData['totalCalories'] as num?)?.toInt() ?? 0;
+          final currentGoal =
+              (dayData['dailyGoal'] as num?)?.toInt() ?? _dailyGoal;
+          final totalCalories =
+              (dayData['totalCalories'] as num?)?.toInt() ?? 0;
           final totalProtein = (dayData['totalProtein'] as num?)?.toInt() ?? 0;
           final totalCarbs = (dayData['totalCarbs'] as num?)?.toInt() ?? 0;
           final totalFat = (dayData['totalFat'] as num?)?.toInt() ?? 0;
           final mealCount = (dayData['mealCount'] as num?)?.toInt() ?? 0;
           final waterGlasses = (dayData['waterGlasses'] as num?)?.toInt() ?? 0;
-          final waterGoal = (dayData['waterGoal'] as num?)?.toInt() ?? _dailyWaterGoal;
+          final waterGoal =
+              (dayData['waterGoal'] as num?)?.toInt() ?? _dailyWaterGoal;
           final progress = currentGoal <= 0
               ? 0.0
               : (totalCalories / currentGoal).clamp(0, 1).toDouble();
@@ -2577,12 +2688,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           _buildCapturedMealFieldsHint(),
                           Autocomplete<_PresetFood>(
                             optionsBuilder: (textEditingValue) {
-                              final query = textEditingValue.text.trim().toLowerCase();
+                              final query =
+                                  textEditingValue.text.trim().toLowerCase();
                               if (query.isEmpty) {
                                 return const Iterable<_PresetFood>.empty();
                               }
                               return _presetFoods.where(
-                                (preset) => preset.name.toLowerCase().contains(query),
+                                (preset) =>
+                                    preset.name.toLowerCase().contains(query),
                               );
                             },
                             displayStringForOption: (option) => option.name,
@@ -2597,21 +2710,21 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                 controller: textEditingController,
                                 focusNode: focusNode,
                                 onChanged: (value) {
-                                  _mealController.value = textEditingController.value;
+                                  _mealController.value =
+                                      textEditingController.value;
                                   _handleMealNameChanged(value);
                                 },
-                                  decoration: InputDecoration(
-                                    labelText: _mealPhotoPath == null
-                                        ? 'Food Name'
-                                        : 'Food Name',
-                                    hintText: _mealPhotoPath == null
-                                        ? 'Meal or snack'
-                                        : 'Detected food name',
-                                    helperText:
-                                      _mealPhotoPath == null
-                                          ? 'Use food name plus quantity/unit below for better accuracy.'
-                                          : 'Review the detected food name before saving.',
-                                    filled: true,
+                                decoration: InputDecoration(
+                                  labelText: _mealPhotoPath == null
+                                      ? 'Food Name'
+                                      : 'Food Name',
+                                  hintText: _mealPhotoPath == null
+                                      ? 'Meal or snack'
+                                      : 'Detected food name',
+                                  helperText: _mealPhotoPath == null
+                                      ? 'Use food name plus quantity/unit below for better accuracy.'
+                                      : 'Review the detected food name before saving.',
+                                  filled: true,
                                   fillColor: const Color(0xFFF8FAF5),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(18),
@@ -2631,11 +2744,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               Expanded(
                                 child: TextField(
                                   controller: _quantityController,
-                                  keyboardType: const TextInputType.numberWithOptions(
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
                                     decimal: true,
                                   ),
                                   onChanged: (_) {
-                                    _handleMealNameChanged(_mealController.text.trim());
+                                    _handleMealNameChanged(
+                                        _mealController.text.trim());
                                   },
                                   decoration: InputDecoration(
                                     labelText: _mealPhotoPath == null
@@ -2689,7 +2804,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                     setState(() {
                                       _selectedMeasurementUnit = value;
                                     });
-                                    _handleMealNameChanged(_mealController.text.trim());
+                                    _handleMealNameChanged(
+                                        _mealController.text.trim());
                                   },
                                 ),
                               ),
@@ -2730,7 +2846,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                             : '${suggestion.subtitle} - ${suggestion.calories} kcal',
                                       ),
                                       trailing: const Icon(Icons.north_west),
-                                      onTap: () => _applyOnlineSuggestion(suggestion),
+                                      onTap: () =>
+                                          _applyOnlineSuggestion(suggestion),
                                     );
                                   }),
                                 ],
@@ -2770,7 +2887,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                     const SizedBox(width: 14),
                                     const Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             'Quick Scan',
@@ -2782,7 +2900,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                           SizedBox(height: 2),
                                           Text(
                                             'Open camera or barcode scanner',
-                                            style: TextStyle(color: Colors.black54),
+                                            style: TextStyle(
+                                                color: Colors.black54),
                                           ),
                                         ],
                                       ),
@@ -2851,13 +2970,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               onPressed: _isLookingUpFood ? null : _addMeal,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF90A17D),
-                                padding: const EdgeInsets.symmetric(vertical: 15),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 15),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
                               child: Text(
-                                _isLookingUpFood ? 'Looking Up Food...' : 'Add Entry',
+                                _isLookingUpFood
+                                    ? 'Looking Up Food...'
+                                    : 'Add Entry',
                                 style: const TextStyle(color: Colors.white),
                               ),
                             ),

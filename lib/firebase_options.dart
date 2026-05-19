@@ -59,11 +59,11 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCJPV86bYifMqGZKRUfMR3gsrHJ5ScxXxs',
-    appId: '1:609604667702:ios:49e500c6cf998ee7558b97',
+    appId: '1:609604667702:ios:f718255c847d11a5558b97',
     messagingSenderId: '609604667702',
     projectId: 'selfcare-1476e',
     storageBucket: 'selfcare-1476e.firebasestorage.app',
-    iosBundleId: 'com.example.selfcareProjects',
+    iosBundleId: 'com.valenin.inneru',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
