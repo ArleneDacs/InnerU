@@ -111,6 +111,7 @@ class AuthService {
         role: role,
         emailVerified: true,
         photoUrl: user.photoURL,
+        authProvider: 'google.com',
       );
 
       return null;
@@ -131,8 +132,16 @@ class AuthService {
 
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (!userDoc.exists) {
-        await _auth.signOut();
-        return "No account found. Please sign up first.";
+        await _createOrUpdateUserDocument(
+          uid: user.uid,
+          email: user.email ?? '',
+          username: _fallbackUsername(user),
+          number: '',
+          role: 'user',
+          emailVerified: true,
+          photoUrl: user.photoURL,
+          authProvider: 'apple.com',
+        );
       }
 
       return null;
@@ -183,6 +192,7 @@ class AuthService {
         role: role,
         emailVerified: true,
         photoUrl: user.photoURL,
+        authProvider: 'apple.com',
       );
 
       return null;
@@ -205,6 +215,21 @@ class AuthService {
 
   Future<void> signOutGoogle() async {
     await _auth.signOut();
+    await _googleSignIn.signOut();
+  }
+
+  Future<void> deleteCurrentUserAccount({String? password}) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: 'no-current-user',
+        message: 'No user signed in.',
+      );
+    }
+
+    await _reauthenticateForDeletion(user, password: password);
+    await _deleteUserData(user.uid);
+    await user.delete();
     await _googleSignIn.signOut();
   }
 
@@ -245,6 +270,22 @@ class AuthService {
   }
 
   Future<User?> _authenticateWithApple() async {
+    final appleAuth = await _getAppleAuthCredential();
+    final userCredential =
+        await _auth.signInWithCredential(appleAuth.credential);
+    final user = userCredential.user;
+
+    if (user != null &&
+        appleAuth.fullName.isNotEmpty &&
+        (user.displayName?.trim().isEmpty ?? true)) {
+      await user.updateDisplayName(appleAuth.fullName);
+      await user.reload();
+    }
+
+    return _auth.currentUser ?? userCredential.user;
+  }
+
+  Future<_AppleAuthCredential> _getAppleAuthCredential() async {
     final rawNonce = generateNonce();
     final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
 
@@ -266,23 +307,124 @@ class AuthService {
       rawNonce: rawNonce,
     );
 
-    final userCredential = await _auth.signInWithCredential(oauthCredential);
-    final user = userCredential.user;
-
     final fullNameParts = [
       appleCredential.givenName?.trim(),
       appleCredential.familyName?.trim(),
     ].whereType<String>().where((value) => value.isNotEmpty).toList();
     final fullName = fullNameParts.join(' ').trim();
 
-    if (user != null &&
-        fullName.isNotEmpty &&
-        (user.displayName?.trim().isEmpty ?? true)) {
-      await user.updateDisplayName(fullName);
-      await user.reload();
+    return _AppleAuthCredential(
+      credential: oauthCredential,
+      fullName: fullName,
+    );
+  }
+
+  Future<void> _reauthenticateForDeletion(
+    User user, {
+    String? password,
+  }) async {
+    final providerIds =
+        user.providerData.map((provider) => provider.providerId).toSet();
+
+    if (providerIds.contains('apple.com')) {
+      final appleAuth = await _getAppleAuthCredential();
+      await user.reauthenticateWithCredential(appleAuth.credential);
+      return;
     }
 
-    return _auth.currentUser ?? userCredential.user;
+    if (providerIds.contains('google.com')) {
+      await _googleSignIn.signOut();
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        throw FirebaseAuthException(
+          code: 'reauth-cancelled',
+          message: 'Google confirmation was cancelled.',
+        );
+      }
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      await user.reauthenticateWithCredential(credential);
+      return;
+    }
+
+    if (user.email != null && (password?.trim().isNotEmpty ?? false)) {
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: password!.trim(),
+      );
+      await user.reauthenticateWithCredential(credential);
+      return;
+    }
+
+    throw FirebaseAuthException(
+      code: 'password-required',
+      message: 'Enter your password to confirm account deletion.',
+    );
+  }
+
+  Future<void> _deleteUserData(String uid) async {
+    await _deleteCollectionDocs(
+      _firestore.collection('users').doc(uid).collection('tasks'),
+    );
+    await _deleteCollectionDocs(
+      _firestore.collection('users').doc(uid).collection('walkInvites'),
+    );
+    await _deleteCollectionDocs(
+      _firestore.collection('users').doc(uid).collection('recorded_walks'),
+    );
+    await _deleteCollectionDocs(
+      _firestore.collection('steps').doc(uid).collection('tracking'),
+    );
+
+    await Future.wait([
+      _deleteTopLevelDocsByField('notes', 'userId', uid),
+      _deleteTopLevelDocsByField('dailytracker', 'userId', uid),
+      _deleteTopLevelDocsByField('emotions', 'userId', uid),
+      _deleteTopLevelDocsByField('userpoints', 'userId', uid),
+      _deleteTopLevelDocsByField('walk_sessions', 'createdBy', uid),
+    ]);
+
+    final batch = _firestore.batch();
+    batch.delete(_firestore.collection('users').doc(uid));
+    batch.delete(_firestore.collection('coaches').doc(uid));
+    batch.delete(_firestore.collection('steps').doc(uid));
+    await batch.commit();
+  }
+
+  Future<void> _deleteTopLevelDocsByField(
+    String collection,
+    String field,
+    String value,
+  ) async {
+    final snapshot = await _firestore
+        .collection(collection)
+        .where(field, isEqualTo: value)
+        .limit(450)
+        .get();
+
+    if (snapshot.docs.isEmpty) return;
+
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
+  Future<void> _deleteCollectionDocs(
+    CollectionReference<Map<String, dynamic>> collection,
+  ) async {
+    final snapshot = await collection.limit(450).get();
+    if (snapshot.docs.isEmpty) return;
+
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
   }
 
   Future<void> _createOrUpdateUserDocument({
@@ -293,6 +435,7 @@ class AuthService {
     required String role,
     required bool emailVerified,
     String? photoUrl,
+    String? authProvider,
   }) async {
     await _firestore.collection("users").doc(uid).set({
       "username": username,
@@ -303,10 +446,31 @@ class AuthService {
       "isCoach": role == 'coach',
       "emailVerified": emailVerified,
       "photoURL": photoUrl,
+      if (authProvider != null) "authProvider": authProvider,
       "termsAccepted": true,
       "termsVersion": "2026-05-05",
       "termsAcceptedAt": FieldValue.serverTimestamp(),
       "createdAt": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
+
+  String _fallbackUsername(User user) {
+    final displayName = user.displayName?.trim();
+    if (displayName != null && displayName.isNotEmpty) return displayName;
+
+    final email = user.email?.trim();
+    if (email != null && email.isNotEmpty) return email.split('@').first;
+
+    return 'Apple User';
+  }
+}
+
+class _AppleAuthCredential {
+  const _AppleAuthCredential({
+    required this.credential,
+    required this.fullName,
+  });
+
+  final OAuthCredential credential;
+  final String fullName;
 }

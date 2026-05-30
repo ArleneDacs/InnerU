@@ -36,6 +36,7 @@ class _StepTrackerState extends State<StepTracker>
   int _lastRawStepCount = 0;
   bool _isWalking = false;
   bool _stepCounterInitialized = false;
+  bool _isDisposed = false;
   Timer? _checkTimer;
 
   // iOS exposes motion access as sensors, while Android uses activity recognition.
@@ -136,9 +137,6 @@ class _StepTrackerState extends State<StepTracker>
     }
 
     debugPrint('Step tracking permission not granted: $status');
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-    }
     return false;
   }
 
@@ -170,12 +168,15 @@ class _StepTrackerState extends State<StepTracker>
 
     _stepCountStream = Pedometer.stepCountStream.listen(
       (StepCount event) async {
+        if (!mounted || _isDisposed) return;
+
         int currentSteps = event.steps;
 
         if (_initialSteps == -1 || currentSteps < _initialSteps) {
           // Ensure initialSteps is always valid
           _initialSteps = currentSteps;
           await prefs.setInt('initial_steps', _initialSteps);
+          if (!mounted || _isDisposed) return;
         }
 
         int newSteps = currentSteps - _initialSteps;
@@ -193,6 +194,8 @@ class _StepTrackerState extends State<StepTracker>
     );
 
     _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!mounted || _isDisposed) return;
+
       if (_steps == _lastSteps) {
         _setWalkingState(false);
       }
@@ -201,9 +204,12 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   void _updateStepCount(int newSteps) async {
-    if (!mounted) return; // Prevent updates if widget is disposed
+    if (!mounted || _isDisposed) {
+      return; // Prevent updates if widget is disposed
+    }
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (!mounted || _isDisposed) return;
 
     setState(() {
       _isWalking = newSteps > _steps;
@@ -212,8 +218,11 @@ class _StepTrackerState extends State<StepTracker>
 
     await prefs.setInt('saved_steps', _steps);
     await prefs.setInt('initial_steps', _initialSteps);
+    if (!mounted || _isDisposed) return;
 
-    _stepStreamController.add(_steps);
+    if (!_stepStreamController.isClosed) {
+      _stepStreamController.add(_steps);
+    }
 
     if (_shouldSyncProgress()) {
       await _syncStepProgress();
@@ -274,6 +283,8 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   void _setWalkingState(bool isWalking) {
+    if (!mounted || _isDisposed) return;
+
     if (isWalking) {
       _lottieController.forward(); // Start animation smoothly
     } else {
@@ -282,6 +293,8 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   void _handleRawStepCount(int rawSteps) {
+    if (!mounted || _isDisposed) return;
+
     final delta = rawSteps - _lastRawStepCount;
     _lastRawStepCount = rawSteps;
 
@@ -354,11 +367,12 @@ class _StepTrackerState extends State<StepTracker>
 
   @override
   void dispose() {
+    _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
-    _lottieController.dispose();
     _stepCountStream?.cancel();
-    _stepStreamController.close();
     _checkTimer?.cancel();
+    _stepStreamController.close();
+    _lottieController.dispose();
     super.dispose();
   }
 

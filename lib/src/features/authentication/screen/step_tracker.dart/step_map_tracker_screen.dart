@@ -289,9 +289,6 @@ class _StepMapTrackingController extends ChangeNotifier {
         'Activity recognition permission is needed to show live step counts.';
     _emit();
 
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-    }
     return false;
   }
 
@@ -621,7 +618,8 @@ class StepMapTrackerScreen extends StatefulWidget {
   State<StepMapTrackerScreen> createState() => _StepMapTrackerScreenState();
 }
 
-class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
+class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
+    with WidgetsBindingObserver {
   static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
   static const int _maxSharedRoutePoints = 500;
   static const String _streetTileUrl =
@@ -699,6 +697,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentUserId = _auth.currentUser?.uid;
     _trackingController.addListener(_handleTrackingControllerChanged);
     _applyTrackingState(notify: false);
@@ -709,6 +708,16 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
     _loadCurrentUser();
     _listenToWalkSessions();
     _loadInitialMapPreview();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!Platform.isIOS || !_trackingController.isTracking) return;
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_trackingController.stopTracking());
+    }
   }
 
   Future<void> _loadInitialMapPreview() async {
@@ -1871,6 +1880,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _routeReplayTimer?.cancel();
     _trackingController.removeListener(_handleTrackingControllerChanged);
     _sessionSubscription?.cancel();

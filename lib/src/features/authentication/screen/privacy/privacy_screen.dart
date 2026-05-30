@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/changepass/change_pass.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 
 class PrivacyScreen extends StatefulWidget {
   const PrivacyScreen({super.key, required this.title});
@@ -14,7 +13,21 @@ class PrivacyScreen extends StatefulWidget {
 class _PrivacyScreen extends State<PrivacyScreen> {
   TextEditingController verificationController = TextEditingController();
   TextEditingController passwordController = TextEditingController();
-  TextEditingController confirmPasswordController = TextEditingController();
+  bool _isDeleting = false;
+
+  bool get _usesPasswordProvider {
+    final user = FirebaseAuth.instance.currentUser;
+    return user?.providerData
+            .any((provider) => provider.providerId == 'password') ??
+        false;
+  }
+
+  @override
+  void dispose() {
+    verificationController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,36 +41,6 @@ class _PrivacyScreen extends State<PrivacyScreen> {
               _buildButtons(context, "Delete Account"),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildButton(BuildContext context, String label, Widget targetScreen) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 10),
-      width: double.infinity,
-      child: TextButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => targetScreen),
-          );
-        },
-        style: ButtonStyle(
-          padding: WidgetStateProperty.all(
-              EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
-          overlayColor: WidgetStateProperty.all(Colors.grey.shade200),
-          shape: WidgetStateProperty.all(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: TextStyle(fontSize: 17, color: Colors.black)),
-            Icon(Icons.arrow_forward_ios, size: 20, color: Colors.black),
-          ],
         ),
       ),
     );
@@ -127,7 +110,7 @@ class _PrivacyScreen extends State<PrivacyScreen> {
                 ),
                 SizedBox(height: 30),
                 Text(
-                  'You will no longer be billed, and after 90 days, your username will be available to anyone on SelfCare.',
+                  'This permanently deletes your InnerU account and profile data. You will be signed out when deletion is complete.',
                   style: TextStyle(color: Colors.white, fontSize: 14),
                 ),
                 SizedBox(height: 10),
@@ -184,36 +167,44 @@ class _PrivacyScreen extends State<PrivacyScreen> {
                   ),
                 ),
                 SizedBox(height: 10),
-                Text(
-                  'Confirm Password:',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14),
-                ),
-                SizedBox(height: 10),
-                SizedBox(
-                  height: 40,
-                  child: TextField(
-                    controller: passwordController,
-                    obscureText: true,
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                    decoration: InputDecoration(
-                      labelStyle: TextStyle(color: Colors.white70),
-                      contentPadding:
-                          EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white, width: 2.0),
+                if (_usesPasswordProvider) ...[
+                  Text(
+                    'Confirm Password:',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14),
+                  ),
+                  SizedBox(height: 10),
+                  SizedBox(
+                    height: 40,
+                    child: TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                      decoration: InputDecoration(
+                        labelStyle: TextStyle(color: Colors.white70),
+                        contentPadding:
+                            EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide:
+                              BorderSide(color: Colors.white, width: 2.0),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ] else ...[
+                  Text(
+                    'You will be asked to confirm with your sign-in provider before deletion.',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ],
               ],
             ),
           ),
@@ -229,9 +220,9 @@ class _PrivacyScreen extends State<PrivacyScreen> {
                   ),
                 ),
                 TextButton(
-                  onPressed: deleteAccount,
+                  onPressed: _isDeleting ? null : deleteAccount,
                   child: Text(
-                    'Delete this account',
+                    _isDeleting ? 'Deleting...' : 'Delete this account',
                     style: TextStyle(
                       color: Colors.red,
                       fontWeight: FontWeight.bold,
@@ -245,8 +236,6 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       );
 
   void deleteAccount() async {
-    final user = FirebaseAuth.instance.currentUser;
-
     final verificationText = verificationController.text.trim().toLowerCase();
     final passwordText = passwordController.text.trim();
 
@@ -260,7 +249,7 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       return;
     }
 
-    if (passwordText.isEmpty) {
+    if (_usesPasswordProvider && passwordText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Password cannot be empty."),
@@ -270,7 +259,8 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       return;
     }
 
-    if (user == null || user.email == null) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("No user signed in."),
@@ -281,23 +271,16 @@ class _PrivacyScreen extends State<PrivacyScreen> {
     }
 
     try {
-      final credential = EmailAuthProvider.credential(
-        email: user.email!,
-        password: passwordText,
+      setState(() {
+        _isDeleting = true;
+      });
+
+      await AuthService().deleteCurrentUserAccount(
+        password: _usesPasswordProvider ? passwordText : null,
       );
 
-      await user.reauthenticateWithCredential(credential);
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .delete();
-
-      await user.delete();
-
+      if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-
-// Optionally show a toast/snack on the login screen instead
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -307,6 +290,11 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       );
     } catch (e) {
       print('Error during account deletion: $e');
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Failed to delete account: ${e.toString()}"),

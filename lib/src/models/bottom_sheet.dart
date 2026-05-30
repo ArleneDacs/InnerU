@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/addcoach.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
 
 class BottomSheetWidget {
   static void show(BuildContext context) async {
@@ -31,6 +32,20 @@ class BottomSheetWidget {
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/profile');
+                  },
+                ),
+                Divider(),
+                ListTile(
+                  leading: Icon(Icons.settings),
+                  title: Text("Account Settings"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PrivacyScreen(title: 'Privacy'),
+                      ),
+                    );
                   },
                 ),
                 Divider(),

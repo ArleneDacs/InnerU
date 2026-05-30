@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:spotify_sdk/models/connection_status.dart';
 import 'package:spotify_sdk/spotify_sdk.dart';
 import 'package:selfcare_projects/src/config/spotify_config.dart';
@@ -23,7 +24,7 @@ class SpotifyNativeService {
         });
   }
 
-  Future<bool> connect() async {
+  Future<bool> connect({bool authorizeIfNeeded = true}) async {
     await initialize();
 
     try {
@@ -42,8 +43,39 @@ class SpotifyNativeService {
         debugPrint('Spotify native connect failed: $error');
       }
       _isConnected = false;
+
+      if (authorizeIfNeeded && _needsExplicitAuthorization(error)) {
+        await authorize();
+        return connect(authorizeIfNeeded: false);
+      }
+
       rethrow;
     }
+  }
+
+  Future<void> authorize() async {
+    try {
+      await SpotifySdk.getAccessToken(
+        clientId: SpotifyConfig.clientId,
+        redirectUrl: SpotifyConfig.redirectUri,
+        scope: SpotifyConfig.scopes.join(','),
+      );
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Spotify authorization failed: $error');
+      }
+      rethrow;
+    }
+  }
+
+  bool _needsExplicitAuthorization(Object error) {
+    if (error is PlatformException) {
+      return error.code == 'UserNotAuthorizedException' ||
+          (error.message?.toLowerCase().contains('authorization') ?? false);
+    }
+
+    return error.toString().contains('UserNotAuthorizedException') ||
+        error.toString().toLowerCase().contains('authorization is required');
   }
 
   Future<void> playTrack(String trackUri) async {

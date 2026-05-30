@@ -2022,7 +2022,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         return Container(
           decoration: const BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/fire.gif'),
+              image: AssetImage('assets/images/angry.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),

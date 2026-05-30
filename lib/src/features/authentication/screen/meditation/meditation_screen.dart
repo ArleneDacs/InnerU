@@ -9,7 +9,6 @@ import 'package:selfcare_projects/src/features/meditation_song/meditation_song.d
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
-import 'package:selfcare_projects/src/services/spotify_helper.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 
@@ -23,7 +22,6 @@ class Meditation extends StatefulWidget {
 class _MeditationState extends State<Meditation> {
   String favoriteSong = "No favorite selected";
   String favoriteSongSource = "default";
-  String? favoriteSpotifyUrl;
   String? favoriteSpotifyTrackId;
   bool _spotifyConnecting = false;
   bool _completionAlertHandled = false;
@@ -59,7 +57,6 @@ class _MeditationState extends State<Meditation> {
     setState(() {
       favoriteSong = song ?? "No favorite selected";
       favoriteSongSource = source ?? "default";
-      favoriteSpotifyUrl = spotifyUrl;
       favoriteSpotifyTrackId = _extractSpotifyTrackId(spotifyUrl);
       favoriteSongPath = _getSongPath(favoriteSong);
     });
@@ -154,7 +151,11 @@ class _MeditationState extends State<Meditation> {
   }
 
   Future<void> _pauseSpotifyPlayer() async {
-    await SpotifyNativeService.instance.pause();
+    try {
+      await SpotifyNativeService.instance.pause();
+    } catch (error) {
+      debugPrint('Spotify pause failed: $error');
+    }
     if (!mounted) return;
     setState(() {
       playingSong = null;
@@ -162,7 +163,11 @@ class _MeditationState extends State<Meditation> {
   }
 
   Future<void> _stopSpotifyPlayer() async {
-    await SpotifyNativeService.instance.stop();
+    try {
+      await SpotifyNativeService.instance.stop();
+    } catch (error) {
+      debugPrint('Spotify stop failed: $error');
+    }
     if (!mounted) return;
     setState(() {
       playingSong = null;
@@ -173,21 +178,6 @@ class _MeditationState extends State<Meditation> {
     final trimmed = trackId?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
     return 'spotify:track:$trimmed';
-  }
-
-  String? _spotifyUrlFromTrackId(String? trackId) {
-    final trimmed = trackId?.trim();
-    if (trimmed == null || trimmed.isEmpty) return null;
-    return 'https://open.spotify.com/track/$trimmed';
-  }
-
-  Future<bool> _openSpotifyFallback() async {
-    final fallbackUrl =
-        favoriteSpotifyUrl ?? _spotifyUrlFromTrackId(favoriteSpotifyTrackId);
-    if (fallbackUrl == null || fallbackUrl.isEmpty) {
-      return false;
-    }
-    return SpotifyHelper.openSpotifyTrack(context, fallbackUrl);
   }
 
   Future<void> _handleMeditationPlay(TimeProvider timeProvider) async {
@@ -228,29 +218,11 @@ class _MeditationState extends State<Meditation> {
         } catch (error) {
           await _cancelMeditationCompletionAlert();
           if (!mounted) return;
-          final openedFallback = await _openSpotifyFallback();
-          if (!mounted) return;
-          if (openedFallback) {
-            await _scheduleMeditationCompletionAlert(timeProvider);
-            if (!mounted) return;
-            timeProvider.startTimer();
-            setState(() {
-              playingSong = favoriteSong;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Spotify app control is unavailable, so the track was opened in Spotify instead.',
-                ),
-              ),
-            );
-            return;
-          }
-
+          debugPrint('Spotify meditation playback failed: $error');
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Text(
-                'Spotify playback needs the Spotify app installed and logged in on this device.\n$error',
+                'Please allow InnerU in Spotify, then tap play again.',
               ),
             ),
           );
@@ -311,8 +283,6 @@ class _MeditationState extends State<Meditation> {
     setState(() {
       favoriteSong = selectedTitle;
       favoriteSongSource = selectedSource == "spotify" ? "spotify" : "default";
-      favoriteSpotifyUrl =
-          selectedSource == "spotify" ? selectedSpotifyUrl : null;
       favoriteSpotifyTrackId = _extractSpotifyTrackId(selectedSpotifyUrl);
       favoriteSongPath = _getSongPath(selectedTitle);
       playingSong = null;
