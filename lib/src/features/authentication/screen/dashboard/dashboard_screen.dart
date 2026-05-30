@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,6 +16,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -34,12 +36,16 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? _profilePic;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
+  final EmotionService _emotionService = EmotionService();
   final GlobalKey _dashboardStackKey = GlobalKey();
   late final AnimationController _introController;
   late final AnimationController _tileTransitionController;
+  StreamSubscription<String?>? _todayEmotionSubscription;
   _DashboardTileTransition? _activeTileTransition;
+  bool _isEmotionLoading = true;
+  bool _isSavingEmotion = false;
 
-  String get _todayDate => DateTime.now().toString().split(' ')[0];
+  String get _todayDate => EmotionService.todayKey();
 
   String _getEmojiForEmotion(String emotion) {
     switch (emotion.toLowerCase()) {
@@ -69,7 +75,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
     _fetchProfilePic();
     fetchQuote();
-    _loadTodayEmotion();
+    _restoreTodayEmotionFromCache();
+    _listenToTodayEmotion();
     _loadLocalChatReadOverrides();
   }
 
@@ -119,56 +126,136 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> selectEmotion(String emotion) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null || _isEmotionLoading || _isSavingEmotion) return;
 
     final username = await _getUsername();
+    if (!mounted) return;
 
     setState(() {
-      selectedEmotion = emotion;
-      currentUserEmotion = emotion;
+      _isSavingEmotion = true;
     });
 
-    await _saveEmotionToDatabase(context, emotion, username);
-    await _saveEmotionToSharedPreferences(emotion);
+    try {
+      final result = await _emotionService.saveTodayEmotion(
+        user: user,
+        emotion: emotion,
+        username: username,
+      );
+
+      if (!mounted) return;
+
+      if (result.created) {
+        setState(() {
+          selectedEmotion = emotion;
+          currentUserEmotion = emotion;
+        });
+        await _cacheTodayEmotion(emotion);
+        return;
+      }
+
+      setState(() {
+        currentUserEmotion = result.emotion;
+      });
+      await _cacheTodayEmotion(result.emotion);
+      if (!mounted) return;
+
+      final savedEmotion = result.emotion;
+      final message = savedEmotion == null
+          ? "You can only select one emotion per day!"
+          : "Today's mood is already logged as $savedEmotion.";
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      debugPrint("Error saving emotion: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Failed to save emotion. Please try again."),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingEmotion = false;
+        });
+      }
+    }
   }
 
-  Future<void> _saveEmotionToSharedPreferences(String emotion) async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _restoreTodayEmotionFromCache() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _isEmotionLoading = false;
+      });
+      return;
+    }
 
-    await prefs.setString('selected_emotion_${user.uid}', emotion);
-    await prefs.setString(
-      'emotion_date_${user.uid}',
-      DateTime.now().toString().split(' ')[0],
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
+    final savedDate = prefs.getString('emotion_date_${user.uid}');
+
+    if (!mounted) return;
+    if (savedDate == _todayDate &&
+        savedEmotion != null &&
+        savedEmotion.isNotEmpty) {
+      setState(() {
+        currentUserEmotion = savedEmotion;
+        _isEmotionLoading = false;
+      });
+    }
+  }
+
+  Future<void> _listenToTodayEmotion() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _isEmotionLoading = false;
+      });
+      return;
+    }
+
+    await _todayEmotionSubscription?.cancel();
+    _todayEmotionSubscription =
+        _emotionService.watchTodayEmotion(user.uid).listen(
+      (emotion) async {
+        if (!mounted) return;
+        setState(() {
+          currentUserEmotion = emotion;
+          _isEmotionLoading = false;
+        });
+        await _cacheTodayEmotion(emotion);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint("Error listening to emotion updates: $error");
+        if (!mounted) return;
+        setState(() {
+          _isEmotionLoading = false;
+        });
+      },
     );
   }
 
-  Future<void> _loadTodayEmotion() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _cacheTodayEmotion(String? emotion) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
-    final savedDate = prefs.getString('emotion_date_${user.uid}');
-    final today = DateTime.now().toString().split(' ')[0];
-
-    setState(() {
-      currentUserEmotion = savedDate == today ? savedEmotion : null;
-    });
-  }
-
-  Future<void> _clearEmotionOnLogout() async {
     final prefs = await SharedPreferences.getInstance();
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final emotionKey = 'selected_emotion_${user.uid}';
+    final dateKey = 'emotion_date_${user.uid}';
 
-    await prefs.remove('selected_emotion_${user.uid}');
-    await prefs.remove('emotion_date_${user.uid}');
+    if (emotion == null || emotion.isEmpty) {
+      await prefs.remove(emotionKey);
+      await prefs.remove(dateKey);
+      return;
+    }
 
-    setState(() {
-      currentUserEmotion = null;
-    });
+    await prefs.setString(emotionKey, emotion);
+    await prefs.setString(dateKey, _todayDate);
   }
 
   Widget _buildSectionTitle(String title) {
@@ -762,6 +849,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    _todayEmotionSubscription?.cancel();
     _introController.dispose();
     _tileTransitionController.dispose();
     super.dispose();
@@ -829,57 +917,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         quote = "Failed to load quote.";
         author = "Unknown";
       });
-    }
-  }
-
-  Future<void> _saveEmotionToDatabase(
-    BuildContext context,
-    String emotion,
-    String username,
-  ) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final today = DateTime.now().toString().split(' ')[0];
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection("emotions")
-          .where("userId", isEqualTo: user.uid)
-          .where("username", isEqualTo: username)
-          .where("date", isEqualTo: today)
-          .get();
-
-      if (snapshot.docs.isNotEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("You can only select one emotion per day!"),
-          ),
-        );
-        return;
-      }
-
-      await FirebaseFirestore.instance.collection("emotions").add({
-        "userId": user.uid,
-        "username": username.isNotEmpty ? username : "Unknown",
-        "emotion": emotion,
-        "date": today,
-      });
-
-      if (mounted) {
-        setState(() {
-          selectedEmotion = emotion;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error saving emotion: $e");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Failed to save emotion. Please try again."),
-        ),
-      );
     }
   }
 
@@ -2096,143 +2133,166 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         const SizedBox(height: 14),
         _buildGlassSectionCard(
-          child: currentUserEmotion == null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Choose the mood that feels closest right now.",
-                      style: TextStyle(
-                        color: Color(0xFF5E6E57),
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: _buildMoodChoice(
-                              icon: CupertinoIcons.smiley_fill,
-                              label: "Happy",
-                              color: const Color(0xFFF5DEB0),
-                              onTap: () => selectEmotion("happy"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 4.0),
-                            child: _buildMoodChoice(
-                              icon: CupertinoIcons.minus_circle_fill,
-                              label: "Neutral",
-                              color: const Color(0xFFE6E4DE),
-                              onTap: () => selectEmotion("neutral"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 4.0),
-                            child: _buildMoodChoice(
-                              icon: CupertinoIcons.cloud_rain_fill,
-                              label: "Sad",
-                              color: const Color(0xFFDCE6F3),
-                              onTap: () => selectEmotion("sad"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8.0),
-                            child: _buildMoodChoice(
-                              icon: CupertinoIcons.flame_fill,
-                              label: "Angry",
-                              color: const Color(0xFFF2D2C6),
-                              onTap: () => selectEmotion("angry"),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+          child: _isEmotionLoading
+              ? const SizedBox(
+                  height: 132,
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
                 )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              : currentUserEmotion == null
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDDE7D5),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: const Icon(
-                            CupertinoIcons.heart_fill,
-                            color: Color(0xFF5E7652),
-                            size: 24,
+                        const Text(
+                          "Choose the mood that feels closest right now.",
+                          style: TextStyle(
+                            color: Color(0xFF5E6E57),
+                            height: 1.45,
                           ),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            "Today you're feeling $currentUserEmotion",
-                            style: const TextStyle(
-                              fontSize: 21,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF24311F),
+                        const SizedBox(height: 18),
+                        AbsorbPointer(
+                          absorbing: _isSavingEmotion,
+                          child: Opacity(
+                            opacity: _isSavingEmotion ? 0.62 : 1,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: _buildMoodChoice(
+                                      icon: CupertinoIcons.smiley_fill,
+                                      label: "Happy",
+                                      color: const Color(0xFFF5DEB0),
+                                      onTap: () => selectEmotion("happy"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4.0),
+                                    child: _buildMoodChoice(
+                                      icon: CupertinoIcons.minus_circle_fill,
+                                      label: "Neutral",
+                                      color: const Color(0xFFE6E4DE),
+                                      onTap: () => selectEmotion("neutral"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4.0),
+                                    child: _buildMoodChoice(
+                                      icon: CupertinoIcons.cloud_rain_fill,
+                                      label: "Sad",
+                                      color: const Color(0xFFDCE6F3),
+                                      onTap: () => selectEmotion("sad"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 8.0),
+                                    child: _buildMoodChoice(
+                                      icon: CupertinoIcons.flame_fill,
+                                      label: "Angry",
+                                      color: const Color(0xFFF2D2C6),
+                                      onTap: () => selectEmotion("angry"),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
-                      style: TextStyle(
-                        color: Color(0xFF5E6E57),
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => EmotionTrackerPage(),
-                          ),
-                        );
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF6E8464),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            "Track Your Emotions",
+                        if (_isSavingEmotion) ...[
+                          const SizedBox(height: 14),
+                          const Text(
+                            "Saving your mood...",
                             style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF5E6E57),
+                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                          SizedBox(width: 6),
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            size: 14,
                           ),
                         ],
-                      ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 52,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDDE7D5),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.heart_fill,
+                                color: Color(0xFF5E7652),
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                "Today you're feeling $currentUserEmotion",
+                                style: const TextStyle(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF24311F),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
+                          style: TextStyle(
+                            color: Color(0xFF5E6E57),
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EmotionTrackerPage(),
+                              ),
+                            );
+                          },
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF6E8464),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "Track Your Emotions",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                size: 14,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
         ),
       ],
     );

@@ -187,33 +187,33 @@ class SpotifyHelper {
     return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  static Future<void> openSongOnSpotify(
+  static Future<bool> openSongOnSpotify(
     BuildContext context,
     String songTitle,
   ) async {
     final uri = Uri.https('open.spotify.com', '/search/$songTitle');
-    await _launchSpotifyUri(context, uri);
+    return _launchSpotifyUri(context, uri);
   }
 
-  static Future<void> openSpotifyTrack(
+  static Future<bool> openSpotifyTrack(
     BuildContext context,
     String spotifyUrl,
   ) async {
     final uri = Uri.tryParse(spotifyUrl);
     if (uri == null) {
-      if (!context.mounted) return;
+      if (!context.mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('This Spotify track link is invalid.'),
         ),
       );
-      return;
+      return false;
     }
 
-    await _launchSpotifyUri(context, uri);
+    return _launchSpotifyUri(context, uri);
   }
 
-  static Future<void> _launchSpotifyUri(
+  static Future<bool> _launchSpotifyUri(
     BuildContext context,
     Uri uri,
   ) async {
@@ -229,5 +229,6 @@ class SpotifyHelper {
         ),
       );
     }
+    return launched;
   }
 }

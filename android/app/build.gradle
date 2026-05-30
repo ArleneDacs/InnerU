@@ -10,8 +10,13 @@ plugins {
 
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("key.properties")
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
 def isReleaseTask = gradle.startParameter.taskNames.any { taskName ->
     taskName?.toLowerCase()?.contains("release")
+}
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
 }
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
@@ -22,7 +27,13 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.valenin.inneru"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = localProperties.getProperty("ndkVersion") ?: flutter.ndkVersion
+
+    packaging {
+        jniLibs {
+            keepDebugSymbols += ["**/*.so"]
+        }
+    }
 
 compileOptions {
     coreLibraryDesugaringEnabled true

@@ -9,6 +9,7 @@ import 'package:selfcare_projects/src/features/meditation_song/meditation_song.d
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/spotify_helper.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 
@@ -136,13 +137,20 @@ class _MeditationState extends State<Meditation> {
     final uri = Uri.tryParse(spotifyUrl ?? '');
     if (uri == null) return null;
 
+    if (uri.scheme == 'spotify') {
+      final parts = uri.path.split(':');
+      if (parts.length >= 2 && parts.first == 'track') {
+        return parts[1];
+      }
+    }
+
     final segments = uri.pathSegments;
     final trackIndex = segments.indexOf('track');
     if (trackIndex == -1 || trackIndex + 1 >= segments.length) {
       return null;
     }
 
-    return segments[trackIndex + 1];
+    return segments[trackIndex + 1].split('?').first;
   }
 
   Future<void> _pauseSpotifyPlayer() async {
@@ -165,6 +173,21 @@ class _MeditationState extends State<Meditation> {
     final trimmed = trackId?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
     return 'spotify:track:$trimmed';
+  }
+
+  String? _spotifyUrlFromTrackId(String? trackId) {
+    final trimmed = trackId?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return 'https://open.spotify.com/track/$trimmed';
+  }
+
+  Future<bool> _openSpotifyFallback() async {
+    final fallbackUrl =
+        favoriteSpotifyUrl ?? _spotifyUrlFromTrackId(favoriteSpotifyTrackId);
+    if (fallbackUrl == null || fallbackUrl.isEmpty) {
+      return false;
+    }
+    return SpotifyHelper.openSpotifyTrack(context, fallbackUrl);
   }
 
   Future<void> _handleMeditationPlay(TimeProvider timeProvider) async {
@@ -205,10 +228,29 @@ class _MeditationState extends State<Meditation> {
         } catch (error) {
           await _cancelMeditationCompletionAlert();
           if (!mounted) return;
+          final openedFallback = await _openSpotifyFallback();
+          if (!mounted) return;
+          if (openedFallback) {
+            await _scheduleMeditationCompletionAlert(timeProvider);
+            if (!mounted) return;
+            timeProvider.startTimer();
+            setState(() {
+              playingSong = favoriteSong;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Spotify app control is unavailable, so the track was opened in Spotify instead.',
+                ),
+              ),
+            );
+            return;
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Spotify native playback failed. Make sure Spotify is installed, you are logged in, and your account can play this track.\n$error',
+                'Spotify playback needs the Spotify app installed and logged in on this device.\n$error',
               ),
             ),
           );
@@ -325,12 +367,27 @@ class _MeditationState extends State<Meditation> {
             Center(
               child: GestureDetector(
                 onTap: () => _showTimePicker(context, timeProvider),
-                child: Text(
-                  _formatTime(timeProvider.remainingTime),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 55,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatTime(timeProvider.remainingTime),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 55,
+                        color: Color(0xFF2E2A27),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Tap to set meditation minutes',
+                      style: TextStyle(
+                        color: Color(0xFF8B8179),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

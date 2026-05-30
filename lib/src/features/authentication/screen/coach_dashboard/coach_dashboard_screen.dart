@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -16,6 +17,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
 
@@ -38,11 +40,16 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   String _author = 'Unknown';
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
+  final EmotionService _emotionService = EmotionService();
   final GlobalKey _dashboardStackKey = GlobalKey();
   late final AnimationController _tileTransitionController;
+  StreamSubscription<String?>? _todayEmotionSubscription;
   _CoachDashboardTileTransition? _activeTileTransition;
+  bool _isEmotionLoading = true;
+  bool _isSavingEmotion = false;
 
   String get _userId => _auth.currentUser!.uid;
+  String get _todayDate => EmotionService.todayKey();
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> get _userStream =>
       _firestore.collection('users').doc(_userId).snapshots();
@@ -62,13 +69,15 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     );
-    _loadTodayEmotion();
+    _restoreTodayEmotionFromCache();
+    _listenToTodayEmotion();
     _fetchQuote();
     _loadLocalChatReadOverrides();
   }
 
   @override
   void dispose() {
+    _todayEmotionSubscription?.cancel();
     _tileTransitionController.dispose();
     super.dispose();
   }
@@ -109,7 +118,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         return;
       }
 
-      final response = await http.get(Uri.parse('https://zenquotes.io/api/random'));
+      final response =
+          await http.get(Uri.parse('https://zenquotes.io/api/random'));
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
         final newQuote = data[0]['q'] ?? 'No quote available.';
@@ -128,31 +138,29 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     } catch (_) {}
   }
 
-  Future<void> _loadTodayEmotion() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _restoreTodayEmotionFromCache() async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _isEmotionLoading = false;
+      });
+      return;
+    }
 
+    final prefs = await SharedPreferences.getInstance();
     final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
     final savedDate = prefs.getString('emotion_date_${user.uid}');
-    final today = DateTime.now().toString().split(' ')[0];
 
     if (!mounted) return;
-    setState(() {
-      _currentUserEmotion = savedDate == today ? savedEmotion : null;
-    });
-  }
-
-  Future<void> _saveEmotionToSharedPreferences(String emotion) async {
-    final prefs = await SharedPreferences.getInstance();
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    await prefs.setString('selected_emotion_${user.uid}', emotion);
-    await prefs.setString(
-      'emotion_date_${user.uid}',
-      DateTime.now().toString().split(' ')[0],
-    );
+    if (savedDate == _todayDate &&
+        savedEmotion != null &&
+        savedEmotion.isNotEmpty) {
+      setState(() {
+        _currentUserEmotion = savedEmotion;
+        _isEmotionLoading = false;
+      });
+    }
   }
 
   Future<String> _getUsername() async {
@@ -166,60 +174,113 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     return user.email?.split('@').first ?? 'Coach';
   }
 
-  Future<void> _saveEmotionToDatabase(
-    BuildContext context,
-    String emotion,
-    String username,
-  ) async {
+  Future<void> _listenToTodayEmotion() async {
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _isEmotionLoading = false;
+      });
+      return;
+    }
 
-    final today = DateTime.now().toString().split(' ')[0];
+    await _todayEmotionSubscription?.cancel();
+    _todayEmotionSubscription =
+        _emotionService.watchTodayEmotion(user.uid).listen(
+      (emotion) async {
+        if (!mounted) return;
+        setState(() {
+          _currentUserEmotion = emotion;
+          _isEmotionLoading = false;
+        });
+        await _cacheTodayEmotion(emotion);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('Error listening to emotion updates: $error');
+        if (!mounted) return;
+        setState(() {
+          _isEmotionLoading = false;
+        });
+      },
+    );
+  }
+
+  Future<void> _selectEmotion(String emotion) async {
+    final user = _auth.currentUser;
+    if (user == null || _isEmotionLoading || _isSavingEmotion) return;
+
+    final username = await _getUsername();
+    if (!mounted) return;
+
+    setState(() {
+      _isSavingEmotion = true;
+    });
 
     try {
-      final snapshot = await _firestore
-          .collection('emotions')
-          .where('userId', isEqualTo: user.uid)
-          .where('username', isEqualTo: username)
-          .where('date', isEqualTo: today)
-          .get();
+      final result = await _emotionService.saveTodayEmotion(
+        user: user,
+        emotion: emotion,
+        username: username,
+      );
 
-      if (snapshot.docs.isNotEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('You can only select one emotion per day!'),
-          ),
-        );
+      if (!mounted) return;
+
+      if (result.created) {
+        setState(() {
+          selectedEmotion = emotion;
+          _currentUserEmotion = emotion;
+        });
+        await _cacheTodayEmotion(emotion);
         return;
       }
 
-      await _firestore.collection('emotions').add({
-        'userId': user.uid,
-        'username': username,
-        'emotion': emotion,
-        'date': today,
+      setState(() {
+        _currentUserEmotion = result.emotion;
       });
-    } catch (_) {
+      await _cacheTodayEmotion(result.emotion);
+      if (!mounted) return;
+
+      final savedEmotion = result.emotion;
+      final message = savedEmotion == null
+          ? 'You can only select one emotion per day!'
+          : 'Today\'s mood is already logged as $savedEmotion.';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      debugPrint('Error saving emotion: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Failed to save emotion. Please try again.'),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingEmotion = false;
+        });
+      }
     }
   }
 
-  Future<void> _selectEmotion(String emotion) async {
-    final username = await _getUsername();
+  Future<void> _cacheTodayEmotion(String? emotion) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-    setState(() {
-      selectedEmotion = emotion;
-      _currentUserEmotion = emotion;
-    });
+    final prefs = await SharedPreferences.getInstance();
+    final emotionKey = 'selected_emotion_${user.uid}';
+    final dateKey = 'emotion_date_${user.uid}';
 
-    await _saveEmotionToDatabase(context, emotion, username);
-    await _saveEmotionToSharedPreferences(emotion);
+    if (emotion == null || emotion.isEmpty) {
+      await prefs.remove(emotionKey);
+      await prefs.remove(dateKey);
+      return;
+    }
+
+    await prefs.setString(emotionKey, emotion);
+    await prefs.setString(dateKey, _todayDate);
   }
 
   Future<void> _showCoachProfileDialog({
@@ -304,11 +365,15 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
                           final teamName = fullNameController.text.trim();
 
-                          await _firestore.collection('coaches').doc(_userId).set({
+                          await _firestore
+                              .collection('coaches')
+                              .doc(_userId)
+                              .set({
                             'userId': _userId,
                             'username': userData?['username'] ?? '',
-                            'email':
-                                userData?['email'] ?? _auth.currentUser?.email ?? '',
+                            'email': userData?['email'] ??
+                                _auth.currentUser?.email ??
+                                '',
                             'fullName': teamName,
                             'bio': bioController.text.trim(),
                             'phonenumber': phoneController.text.trim(),
@@ -320,7 +385,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             'updatedAt': FieldValue.serverTimestamp(),
                           }, SetOptions(merge: true));
 
-                          await _firestore.collection('users').doc(_userId).set({
+                          await _firestore
+                              .collection('users')
+                              .doc(_userId)
+                              .set({
                             'role': 'coach',
                             'isCoach': true,
                             'team': teamName,
@@ -348,7 +416,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                           );
                         },
                   child: Text(
-                    (coachData == null || coachData.isEmpty) ? 'Create' : 'Save',
+                    (coachData == null || coachData.isEmpty)
+                        ? 'Create'
+                        : 'Save',
                   ),
                 ),
               ],
@@ -470,8 +540,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           .snapshots(),
       builder: (context, snapshot) {
         var unreadCount = 0;
-        for (final doc
-            in snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+        for (final doc in snapshot.data?.docs ??
+            <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
           final chatData = doc.data();
           final localReadTime = _localChatReadOverrides[doc.id];
           final lastMessageTimeRaw = chatData['lastMessageTime'];
@@ -489,8 +559,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             if (localReadTime != null) localReadTime,
           ].fold<DateTime?>(
             null,
-            (latest, candidate) =>
-                latest == null || candidate.isAfter(latest) ? candidate : latest,
+            (latest, candidate) => latest == null || candidate.isAfter(latest)
+                ? candidate
+                : latest,
           );
           if (effectiveReadTime != null &&
               !lastMessageTime.isAfter(effectiveReadTime)) {
@@ -508,7 +579,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               unreadCount += rawValue.toInt();
             }
           } else {
-            final lastSenderId = (chatData['lastSenderId'] as String?)?.trim() ?? '';
+            final lastSenderId =
+                (chatData['lastSenderId'] as String?)?.trim() ?? '';
             if (lastSenderId.isNotEmpty &&
                 lastSenderId != _userId &&
                 (effectiveReadTime == null ||
@@ -524,10 +596,12 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             IconButton(
               icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
               onPressed: () async {
-                final coachDoc = await _firestore.collection('coaches').doc(_userId).get();
+                final coachDoc =
+                    await _firestore.collection('coaches').doc(_userId).get();
                 final coachData = coachDoc.data();
                 final userName =
-                    (coachData?['fullName'] as String?)?.trim().isNotEmpty == true
+                    (coachData?['fullName'] as String?)?.trim().isNotEmpty ==
+                            true
                         ? (coachData!['fullName'] as String).trim()
                         : await _getUsername();
                 if (!context.mounted) return;
@@ -551,7 +625,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 right: 6,
                 top: 6,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: const Color(0xFFE56B6F),
                     borderRadius: BorderRadius.circular(999),
@@ -617,7 +692,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             height: screenWidth * 0.08,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) {
-                              return Icon(Icons.person, size: screenWidth * 0.08);
+                              return Icon(Icons.person,
+                                  size: screenWidth * 0.08);
                             },
                           ),
                         ),
@@ -626,7 +702,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 actions: [
                   _buildInboxAction(),
                   IconButton(
-                    icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
+                    icon:
+                        const Icon(CupertinoIcons.line_horizontal_3, size: 28),
                     onPressed: () => BottomSheetWidget.show(context),
                   ),
                 ],
@@ -768,7 +845,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             children: [
               _buildHeroChip('Team', teamName),
               _buildHeroChip('Mentees', '$menteeCount'),
-              _buildHeroChip('Phone', phone?.isNotEmpty == true ? phone! : 'Not set'),
+              _buildHeroChip(
+                  'Phone', phone?.isNotEmpty == true ? phone! : 'Not set'),
             ],
           ),
           const SizedBox(height: 18),
@@ -1165,7 +1243,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(999),
@@ -1313,7 +1392,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       child: AnimatedBuilder(
         animation: _tileTransitionController,
         builder: (context, child) {
-          final t = Curves.easeInOutCubic.transform(_tileTransitionController.value);
+          final t =
+              Curves.easeInOutCubic.transform(_tileTransitionController.value);
           final size = MediaQuery.of(context).size;
           final targetWidth = size.width.clamp(280.0, 420.0) * 0.82;
           final targetHeight = 260.0;
@@ -1322,12 +1402,16 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             width: targetWidth,
             height: targetHeight,
           );
-          final moveT = Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
+          final moveT =
+              Curves.easeOutCubic.transform((t / 0.42).clamp(0.0, 1.0));
           final scatterT = ((t - 0.58) / 0.42).clamp(0.0, 1.0);
           final currentRect = Rect.lerp(transition.rect, targetRect, moveT)!;
-          final overlayOpacity = Tween<double>(begin: 0, end: 0.22).transform(t);
+          final overlayOpacity =
+              Tween<double>(begin: 0, end: 0.22).transform(t);
           final tileOpacity = scatterT > 0
-              ? (1 - Curves.easeInCubic.transform(scatterT)).clamp(0.0, 1.0).toDouble()
+              ? (1 - Curves.easeInCubic.transform(scatterT))
+                  .clamp(0.0, 1.0)
+                  .toDouble()
               : 1.0;
           final turns = scatterT > 0
               ? Tween<double>(begin: 0, end: 1.12).transform(
@@ -1394,16 +1478,65 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     required double progress,
   }) {
     const fragments = [
-      (ax: -0.34, ay: -0.22, size: 26.0, radius: 10.0, dx: -120.0, dy: -88.0, rot: -0.9),
-      (ax: 0.28, ay: -0.18, size: 20.0, radius: 8.0, dx: 128.0, dy: -96.0, rot: 1.1),
-      (ax: -0.18, ay: 0.08, size: 22.0, radius: 9.0, dx: -96.0, dy: 24.0, rot: 0.8),
-      (ax: 0.16, ay: 0.16, size: 18.0, radius: 8.0, dx: 90.0, dy: 46.0, rot: -1.2),
-      (ax: -0.04, ay: 0.26, size: 24.0, radius: 10.0, dx: -18.0, dy: 136.0, rot: 1.0),
-      (ax: 0.34, ay: 0.02, size: 16.0, radius: 7.0, dx: 144.0, dy: 8.0, rot: 1.4),
+      (
+        ax: -0.34,
+        ay: -0.22,
+        size: 26.0,
+        radius: 10.0,
+        dx: -120.0,
+        dy: -88.0,
+        rot: -0.9
+      ),
+      (
+        ax: 0.28,
+        ay: -0.18,
+        size: 20.0,
+        radius: 8.0,
+        dx: 128.0,
+        dy: -96.0,
+        rot: 1.1
+      ),
+      (
+        ax: -0.18,
+        ay: 0.08,
+        size: 22.0,
+        radius: 9.0,
+        dx: -96.0,
+        dy: 24.0,
+        rot: 0.8
+      ),
+      (
+        ax: 0.16,
+        ay: 0.16,
+        size: 18.0,
+        radius: 8.0,
+        dx: 90.0,
+        dy: 46.0,
+        rot: -1.2
+      ),
+      (
+        ax: -0.04,
+        ay: 0.26,
+        size: 24.0,
+        radius: 10.0,
+        dx: -18.0,
+        dy: 136.0,
+        rot: 1.0
+      ),
+      (
+        ax: 0.34,
+        ay: 0.02,
+        size: 16.0,
+        radius: 7.0,
+        dx: 144.0,
+        dy: 8.0,
+        rot: 1.4
+      ),
     ];
 
     final eased = Curves.easeOutCubic.transform(progress);
-    final fade = (1 - Curves.easeInQuad.transform(progress)).clamp(0.0, 1.0).toDouble();
+    final fade =
+        (1 - Curves.easeInQuad.transform(progress)).clamp(0.0, 1.0).toDouble();
     final center = Offset(size.width / 2, size.height / 2);
 
     return fragments.map((fragment) {
@@ -1423,7 +1556,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         child: Opacity(
           opacity: fade,
           child: Transform.rotate(
-            angle: fragment.rot * Curves.easeInOut.transform(progress) * 3.141592653589793,
+            angle: fragment.rot *
+                Curves.easeInOut.transform(progress) *
+                3.141592653589793,
             child: Container(
               width: fragment.size,
               height: fragment.size,
@@ -1474,8 +1609,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 builder: (context) => CoachManageMenteesPage(
                   firestore: _firestore,
                   currentUserId: _userId,
-                  currentUserName:
-                      (userData['username'] as String?) ??
+                  currentUserName: (userData['username'] as String?) ??
                       (coachData['fullName'] as String?) ??
                       'Coach',
                   teamName: teamName,
@@ -1492,7 +1626,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         const SizedBox(height: 12),
         _buildNavigationCard(
           title: 'Recent activity',
-          subtitle: 'See all mentee progress in a calendar view like user progress.',
+          subtitle:
+              'See all mentee progress in a calendar view like user progress.',
           icon: CupertinoIcons.calendar,
           color: const Color(0xFFE7EDF4),
           actionLabel: 'View',
@@ -1655,141 +1790,166 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         ),
         const SizedBox(height: 14),
         _buildGlassSectionCard(
-          child: _currentUserEmotion == null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Choose the mood that feels closest right now.",
-                      style: TextStyle(
-                        color: Color(0xFF5E6E57),
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: _buildUnifiedMoodChoice(
-                              icon: CupertinoIcons.smiley_fill,
-                              label: "Happy",
-                              color: const Color(0xFFF5DEB0),
-                              onTap: () => _selectEmotion("happy"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                            child: _buildUnifiedMoodChoice(
-                              icon: CupertinoIcons.minus_circle_fill,
-                              label: "Neutral",
-                              color: const Color(0xFFE6E4DE),
-                              onTap: () => _selectEmotion("neutral"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                            child: _buildUnifiedMoodChoice(
-                              icon: CupertinoIcons.cloud_rain_fill,
-                              label: "Sad",
-                              color: const Color(0xFFDCE6F3),
-                              onTap: () => _selectEmotion("sad"),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8.0),
-                            child: _buildUnifiedMoodChoice(
-                              icon: CupertinoIcons.flame_fill,
-                              label: "Angry",
-                              color: const Color(0xFFF2D2C6),
-                              onTap: () => _selectEmotion("angry"),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+          child: _isEmotionLoading
+              ? const SizedBox(
+                  height: 132,
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
                 )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              : _currentUserEmotion == null
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDDE7D5),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: const Icon(
-                            CupertinoIcons.heart_fill,
-                            color: Color(0xFF5E7652),
-                            size: 24,
+                        const Text(
+                          "Choose the mood that feels closest right now.",
+                          style: TextStyle(
+                            color: Color(0xFF5E6E57),
+                            height: 1.45,
                           ),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            "Today you're feeling $_currentUserEmotion",
-                            style: const TextStyle(
-                              fontSize: 21,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF24311F),
+                        const SizedBox(height: 18),
+                        AbsorbPointer(
+                          absorbing: _isSavingEmotion,
+                          child: Opacity(
+                            opacity: _isSavingEmotion ? 0.62 : 1,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: _buildUnifiedMoodChoice(
+                                      icon: CupertinoIcons.smiley_fill,
+                                      label: "Happy",
+                                      color: const Color(0xFFF5DEB0),
+                                      onTap: () => _selectEmotion("happy"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4.0),
+                                    child: _buildUnifiedMoodChoice(
+                                      icon: CupertinoIcons.minus_circle_fill,
+                                      label: "Neutral",
+                                      color: const Color(0xFFE6E4DE),
+                                      onTap: () => _selectEmotion("neutral"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4.0),
+                                    child: _buildUnifiedMoodChoice(
+                                      icon: CupertinoIcons.cloud_rain_fill,
+                                      label: "Sad",
+                                      color: const Color(0xFFDCE6F3),
+                                      onTap: () => _selectEmotion("sad"),
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 8.0),
+                                    child: _buildUnifiedMoodChoice(
+                                      icon: CupertinoIcons.flame_fill,
+                                      label: "Angry",
+                                      color: const Color(0xFFF2D2C6),
+                                      onTap: () => _selectEmotion("angry"),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
-                      style: TextStyle(
-                        color: Color(0xFF5E6E57),
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => EmotionTrackerPage(),
-                          ),
-                        );
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF6E8464),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            "Track Your Emotions",
+                        if (_isSavingEmotion) ...[
+                          const SizedBox(height: 14),
+                          const Text(
+                            "Saving your mood...",
                             style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF5E6E57),
+                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                          SizedBox(width: 6),
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            size: 14,
                           ),
                         ],
-                      ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 52,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDDE7D5),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.heart_fill,
+                                color: Color(0xFF5E7652),
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                "Today you're feeling $_currentUserEmotion",
+                                style: const TextStyle(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF24311F),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
+                          style: TextStyle(
+                            color: Color(0xFF5E6E57),
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EmotionTrackerPage(),
+                              ),
+                            );
+                          },
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF6E8464),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "Track Your Emotions",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                size: 14,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
         ),
       ],
     );
@@ -1839,29 +1999,20 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   Widget _buildMoodOverlay(String emotion) {
     switch (emotion.toLowerCase()) {
       case 'happy':
-        return Stack(
-          children: [
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: MediaQuery.of(context).size.width / 2,
-              child: Image.asset('assets/images/confetti_left.gif', fit: BoxFit.cover),
+        return Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage('assets/images/happy.gif'),
+              fit: BoxFit.cover,
+              opacity: 0.3,
             ),
-            Positioned(
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: MediaQuery.of(context).size.width / 2,
-              child: Image.asset('assets/images/confetti_right.gif', fit: BoxFit.cover),
-            ),
-          ],
+          ),
         );
       case 'sad':
         return Container(
           decoration: const BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/rain.jpg'),
+              image: AssetImage('assets/images/rain.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -1871,7 +2022,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         return Container(
           decoration: const BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/night_firepit.jpg'),
+              image: AssetImage('assets/images/fire.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -1881,7 +2032,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         return Container(
           decoration: const BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('assets/images/ocean_waves.jpg'),
+              image: AssetImage('assets/images/neutral.gif'),
               fit: BoxFit.cover,
               opacity: 0.3,
             ),
@@ -2077,7 +2228,9 @@ class CoachTeamOverviewPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  hasProfile ? (coachData['fullName'] as String? ?? teamName) : username,
+                  hasProfile
+                      ? (coachData['fullName'] as String? ?? teamName)
+                      : username,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
@@ -2116,7 +2269,8 @@ class CoachTeamOverviewPage extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: onEditProfile,
                       icon: const Icon(Icons.edit_outlined),
-                      label: Text(hasProfile ? 'Edit profile' : 'Create profile'),
+                      label:
+                          Text(hasProfile ? 'Edit profile' : 'Create profile'),
                     ),
                     OutlinedButton.icon(
                       onPressed: onOpenInbox,
@@ -2158,7 +2312,8 @@ class CoachManageMenteesPage extends StatelessWidget {
     required String teamName,
   }) onAssignMentee;
   final Future<void> Function(String menteeId) onRemoveMentee;
-  final Future<Map<String, dynamic>?> Function(String userId) latestTrackerForUser;
+  final Future<Map<String, dynamic>?> Function(String userId)
+      latestTrackerForUser;
   final String Function(Map<String, dynamic>? tracker) formatTrackerDate;
 
   String _normalizeName(String value) => value.trim().toLowerCase();
@@ -2185,8 +2340,7 @@ class CoachManageMenteesPage extends StatelessWidget {
       taskPoints,
       ['Meditation Points', 'meditation_points', 'meditationPoints'],
     );
-    final stepsTaken =
-        _extractIntValue(
+    final stepsTaken = _extractIntValue(
           taskPoints,
           ['Steps Points', 'steps_points', 'stepsPoints'],
         ) *
@@ -2319,17 +2473,21 @@ class CoachManageMenteesPage extends StatelessWidget {
                       stream: firestore.collection('users').snapshots(),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
+                          return const Center(
+                              child: CircularProgressIndicator());
                         }
 
-                        final query = searchController.text.trim().toLowerCase();
+                        final query =
+                            searchController.text.trim().toLowerCase();
                         final users = snapshot.data!.docs.where((doc) {
                           final data = doc.data();
                           final isCoach = data['isCoach'] == true ||
-                              ((data['role'] as String?)?.toLowerCase() == 'coach');
+                              ((data['role'] as String?)?.toLowerCase() ==
+                                  'coach');
                           final username =
                               (data['username'] as String? ?? '').toLowerCase();
-                          final email = (data['email'] as String? ?? '').toLowerCase();
+                          final email =
+                              (data['email'] as String? ?? '').toLowerCase();
                           return doc.id != currentUserId &&
                               !isCoach &&
                               (query.isEmpty ||
@@ -2347,7 +2505,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                             final userDoc = users[index];
                             final data = userDoc.data();
                             final assignedCoachId = data['coachId'] as String?;
-                            final assignedToMe = assignedCoachId == currentUserId;
+                            final assignedToMe =
+                                assignedCoachId == currentUserId;
                             final assignedElsewhere = assignedCoachId != null &&
                                 assignedCoachId.isNotEmpty &&
                                 !assignedToMe;
@@ -2355,8 +2514,10 @@ class CoachManageMenteesPage extends StatelessWidget {
                             return ListTile(
                               leading: CircleAvatar(
                                 child: Text(
-                                  ((data['username'] as String?)?.isNotEmpty ?? false)
-                                      ? (data['username'] as String)[0].toUpperCase()
+                                  ((data['username'] as String?)?.isNotEmpty ??
+                                          false)
+                                      ? (data['username'] as String)[0]
+                                          .toUpperCase()
                                       : '?',
                                 ),
                               ),
@@ -2364,7 +2525,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                               subtitle: Text(data['email'] ?? ''),
                               trailing: assignedToMe
                                   ? TextButton(
-                                      onPressed: () => onRemoveMentee(userDoc.id),
+                                      onPressed: () =>
+                                          onRemoveMentee(userDoc.id),
                                       child: const Text('Remove'),
                                     )
                                   : ElevatedButton(
@@ -2376,7 +2538,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                                 teamName: teamName,
                                               );
                                               if (!context.mounted) return;
-                                              ScaffoldMessenger.of(context).showSnackBar(
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
                                                 SnackBar(
                                                   content: Text(
                                                     '${data['username']} added to your team',
@@ -2521,28 +2684,33 @@ class CoachManageMenteesPage extends StatelessWidget {
                                   ),
                                   child: CircleAvatar(
                                     radius: 28,
-                                    backgroundColor: badgeColor.withOpacity(0.16),
-                                    backgroundImage: (data['profilePic'] as String?)
-                                                ?.trim()
-                                                .isNotEmpty ==
-                                            true
-                                        ? NetworkImage(data['profilePic'] as String)
-                                        : null,
-                                    child:
-                                        ((data['profilePic'] as String?)?.trim().isEmpty ??
-                                                true)
-                                            ? Text(
-                                                ((data['username'] as String?)
-                                                            ?.isNotEmpty ??
-                                                        false)
-                                                    ? (data['username'] as String)[0]
-                                                        .toUpperCase()
-                                                    : '?',
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w800,
-                                                ),
-                                              )
+                                    backgroundColor:
+                                        badgeColor.withOpacity(0.16),
+                                    backgroundImage:
+                                        (data['profilePic'] as String?)
+                                                    ?.trim()
+                                                    .isNotEmpty ==
+                                                true
+                                            ? NetworkImage(
+                                                data['profilePic'] as String)
                                             : null,
+                                    child: ((data['profilePic'] as String?)
+                                                ?.trim()
+                                                .isEmpty ??
+                                            true)
+                                        ? Text(
+                                            ((data['username'] as String?)
+                                                        ?.isNotEmpty ??
+                                                    false)
+                                                ? (data['username']
+                                                        as String)[0]
+                                                    .toUpperCase()
+                                                : '?',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          )
+                                        : null,
                                   ),
                                 ),
                                 Positioned(
@@ -2584,7 +2752,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                   Wrap(
                                     spacing: 8,
                                     runSpacing: 8,
-                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
                                       Text(
                                         data['username'] ?? 'Unknown',
@@ -2601,10 +2770,12 @@ class CoachManageMenteesPage extends StatelessWidget {
                                         ),
                                         decoration: BoxDecoration(
                                           color: badgeColor.withOpacity(0.14),
-                                          borderRadius: BorderRadius.circular(999),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
                                         ),
                                         child: Text(
-                                          _badgeLabelForRank(leaderboardData.rank),
+                                          _badgeLabelForRank(
+                                              leaderboardData.rank),
                                           style: TextStyle(
                                             color: badgeColor,
                                             fontSize: 11,
@@ -2632,7 +2803,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                         ),
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF6F2EA),
-                                          borderRadius: BorderRadius.circular(16),
+                                          borderRadius:
+                                              BorderRadius.circular(16),
                                         ),
                                         child: Text(
                                           '${leaderboardData.score} pts',
@@ -2661,7 +2833,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF90A17D),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
                                   ),
@@ -2681,9 +2854,11 @@ class CoachManageMenteesPage extends StatelessWidget {
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: const Color(0xFFB55D5D),
                                   side: BorderSide(
-                                    color: const Color(0xFFB55D5D).withOpacity(0.28),
+                                    color: const Color(0xFFB55D5D)
+                                        .withOpacity(0.28),
                                   ),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
                                   ),
@@ -2900,9 +3075,11 @@ class _CoachMenteeActivityCalendarPageState
                 itemCount: mentees.length,
                 itemBuilder: (context, index) {
                   final mentee = mentees[index];
-                  final menteeTrackers = trackerDocs.where(
-                    (doc) => (doc.data()['userId'] as String?) == mentee.id,
-                  ).toList();
+                  final menteeTrackers = trackerDocs
+                      .where(
+                        (doc) => (doc.data()['userId'] as String?) == mentee.id,
+                      )
+                      .toList();
                   return _buildMenteeCalendarCard(mentee, menteeTrackers);
                 },
               );
@@ -3069,8 +3246,8 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final selectedTracker = trackerMap[_normalizeDate(_selectedDay)];
     final latestEntry = trackerMap.entries.isEmpty
         ? null
-        : (trackerMap.entries.toList()
-          ..sort((a, b) => b.key.compareTo(a.key))).first;
+        : (trackerMap.entries.toList()..sort((a, b) => b.key.compareTo(a.key)))
+            .first;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),

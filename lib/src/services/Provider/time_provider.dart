@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 
 class TimeProvider extends ChangeNotifier {
-  int _remainingTime = 60;
-  int _initialTime = 60;
+  static const int defaultMeditationSeconds = 30 * 60;
+
+  int _remainingTime = defaultMeditationSeconds;
+  int _initialTime = defaultMeditationSeconds;
   Timer? _timer;
   bool _isRunning = false;
 

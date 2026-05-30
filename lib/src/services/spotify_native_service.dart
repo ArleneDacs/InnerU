@@ -27,6 +27,10 @@ class SpotifyNativeService {
     await initialize();
 
     try {
+      if (_isConnected) {
+        return true;
+      }
+
       final connected = await SpotifySdk.connectToSpotifyRemote(
         clientId: SpotifyConfig.clientId,
         redirectUrl: SpotifyConfig.redirectUri,
@@ -51,7 +55,19 @@ class SpotifyNativeService {
     }
 
     _currentTrackUri = trackUri;
-    await SpotifySdk.play(spotifyUri: trackUri);
+    try {
+      await SpotifySdk.play(spotifyUri: trackUri);
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Spotify native play failed, reconnecting once: $error');
+      }
+      _isConnected = false;
+      final connected = await connect();
+      if (!connected) {
+        rethrow;
+      }
+      await SpotifySdk.play(spotifyUri: trackUri);
+    }
   }
 
   Future<void> pause() async {
