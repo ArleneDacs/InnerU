@@ -158,6 +158,7 @@ class AuthService {
       }
       return e.message ?? "Apple sign-in failed.";
     } catch (e) {
+      debugPrint('Apple sign-in failed: $e');
       return "Apple sign-in failed. Please try again.";
     }
   }
@@ -209,6 +210,7 @@ class AuthService {
       }
       return e.message ?? "Apple sign-up failed.";
     } catch (e) {
+      debugPrint('Apple sign-up failed: $e');
       return "Apple sign-up failed. Please try again.";
     }
   }

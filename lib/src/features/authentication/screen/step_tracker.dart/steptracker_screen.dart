@@ -36,7 +36,9 @@ class _StepTrackerState extends State<StepTracker>
   int _lastRawStepCount = 0;
   bool _isWalking = false;
   bool _stepCounterInitialized = false;
+  bool _hasStepPermission = false;
   bool _isDisposed = false;
+  String? _stepPermissionMessage;
   Timer? _checkTimer;
 
   // iOS exposes motion access as sensors, while Android uses activity recognition.
@@ -53,12 +55,22 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _initializeApp() async {
-    final hasPermission = await _requestPermission();
     await _loadDailyGoal();
     await _loadSteps();
-    if (hasPermission) {
+    final status = await _stepPermission.status;
+    if (!mounted || _isDisposed) return;
+
+    if (status.isGranted) {
+      _hasStepPermission = true;
       _initStepCounter();
+      return;
     }
+
+    setState(() {
+      _hasStepPermission = false;
+      _stepPermissionMessage =
+          'Enable live step tracking when you want InnerU to count your steps.';
+    });
   }
 
   Future<void> _loadDailyGoal() async {
@@ -122,21 +134,41 @@ class _StepTrackerState extends State<StepTracker>
     }
     _lastRawStepCount = _steps;
 
-    _updateStepCount(_steps);
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _isWalking = false;
+      });
+      if (!_stepStreamController.isClosed) {
+        _stepStreamController.add(_steps);
+      }
+    }
   }
 
   Future<bool> _requestPermission() async {
-    PermissionStatus status = await _stepPermission.status;
+    var status = await _stepPermission.status;
     if (!status.isGranted) {
       status = await _stepPermission.request();
     }
 
     if (status.isGranted) {
       debugPrint('Step tracking permission granted.');
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _hasStepPermission = true;
+          _stepPermissionMessage = null;
+        });
+      }
       return true;
     }
 
     debugPrint('Step tracking permission not granted: $status');
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _hasStepPermission = false;
+        _stepPermissionMessage =
+            'Motion & Fitness access was not enabled. You can still use saved step history, goals, and map features.';
+      });
+    }
     return false;
   }
 
@@ -172,9 +204,13 @@ class _StepTrackerState extends State<StepTracker>
 
         int currentSteps = event.steps;
 
-        if (_initialSteps == -1 || currentSteps < _initialSteps) {
-          // Ensure initialSteps is always valid
+        if (_initialSteps == -1) {
+          _initialSteps = (currentSteps - _steps).clamp(0, currentSteps);
+          await prefs.setInt('initial_steps', _initialSteps);
+          if (!mounted || _isDisposed) return;
+        } else if (currentSteps < _initialSteps) {
           _initialSteps = currentSteps;
+          _lastRawStepCount = 0;
           await prefs.setInt('initial_steps', _initialSteps);
           if (!mounted || _isDisposed) return;
         }
@@ -295,6 +331,11 @@ class _StepTrackerState extends State<StepTracker>
   void _handleRawStepCount(int rawSteps) {
     if (!mounted || _isDisposed) return;
 
+    if (rawSteps <= _steps) {
+      _lastRawStepCount = rawSteps;
+      return;
+    }
+
     final delta = rawSteps - _lastRawStepCount;
     _lastRawStepCount = rawSteps;
 
@@ -351,6 +392,19 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<void> _resumeStepCounterIfNeeded() async {
     if (!mounted || _stepCounterInitialized) return;
+
+    final status = await _stepPermission.status;
+    if (!mounted || !status.isGranted) return;
+
+    setState(() {
+      _hasStepPermission = true;
+      _stepPermissionMessage = null;
+    });
+    _initStepCounter();
+  }
+
+  Future<void> _enableStepCounter() async {
+    if (_stepCounterInitialized) return;
 
     final hasPermission = await _requestPermission();
     if (!mounted || !hasPermission) return;
@@ -473,6 +527,43 @@ class _StepTrackerState extends State<StepTracker>
                   },
                 ),
                 SizedBox(height: context.responsiveValue(10)),
+                if (!_stepCounterInitialized || _stepPermissionMessage != null)
+                  Container(
+                    width: double.infinity,
+                    margin: EdgeInsets.symmetric(
+                      horizontal: context.isTabletWidth ? 20 : 0,
+                    ),
+                    padding: EdgeInsets.all(context.responsiveValue(14)),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF6F4),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _stepPermissionMessage ??
+                              'Enable live step tracking to update this count automatically.',
+                          style: TextStyle(
+                            fontSize: context.responsiveFont(14),
+                            color: Colors.black87,
+                            height: 1.35,
+                          ),
+                        ),
+                        if (!_hasStepPermission &&
+                            !_stepCounterInitialized) ...[
+                          SizedBox(height: context.responsiveValue(10)),
+                          TextButton.icon(
+                            onPressed: _enableStepCounter,
+                            icon: const Icon(Icons.directions_walk),
+                            label: const Text('Enable Step Tracking'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                if (!_stepCounterInitialized || _stepPermissionMessage != null)
+                  SizedBox(height: context.responsiveValue(10)),
                 Container(
                   width: double.infinity,
                   margin: EdgeInsets.symmetric(

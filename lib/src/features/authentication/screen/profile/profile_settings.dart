@@ -43,6 +43,14 @@ class ProfileSettings extends StatelessWidget {
                   PrivacyScreen(
                     title: 'Privacy',
                   )),
+              _buildButton(
+                context,
+                "Delete Account",
+                PrivacyScreen(
+                  title: 'Delete Account',
+                ),
+                textColor: Colors.red.shade700,
+              ),
               SizedBox(height: 10),
             ],
           ),
@@ -64,7 +72,12 @@ class ProfileSettings extends StatelessWidget {
   }
 
   // Button Widget with Navigation
-  Widget _buildButton(BuildContext context, String label, Widget targetScreen) {
+  Widget _buildButton(
+    BuildContext context,
+    String label,
+    Widget targetScreen, {
+    Color textColor = Colors.black,
+  }) {
     return Container(
       margin: EdgeInsets.only(bottom: 10),
       width: double.infinity,
@@ -87,8 +100,8 @@ class ProfileSettings extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: TextStyle(fontSize: 17, color: Colors.black)),
-            Icon(Icons.arrow_forward_ios, size: 20, color: Colors.black),
+            Text(label, style: TextStyle(fontSize: 17, color: textColor)),
+            Icon(Icons.arrow_forward_ios, size: 20, color: textColor),
           ],
         ),
       ),

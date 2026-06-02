@@ -39,6 +39,11 @@ class _PrivacyScreen extends State<PrivacyScreen> {
           child: Column(
             children: [
               _buildButtons(context, "Delete Account"),
+              SizedBox(height: 12),
+              Text(
+                "This permanently deletes your InnerU account and profile data.",
+                style: TextStyle(color: Colors.black54),
+              ),
             ],
           ),
         ),
@@ -82,6 +87,7 @@ class _PrivacyScreen extends State<PrivacyScreen> {
 
   Future openDelete() => showDialog(
         context: context,
+        barrierDismissible: !_isDeleting,
         builder: (context) => AlertDialog(
           backgroundColor: Colors.grey[850],
           title: Text(
@@ -213,7 +219,13 @@ class _PrivacyScreen extends State<PrivacyScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _isDeleting
+                      ? null
+                      : () {
+                          verificationController.clear();
+                          passwordController.clear();
+                          Navigator.of(context).pop();
+                        },
                   child: Text(
                     'Cancel',
                     style: TextStyle(color: Colors.white),
