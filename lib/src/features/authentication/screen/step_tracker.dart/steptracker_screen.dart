@@ -1,16 +1,27 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:pedometer/pedometer.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lottie/lottie.dart';
+import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
+import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/watch_sync_service.dart';
+import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
+import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
@@ -24,6 +35,10 @@ class StepTracker extends StatefulWidget {
 
 class _StepTrackerState extends State<StepTracker>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  static const int _maxInitialStepJump = 150;
+  static const int _maxInstantStepJump = 80;
+  static const double _maxStepsPerSecond = 4.5;
+
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
   StreamSubscription<StepCount>? _stepCountStream;
@@ -34,12 +49,17 @@ class _StepTrackerState extends State<StepTracker>
   int _lastSyncedStepCount = -1;
   int _dailyGoal = 5000;
   int _lastRawStepCount = 0;
+  int _stepCountOffset = 0;
+  DateTime? _lastStepEventAt;
   bool _isWalking = false;
   bool _stepCounterInitialized = false;
   bool _hasStepPermission = false;
   bool _isDisposed = false;
+  bool _stepGoalDialogVisible = false;
   String? _stepPermissionMessage;
   Timer? _checkTimer;
+  final ImagePicker _memoryPicker = ImagePicker();
+  final ActivityStreakService _activityStreakService = ActivityStreakService();
 
   // iOS exposes motion access as sensors, while Android uses activity recognition.
   Permission get _stepPermission =>
@@ -111,28 +131,53 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _loadSteps() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String? lastSavedDate = prefs.getString('last_saved_date');
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null || userId.isEmpty) {
+      _steps = 0;
+      _initialSteps = -1;
+      _lastRawStepCount = 0;
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final savedStepsKey = SessionCleanupService.savedStepsKey(userId);
+    final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
+    final stepOffsetKey = SessionCleanupService.stepOffsetKey(userId);
+    final lastSavedDateKey = SessionCleanupService.lastSavedDateKey(userId);
+    final lastSavedDate = prefs.getString(lastSavedDateKey);
 
     // If the last saved date is not today, reset steps
     if (lastSavedDate != today) {
-      int previousSteps = prefs.getInt('saved_steps') ?? 0;
+      final previousSteps = prefs.getInt(savedStepsKey) ?? 0;
 
       // Save yesterday's steps to Firestore before resetting
-      await _saveDailyStepsToHistory(previousSteps, lastSavedDate);
+      await _saveDailyStepsToHistory(
+        userId: userId,
+        steps: previousSteps,
+        date: lastSavedDate,
+      );
 
       // Reset steps and update last saved date
-      await prefs.setInt('saved_steps', 0);
-      await prefs.setInt('initial_steps', -1); // Reset initial steps
-      await prefs.setString('last_saved_date', today);
+      await prefs.setInt(savedStepsKey, 0);
+      await prefs.setInt(initialStepsKey, -1); // Reset initial steps
+      await prefs.setString(lastSavedDateKey, today);
 
-      _steps = 0;
+      _steps = await _loadRemoteTodaySteps(userId, today);
+      await prefs.setInt(savedStepsKey, _steps);
+      await prefs.setInt(stepOffsetKey, 0);
       _initialSteps = -1;
+      _stepCountOffset = 0;
     } else {
-      _steps = prefs.getInt('saved_steps') ?? 0; // Load today's saved steps
+      _steps = prefs.getInt(savedStepsKey) ?? 0; // Load today's saved steps
+      if (_steps == 0) {
+        _steps = await _loadRemoteTodaySteps(userId, today);
+      }
+      _stepCountOffset = prefs.getInt(stepOffsetKey) ?? 0;
     }
     _lastRawStepCount = _steps;
+    _lastStepEventAt = null;
+    await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
 
     if (mounted && !_isDisposed) {
       setState(() {
@@ -172,11 +217,41 @@ class _StepTrackerState extends State<StepTracker>
     return false;
   }
 
-  Future<void> _saveDailyStepsToHistory(int steps, String? date) async {
+  Future<int> _loadRemoteTodaySteps(String userId, String date) async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final membershipData = await CompanyMembershipService.loadForUser(userId);
+      final scopedDocId = CompanyMembershipService.scopedDailyDocId(
+        uid: userId,
+        date: date,
+        membership: membershipData.activeMembership,
+      );
+      final doc =
+          await firestore.collection('dailytracker').doc(scopedDocId).get();
+      final legacyDoc = scopedDocId == '$userId-$date'
+          ? null
+          : await firestore
+              .collection('dailytracker')
+              .doc('$userId-$date')
+              .get();
+      final value = doc.data()?['stepCount'] ?? legacyDoc?.data()?['stepCount'];
+      if (value is num && value > 0) {
+        return value.toInt();
+      }
+    } catch (error) {
+      debugPrint("Failed to load remote steps: $error");
+    }
+    return 0;
+  }
+
+  Future<void> _saveDailyStepsToHistory({
+    required String userId,
+    required int steps,
+    required String? date,
+  }) async {
     if (date == null) return;
 
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    FirebaseFirestore firestore = FirebaseFirestore.instance;
+    final firestore = FirebaseFirestore.instance;
 
     await firestore
         .collection('steps')
@@ -193,33 +268,66 @@ class _StepTrackerState extends State<StepTracker>
 
   void _initStepCounter() async {
     if (_stepCounterInitialized) return;
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null || userId.isEmpty) return;
+
     _stepCounterInitialized = true;
 
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    _initialSteps = prefs.getInt('initial_steps') ?? -1;
+    final prefs = await SharedPreferences.getInstance();
+    final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
+    final stepOffsetKey = SessionCleanupService.stepOffsetKey(userId);
+    _initialSteps = prefs.getInt(initialStepsKey) ?? -1;
+    _stepCountOffset = prefs.getInt(stepOffsetKey) ?? _stepCountOffset;
+    await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
 
     _stepCountStream = Pedometer.stepCountStream.listen(
       (StepCount event) async {
         if (!mounted || _isDisposed) return;
 
-        int currentSteps = event.steps;
+        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+        if (currentUserId != userId) {
+          await _stopStepCounterForAccountSwitch();
+          return;
+        }
+
+        final currentSteps = event.steps;
+        final eventTime = event.timeStamp;
 
         if (_initialSteps == -1) {
+          _stepCountOffset = 0;
           _initialSteps = (currentSteps - _steps).clamp(0, currentSteps);
-          await prefs.setInt('initial_steps', _initialSteps);
+          await prefs.setInt(initialStepsKey, _initialSteps);
+          await prefs.setInt(stepOffsetKey, _stepCountOffset);
           if (!mounted || _isDisposed) return;
         } else if (currentSteps < _initialSteps) {
+          _stepCountOffset = _steps;
           _initialSteps = currentSteps;
-          _lastRawStepCount = 0;
-          await prefs.setInt('initial_steps', _initialSteps);
+          _lastRawStepCount = _steps;
+          _lastStepEventAt = null;
+          await prefs.setInt(initialStepsKey, _initialSteps);
+          await prefs.setInt(stepOffsetKey, _stepCountOffset);
           if (!mounted || _isDisposed) return;
         }
 
-        int newSteps = currentSteps - _initialSteps;
+        var newSteps = _stepCountOffset + currentSteps - _initialSteps;
 
         // Prevent negative step count
         if (newSteps < 0) newSteps = 0;
 
+        if (_isUnrealisticStepJump(newSteps, eventTime)) {
+          _stepCountOffset = _steps;
+          _initialSteps = currentSteps;
+          _lastRawStepCount = _steps;
+          _lastStepEventAt = eventTime;
+          await prefs.setInt(initialStepsKey, _initialSteps);
+          await prefs.setInt(stepOffsetKey, _stepCountOffset);
+          debugPrint(
+            'Ignored unrealistic step jump. Rebased step baseline for $userId.',
+          );
+          return;
+        }
+
+        _lastStepEventAt = eventTime;
         if (newSteps != _lastRawStepCount) {
           _handleRawStepCount(newSteps);
         }
@@ -239,26 +347,63 @@ class _StepTrackerState extends State<StepTracker>
     });
   }
 
+  Future<void> _stopStepCounterForAccountSwitch() async {
+    await _stepCountStream?.cancel();
+    _stepCountStream = null;
+    _checkTimer?.cancel();
+    _checkTimer = null;
+    _stepCounterInitialized = false;
+    _steps = 0;
+    _initialSteps = -1;
+    _lastSteps = 0;
+    _lastRawStepCount = 0;
+    _stepCountOffset = 0;
+    _lastStepEventAt = null;
+    if (!_stepStreamController.isClosed) {
+      _stepStreamController.add(0);
+    }
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _isWalking = false;
+      });
+    }
+  }
+
   void _updateStepCount(int newSteps) async {
     if (!mounted || _isDisposed) {
       return; // Prevent updates if widget is disposed
     }
 
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null || userId.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
     if (!mounted || _isDisposed) return;
+
+    final previousSteps = _steps;
 
     setState(() {
       _isWalking = newSteps > _steps;
       _steps = newSteps;
     });
 
-    await prefs.setInt('saved_steps', _steps);
-    await prefs.setInt('initial_steps', _initialSteps);
+    await prefs.setInt(SessionCleanupService.savedStepsKey(userId), _steps);
+    await prefs.setInt(
+      SessionCleanupService.initialStepsKey(userId),
+      _initialSteps,
+    );
+    await prefs.setInt(
+      SessionCleanupService.stepOffsetKey(userId),
+      _stepCountOffset,
+    );
+    await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
     if (!mounted || _isDisposed) return;
 
     if (!_stepStreamController.isClosed) {
       _stepStreamController.add(_steps);
     }
+
+    WatchSyncService.instance.syncSteps(_steps, goal: _dailyGoal);
 
     if (_shouldSyncProgress()) {
       await _syncStepProgress();
@@ -266,6 +411,10 @@ class _StepTrackerState extends State<StepTracker>
 
     if (_steps >= _dailyGoal) {
       await _saveDailyActivity(steps: true);
+    }
+
+    if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+      await _handleStepGoalCompleted();
     }
 
     if (_isWalking) {
@@ -295,10 +444,15 @@ class _StepTrackerState extends State<StepTracker>
 
     if (username != null) {
       String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final membershipData = await CompanyMembershipService.loadForUser(userId);
+      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
+        uid: userId,
+        date: formattedDate,
+        membership: membershipData.activeMembership,
+      );
 
-      // Use UID for document ID
       DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$userId-$formattedDate');
+          firestore.collection('dailytracker').doc(trackerDocId);
 
       // Use Firestore's FieldValue.merge to update without overwriting other fields
       await docRef.set({
@@ -309,6 +463,9 @@ class _StepTrackerState extends State<StepTracker>
         'stepGoal': _dailyGoal,
         if (meditation) 'meditation': true,
         if (steps) 'steps': true,
+        ...CompanyMembershipService.activeCompanyFields(
+          membershipData.activeMembership,
+        ),
       }, SetOptions(merge: true));
 
       print(
@@ -326,6 +483,27 @@ class _StepTrackerState extends State<StepTracker>
     } else {
       _lottieController.stop();
     }
+  }
+
+  bool _isUnrealisticStepJump(int newSteps, DateTime eventTime) {
+    final delta = newSteps - _steps;
+    if (delta <= 0) return false;
+
+    final previousEventTime = _lastStepEventAt;
+    if (previousEventTime == null) {
+      return delta > _maxInitialStepJump;
+    }
+
+    final elapsedSeconds = math.max(
+      eventTime.difference(previousEventTime).inMilliseconds / 1000,
+      1.0,
+    );
+    final allowedDelta = math.max(
+      _maxInstantStepJump,
+      (elapsedSeconds * _maxStepsPerSecond).ceil() + 12,
+    );
+
+    return delta > allowedDelta;
   }
 
   void _handleRawStepCount(int rawSteps) {
@@ -353,13 +531,22 @@ class _StepTrackerState extends State<StepTracker>
     final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     try {
+      final membershipData = await CompanyMembershipService.loadForUser(userId);
+      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
+        uid: userId,
+        date: formattedDate,
+        membership: membershipData.activeMembership,
+      );
       await FirebaseFirestore.instance
           .collection('dailytracker')
-          .doc('$userId-$formattedDate')
+          .doc(trackerDocId)
           .set({
         'stepCount': _steps,
         'stepGoal': _dailyGoal,
         'date': formattedDate,
+        ...CompanyMembershipService.activeCompanyFields(
+          membershipData.activeMembership,
+        ),
       }, SetOptions(merge: true));
       _lastSyncedStepCount = _steps;
     } catch (error) {
@@ -372,6 +559,307 @@ class _StepTrackerState extends State<StepTracker>
     if (_steps == 0) return true;
     if (_steps >= _dailyGoal && _lastSyncedStepCount < _dailyGoal) return true;
     return (_steps - _lastSyncedStepCount).abs() >= 50;
+  }
+
+  String _formatSteps(int steps) {
+    return NumberFormat.decimalPattern().format(steps);
+  }
+
+  String _todayKey() {
+    return DateFormat('yyyy-MM-dd').format(DateTime.now());
+  }
+
+  Future<bool> _markStepGoalPromptIfNeeded() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    final promptKey =
+        'step_goal_memory_prompt_${userId}_${_todayKey()}_$_dailyGoal';
+
+    if (prefs.getBool(promptKey) == true) {
+      return false;
+    }
+
+    await prefs.setBool(promptKey, true);
+    return true;
+  }
+
+  Future<void> _handleStepGoalCompleted() async {
+    if (_stepGoalDialogVisible || !mounted || _isDisposed) return;
+
+    final unlockedRewards = await _recordStepStreak();
+    if (unlockedRewards.isNotEmpty && mounted && !_isDisposed) {
+      _showStreakRewardSnackBar(unlockedRewards.last);
+    }
+
+    final shouldShowPrompt = await _markStepGoalPromptIfNeeded();
+    if (!shouldShowPrompt || !mounted || _isDisposed) return;
+
+    await _showStepGoalCompleteDialog();
+  }
+
+  Future<List<ActivityStreakMilestone>> _recordStepStreak() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return <ActivityStreakMilestone>[];
+
+    try {
+      return await _activityStreakService.recordCompletedSession(
+        userId: userId,
+        type: ActivityStreakType.steps,
+      );
+    } catch (error) {
+      debugPrint('Step streak update failed: $error');
+      return <ActivityStreakMilestone>[];
+    }
+  }
+
+  void _showStreakRewardSnackBar(ActivityStreakMilestone reward) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Step medal unlocked: ${reward.title}'),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: _openStepRewards,
+        ),
+      ),
+    );
+  }
+
+  void _openStepRewards() {
+    if (!mounted || _isDisposed) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MeditationStreakRewardsScreen(
+          activityType: ActivityStreakType.steps,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showStepGoalCompleteDialog() async {
+    if (_stepGoalDialogVisible || !mounted || _isDisposed) return;
+
+    _stepGoalDialogVisible = true;
+    final completedSteps = _steps;
+    final formattedSteps = _formatSteps(completedSteps);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 34, 24, 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBF7),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: const Color(0xFFE9DED5)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 28,
+                  offset: Offset(0, 16),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 74,
+                  width: 74,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEAF4DE),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.directions_walk_rounded,
+                    color: Color(0xFF4C6B43),
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Step goal complete',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF2B2B2B),
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'You reached $formattedSteps steps today. Save this moment as a memory.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF6E625B),
+                    fontSize: 16,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _shareStepMemory(completedSteps),
+                    icon: const Icon(Icons.add_photo_alternate_rounded),
+                    label: const Text('Share with memories'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF4C6B43),
+                      side: const BorderSide(color: Color(0xFFD8C7B9)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7A5AB8),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Text(
+                      'Done',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    _stepGoalDialogVisible = false;
+  }
+
+  Future<ImageSource?> _showMemorySourceSheet() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8C7B9),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.photo_camera_rounded,
+                    color: Color(0xFF4C6B43),
+                  ),
+                  title: const Text(
+                    'Take photo',
+                    style: TextStyle(color: Color(0xFF2B2B2B)),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.photo_library_rounded,
+                    color: Color(0xFF4C6B43),
+                  ),
+                  title: const Text(
+                    'Upload image',
+                    style: TextStyle(color: Color(0xFF2B2B2B)),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _shareStepMemory(int completedSteps) async {
+    if (!mounted || _isDisposed) return;
+
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (!mounted || _isDisposed) return;
+
+    final source = await _showMemorySourceSheet();
+    if (source == null || !mounted || _isDisposed) return;
+
+    XFile? image;
+    try {
+      image = await _memoryPicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1800,
+      );
+    } catch (error) {
+      debugPrint('Step memory picker failed: $error');
+      if (!mounted || _isDisposed) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open image picker.')),
+      );
+      return;
+    }
+
+    if (image == null || !mounted || _isDisposed) return;
+
+    final formattedSteps = _formatSteps(completedSteps);
+    final memoryNote = Note(
+      id: '',
+      userId: '',
+      username: '',
+      title: 'Step Goal Memory',
+      note: [
+        {
+          'type': 'text',
+          'value':
+              'I completed my daily step goal with $formattedSteps steps today.',
+        },
+      ],
+      createdAt: DateTime.now(),
+      category: 'Add Value',
+    );
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotesType(
+          note: memoryNote,
+          initialImage: image,
+          initialCategory: 'Add Value',
+          openCommunityAfterPost: true,
+        ),
+      ),
+    );
   }
 
   Future<void> _openGoalScreen() async {
@@ -437,243 +925,330 @@ class _StepTrackerState extends State<StepTracker>
     final animationSize =
         context.isTabletWidth ? 360.0 : context.screenWidth * 0.7;
 
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(
-            vertical: context.responsiveValue(20),
-          ),
-          child: ResponsiveContent(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Lottie.asset(
-                  'assets/images/walking.json',
-                  width: animationSize.clamp(220, 360),
-                  height: animationSize.clamp(220, 360),
-                  controller: _lottieController,
-                  repeat: false,
-                  onLoaded: (composition) {
-                    _lottieController.duration = composition.duration;
-                    _lottieController.value = 0;
-                  },
-                ),
-                SizedBox(height: context.responsiveValue(10)),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    Text(
-                      'Today ',
-                      style: TextStyle(
-                        fontSize: context.responsiveFont(15),
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    Text(
-                      DateFormat('(MMM dd, yyyy)').format(DateTime.now()),
-                      style: TextStyle(
-                        fontSize: context.responsiveFont(15),
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: context.responsiveValue(10)),
-                StreamBuilder<int>(
-                  stream: _stepStreamController.stream,
-                  initialData: _steps,
-                  builder: (context, snapshot) {
-                    return ShaderMask(
-                      shaderCallback: (bounds) => const LinearGradient(
-                        colors: [Color(0xFF8bc074), Color(0xFFce8f5a)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ).createShader(bounds),
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        crossAxisAlignment: WrapCrossAlignment.end,
-                        spacing: 5,
-                        children: [
-                          Text(
-                            '${snapshot.data ?? 0}',
-                            style: TextStyle(
-                              fontSize: context.responsiveFont(60,
-                                  min: 0.8, max: 1.15),
-                              fontFamily: 'ralemed',
-                              color: Colors.white,
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.only(
-                              bottom: context.responsiveValue(8),
-                            ),
-                            child: Text(
-                              'steps',
-                              style: TextStyle(
-                                fontSize: context.responsiveFont(22),
-                                fontFamily: 'ralemed',
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-                SizedBox(height: context.responsiveValue(10)),
-                if (!_stepCounterInitialized || _stepPermissionMessage != null)
-                  Container(
-                    width: double.infinity,
-                    margin: EdgeInsets.symmetric(
-                      horizontal: context.isTabletWidth ? 20 : 0,
-                    ),
-                    padding: EdgeInsets.all(context.responsiveValue(14)),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEAF6F4),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _stepPermissionMessage ??
-                              'Enable live step tracking to update this count automatically.',
-                          style: TextStyle(
-                            fontSize: context.responsiveFont(14),
-                            color: Colors.black87,
-                            height: 1.35,
-                          ),
-                        ),
-                        if (!_hasStepPermission &&
-                            !_stepCounterInitialized) ...[
-                          SizedBox(height: context.responsiveValue(10)),
-                          TextButton.icon(
-                            onPressed: _enableStepCounter,
-                            icon: const Icon(Icons.directions_walk),
-                            label: const Text('Enable Step Tracking'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                if (!_stepCounterInitialized || _stepPermissionMessage != null)
-                  SizedBox(height: context.responsiveValue(10)),
-                Container(
-                  width: double.infinity,
-                  margin: EdgeInsets.symmetric(
-                    horizontal: context.isTabletWidth ? 20 : 0,
-                  ),
-                  padding: EdgeInsets.all(context.responsiveValue(18)),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFCF5EA),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Column(
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              final goalPanelColor = companyTheme.isDark
+                  ? companyTheme.surfaceColor
+                  : const Color(0xFFFCF5EA);
+              final infoPanelColor = companyTheme.isDark
+                  ? companyTheme.surfaceColor
+                  : const Color(0xFFEAF6F4);
+              final subtleTextColor = companyTheme.mutedInkColor;
+
+              return Scaffold(
+                backgroundColor: companyTheme.backgroundColor,
+                body: SafeArea(
+                  child: Stack(
                     children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.flag_rounded,
-                            color: Color(0xFFCE8F5A),
-                          ),
-                          SizedBox(width: context.responsiveValue(10)),
-                          Expanded(
-                            child: Text(
-                              'Daily Goal: $_dailyGoal steps',
-                              style: TextStyle(
-                                fontSize: context.responsiveFont(17),
-                                fontWeight: FontWeight.bold,
+                      SingleChildScrollView(
+                        padding: EdgeInsets.symmetric(
+                          vertical: context.responsiveValue(20),
+                        ),
+                        child: ResponsiveContent(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Lottie.asset(
+                                'assets/images/walking.json',
+                                width: animationSize.clamp(220, 360),
+                                height: animationSize.clamp(220, 360),
+                                controller: _lottieController,
+                                repeat: false,
+                                onLoaded: (composition) {
+                                  _lottieController.duration =
+                                      composition.duration;
+                                  _lottieController.value = 0;
+                                },
                               ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _openGoalScreen,
-                            child: const Text('Set Goal'),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: context.responsiveValue(8)),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: LinearProgressIndicator(
-                          minHeight: 10,
-                          value: progress,
-                          backgroundColor: Colors.white,
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF8BC074),
+                              SizedBox(height: context.responsiveValue(10)),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  Text(
+                                    'Today ',
+                                    style: TextStyle(
+                                      fontSize: context.responsiveFont(15),
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  Text(
+                                    DateFormat('(MMM dd, yyyy)')
+                                        .format(DateTime.now()),
+                                    style: TextStyle(
+                                      fontSize: context.responsiveFont(15),
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: context.responsiveValue(10)),
+                              StreamBuilder<int>(
+                                stream: _stepStreamController.stream,
+                                initialData: _steps,
+                                builder: (context, snapshot) {
+                                  return ShaderMask(
+                                    shaderCallback: (bounds) =>
+                                        const LinearGradient(
+                                      colors: [
+                                        Color(0xFF8bc074),
+                                        Color(0xFFce8f5a)
+                                      ],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ).createShader(bounds),
+                                    child: Wrap(
+                                      alignment: WrapAlignment.center,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.end,
+                                      spacing: 5,
+                                      children: [
+                                        Text(
+                                          '${snapshot.data ?? 0}',
+                                          style: TextStyle(
+                                            fontSize: context.responsiveFont(60,
+                                                min: 0.8, max: 1.15),
+                                            fontFamily: 'ralemed',
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: EdgeInsets.only(
+                                            bottom: context.responsiveValue(8),
+                                          ),
+                                          child: Text(
+                                            'steps',
+                                            style: TextStyle(
+                                              fontSize:
+                                                  context.responsiveFont(22),
+                                              fontFamily: 'ralemed',
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                              SizedBox(height: context.responsiveValue(10)),
+                              if (!_stepCounterInitialized ||
+                                  _stepPermissionMessage != null)
+                                Container(
+                                  width: double.infinity,
+                                  margin: EdgeInsets.symmetric(
+                                    horizontal: context.isTabletWidth ? 20 : 0,
+                                  ),
+                                  padding: EdgeInsets.all(
+                                      context.responsiveValue(14)),
+                                  decoration: BoxDecoration(
+                                    color: infoPanelColor,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _stepPermissionMessage ??
+                                            'Enable live step tracking to update this count automatically.',
+                                        style: TextStyle(
+                                          fontSize: context.responsiveFont(14),
+                                          color: companyTheme.inkColor,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                      if (!_hasStepPermission &&
+                                          !_stepCounterInitialized) ...[
+                                        SizedBox(
+                                            height:
+                                                context.responsiveValue(10)),
+                                        TextButton.icon(
+                                          onPressed: _enableStepCounter,
+                                          style: TextButton.styleFrom(
+                                            foregroundColor:
+                                                companyTheme.iconColor,
+                                          ),
+                                          icon:
+                                              const Icon(Icons.directions_walk),
+                                          label: const Text(
+                                            'Enable Step Tracking',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              if (!_stepCounterInitialized ||
+                                  _stepPermissionMessage != null)
+                                SizedBox(height: context.responsiveValue(10)),
+                              Container(
+                                width: double.infinity,
+                                margin: EdgeInsets.symmetric(
+                                  horizontal: context.isTabletWidth ? 20 : 0,
+                                ),
+                                padding:
+                                    EdgeInsets.all(context.responsiveValue(18)),
+                                decoration: BoxDecoration(
+                                  color: goalPanelColor,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: companyTheme.iconColor
+                                        .withValues(alpha: 0.18),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.flag_rounded,
+                                          color: Color(0xFFCE8F5A),
+                                        ),
+                                        SizedBox(
+                                            width: context.responsiveValue(10)),
+                                        Expanded(
+                                          child: Text(
+                                            'Daily Goal: $_dailyGoal steps',
+                                            style: TextStyle(
+                                              fontSize:
+                                                  context.responsiveFont(17),
+                                              fontWeight: FontWeight.bold,
+                                              color: companyTheme.inkColor,
+                                            ),
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: _openGoalScreen,
+                                          style: TextButton.styleFrom(
+                                            foregroundColor:
+                                                companyTheme.iconColor,
+                                          ),
+                                          child: const Text(
+                                            'Set Goal',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    SizedBox(
+                                        height: context.responsiveValue(8)),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: LinearProgressIndicator(
+                                        minHeight: 10,
+                                        value: progress,
+                                        backgroundColor: theme
+                                            .colorScheme.onSurface
+                                            .withValues(alpha: 0.10),
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                          companyTheme.primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(
+                                        height: context.responsiveValue(10)),
+                                    Wrap(
+                                      alignment: WrapAlignment.spaceBetween,
+                                      runSpacing: 8,
+                                      spacing: 16,
+                                      children: [
+                                        Text(
+                                          '$_steps / $_dailyGoal',
+                                          style:
+                                              TextStyle(color: subtleTextColor),
+                                        ),
+                                        Text(
+                                          '${(progress * 100).round()}% complete',
+                                          style:
+                                              TextStyle(color: subtleTextColor),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              SizedBox(height: context.responsiveValue(16)),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 12,
+                                runSpacing: 12,
+                                children: [
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const TrackingScreen(title: ''),
+                                        ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFce8f5a),
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: context.responsiveValue(20),
+                                        vertical: context.responsiveValue(12),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'View Steps',
+                                      style: GoogleFonts.roboto(
+                                        color: Colors.white,
+                                        fontSize: context.responsiveFont(16),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const StepMapTrackerScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.map_outlined),
+                                    label: const Text('Track on Map'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      SizedBox(height: context.responsiveValue(10)),
-                      Wrap(
-                        alignment: WrapAlignment.spaceBetween,
-                        runSpacing: 8,
-                        spacing: 16,
-                        children: [
-                          Text('$_steps / $_dailyGoal'),
-                          Text('${(progress * 100).round()}% complete'),
-                        ],
+                      Positioned(
+                        top: 2,
+                        right: 10,
+                        child: IconButton(
+                          onPressed: _openStepRewards,
+                          icon: const Icon(Icons.workspace_premium_rounded),
+                          tooltip: 'Rewards',
+                        ),
                       ),
                     ],
                   ),
                 ),
-                SizedBox(height: context.responsiveValue(16)),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                const TrackingScreen(title: ''),
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFce8f5a),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: context.responsiveValue(20),
-                          vertical: context.responsiveValue(12),
-                        ),
-                      ),
-                      child: Text(
-                        'View Steps',
-                        style: GoogleFonts.roboto(
-                          color: Colors.white,
-                          fontSize: context.responsiveFont(16),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const StepMapTrackerScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.map_outlined),
-                      label: const Text('Track on Map'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              );
+            },
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

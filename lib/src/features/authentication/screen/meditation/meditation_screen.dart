@@ -1,16 +1,28 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
+import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
+import 'package:selfcare_projects/src/services/watch_sync_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class Meditation extends StatefulWidget {
   const Meditation({super.key});
@@ -25,8 +37,22 @@ class _MeditationState extends State<Meditation> {
   String? favoriteSpotifyTrackId;
   bool _spotifyConnecting = false;
   bool _completionAlertHandled = false;
+  bool _completionFlowHandled = false;
+  bool _completionDialogVisible = false;
+  Timer? _completionAlarmTimer;
+  final ImagePicker _memoryPicker = ImagePicker();
+  final MeditationStreakService _meditationStreakService =
+      MeditationStreakService();
   String? playingSong;
   String? favoriteSongPath;
+
+  static const List<String> _completionAffirmations = [
+    'You showed up for yourself. Carry this calm into the rest of your day.',
+    'Your mind is allowed to rest. You are doing enough.',
+    'Breathe gently. You just made space for yourself.',
+    'Peace is a practice, and today you practiced.',
+    'You are grounded, steady, and ready for what comes next.',
+  ];
 
   @override
   void initState() {
@@ -46,12 +72,22 @@ class _MeditationState extends State<Meditation> {
   }
 
   Future<void> loadFavorite() async {
-    final username = await UserPreferences.loadUsername();
-    if (username == null) return;
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null || userId.isEmpty) return;
 
-    final song = await UserPreferences.loadFavoriteSong(username);
-    final source = await UserPreferences.loadFavoriteSongSource(username);
-    final spotifyUrl = await UserPreferences.loadFavoriteSpotifyUrl(username);
+    final legacyUsername = await UserPreferences.loadUsername();
+    final song = await UserPreferences.loadFavoriteSong(userId) ??
+        (legacyUsername == null
+            ? null
+            : await UserPreferences.loadFavoriteSong(legacyUsername));
+    final source = await UserPreferences.loadFavoriteSongSource(userId) ??
+        (legacyUsername == null
+            ? null
+            : await UserPreferences.loadFavoriteSongSource(legacyUsername));
+    final spotifyUrl = await UserPreferences.loadFavoriteSpotifyUrl(userId) ??
+        (legacyUsername == null
+            ? null
+            : await UserPreferences.loadFavoriteSpotifyUrl(legacyUsername));
     if (!mounted) return;
 
     setState(() {
@@ -65,6 +101,7 @@ class _MeditationState extends State<Meditation> {
   Future<void> _saveDailyActivity({
     bool meditation = false,
     bool steps = false,
+    int? meditationSeconds,
   }) async {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
@@ -75,21 +112,77 @@ class _MeditationState extends State<Meditation> {
 
     if (username != null) {
       final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final docRef =
-          firestore.collection('dailytracker').doc('$userId-$formattedDate');
+      final membershipData = await CompanyMembershipService.loadForUser(userId);
+      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
+        uid: userId,
+        date: formattedDate,
+        membership: membershipData.activeMembership,
+      );
+      final docRef = firestore.collection('dailytracker').doc(trackerDocId);
+
+      final meditationMinutes = meditationSeconds == null
+          ? null
+          : (meditationSeconds / Duration.secondsPerMinute).ceil();
 
       await docRef.set({
         'userId': userId,
         'username': username,
         'date': formattedDate,
         if (meditation) 'meditation': true,
+        if (meditation && meditationMinutes != null)
+          'meditationMinutes': FieldValue.increment(meditationMinutes),
         if (steps) 'steps': true,
+        ...CompanyMembershipService.activeCompanyFields(
+          membershipData.activeMembership,
+        ),
       }, SetOptions(merge: true));
     }
   }
 
-  void _onMeditationComplete() async {
-    await _saveDailyActivity(meditation: true);
+  Future<List<MeditationStreakMilestone>> _onMeditationComplete({
+    required int completedSeconds,
+  }) async {
+    await _saveDailyActivity(
+      meditation: true,
+      meditationSeconds: completedSeconds,
+    );
+
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return <MeditationStreakMilestone>[];
+
+    try {
+      final milestones = await _meditationStreakService.recordCompletedSession(
+        userId: userId,
+      );
+      unawaited(_syncMeditationToWatch(userId));
+      return milestones;
+    } catch (error) {
+      debugPrint('Meditation streak update failed: $error');
+      return <MeditationStreakMilestone>[];
+    }
+  }
+
+  Future<void> _syncMeditationToWatch(String userId) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      final data = snapshot.data() ?? <String, dynamic>{};
+      final streak = ActivityStreakService.activeCurrentStreak(
+        lastDate: data[ActivityStreakService.lastDateFieldFor(
+          ActivityStreakType.meditation,
+        )],
+        currentStreak: ActivityStreakService.readInt(
+          data[ActivityStreakService.currentFieldFor(
+            ActivityStreakType.meditation,
+          )],
+        ),
+      );
+      WatchSyncService.instance.syncMeditation(streak: streak);
+    } catch (error) {
+      debugPrint('Watch meditation sync failed: $error');
+    }
   }
 
   Future<void> _scheduleMeditationCompletionAlert(
@@ -98,6 +191,7 @@ class _MeditationState extends State<Meditation> {
     if (timeProvider.remainingTime <= 0) return;
 
     _completionAlertHandled = false;
+    _completionFlowHandled = false;
     await FastingNotificationService.instance.ensurePermissions();
     await FastingNotificationService.instance
         .scheduleMeditationCompleteNotification(
@@ -118,6 +212,376 @@ class _MeditationState extends State<Meditation> {
         .cancelMeditationCompleteNotification();
     await FastingNotificationService.instance
         .showMeditationCompleteNotification();
+  }
+
+  String get _completionAffirmation {
+    final index =
+        DateTime.now().millisecondsSinceEpoch % _completionAffirmations.length;
+    return _completionAffirmations[index];
+  }
+
+  void _playCompletionAlarm() {
+    _completionAlarmTimer?.cancel();
+
+    var rings = 0;
+    void ring() {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.mediumImpact();
+    }
+
+    ring();
+    _completionAlarmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      rings += 1;
+      if (rings >= 3) {
+        timer.cancel();
+        if (_completionAlarmTimer == timer) {
+          _completionAlarmTimer = null;
+        }
+        return;
+      }
+      ring();
+    });
+  }
+
+  Future<void> _showMeditationCompleteDialog() async {
+    if (_completionDialogVisible || !mounted) return;
+
+    _completionDialogVisible = true;
+    final affirmation = _completionAffirmation;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 34, 24, 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBF7),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(
+                color: const Color(0xFFE9DED5),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 28,
+                  offset: Offset(0, 16),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 74,
+                  width: 74,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF7DEAA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.self_improvement,
+                    color: Color(0xFF4C6B43),
+                    size: 38,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Meditation complete',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF2B2B2B),
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  affirmation,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF6E625B),
+                    fontSize: 16,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _shareWithMemories,
+                    icon: const Icon(Icons.add_photo_alternate_rounded),
+                    label: const Text('Share with memories'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF4C6B43),
+                      side: const BorderSide(color: Color(0xFFD8C7B9)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7A5AB8),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Text(
+                      'Done',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    _completionDialogVisible = false;
+  }
+
+  Future<void> _showUnlockedRewardDialog(
+    MeditationStreakMilestone reward,
+  ) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111734),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: const Color(0xFFF7C344)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 32,
+                  offset: Offset(0, 18),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 104,
+                  height: 104,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7C344).withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFFF7C344),
+                      width: 4,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.workspace_premium_rounded,
+                    color: Color(0xFFF7C344),
+                    size: 54,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Reward unlocked',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  reward.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFF7C344),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  reward.description,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFCCD3EA),
+                    fontSize: 15,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      _openStreakRewards();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF7C344),
+                      foregroundColor: const Color(0xFF17120A),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Text(
+                      'View medals',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<ImageSource?> _showMemorySourceSheet() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8C7B9),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_rounded),
+                  title: const Text('Take photo'),
+                  onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_rounded),
+                  title: const Text('Upload image'),
+                  onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _shareWithMemories() async {
+    if (!mounted) return;
+
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (!mounted) return;
+
+    final source = await _showMemorySourceSheet();
+    if (source == null || !mounted) return;
+
+    XFile? image;
+    try {
+      image = await _memoryPicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1800,
+      );
+    } catch (error) {
+      debugPrint('Meditation memory picker failed: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open image picker.')),
+      );
+      return;
+    }
+
+    if (image == null || !mounted) return;
+
+    final memoryNote = Note(
+      id: '',
+      userId: '',
+      username: '',
+      title: 'Meditation Memory',
+      note: const [
+        {
+          'type': 'text',
+          'value':
+              'I completed a meditation session today and wanted to remember this calm moment.',
+        },
+      ],
+      createdAt: DateTime.now(),
+      category: 'Add Value',
+    );
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotesType(
+          note: memoryNote,
+          initialImage: image,
+          initialCategory: 'Add Value',
+          openCommunityAfterPost: true,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleMeditationFinished(TimeProvider timeProvider) async {
+    if (_completionFlowHandled) return;
+    _completionFlowHandled = true;
+    final completedSeconds = timeProvider.initialTime;
+
+    timeProvider.stopTimer();
+    await AudioHelper.stopAudio();
+    await _stopSpotifyPlayer();
+    final unlockedRewards =
+        await _onMeditationComplete(completedSeconds: completedSeconds);
+    await _handleMeditationCompleteAlert();
+
+    if (!mounted) return;
+    _playCompletionAlarm();
+    await _showMeditationCompleteDialog();
+    if (unlockedRewards.isNotEmpty) {
+      await _showUnlockedRewardDialog(unlockedRewards.last);
+    }
   }
 
   String? _getSongPath(String songTitle) {
@@ -174,6 +638,52 @@ class _MeditationState extends State<Meditation> {
     });
   }
 
+  Future<void> _showSpotifyConnectionDialog(Object error) async {
+    if (!mounted) return;
+
+    final spotifyError = error is SpotifyNativeException ? error : null;
+    final reason = spotifyError?.reason;
+
+    final title = switch (reason) {
+      SpotifyNativeFailureReason.appNotInstalled => 'Spotify Required',
+      SpotifyNativeFailureReason.notLoggedIn => 'Log In To Spotify',
+      SpotifyNativeFailureReason.offlineMode => 'Spotify Is Offline',
+      SpotifyNativeFailureReason.unsupportedVersion => 'Update Spotify',
+      _ => 'Spotify Permission Needed',
+    };
+
+    final message = switch (reason) {
+      SpotifyNativeFailureReason.appNotInstalled =>
+        'Install the Spotify app, log in, then come back to InnerU.',
+      SpotifyNativeFailureReason.notLoggedIn =>
+        'Open Spotify and log in. After that, return to InnerU and tap play again.',
+      SpotifyNativeFailureReason.offlineMode =>
+        'Turn off Offline Mode in Spotify, then come back to InnerU and tap play again.',
+      SpotifyNativeFailureReason.unsupportedVersion =>
+        'Update Spotify from the Play Store, then come back to InnerU.',
+      SpotifyNativeFailureReason.authenticationFailed =>
+        'Spotify could not authorize InnerU. Tap play again and approve InnerU if Spotify asks.',
+      _ =>
+        'Spotify needs permission before InnerU can control playback. Tap play again, approve InnerU in Spotify if asked, then return here.',
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   String? _spotifyUriFromTrackId(String? trackId) {
     final trimmed = trackId?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
@@ -210,7 +720,9 @@ class _MeditationState extends State<Meditation> {
         try {
           await _scheduleMeditationCompletionAlert(timeProvider);
           await SpotifyNativeService.instance.playTrack(trackUri);
-          timeProvider.startTimer();
+          timeProvider.startTimer(
+            onComplete: () => _handleMeditationFinished(timeProvider),
+          );
           if (!mounted) return;
           setState(() {
             playingSong = favoriteSong;
@@ -219,13 +731,10 @@ class _MeditationState extends State<Meditation> {
           await _cancelMeditationCompletionAlert();
           if (!mounted) return;
           debugPrint('Spotify meditation playback failed: $error');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Please allow InnerU in Spotify, then tap play again.',
-              ),
-            ),
-          );
+          setState(() {
+            _spotifyConnecting = false;
+          });
+          await _showSpotifyConnectionDialog(error);
         } finally {
           if (mounted) {
             setState(() {
@@ -255,7 +764,9 @@ class _MeditationState extends State<Meditation> {
       await _cancelMeditationCompletionAlert();
     } else {
       await _scheduleMeditationCompletionAlert(timeProvider);
-      timeProvider.startTimer();
+      timeProvider.startTimer(
+        onComplete: () => _handleMeditationFinished(timeProvider),
+      );
     }
   }
 
@@ -289,20 +800,49 @@ class _MeditationState extends State<Meditation> {
     });
   }
 
+  void _openStreakRewards() {
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MeditationStreakRewardsScreen(),
+      ),
+    );
+  }
+
   void _showTimePicker(BuildContext context, TimeProvider timeProvider) {
+    final pageTheme = Theme.of(context);
     showModalBottomSheet(
       context: context,
+      backgroundColor: pageTheme.colorScheme.surface,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
       builder: (context) {
-        return SizedBox(
-          height: 300,
-          child: CupertinoTimerPicker(
-            mode: CupertinoTimerPickerMode.hms,
-            initialTimerDuration: Duration(seconds: timeProvider.remainingTime),
-            onTimerDurationChanged: (Duration newDuration) {
-              if (newDuration.inSeconds > 0) {
-                timeProvider.setTime(newDuration.inSeconds);
-              }
-            },
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+
+        return CupertinoTheme(
+          data: CupertinoTheme.of(context).copyWith(
+            brightness: theme.brightness,
+            scaffoldBackgroundColor: colorScheme.surface,
+            textTheme: CupertinoTextThemeData(
+              pickerTextStyle: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 21,
+              ),
+            ),
+          ),
+          child: SizedBox(
+            height: 300,
+            child: CupertinoTimerPicker(
+              mode: CupertinoTimerPickerMode.hms,
+              initialTimerDuration:
+                  Duration(seconds: timeProvider.remainingTime),
+              onTimerDurationChanged: (Duration newDuration) {
+                if (newDuration.inSeconds > 0) {
+                  timeProvider.setTime(newDuration.inSeconds);
+                }
+              },
+            ),
           ),
         );
       },
@@ -317,112 +857,240 @@ class _MeditationState extends State<Meditation> {
   }
 
   @override
+  void dispose() {
+    _completionAlarmTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final timeProvider = Provider.of<TimeProvider>(context);
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              final colorScheme = theme.colorScheme;
+              final isDark = theme.brightness == Brightness.dark;
 
-    if (timeProvider.remainingTime == 0 && timeProvider.isRunning) {
-      timeProvider.stopTimer();
-      _stopSpotifyPlayer();
-      _onMeditationComplete();
-      _handleMeditationCompleteAlert();
-    }
+              return Scaffold(
+                backgroundColor: companyTheme.backgroundColor,
+                body: SafeArea(
+                  child: Stack(
+                    children: [
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final isLandscape =
+                              constraints.maxWidth > constraints.maxHeight;
+                          final isShort =
+                              constraints.maxHeight < 520 || isLandscape;
+                          final animationHeight = isShort
+                              ? (constraints.maxHeight * 0.28)
+                                  .clamp(110.0, 170.0)
+                              : 300.0;
+                          final timerFontSize = isShort ? 42.0 : 55.0;
+                          final topPadding = isShort ? 8.0 : 24.0;
 
-    return Scaffold(
-      body: Center(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Lottie.asset("assets/images/lottie_meditation.json", height: 300),
-            Center(
-              child: GestureDetector(
-                onTap: () => _showTimePicker(context, timeProvider),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _formatTime(timeProvider.remainingTime),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 55,
-                        color: Color(0xFF2E2A27),
+                          return SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(
+                              20,
+                              topPadding,
+                              20,
+                              MediaQuery.paddingOf(context).bottom + 28,
+                            ),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight:
+                                    (constraints.maxHeight - topPadding - 28)
+                                        .clamp(0.0, double.infinity),
+                              ),
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 560),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      Lottie.asset(
+                                        "assets/images/lottie_meditation.json",
+                                        height: animationHeight,
+                                      ),
+                                      SizedBox(height: isShort ? 4 : 10),
+                                      GestureDetector(
+                                        onTap: () => _showTimePicker(
+                                            context, timeProvider),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _formatTime(
+                                                  timeProvider.remainingTime),
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: timerFontSize,
+                                                color: isDark
+                                                    ? const Color(0xFFF3EFE9)
+                                                    : const Color(0xFF2E2A27),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              'Tap to set meditation minutes',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(
+                                                color: isDark
+                                                    ? const Color(0xFFB9B1A7)
+                                                    : const Color(0xFF8B8179),
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      SizedBox(height: isShort ? 4 : 8),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          IconButton(
+                                            onPressed: _spotifyConnecting
+                                                ? null
+                                                : () => _handleMeditationPlay(
+                                                    timeProvider),
+                                            icon: Icon(
+                                              timeProvider.isRunning
+                                                  ? Icons.pause
+                                                  : Icons.play_arrow,
+                                              color: const Color(0xFFCE8F5A),
+                                              size: 40,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () {
+                                              _completionAlarmTimer?.cancel();
+                                              _completionFlowHandled = true;
+                                              timeProvider.stopTimer();
+                                              AudioHelper.stopAudio();
+                                              _stopSpotifyPlayer();
+                                              _cancelMeditationCompletionAlert();
+                                              setState(() {
+                                                playingSong = null;
+                                              });
+                                            },
+                                            icon: const Icon(
+                                              Icons.stop,
+                                              color: Color(0xFFCE8F5A),
+                                              size: 40,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Container(
+                                        width: double.infinity,
+                                        margin: EdgeInsets.only(
+                                            top: isShort ? 2 : 8),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 10,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? colorScheme.surface
+                                              : const Color(0xFFFFFBF7),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          border: Border.all(
+                                            color: isDark
+                                                ? companyTheme.iconColor
+                                                    .withValues(alpha: 0.34)
+                                                : const Color(0xFFE9DED5),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.music_note,
+                                              size: 20,
+                                              color: companyTheme.iconColor,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: GestureDetector(
+                                                onTap: _openMusicSelector,
+                                                child: Text(
+                                                  '$favoriteSong (${favoriteSongSource == "spotify" ? "Spotify" : "Default"})',
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    height: 1.25,
+                                                    color:
+                                                        companyTheme.inkColor,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              onPressed: null,
+                                              tooltip: favoriteSongSource ==
+                                                      "spotify"
+                                                  ? 'Native Spotify playback is active for this track'
+                                                  : 'Open on Spotify',
+                                              icon: Icon(
+                                                Icons.open_in_new,
+                                                color:
+                                                    companyTheme.mutedInkColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (favoriteSongSource == "spotify" &&
+                                          _spotifyConnecting)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 12),
+                                          child: Text(
+                                            'Connecting...',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isDark
+                                                  ? Colors.white70
+                                                  : Colors.black54,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Tap to set meditation minutes',
-                      style: TextStyle(
-                        color: Color(0xFF8B8179),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                      Positioned(
+                        top: 2,
+                        right: 10,
+                        child: IconButton(
+                          onPressed: _openStreakRewards,
+                          icon: const Icon(Icons.workspace_premium_rounded),
+                          tooltip: 'Rewards',
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  onPressed: _spotifyConnecting
-                      ? null
-                      : () => _handleMeditationPlay(timeProvider),
-                  icon: Icon(
-                    timeProvider.isRunning ? Icons.pause : Icons.play_arrow,
-                    color: const Color(0xFFCE8F5A),
-                    size: 40,
+                    ],
                   ),
                 ),
-                IconButton(
-                  onPressed: () {
-                    timeProvider.stopTimer();
-                    AudioHelper.stopAudio();
-                    _stopSpotifyPlayer();
-                    _cancelMeditationCompletionAlert();
-                    setState(() {
-                      playingSong = null;
-                    });
-                  },
-                  icon: const Icon(
-                    Icons.stop,
-                    color: Color(0xFFCE8F5A),
-                    size: 40,
-                  ),
-                ),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.music_note, size: 20),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _openMusicSelector,
-                  child: Text(
-                    '$favoriteSong (${favoriteSongSource == "spotify" ? "Spotify" : "Default"})',
-                  ),
-                ),
-                IconButton(
-                  onPressed: null,
-                  tooltip: favoriteSongSource == "spotify"
-                      ? 'Native Spotify playback is active for this track'
-                      : 'Open on Spotify',
-                  icon: const Icon(Icons.open_in_new),
-                ),
-              ],
-            ),
-            if (favoriteSongSource == "spotify" && _spotifyConnecting)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: Text(
-                  'Connecting...',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-              ),
-          ],
-        ),
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
