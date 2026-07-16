@@ -7,9 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watch_connectivity/watch_connectivity.dart';
 
+import 'package:flutter/widgets.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/watch_snapshot.dart';
+import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
 /// Receives step counts measured by the Apple Watch's own sensors and
@@ -29,10 +31,18 @@ class WatchStepsReceiver {
     if (kIsWeb || !Platform.isIOS) return;
     _messageSub ??= _watch.messageStream.listen(_handle);
     _contextSub ??= _watch.contextStream.listen(_handle);
+    WidgetsBinding.instance.addObserver(_WatchResumeObserver());
   }
 
   Future<void> _handle(Map<String, dynamic> data) async {
     try {
+      if (data['requestRefresh'] == true) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null && uid.isNotEmpty) {
+          await WatchStateRefresher().refresh(uid);
+        }
+        return;
+      }
       final steps = (data['watchSteps'] as num?)?.toInt();
       final date = data['watchStepsDate'] as String?;
       if (steps == null || steps <= 0 || date == null) return;
@@ -84,5 +94,17 @@ class WatchStepsReceiver {
     } catch (error) {
       debugPrint('Watch steps recording failed: $error');
     }
+  }
+}
+
+/// Re-pushes current state to the watch whenever the phone app returns
+/// to the foreground, so the two stay in sync without user action.
+class _WatchResumeObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+    unawaited(WatchStateRefresher().refresh(uid));
   }
 }

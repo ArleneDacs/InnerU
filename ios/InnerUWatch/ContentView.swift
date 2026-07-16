@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var connector = PhoneConnector()
     @StateObject private var stepCounter = WatchStepCounter()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -62,6 +63,12 @@ struct ContentView: View {
             .navigationTitle("InnerU")
         }
         .onAppear { stepCounter.start() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                connector.requestRefresh()
+                stepCounter.start()
+            }
+        }
     }
 
     private var stepsDetail: String {
