@@ -9,7 +9,6 @@ final class WatchStepCounter: ObservableObject {
     @Published var stepsToday: Int?
 
     private let pedometer = CMPedometer()
-    private let reporter = WatchStepReporter()
 
     func start() {
         guard CMPedometer.isStepCountingAvailable() else { return }
@@ -31,7 +30,7 @@ final class WatchStepCounter: ObservableObject {
     private func update(_ steps: Int) {
         stepsToday = steps
         persistForWidget(steps)
-        reporter.report(steps: steps)
+        WatchToPhoneSync.shared.reportSteps(steps)
     }
 
     private func persistForWidget(_ steps: Int) {
@@ -41,37 +40,3 @@ final class WatchStepCounter: ObservableObject {
     }
 }
 
-/// Sends the watch's step count to the iPhone. Live message when the
-/// phone is reachable; otherwise the application context persists the
-/// latest count and iOS delivers it when the devices reconnect.
-final class WatchStepReporter {
-    private var lastSent = -1
-    private var lastSentAt = Date.distantPast
-
-    func report(steps: Int) {
-        let session = WCSession.default
-        guard session.activationState == .activated else { return }
-
-        let payload: [String: Any] = [
-            "watchSteps": steps,
-            "watchStepsDate": WatchState.todayKey(),
-            "watchStepsAtMs": Int(Date().timeIntervalSince1970 * 1000),
-        ]
-
-        if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil)
-            lastSent = steps
-            lastSentAt = Date()
-            return
-        }
-
-        // Not reachable: queue via context, throttled — only the latest
-        // count matters and iOS keeps exactly one pending context.
-        let dueBySteps = steps - lastSent >= 25
-        let dueByTime = Date().timeIntervalSince(lastSentAt) >= 300
-        guard dueBySteps || dueByTime else { return }
-        try? session.updateApplicationContext(payload)
-        lastSent = steps
-        lastSentAt = Date()
-    }
-}

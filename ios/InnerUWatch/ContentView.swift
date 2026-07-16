@@ -1,8 +1,27 @@
 import SwiftUI
 
+/// Colors matched to the InnerU phone app's dark-navy dashboard.
+enum InnerUTheme {
+    static let background = LinearGradient(
+        colors: [
+            Color(red: 0.04, green: 0.07, blue: 0.15),
+            Color(red: 0.07, green: 0.11, blue: 0.22),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+    static let card = Color(red: 0.11, green: 0.17, blue: 0.30)
+    static let accent = Color(red: 0.45, green: 0.72, blue: 1.0)
+    static let steps = Color(red: 0.38, green: 0.85, blue: 0.56)
+    static let fasting = Color(red: 1.0, green: 0.62, blue: 0.29)
+    static let meditate = Color(red: 0.42, green: 0.86, blue: 0.83)
+    static let mood = Color(red: 0.98, green: 0.48, blue: 0.60)
+}
+
 struct ContentView: View {
     @StateObject private var connector = PhoneConnector()
     @StateObject private var stepCounter = WatchStepCounter()
+    @StateObject private var meditationSession = WatchMeditationSession()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -14,7 +33,7 @@ struct ContentView: View {
                     } label: {
                         CardView(
                             icon: "figure.walk",
-                            tint: .green,
+                            tint: InnerUTheme.steps,
                             title: "Steps",
                             detail: stepsDetail
                         )
@@ -26,7 +45,7 @@ struct ContentView: View {
                         TimelineView(.periodic(from: .now, by: 60)) { context in
                             CardView(
                                 icon: "timer",
-                                tint: .orange,
+                                tint: InnerUTheme.fasting,
                                 title: "Fasting",
                                 detail: fastingDetail(at: context.date)
                             )
@@ -34,12 +53,15 @@ struct ContentView: View {
                     }
 
                     NavigationLink {
-                        MeditationDetailView(connector: connector)
+                        MeditationDetailView(
+                            connector: connector,
+                            session: meditationSession
+                        )
                     } label: {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             CardView(
                                 icon: "leaf.fill",
-                                tint: .teal,
+                                tint: InnerUTheme.meditate,
                                 title: "Meditate",
                                 detail: meditationDetail(at: context.date)
                             )
@@ -50,8 +72,8 @@ struct ContentView: View {
                         MoodDetailView(connector: connector)
                     } label: {
                         CardView(
-                            icon: "face.smiling",
-                            tint: .purple,
+                            icon: "heart.fill",
+                            tint: InnerUTheme.mood,
                             title: "Mood",
                             detail: moodDetail
                         )
@@ -60,13 +82,18 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, 2)
             }
-            .navigationTitle("InnerU")
+            .containerBackground(InnerUTheme.background, for: .navigation)
+            .navigationTitle {
+                Text("InnerU")
+                    .foregroundStyle(InnerUTheme.accent)
+            }
         }
         .onAppear { stepCounter.start() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 connector.requestRefresh()
                 stepCounter.start()
+                meditationSession.reconcile()
             }
         }
     }
@@ -96,6 +123,10 @@ struct ContentView: View {
     }
 
     private func meditationDetail(at now: Date) -> String {
+        if let endsAt = meditationSession.endsAt, endsAt > now {
+            let seconds = max(0, Int(endsAt.timeIntervalSince(now)))
+            return String(format: "%d:%02d left · on watch", seconds / 60, seconds % 60)
+        }
         if connector.state.meditationRunning(at: now),
            let endsAt = connector.state.meditationEndsAt {
             let seconds = max(0, Int(endsAt.timeIntervalSince(now)))
@@ -136,9 +167,10 @@ struct CardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
+                    .foregroundStyle(.white)
                 Text(detail)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
                     .lineLimit(2)
             }
 
@@ -146,12 +178,12 @@ struct CardView: View {
 
             Image(systemName: "chevron.right")
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.white.opacity(0.35))
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            tint.opacity(0.16),
+            InnerUTheme.card.opacity(0.85),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
     }
