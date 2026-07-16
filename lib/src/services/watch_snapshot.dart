@@ -24,8 +24,8 @@ String dayKey(DateTime date) {
 /// Throttles step syncs so the watch is not spammed on every step.
 class StepSyncGate {
   StepSyncGate({
-    this.minStepDelta = 100,
-    this.minInterval = const Duration(minutes: 5),
+    this.minStepDelta = 10,
+    this.minInterval = const Duration(seconds: 30),
   });
 
   final int minStepDelta;

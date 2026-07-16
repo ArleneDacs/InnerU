@@ -24,8 +24,8 @@ struct SnapshotProvider: TimelineProvider {
     ) {
         let state = WatchState.loadFromSharedStore()
         var entries = [SnapshotEntry(date: .now, state: state)]
-        if state.fastingActive {
-            // Tick the elapsed time once a minute for the next 30 minutes.
+        if state.fastingActive || state.meditationRunning() {
+            // Tick the countdown/elapsed line once a minute for 30 minutes.
             for minute in 1...30 {
                 entries.append(SnapshotEntry(
                     date: .now.addingTimeInterval(Double(minute) * 60),
@@ -62,6 +62,11 @@ struct InnerUWidgetView: View {
     }
 
     private var bottomLine: String {
+        if entry.state.meditationRunning(at: entry.date),
+           let endsAt = entry.state.meditationEndsAt {
+            let minutes = max(1, Int(endsAt.timeIntervalSince(entry.date)) / 60)
+            return "Meditating · \(minutes)m left"
+        }
         if entry.state.fastingActive, let start = entry.state.fastingStart {
             let minutes = max(0, Int(entry.date.timeIntervalSince(start)) / 60)
             return "Fasting \(minutes / 60)h \(minutes % 60)m"

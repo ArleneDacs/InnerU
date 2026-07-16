@@ -33,6 +33,13 @@ final class PhoneConnector: NSObject, ObservableObject, WCSessionDelegate {
         apply(applicationContext)
     }
 
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any]
+    ) {
+        apply(message)
+    }
+
     private func apply(_ dict: [String: Any]) {
         DispatchQueue.main.async {
             self.state = WatchState(dict: dict)

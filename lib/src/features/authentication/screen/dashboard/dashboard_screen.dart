@@ -11,17 +11,28 @@ import 'package:selfcare_projects/src/features/authentication/screen/calorie_tra
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
+import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({
+    super.key,
+    this.initialCompanyTheme,
+  });
+
+  final CompanyThemeData? initialCompanyTheme;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -34,6 +45,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
+  late CompanyThemeData _companyTheme;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
   final EmotionService _emotionService = EmotionService();
@@ -47,24 +59,29 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   String get _todayDate => EmotionService.todayKey();
 
-  String _getEmojiForEmotion(String emotion) {
+  IconData _getIconForEmotion(String emotion) {
     switch (emotion.toLowerCase()) {
       case 'happy':
-        return '😊';
+        return Icons.sentiment_satisfied_alt_rounded;
       case 'sad':
-        return '😢';
+        return Icons.sentiment_dissatisfied_rounded;
       case 'angry':
-        return '😡';
+        return Icons.local_fire_department_rounded;
       case 'neutral':
-        return '😐';
+        return Icons.remove_circle_rounded;
       default:
-        return '❓';
+        return Icons.help_rounded;
     }
   }
 
   @override
   void initState() {
     super.initState();
+    _companyTheme = widget.initialCompanyTheme ??
+        CompanyThemeService.cachedThemeForUser(
+          FirebaseAuth.instance.currentUser?.uid ?? '',
+        ) ??
+        CompanyThemeData.standard;
     _introController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 950),
@@ -74,10 +91,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       duration: const Duration(milliseconds: 1100),
     );
     _fetchProfilePic();
+    _loadCompanyTheme();
     fetchQuote();
     _restoreTodayEmotionFromCache();
     _listenToTodayEmotion();
     _loadLocalChatReadOverrides();
+    final watchUserId = FirebaseAuth.instance.currentUser?.uid;
+    if (watchUserId != null && watchUserId.isNotEmpty) {
+      unawaited(WatchStateRefresher().refresh(watchUserId));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final updatedTheme = widget.initialCompanyTheme;
+    if (updatedTheme != null && updatedTheme != oldWidget.initialCompanyTheme) {
+      setState(() {
+        _companyTheme = updatedTheme;
+      });
+    }
   }
 
   Future<void> _loadLocalChatReadOverrides() async {
@@ -101,6 +134,21 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  Future<void> _loadCompanyTheme() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final companyTheme = await CompanyThemeService.resolveForUser(user.uid);
+      if (!mounted) return;
+      setState(() {
+        _companyTheme = companyTheme;
+      });
+    } catch (e) {
+      debugPrint("Error fetching company theme: $e");
+    }
+  }
+
   Future<void> _fetchProfilePic() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -110,15 +158,12 @@ class _DashboardScreenState extends State<DashboardScreen>
           .collection("users")
           .doc(user.uid)
           .get();
-
-      if (userDoc.exists) {
-        final rawProfilePic = userDoc.data()?["profilePic"];
-        final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
-        if (!mounted) return;
-        setState(() {
-          _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
-        });
-      }
+      final rawProfilePic = userDoc.data()?["profilePic"];
+      final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
+      if (!mounted) return;
+      setState(() {
+        _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
+      });
     } catch (e) {
       debugPrint("Error fetching profile picture: $e");
     }
@@ -144,29 +189,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       if (!mounted) return;
 
-      if (result.created) {
-        setState(() {
-          selectedEmotion = emotion;
-          currentUserEmotion = emotion;
-        });
-        await _cacheTodayEmotion(emotion);
-        return;
-      }
-
       setState(() {
-        currentUserEmotion = result.emotion;
+        selectedEmotion = emotion;
+        currentUserEmotion = result.emotion ?? emotion;
       });
-      await _cacheTodayEmotion(result.emotion);
-      if (!mounted) return;
-
-      final savedEmotion = result.emotion;
-      final message = savedEmotion == null
-          ? "You can only select one emotion per day!"
-          : "Today's mood is already logged as $savedEmotion.";
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      await _cacheTodayEmotion(result.emotion ?? emotion);
     } catch (e) {
       debugPrint("Error saving emotion: $e");
       if (!mounted) return;
@@ -261,11 +288,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildSectionTitle(String title) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 20,
         fontWeight: FontWeight.w800,
         letterSpacing: -0.35,
-        color: Color(0xFF24311F),
+        color: _companyTheme.inkColor,
       ),
     );
   }
@@ -343,6 +370,17 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Future<List<Coach>> _loadAssignedCoaches(List<String> coachIds) async {
+    final coaches = <Coach>[];
+    for (final coachId in coachIds) {
+      final coach = await _loadAssignedCoach(coachId);
+      if (coach != null) {
+        coaches.add(coach);
+      }
+    }
+    return coaches;
+  }
+
   Widget _buildBackdropOrb({
     required double size,
     required List<Color> colors,
@@ -369,28 +407,47 @@ class _DashboardScreenState extends State<DashboardScreen>
     bool isPressed = false,
     String? backgroundImage,
   }) {
+    final theme = _companyTheme;
+    final cardColor = theme.isDark
+        ? Color.alphaBlend(
+            color.withValues(alpha: 0.12),
+            theme.surfaceColor,
+          )
+        : Color.alphaBlend(const Color(0x1FFFFFFF), color);
+    final textColor = theme.isDark ? theme.inkColor : const Color(0xFF1F2A1A);
+    final mutedColor =
+        theme.isDark ? theme.mutedInkColor : const Color(0xFF43523D);
+    final iconColor =
+        theme.isDark ? theme.primaryColor : const Color(0xFF53654C);
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       height: 184,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: Colors.white.withOpacity(0.72)),
+        border: Border.all(
+          color: theme.isDark
+              ? theme.primaryColor.withValues(alpha: 0.24)
+              : Colors.white.withValues(alpha: 0.72),
+        ),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withOpacity(0.82),
-            Color.alphaBlend(const Color(0x1FFFFFFF), color),
-            Color.alphaBlend(
-              const Color(0x40FFFFFF),
-              color,
-            ),
+            theme.isDark
+                ? theme.surfaceColor.withValues(alpha: 0.9)
+                : Colors.white.withValues(alpha: 0.82),
+            cardColor,
+            theme.isDark
+                ? theme.backgroundColor.withValues(alpha: 0.94)
+                : Color.alphaBlend(const Color(0x40FFFFFF), color),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
+            color: (theme.isDark ? theme.primaryColor : const Color(0xFFB9C7B6))
+                .withValues(alpha: isPressed ? 0.14 : 0.24),
             blurRadius: isPressed ? 16 : 26,
             offset: Offset(0, isPressed ? 8 : 14),
           ),
@@ -412,57 +469,59 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
             ),
-          Positioned(
-            top: -28,
-            right: -18,
-            child: Container(
-              width: 126,
-              height: 126,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [
-                    Colors.white.withOpacity(0.36),
-                    Colors.white.withOpacity(0.02),
-                  ],
+          if (backgroundImage == null) ...[
+            Positioned(
+              top: -28,
+              right: -18,
+              child: Container(
+                width: 126,
+                height: 126,
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.36),
+                      Colors.white.withValues(alpha: 0.02),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
                 ),
-                shape: BoxShape.circle,
               ),
             ),
-          ),
-          Positioned(
-            bottom: -18,
-            left: -14,
-            child: Transform.rotate(
-              angle: -0.45,
-              child: Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.3),
-                      Colors.white.withOpacity(0.06),
-                    ],
+            Positioned(
+              bottom: -18,
+              left: -14,
+              child: Transform.rotate(
+                angle: -0.45,
+                child: Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.3),
+                        Colors.white.withValues(alpha: 0.06),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            top: 58,
-            right: 42,
-            child: Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.3),
-                shape: BoxShape.circle,
+            Positioned(
+              top: 58,
+              right: 42,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.3),
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
-          ),
+          ],
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -471,9 +530,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(0.1),
+                    Colors.white.withValues(alpha: 0.1),
                     Colors.transparent,
-                    Colors.black.withOpacity(0.06),
+                    Colors.black.withValues(alpha: 0.06),
                   ],
                 ),
               ),
@@ -486,13 +545,26 @@ class _DashboardScreenState extends State<DashboardScreen>
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.62),
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.16)
+                    : Colors.white.withValues(alpha: 0.62),
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withOpacity(0.6)),
+                border: Border.all(
+                  color: theme.isDark
+                      ? theme.primaryColor.withValues(alpha: 0.22)
+                      : Colors.white.withValues(alpha: 0.6),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: Icon(
                 icon,
-                color: const Color(0xFF53654C),
+                color: iconColor,
                 size: 27,
               ),
             ),
@@ -506,46 +578,48 @@ class _DashboardScreenState extends State<DashboardScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.38),
+                    color: Colors.white.withValues(alpha: 0.38),
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text(
+                  child: Text(
                     "Daily practice",
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,
-                      color: Color(0xFF697960),
+                      color: theme.isDark
+                          ? theme.primaryColor
+                          : const Color(0xFF697960),
                     ),
                   ),
                 ),
                 const Spacer(),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF1F2A1A),
+                    color: textColor,
                     letterSpacing: -0.3,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     height: 1.45,
-                    color: Color(0xFF43523D),
+                    color: mutedColor,
                     fontWeight: FontWeight.w400,
                   ),
                 ),
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    const Text(
+                    Text(
                       "Open",
                       style: TextStyle(
-                        color: Color(0xFF506149),
+                        color: iconColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -554,13 +628,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.56),
+                        color: Colors.white.withValues(alpha: 0.56),
                         borderRadius: BorderRadius.circular(999),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.arrow_forward_rounded,
                         size: 15,
-                        color: Color(0xFF506149),
+                        color: iconColor,
                       ),
                     ),
                   ],
@@ -613,12 +687,17 @@ class _DashboardScreenState extends State<DashboardScreen>
     final targetPage = setupIndex != null
         ? Setuppage(initialIndex: setupIndex)
         : destinationPage;
+    final themedTargetPage = Theme(
+      data: AppTheme.company(_companyTheme),
+      child: targetPage,
+    );
 
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         transitionDuration: const Duration(milliseconds: 360),
         reverseTransitionDuration: const Duration(milliseconds: 260),
-        pageBuilder: (context, animation, secondaryAnimation) => targetPage,
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            themedTargetPage,
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           final curved = CurvedAnimation(
             parent: animation,
@@ -1057,33 +1136,65 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildProfileAndPoints(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
+    final theme = _companyTheme;
     if (currentUser == null) {
       return const SizedBox.shrink();
     }
 
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+    num scoreFromData(Map<String, dynamic>? data) {
+      final rawPoints = data?['totalPoints'];
+      final rawDailyTrackerScore = data?['dailyTrackerScore'];
+      final rawTodoListScore = data?['todoListScore'];
+      final rawTodoListContribution = data?['todoListScoreDailyContribution'];
+      final includeTodoListScore = data?['todoListIncludedInTotal'] == true;
+
+      if (rawDailyTrackerScore is num && rawTodoListScore is num) {
+        final dailyScore = rawDailyTrackerScore.clamp(0, 100);
+        final todoScore = rawTodoListContribution is num
+            ? rawTodoListContribution.clamp(0, 100)
+            : rawTodoListScore.clamp(0, 100);
+        return includeTodoListScore
+            ? ((dailyScore + todoScore) / 2).clamp(0, 100)
+            : dailyScore;
+      }
+
+      return rawPoints is num ? rawPoints.clamp(0, 100) : 0;
+    }
+
+    String scoreLabel(num score) {
+      return score == score.roundToDouble()
+          ? score.toStringAsFixed(0)
+          : score.toStringAsFixed(1);
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('userpoints')
-          .doc('${currentUser.uid}-$_todayDate')
+          .where('userId', isEqualTo: currentUser.uid)
           .snapshots(),
       builder: (context, snapshot) {
-        final data = snapshot.data?.data();
-        final rawPoints = data?['totalPoints'];
-        final totalPoints = rawPoints is int
-            ? rawPoints
-            : rawPoints is num
-                ? rawPoints.toInt()
-                : 0;
+        final docs = snapshot.data?.docs ?? const [];
+        final totalPoints = docs.isEmpty
+            ? 0
+            : docs
+                    .map((doc) => scoreFromData(doc.data()))
+                    .fold<num>(0, (total, score) => total + score) /
+                docs.length;
+        final totalPointsLabel = scoreLabel(totalPoints);
 
         return InkWell(
           borderRadius: BorderRadius.circular(999),
           onTap: () => Navigator.pushNamed(context, '/profile'),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.92),
+              color: theme.surfaceColor.withValues(alpha: 0.86),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFFDCE5D4)),
+              border: Border.all(
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.18)
+                    : const Color(0xFFDCE5D4),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1091,43 +1202,53 @@ class _DashboardScreenState extends State<DashboardScreen>
                 (_profilePic == null || _profilePic!.trim().isEmpty)
                     ? Image.asset(
                         'assets/images/avatar.png',
-                        width: 28,
-                        height: 28,
+                        width: 22,
+                        height: 22,
                       )
                     : ClipOval(
                         child: Image.network(
                           _profilePic!,
-                          width: 28,
-                          height: 28,
+                          width: 22,
+                          height: 22,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
-                            return const Icon(Icons.person, size: 24);
+                            return Image.asset(
+                              'assets/images/avatar.png',
+                              width: 22,
+                              height: 22,
+                            );
                           },
                         ),
                       ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 5),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEEF3E8),
+                    color: theme.isDark
+                        ? theme.primaryColor.withValues(alpha: 0.1)
+                        : const Color(0xFFEEF3E8),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
+                      Icon(
                         CupertinoIcons.star_fill,
-                        size: 13,
-                        color: Color(0xFFCE8F5A),
+                        size: 10,
+                        color: theme.isDark
+                            ? theme.primaryColor
+                            : const Color(0xFFCE8F5A),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 3),
                       Text(
-                        '$totalPoints',
-                        style: const TextStyle(
-                          fontSize: 12,
+                        totalPointsLabel,
+                        style: TextStyle(
+                          fontSize: 10,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF2D3A25),
+                          color: theme.inkColor,
                         ),
                       ),
                     ],
@@ -1145,33 +1266,34 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final horizontalPadding = screenWidth > 600 ? 28.0 : 20.0;
+    final bottomContentPadding =
+        SetupBottomNavigationScope.hasBottomNavigation(context) ? 24.0 : 0.0;
+
+    final companyTheme = _companyTheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F6F1),
+      backgroundColor: companyTheme.backgroundColor,
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        leadingWidth: 126,
+        automaticallyImplyLeading: false,
+        leadingWidth: 104,
         leading: Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: _buildProfileAndPoints(context),
+          padding: const EdgeInsets.only(left: 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _buildProfileAndPoints(context),
+          ),
         ),
         actions: [
           _buildInboxAction(),
           Padding(
             padding: const EdgeInsets.only(right: 10),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.76),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE8E2D6)),
-              ),
-              child: IconButton(
-                icon: const Icon(CupertinoIcons.line_horizontal_3, size: 24),
-                color: const Color(0xFF42523B),
-                onPressed: () => BottomSheetWidget.show(context),
-              ),
+            child: IconButton(
+              icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
+              color: companyTheme.iconColor,
+              onPressed: () => BottomSheetWidget.show(context),
             ),
           ),
         ],
@@ -1185,8 +1307,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: _buildBackdropOrb(
               size: 220,
               colors: [
-                const Color(0xFFFFF4E7).withOpacity(0.95),
-                const Color(0xFFFFF4E7).withOpacity(0),
+                companyTheme.accentColor.withValues(
+                  alpha: companyTheme.isDark ? 0.34 : 0.95,
+                ),
+                companyTheme.accentColor.withValues(alpha: 0),
               ],
             ),
           ),
@@ -1196,8 +1320,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: _buildBackdropOrb(
               size: 240,
               colors: [
-                const Color(0xFFDDEBDD).withOpacity(0.82),
-                const Color(0xFFDDEBDD).withOpacity(0),
+                companyTheme.primaryColor.withValues(
+                  alpha: companyTheme.isDark ? 0.28 : 0.32,
+                ),
+                companyTheme.primaryColor.withValues(alpha: 0),
               ],
             ),
           ),
@@ -1207,74 +1333,102 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: _buildBackdropOrb(
               size: 190,
               colors: [
-                const Color(0xFFE9E1F2).withOpacity(0.48),
-                const Color(0xFFE9E1F2).withOpacity(0),
+                companyTheme.mutedInkColor.withValues(
+                  alpha: companyTheme.isDark ? 0.18 : 0.26,
+                ),
+                companyTheme.mutedInkColor.withValues(alpha: 0),
               ],
             ),
           ),
           SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(
-                horizontalPadding, 8, horizontalPadding, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildIntroMotion(
-                  start: 0.0,
-                  end: 0.42,
-                  child: FutureBuilder<String>(
-                    future: _getUsername(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.done &&
-                          snapshot.hasData) {
-                        UserPreferences.saveUsername(snapshot.data!);
-                      }
+              horizontalPadding,
+              8,
+              horizontalPadding,
+              bottomContentPadding,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildIntroMotion(
+                      start: 0.0,
+                      end: 0.42,
+                      child: FutureBuilder<String>(
+                        future: _getUsername(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                                  ConnectionState.done &&
+                              snapshot.hasData) {
+                            final userId =
+                                FirebaseAuth.instance.currentUser?.uid;
+                            if (userId == null || userId.isEmpty) {
+                              UserPreferences.saveUsername(snapshot.data!);
+                            } else {
+                              UserPreferences.saveUsernameForUser(
+                                userId,
+                                snapshot.data!,
+                              );
+                            }
+                          }
 
-                      final username =
-                          snapshot.connectionState == ConnectionState.waiting
+                          final username = snapshot.connectionState ==
+                                  ConnectionState.waiting
                               ? "there"
                               : snapshot.data ?? "there";
 
-                      return _buildWelcomeHero(
-                        context,
-                        username: username,
-                        quote: quote,
-                        author: author,
-                      );
-                    },
-                  ),
+                          return _buildWelcomeHero(
+                            context,
+                            username: username,
+                            quote: quote,
+                            author: author,
+                            companyTheme: companyTheme,
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildIntroMotion(
+                      start: 0.1,
+                      end: 0.42,
+                      child: _buildQuickOverviewSection(),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildIntroMotion(
+                      start: 0.14,
+                      end: 0.54,
+                      child: _buildStreakMedalsSection(),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildIntroMotion(
+                      start: 0.18,
+                      end: 0.62,
+                      child: _buildScrollableFeatureRail(context),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildIntroMotion(
+                      start: 0.28,
+                      end: 0.74,
+                      child: _buildDailyInsightsSection(),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildIntroMotion(
+                      start: 0.36,
+                      end: 0.82,
+                      child: _buildCoachSection(context),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildIntroMotion(
+                      start: 0.48,
+                      end: 1.0,
+                      child: _buildMoodSection(context),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
-                const SizedBox(height: 24),
-                _buildIntroMotion(
-                  start: 0.1,
-                  end: 0.42,
-                  child: _buildQuickOverviewSection(),
-                ),
-                const SizedBox(height: 28),
-                _buildIntroMotion(
-                  start: 0.18,
-                  end: 0.62,
-                  child: _buildScrollableFeatureRail(context),
-                ),
-                const SizedBox(height: 28),
-                _buildIntroMotion(
-                  start: 0.28,
-                  end: 0.74,
-                  child: _buildDailyInsightsSection(),
-                ),
-                const SizedBox(height: 28),
-                _buildIntroMotion(
-                  start: 0.36,
-                  end: 0.82,
-                  child: _buildCoachSection(context),
-                ),
-                const SizedBox(height: 28),
-                _buildIntroMotion(
-                  start: 0.48,
-                  end: 1.0,
-                  child: _buildMoodSection(context),
-                ),
-                const SizedBox(height: 12),
-              ],
+              ),
             ),
           ),
           _buildTileTransitionOverlay(),
@@ -1290,27 +1444,52 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String username,
     required String quote,
     required String author,
+    required CompanyThemeData companyTheme,
   }) {
     final theme = Theme.of(context);
+    final heroColors = companyTheme.isDark
+        ? [
+            const Color(0xFF031019),
+            Color.alphaBlend(
+              companyTheme.primaryColor.withValues(alpha: 0.26),
+              const Color(0xFF071A24),
+            ),
+            Color.alphaBlend(
+              companyTheme.accentColor.withValues(alpha: 0.22),
+              const Color(0xFF031019),
+            ),
+          ]
+        : [
+            companyTheme.primaryColor,
+            companyTheme.accentColor,
+            const Color(0xFFF2E4D0),
+          ];
+    const tagline =
+        'Your dashboard is ready with the habits that keep today balanced.';
+    final badgeContentColor = companyTheme.isDark
+        ? Colors.white.withValues(alpha: 0.92)
+        : const Color(0xFF355033);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(36),
-        border: Border.all(color: Colors.white.withOpacity(0.38)),
-        gradient: const LinearGradient(
+        border: Border.all(
+          color: companyTheme.isDark
+              ? companyTheme.primaryColor.withValues(alpha: 0.32)
+              : Colors.white.withValues(alpha: 0.38),
+        ),
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF9CB58F),
-            Color(0xFFC9B395),
-            Color(0xFFF2E4D0),
-          ],
+          colors: heroColors,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF90A783).withOpacity(0.28),
+            color: companyTheme.primaryColor.withValues(
+              alpha: companyTheme.isDark ? 0.22 : 0.28,
+            ),
             blurRadius: 40,
             offset: const Offset(0, 18),
           ),
@@ -1328,33 +1507,75 @@ class _DashboardScreenState extends State<DashboardScreen>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.28),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Colors.white.withOpacity(0.3)),
-                    ),
-                    child: const Text(
-                      "Daily reset",
-                      style: TextStyle(
-                        color: Color(0xFF355033),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                      color: Colors.white.withValues(
+                        alpha: companyTheme.isDark ? 0.1 : 0.28,
                       ),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: companyTheme.isDark
+                            ? Colors.white.withValues(alpha: 0.22)
+                            : Colors.white.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (companyTheme.logoUrl.isNotEmpty) ...[
+                          ClipOval(
+                            child: Image.network(
+                              companyTheme.logoUrl,
+                              width: 18,
+                              height: 18,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(
+                                CupertinoIcons.building_2_fill,
+                                size: 15,
+                                color: badgeContentColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ] else if (companyTheme.isCompanyTheme) ...[
+                          Icon(
+                            CupertinoIcons.building_2_fill,
+                            size: 15,
+                            color: badgeContentColor,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Text(
+                            companyTheme.isCompanyTheme
+                                ? '${companyTheme.companyName} Safespace'
+                                : 'Daily reset',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: badgeContentColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     "Hello, $username",
                     style: theme.textTheme.headlineSmall?.copyWith(
-                      color: const Color(0xFF24311F),
+                      color: companyTheme.inkColor,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.8,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    "Your dashboard is ready with the habits that keep today balanced.",
+                    tagline,
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: const Color(0xFF42563E),
+                      color: companyTheme.isDark
+                          ? companyTheme.mutedInkColor
+                          : const Color(0xFF42563E),
                       height: 1.5,
                     ),
                   ),
@@ -1389,25 +1610,35 @@ class _DashboardScreenState extends State<DashboardScreen>
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.34),
+                  color: Colors.white.withValues(
+                    alpha: companyTheme.isDark ? 0.08 : 0.34,
+                  ),
                   borderRadius: BorderRadius.circular(26),
-                  border: Border.all(color: Colors.white.withOpacity(0.42)),
+                  border: Border.all(
+                    color: companyTheme.isDark
+                        ? companyTheme.primaryColor.withValues(alpha: 0.22)
+                        : Colors.white.withValues(alpha: 0.42),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
                         Icon(
                           CupertinoIcons.quote_bubble_fill,
                           size: 18,
-                          color: Color(0xFF4F6047),
+                          color: companyTheme.isDark
+                              ? companyTheme.primaryColor
+                              : const Color(0xFF4F6047),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
                           "Today's note",
                           style: TextStyle(
-                            color: Color(0xFF4F6047),
+                            color: companyTheme.isDark
+                                ? companyTheme.primaryColor
+                                : const Color(0xFF4F6047),
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
@@ -1417,8 +1648,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 12),
                     Text(
                       quote,
-                      style: const TextStyle(
-                        color: Color(0xFF24311F),
+                      style: TextStyle(
+                        color: companyTheme.inkColor,
                         fontSize: 16,
                         height: 1.5,
                         fontWeight: FontWeight.w600,
@@ -1427,8 +1658,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 8),
                     Text(
                       author,
-                      style: const TextStyle(
-                        color: Color(0xFF61715B),
+                      style: TextStyle(
+                        color: companyTheme.isDark
+                            ? companyTheme.mutedInkColor
+                            : const Color(0xFF61715B),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1448,12 +1681,17 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String label,
     required String value,
   }) {
+    final theme = _companyTheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.24),
+        color: Colors.white.withValues(alpha: theme.isDark ? 0.1 : 0.24),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withOpacity(0.3)),
+        border: Border.all(
+          color: theme.isDark
+              ? theme.primaryColor.withValues(alpha: 0.22)
+              : Colors.white.withValues(alpha: 0.3),
+        ),
       ),
       child: Row(
         children: [
@@ -1461,10 +1699,17 @@ class _DashboardScreenState extends State<DashboardScreen>
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.24),
+              color: theme.isDark
+                  ? theme.primaryColor.withValues(alpha: 0.16)
+                  : Colors.white.withValues(alpha: 0.24),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: const Color(0xFF42563E), size: 20),
+            child: Icon(
+              icon,
+              color:
+                  theme.isDark ? theme.primaryColor : const Color(0xFF42563E),
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1475,8 +1720,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF52644D),
+                  style: TextStyle(
+                    color: theme.isDark
+                        ? theme.mutedInkColor
+                        : const Color(0xFF52644D),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1486,8 +1733,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF24311F),
+                  style: TextStyle(
+                    color: theme.inkColor,
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
                   ),
@@ -1505,6 +1752,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String subtitle,
     String? actionLabel,
   }) {
+    final theme = _companyTheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1516,8 +1764,8 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(height: 6),
               Text(
                 subtitle,
-                style: const TextStyle(
-                  color: Color(0xFF5E6E57),
+                style: TextStyle(
+                  color: theme.mutedInkColor,
                   height: 1.4,
                 ),
               ),
@@ -1529,8 +1777,9 @@ class _DashboardScreenState extends State<DashboardScreen>
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               actionLabel,
-              style: const TextStyle(
-                color: Color(0xFF708467),
+              style: TextStyle(
+                color:
+                    theme.isDark ? theme.primaryColor : const Color(0xFF708467),
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -1544,23 +1793,36 @@ class _DashboardScreenState extends State<DashboardScreen>
     required Widget child,
     EdgeInsetsGeometry padding = const EdgeInsets.all(20),
   }) {
+    final theme = _companyTheme;
     return Container(
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withOpacity(0.74)),
+        border: Border.all(
+          color: theme.isDark
+              ? theme.primaryColor.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.74),
+        ),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withOpacity(0.92),
-            const Color(0xFFF6F1E8).withOpacity(0.88),
+            theme.isDark
+                ? theme.surfaceColor.withValues(alpha: 0.94)
+                : Colors.white.withValues(alpha: 0.92),
+            theme.isDark
+                ? Color.alphaBlend(
+                    theme.primaryColor.withValues(alpha: 0.08),
+                    theme.backgroundColor,
+                  )
+                : const Color(0xFFF6F1E8).withValues(alpha: 0.88),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFD0D8C8).withOpacity(0.22),
+            color: (theme.isDark ? theme.primaryColor : const Color(0xFFD0D8C8))
+                .withValues(alpha: 0.22),
             blurRadius: 28,
             offset: const Offset(0, 14),
           ),
@@ -1587,7 +1849,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 title: "Mood",
                 value: currentUserEmotion == null
                     ? "Check in"
-                    : "${_getEmojiForEmotion(currentUserEmotion!)} $currentUserEmotion",
+                    : currentUserEmotion!,
+                valueIcon: currentUserEmotion == null
+                    ? null
+                    : _getIconForEmotion(currentUserEmotion!),
                 accent: const Color(0xFFE8DCC9),
                 onTap: () => Navigator.pushNamed(context, '/emotionScreen'),
               ),
@@ -1608,24 +1873,252 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildStreakMedalsSection() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          "Streak medals",
+          subtitle: "Your unlocked habit rewards across core routines.",
+        ),
+        const SizedBox(height: 16),
+        StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .snapshots(),
+          builder: (context, snapshot) {
+            final data = snapshot.data?.data() ?? <String, dynamic>{};
+            return _buildGlassSectionCard(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final useGrid = constraints.maxWidth > 520;
+                  final medals = ActivityStreakType.values.map((type) {
+                    return _DashboardStreakMedalData.fromUserData(type, data);
+                  }).toList();
+
+                  if (useGrid) {
+                    return Row(
+                      children: [
+                        for (var i = 0; i < medals.length; i++) ...[
+                          Expanded(
+                              child: _buildDashboardStreakMedal(medals[i])),
+                          if (i != medals.length - 1) const SizedBox(width: 12),
+                        ],
+                      ],
+                    );
+                  }
+
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        for (var i = 0; i < medals.length; i++) ...[
+                          SizedBox(
+                            width: 132,
+                            child: _buildDashboardStreakMedal(medals[i]),
+                          ),
+                          if (i != medals.length - 1) const SizedBox(width: 12),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDashboardStreakMedal(_DashboardStreakMedalData medal) {
+    final theme = _companyTheme;
+    final color = _streakTierColor(medal.tier);
+    final unlocked = medal.unlockedCount > 0;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: () => _openStreakRewards(medal.type),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          children: [
+            AnimatedScale(
+              scale: unlocked ? 1.08 : 0.92,
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutBack,
+              child: SizedBox(
+                width: 76,
+                height: 94,
+                child: Stack(
+                  alignment: Alignment.bottomCenter,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 18,
+                      child: Transform.rotate(
+                        angle: -0.16,
+                        child: _DashboardMedalRibbon(
+                          color: unlocked ? color : theme.mutedInkColor,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: 18,
+                      child: Transform.rotate(
+                        angle: 0.16,
+                        child: _DashboardMedalRibbon(
+                          color: unlocked ? color : theme.mutedInkColor,
+                        ),
+                      ),
+                    ),
+                    ClipPath(
+                      clipper: const _DashboardMedalBodyClipper(),
+                      child: Container(
+                        width: 72,
+                        height: 72,
+                        padding: EdgeInsets.all(unlocked ? 3 : 2),
+                        decoration: BoxDecoration(
+                          color: unlocked
+                              ? color.withValues(alpha: 0.86)
+                              : theme.mutedInkColor.withValues(alpha: 0.24),
+                        ),
+                        child: ClipPath(
+                          clipper: const _DashboardMedalBodyClipper(),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: unlocked
+                                  ? color.withValues(
+                                      alpha: theme.isDark ? 0.2 : 0.18,
+                                    )
+                                  : theme.mutedInkColor.withValues(alpha: 0.08),
+                              boxShadow: [
+                                if (unlocked)
+                                  BoxShadow(
+                                    color: color.withValues(alpha: 0.2),
+                                    blurRadius: 18,
+                                    offset: const Offset(0, 8),
+                                  ),
+                              ],
+                            ),
+                            child: Icon(
+                              _streakIcon(medal.type, unlocked: unlocked),
+                              color: unlocked ? color : theme.mutedInkColor,
+                              size: unlocked ? 32 : 26,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              medal.type.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: theme.inkColor,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${medal.currentStreak} day streak',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: theme.mutedInkColor,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${medal.unlockedCount}/${medal.totalCount} medals',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: unlocked ? color : theme.mutedInkColor,
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openStreakRewards(ActivityStreakType type) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MeditationStreakRewardsScreen(activityType: type),
+      ),
+    );
+  }
+
+  IconData _streakIcon(ActivityStreakType type, {required bool unlocked}) {
+    if (!unlocked) return Icons.lock_rounded;
+    return switch (type) {
+      ActivityStreakType.meditation => Icons.self_improvement_rounded,
+      ActivityStreakType.steps => Icons.directions_walk_rounded,
+      ActivityStreakType.exercise => Icons.fitness_center_rounded,
+      ActivityStreakType.fasting => Icons.local_fire_department_rounded,
+    };
+  }
+
+  Color _streakTierColor(String tier) {
+    return switch (tier) {
+      'Bronze' => const Color(0xFFCE7A34),
+      'Silver' => const Color(0xFFB9C8E3),
+      'Gold' => const Color(0xFFF7C344),
+      'Platinum' => const Color(0xFF9FE6FF),
+      _ => const Color(0xFFCE8F5A),
+    };
+  }
+
   Widget _buildMiniOverviewCard({
     required IconData icon,
     required String title,
     required String value,
     required Color accent,
+    IconData? valueIcon,
     VoidCallback? onTap,
   }) {
+    final theme = _companyTheme;
+    final cardAccent = theme.isDark
+        ? Color.alphaBlend(theme.primaryColor.withValues(alpha: 0.2), accent)
+        : accent;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.82),
+          color: theme.isDark
+              ? theme.surfaceColor.withValues(alpha: 0.94)
+              : Colors.white.withValues(alpha: 0.82),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withOpacity(0.84)),
+          border: Border.all(
+            color: theme.isDark
+                ? theme.primaryColor.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.84),
+          ),
           boxShadow: [
             BoxShadow(
-              color: accent.withOpacity(0.26),
+              color: (theme.isDark ? theme.primaryColor : cardAccent)
+                  .withValues(alpha: 0.26),
               blurRadius: 18,
               offset: const Offset(0, 10),
             ),
@@ -1639,30 +2132,53 @@ class _DashboardScreenState extends State<DashboardScreen>
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: accent,
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.16)
+                    : cardAccent,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(icon, color: const Color(0xFF4A5E45), size: 21),
+              child: Icon(
+                icon,
+                color:
+                    theme.isDark ? theme.primaryColor : const Color(0xFF4A5E45),
+                size: 21,
+              ),
             ),
             const SizedBox(height: 18),
             Text(
               title,
-              style: const TextStyle(
-                color: Color(0xFF65745E),
+              style: TextStyle(
+                color: theme.mutedInkColor,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF24311F),
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (valueIcon != null) ...[
+                  Icon(
+                    valueIcon,
+                    color: theme.inkColor,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Flexible(
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.inkColor,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -1773,6 +2289,17 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(width: 14),
               _buildClickableInfoCard(
                 context,
+                'exercise_tile',
+                "Exercise",
+                "Log pilates, gym, yoga, sports, or any custom workout.",
+                Icons.fitness_center,
+                const Color(0xFFE9E4F2),
+                const ExerciseTrackerScreen(),
+                backgroundImage: 'assets/images/exercise.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
                 'meditate_tile',
                 "Meditate",
                 "Create a calm reset with a short guided session.",
@@ -1876,6 +2403,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String description,
     required Color color,
   }) {
+    final theme = _companyTheme;
+    final iconBackground =
+        theme.isDark ? theme.primaryColor.withValues(alpha: 0.14) : color;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1883,10 +2413,14 @@ class _DashboardScreenState extends State<DashboardScreen>
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-            color: color,
+            color: iconBackground,
             borderRadius: BorderRadius.circular(18),
           ),
-          child: Icon(icon, color: const Color(0xFF4B5D45), size: 22),
+          child: Icon(
+            icon,
+            color: theme.isDark ? theme.primaryColor : const Color(0xFF4B5D45),
+            size: 22,
+          ),
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -1895,17 +2429,17 @@ class _DashboardScreenState extends State<DashboardScreen>
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF24311F),
+                  color: theme.inkColor,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
                 description,
-                style: const TextStyle(
-                  color: Color(0xFF5E6E57),
+                style: TextStyle(
+                  color: theme.mutedInkColor,
                   height: 1.45,
                 ),
               ),
@@ -1933,7 +2467,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         }
 
         final userData = userSnapshot.data?.data();
-        final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
+        final coachIds = List<String>.from(
+          userData?['coachIds'] as List? ?? const <String>[],
+        ).where((id) => id.trim().isNotEmpty).toList();
+        final legacyCoachId = (userData?['coachId'] as String?)?.trim() ?? '';
+        final activeCoachIds = <String>[
+          ...coachIds,
+          if (legacyCoachId.isNotEmpty && !coachIds.contains(legacyCoachId))
+            legacyCoachId,
+        ];
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1943,30 +2485,34 @@ class _DashboardScreenState extends State<DashboardScreen>
               subtitle: 'Support that feels close and easy to reach.',
             ),
             const SizedBox(height: 14),
-            if (coachId.isEmpty)
-              _buildNoCoachCard()
+            if (activeCoachIds.isEmpty)
+              _buildNoCoachCard(context)
             else
-              FutureBuilder<Coach?>(
-                future: _loadAssignedCoach(coachId),
+              FutureBuilder<List<Coach>>(
+                future: _loadAssignedCoaches(activeCoachIds),
                 builder: (context, coachSnapshot) {
                   if (coachSnapshot.connectionState ==
                       ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final coach = coachSnapshot.data;
-                  if (coach == null) {
+                  final coaches = coachSnapshot.data ?? const <Coach>[];
+                  if (coaches.isEmpty) {
                     return _buildNoCoachCard(
+                      context,
                       title: 'Coach details unavailable',
                       message:
-                          'Your coach is assigned, but the profile details could not be loaded yet.',
+                          'Your coaches are assigned, but the profile details could not be loaded yet.',
                     );
                   }
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildAssignedCoachCard(context, coach: coach),
+                      for (final coach in coaches) ...[
+                        _buildAssignedCoachCard(context, coach: coach),
+                        if (coach != coaches.last) const SizedBox(height: 12),
+                      ],
                     ],
                   );
                 },
@@ -1977,53 +2523,68 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildNoCoachCard({
+  Widget _buildNoCoachCard(
+    BuildContext context, {
     String title = 'No coach yet',
     String message =
         'You do not have a coach assigned yet. Once you connect with one, they will appear here.',
   }) {
-    return _buildGlassSectionCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE9EEE4),
-              borderRadius: BorderRadius.circular(18),
+    final theme = _companyTheme;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.pushNamed(context, '/coachesScreen'),
+      child: _buildGlassSectionCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.14)
+                    : const Color(0xFFE9EEE4),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(
+                CupertinoIcons.person_crop_circle_badge_plus,
+                color:
+                    theme.isDark ? theme.primaryColor : const Color(0xFF6C7E62),
+                size: 28,
+              ),
             ),
-            child: const Icon(
-              CupertinoIcons.person_crop_circle_badge_plus,
-              color: Color(0xFF6C7E62),
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF24311F),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: theme.inkColor,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  message,
-                  style: const TextStyle(
-                    color: Color(0xFF667460),
-                    height: 1.45,
+                  const SizedBox(height: 6),
+                  Text(
+                    message,
+                    style: TextStyle(
+                      color: theme.mutedInkColor,
+                      height: 1.45,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Icon(
+              CupertinoIcons.chevron_right,
+              color: theme.mutedInkColor,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2032,6 +2593,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     BuildContext context, {
     required Coach coach,
   }) {
+    final theme = _companyTheme;
     return _buildGlassSectionCard(
       child: Column(
         children: [
@@ -2039,7 +2601,9 @@ class _DashboardScreenState extends State<DashboardScreen>
             children: [
               CircleAvatar(
                 radius: 32,
-                backgroundColor: const Color(0xFFDCE5D4),
+                backgroundColor: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.2)
+                    : const Color(0xFFDCE5D4),
                 backgroundImage: coach.profilePic.isNotEmpty
                     ? NetworkImage(coach.profilePic)
                     : null,
@@ -2054,19 +2618,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                   children: [
                     Text(
                       coach.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF24311F),
+                        color: theme.inkColor,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       coach.bio.isEmpty ? 'Your support coach' : coach.bio,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         height: 1.35,
-                        color: Color(0xFF667460),
+                        color: theme.mutedInkColor,
                       ),
                     ),
                   ],
@@ -2086,9 +2650,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                     );
                   },
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF52624A),
+                    foregroundColor: theme.isDark
+                        ? theme.primaryColor
+                        : const Color(0xFF52624A),
                     side: BorderSide(
-                      color: const Color(0xFFD8D4C9).withOpacity(0.92),
+                      color: theme.isDark
+                          ? theme.primaryColor.withValues(alpha: 0.32)
+                          : const Color(0xFFD8D4C9).withValues(alpha: 0.92),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -2107,8 +2675,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                   label: const Text('Message'),
                   style: ElevatedButton.styleFrom(
                     elevation: 0,
-                    backgroundColor: const Color(0xFF7E9471),
-                    foregroundColor: Colors.white,
+                    backgroundColor: theme.isDark
+                        ? theme.primaryColor
+                        : const Color(0xFF7E9471),
+                    foregroundColor:
+                        theme.isDark ? theme.backgroundColor : Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -2124,6 +2695,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildMoodSection(BuildContext context) {
+    final theme = _companyTheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2144,10 +2716,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           "Choose the mood that feels closest right now.",
                           style: TextStyle(
-                            color: Color(0xFF5E6E57),
+                            color: theme.mutedInkColor,
                             height: 1.45,
                           ),
                         ),
@@ -2210,10 +2782,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                         if (_isSavingEmotion) ...[
                           const SizedBox(height: 14),
-                          const Text(
+                          Text(
                             "Saving your mood...",
                             style: TextStyle(
-                              color: Color(0xFF5E6E57),
+                              color: theme.mutedInkColor,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -2229,12 +2801,16 @@ class _DashboardScreenState extends State<DashboardScreen>
                               width: 52,
                               height: 52,
                               decoration: BoxDecoration(
-                                color: const Color(0xFFDDE7D5),
+                                color: theme.isDark
+                                    ? theme.primaryColor.withValues(alpha: 0.14)
+                                    : const Color(0xFFDDE7D5),
                                 borderRadius: BorderRadius.circular(18),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 CupertinoIcons.heart_fill,
-                                color: Color(0xFF5E7652),
+                                color: theme.isDark
+                                    ? theme.primaryColor
+                                    : const Color(0xFF5E7652),
                                 size: 24,
                               ),
                             ),
@@ -2242,20 +2818,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                             Expanded(
                               child: Text(
                                 "Today you're feeling $currentUserEmotion",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 21,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF24311F),
+                                  color: theme.inkColor,
                                 ),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
                           style: TextStyle(
-                            color: Color(0xFF5E6E57),
+                            color: theme.mutedInkColor,
                             height: 1.45,
                           ),
                         ),
@@ -2270,7 +2846,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                             );
                           },
                           style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFF6E8464),
+                            foregroundColor: theme.isDark
+                                ? theme.primaryColor
+                                : const Color(0xFF6E8464),
                             padding: EdgeInsets.zero,
                           ),
                           child: const Row(
@@ -2304,14 +2882,21 @@ class _DashboardScreenState extends State<DashboardScreen>
     required Color color,
     required VoidCallback onTap,
   }) {
+    final theme = _companyTheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.8),
+          color: theme.isDark
+              ? theme.surfaceColor.withValues(alpha: 0.92)
+              : Colors.white.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.white.withOpacity(0.76)),
+          border: Border.all(
+            color: theme.isDark
+                ? theme.primaryColor.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.76),
+          ),
         ),
         child: Column(
           children: [
@@ -2319,18 +2904,23 @@ class _DashboardScreenState extends State<DashboardScreen>
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: color,
+                color: theme.isDark ? color.withValues(alpha: 0.18) : color,
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: Icon(icon, color: const Color(0xFF4A5E45), size: 26),
+              child: Icon(
+                icon,
+                color:
+                    theme.isDark ? theme.primaryColor : const Color(0xFF4A5E45),
+                size: 26,
+              ),
             ),
             const SizedBox(height: 10),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF30402A),
+                color: theme.inkColor,
               ),
             ),
           ],
@@ -2527,4 +3117,116 @@ class _DashboardTileTransition {
   final String description;
   final IconData icon;
   final Color color;
+}
+
+class _DashboardMedalRibbon extends StatelessWidget {
+  const _DashboardMedalRibbon({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipPath(
+      clipper: const _DashboardMedalRibbonClipper(),
+      child: Container(
+        width: 28,
+        height: 40,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              color.withValues(alpha: 0.92),
+              Color.alphaBlend(Colors.black.withValues(alpha: 0.35), color),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardMedalBodyClipper extends CustomClipper<Path> {
+  const _DashboardMedalBodyClipper();
+
+  @override
+  Path getClip(Size size) {
+    return Path()
+      ..moveTo(size.width * 0.5, 0)
+      ..lineTo(size.width * 0.73, size.height * 0.08)
+      ..lineTo(size.width * 0.92, size.height * 0.28)
+      ..lineTo(size.width, size.height * 0.56)
+      ..lineTo(size.width * 0.84, size.height * 0.86)
+      ..lineTo(size.width * 0.5, size.height)
+      ..lineTo(size.width * 0.16, size.height * 0.86)
+      ..lineTo(0, size.height * 0.56)
+      ..lineTo(size.width * 0.08, size.height * 0.28)
+      ..lineTo(size.width * 0.27, size.height * 0.08)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+class _DashboardMedalRibbonClipper extends CustomClipper<Path> {
+  const _DashboardMedalRibbonClipper();
+
+  @override
+  Path getClip(Size size) {
+    return Path()
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(size.width * 0.5, size.height * 0.76)
+      ..lineTo(0, size.height)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+class _DashboardStreakMedalData {
+  const _DashboardStreakMedalData({
+    required this.type,
+    required this.currentStreak,
+    required this.unlockedCount,
+    required this.totalCount,
+    required this.tier,
+  });
+
+  final ActivityStreakType type;
+  final int currentStreak;
+  final int unlockedCount;
+  final int totalCount;
+  final String tier;
+
+  factory _DashboardStreakMedalData.fromUserData(
+    ActivityStreakType type,
+    Map<String, dynamic> userData,
+  ) {
+    final storedCurrentStreak = ActivityStreakService.readInt(
+      userData[ActivityStreakService.currentFieldFor(type)],
+    );
+    final currentStreak = ActivityStreakService.activeCurrentStreak(
+      lastDate: userData[ActivityStreakService.lastDateFieldFor(type)],
+      currentStreak: storedCurrentStreak,
+    );
+    final rewards = ActivityStreakService.readRewards(
+      userData[ActivityStreakService.rewardsFieldFor(type)],
+    );
+    final milestones = ActivityStreakService.milestonesFor(type);
+    final unlockedMilestones = milestones
+        .where((milestone) => rewards.containsKey(milestone.id))
+        .toList();
+
+    return _DashboardStreakMedalData(
+      type: type,
+      currentStreak: currentStreak,
+      unlockedCount: unlockedMilestones.length,
+      totalCount: milestones.length,
+      tier:
+          unlockedMilestones.isEmpty ? 'Locked' : unlockedMilestones.last.tier,
+    );
+  }
 }

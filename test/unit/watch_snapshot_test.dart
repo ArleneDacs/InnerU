@@ -50,27 +50,27 @@ void main() {
     test('small delta within interval does not sync', () {
       final gate = StepSyncGate();
       gate.shouldSync(10, t0);
-      expect(gate.shouldSync(50, t0.add(const Duration(minutes: 1))), isFalse);
+      expect(gate.shouldSync(15, t0.add(const Duration(seconds: 10))), isFalse);
     });
 
-    test('delta of 100 or more syncs', () {
+    test('delta of 10 or more syncs', () {
       final gate = StepSyncGate();
       gate.shouldSync(10, t0);
-      expect(gate.shouldSync(110, t0.add(const Duration(seconds: 5))), isTrue);
+      expect(gate.shouldSync(20, t0.add(const Duration(seconds: 5))), isTrue);
     });
 
-    test('small delta after 5 minutes syncs', () {
+    test('small delta after 30 seconds syncs', () {
       final gate = StepSyncGate();
       gate.shouldSync(10, t0);
-      expect(gate.shouldSync(11, t0.add(const Duration(minutes: 5))), isTrue);
+      expect(gate.shouldSync(11, t0.add(const Duration(seconds: 30))), isTrue);
     });
 
     test('gate rebases after a granted sync', () {
       final gate = StepSyncGate();
       gate.shouldSync(10, t0);
-      gate.shouldSync(110, t0.add(const Duration(minutes: 1)));
+      gate.shouldSync(20, t0.add(const Duration(seconds: 10)));
       expect(
-        gate.shouldSync(150, t0.add(const Duration(minutes: 2))),
+        gate.shouldSync(25, t0.add(const Duration(seconds: 15))),
         isFalse,
       );
     });

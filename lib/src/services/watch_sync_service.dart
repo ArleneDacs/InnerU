@@ -48,9 +48,20 @@ class WatchSyncService {
     });
   }
 
-  void syncMood(String mood, DateTime at) {
+  /// Live meditation session state. While active the watch shows a
+  /// countdown to [endsAt], ticking locally without further updates.
+  void syncMeditationSession({required bool active, DateTime? endsAt}) {
     if (!_enabled) return;
-    _push({'mood': mood, 'moodAtMs': at.millisecondsSinceEpoch});
+    _push({
+      'meditationActive': active,
+      if (active && endsAt != null)
+        'meditationEndsAtMs': endsAt.millisecondsSinceEpoch,
+    });
+  }
+
+  void syncMood(String mood, [DateTime? at]) {
+    if (!_enabled) return;
+    _push({'mood': mood, if (at != null) 'moodAtMs': at.millisecondsSinceEpoch});
   }
 
   void _push(Map<String, Object?> updates) {
@@ -63,9 +74,14 @@ class WatchSyncService {
     try {
       if (!await _watch.isSupported) return;
       if (!await _watch.isPaired) return;
-      await _watch.updateApplicationContext(
-        Map<String, dynamic>.from(_snapshot.data),
-      );
+      final payload = Map<String, dynamic>.from(_snapshot.data);
+      // Application context: persisted "latest state", delivered even if
+      // the watch app is closed.
+      await _watch.updateApplicationContext(payload);
+      // Live message: instant delivery while the watch app is open.
+      if (await _watch.isReachable) {
+        await _watch.sendMessage(payload);
+      }
     } catch (error) {
       debugPrint('Watch sync failed: $error');
     }

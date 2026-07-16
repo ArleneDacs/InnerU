@@ -16,6 +16,8 @@ struct WatchState {
     var fastingGoalHours: Int?
     var meditatedOn: String?
     var meditationStreak: Int = 0
+    var meditationActive: Bool = false
+    var meditationEndsAt: Date?
     var mood: String?
     var moodAt: Date?
 
@@ -34,6 +36,12 @@ struct WatchState {
         fastingGoalHours = dict["fastingGoalHours"] as? Int
         meditatedOn = dict["meditatedOn"] as? String
         meditationStreak = dict["meditationStreak"] as? Int ?? 0
+        meditationActive = dict["meditationActive"] as? Bool ?? false
+        if let ms = dict["meditationEndsAtMs"] as? Double {
+            meditationEndsAt = Date(timeIntervalSince1970: ms / 1000)
+        } else if let ms = dict["meditationEndsAtMs"] as? Int {
+            meditationEndsAt = Date(timeIntervalSince1970: Double(ms) / 1000)
+        }
         mood = dict["mood"] as? String
         if let ms = dict["moodAtMs"] as? Double {
             moodAt = Date(timeIntervalSince1970: ms / 1000)
@@ -56,6 +64,12 @@ struct WatchState {
 
     var meditatedToday: Bool {
         meditatedOn == Self.todayKey()
+    }
+
+    /// True while a phone meditation session is running and not yet expired.
+    func meditationRunning(at now: Date = Date()) -> Bool {
+        guard meditationActive, let endsAt = meditationEndsAt else { return false }
+        return endsAt > now
     }
 
     static func loadFromSharedStore() -> WatchState {

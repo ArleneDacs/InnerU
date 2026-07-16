@@ -15,7 +15,7 @@ struct ContentView: View {
 
                 card(title: "Steps", detail: stepsDetail)
                 fastingCard
-                card(title: "Meditate", detail: meditationDetail)
+                meditationCard
                 card(title: "Mood", detail: moodDetail)
             }
             .padding(.horizontal, 4)
@@ -52,7 +52,18 @@ struct ContentView: View {
         return "\(elapsed) elapsed"
     }
 
-    private var meditationDetail: String {
+    private var meditationCard: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            card(title: "Meditate", detail: meditationDetail(at: context.date))
+        }
+    }
+
+    private func meditationDetail(at now: Date) -> String {
+        if connector.state.meditationRunning(at: now),
+           let endsAt = connector.state.meditationEndsAt {
+            let seconds = max(0, Int(endsAt.timeIntervalSince(now)))
+            return String(format: "%d:%02d left", seconds / 60, seconds % 60)
+        }
         guard connector.state.meditatedToday else {
             return "Not yet today"
         }
