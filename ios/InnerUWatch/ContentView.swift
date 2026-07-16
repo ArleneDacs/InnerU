@@ -22,6 +22,7 @@ struct ContentView: View {
     @StateObject private var connector = PhoneConnector()
     @StateObject private var stepCounter = WatchStepCounter()
     @StateObject private var meditationSession = WatchMeditationSession()
+    @StateObject private var trackRecorder = WatchTrackRecorder()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -36,6 +37,17 @@ struct ContentView: View {
                             tint: InnerUTheme.steps,
                             title: "Steps",
                             detail: stepsDetail
+                        )
+                    }
+
+                    NavigationLink {
+                        TrackMapView(recorder: trackRecorder)
+                    } label: {
+                        CardView(
+                            icon: "map.fill",
+                            tint: InnerUTheme.accent,
+                            title: "Track",
+                            detail: trackDetail
                         )
                     }
 
@@ -109,6 +121,12 @@ struct ContentView: View {
             format: "%@ of %@ · %.2f km",
             steps.formatted(), goal.formatted(), km
         )
+    }
+
+    private var trackDetail: String {
+        guard trackRecorder.isTracking else { return "Record a walk route" }
+        let km = trackRecorder.distanceMeters / 1000
+        return String(format: "Tracking · %.2f km", km)
     }
 
     private func fastingDetail(at now: Date) -> String {

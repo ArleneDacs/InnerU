@@ -145,6 +145,8 @@ class WatchStepsReceiver {
         await _recordMeditation(user, seconds, at);
       case 'logMood':
         await _logMood(user, command['mood'] as String?, at);
+      case 'trackCompleted':
+        await _saveWatchTrack(user, command, at);
       default:
         debugPrint('Unknown watch command: $type');
     }
@@ -253,6 +255,57 @@ class WatchStepsReceiver {
 
     await MeditationStreakService()
         .recordCompletedSession(userId: user.uid, completedAt: at);
+  }
+
+  /// Saves a route recorded on the watch as a solo walk session, using
+  /// the same shape the phone's map tracker writes.
+  Future<void> _saveWatchTrack(
+    User user,
+    Map<String, dynamic> command,
+    DateTime at,
+  ) async {
+    final distance = (command['distanceMeters'] as num?)?.toDouble() ?? 0;
+    final seconds = (command['elapsedSeconds'] as num?)?.toInt() ?? 0;
+    final points = <Map<String, double>>[];
+    final rawPoints = command['routePoints'];
+    if (rawPoints is List) {
+      for (final point in rawPoints) {
+        if (point is Map) {
+          final lat = (point['latitude'] as num?)?.toDouble();
+          final lng = (point['longitude'] as num?)?.toDouble();
+          if (lat != null && lng != null) {
+            points.add({'latitude': lat, 'longitude': lng});
+          }
+        }
+      }
+    }
+    if (points.length < 2) return;
+
+    final firestore = FirebaseFirestore.instance;
+    final userDoc = await firestore.collection('users').doc(user.uid).get();
+    final username = (userDoc.data()?['username'] as String?) ?? 'Walker';
+
+    final sessionRef = firestore.collection('walk_sessions').doc();
+    await sessionRef.set({
+      'createdBy': user.uid,
+      'source': 'watch',
+      'createdAt': Timestamp.fromDate(at),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await sessionRef.collection('members').doc(user.uid).set({
+      'userId': user.uid,
+      'username': username,
+      'status': 'accepted',
+      'isTracking': false,
+      'distanceMeters': distance,
+      'elapsedSeconds': seconds,
+      'routePoints': points,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    debugPrint(
+      'Saved watch track: ${points.length} points, '
+      '${distance.toStringAsFixed(0)} m, ${seconds}s',
+    );
   }
 
   Future<void> _logMood(User user, String? mood, DateTime at) async {

@@ -20,6 +20,7 @@ raise 'InnerUWatch group not found' unless watch_group
   WatchStepCounter.swift
   CardDetailViews.swift
   WatchToPhoneSync.swift
+  TrackMapView.swift
 ].each do |file_name|
   next if watch_group.files.any? { |f| f.path == file_name }
   file_ref = watch_group.new_reference(file_name)
