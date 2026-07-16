@@ -103,10 +103,12 @@ struct StepsDetailView: View {
                 }
 
                 NavigationLink {
-                    TrackMapView(recorder: trackRecorder)
+                    TrackMapView(recorder: trackRecorder, connector: connector)
                 } label: {
                     Label(
-                        trackRecorder.isTracking ? "Tracking…" : "Track walk",
+                        trackRecorder.isTracking || connector.state.trackActive
+                            ? "Tracking…"
+                            : "Track walk",
                         systemImage: "map.fill"
                     )
                 }

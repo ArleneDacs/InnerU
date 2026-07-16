@@ -15,6 +15,7 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -644,7 +645,31 @@ class _StepMapTrackingController extends ChangeNotifier {
     await syncSharedSessionMember();
   }
 
+  /// The watch mirrors the phone's live track; keep its payload small.
+  List<List<double>> _watchTrackPoints() {
+    const maxPoints = 120;
+    var points = routePoints;
+    if (points.length > maxPoints) {
+      final stride = (points.length - 1) / (maxPoints - 1);
+      points = List<LatLng>.generate(
+        maxPoints,
+        (index) => routePoints[(index * stride).round()],
+      );
+    }
+    return points
+        .map((point) => [point.latitude, point.longitude])
+        .toList();
+  }
+
   Future<void> syncSharedSessionMember() async {
+    WatchSyncService.instance.syncTrack(
+      active: isTracking,
+      points: _watchTrackPoints(),
+      distanceMeters: distanceMeters,
+      startedAt: startedAt,
+      steps: sessionSteps,
+    );
+
     final userId = currentUserId;
     final sessionId = activeSessionId;
     if (userId == null || sessionId == null) return;
@@ -836,6 +861,7 @@ class _StepMapTrackingController extends ChangeNotifier {
     currentUsername = 'Walker';
     activeSessionId = null;
     _lastNotificationElapsedSeconds = -1;
+    WatchSyncService.instance.syncTrack(active: false);
     _emit();
   }
 

@@ -39,6 +39,13 @@ struct WatchState {
     var stepAwards: [String] = []
     var moodLogs: [MoodLog] = []
 
+    /// Live mirror of the phone's map-tracker walk.
+    var trackActive: Bool = false
+    var trackPoints: [[Double]] = []
+    var trackDistanceM: Double = 0
+    var trackStartedAt: Date?
+    var trackSteps: Int = 0
+
     init() {}
 
     init(dict: [String: Any]) {
@@ -71,6 +78,24 @@ struct WatchState {
         stepStreak = dict["stepStreak"] as? Int ?? 0
         stepAwards = dict["stepAwards"] as? [String] ?? []
         moodLogs = Self.parseMoodLogs(dict["moodLogs"])
+        trackActive = dict["trackActive"] as? Bool ?? false
+        if let rawPoints = dict["trackPoints"] as? [[Any]] {
+            trackPoints = rawPoints.compactMap { pair in
+                guard pair.count >= 2,
+                      let lat = (pair[0] as? Double) ?? (pair[0] as? Int).map(Double.init),
+                      let lng = (pair[1] as? Double) ?? (pair[1] as? Int).map(Double.init)
+                else { return nil }
+                return [lat, lng]
+            }
+        }
+        trackDistanceM = (dict["trackDistanceM"] as? Double)
+            ?? Double(dict["trackDistanceM"] as? Int ?? 0)
+        if let ms = dict["trackStartedAtMs"] as? Double {
+            trackStartedAt = Date(timeIntervalSince1970: ms / 1000)
+        } else if let ms = dict["trackStartedAtMs"] as? Int {
+            trackStartedAt = Date(timeIntervalSince1970: Double(ms) / 1000)
+        }
+        trackSteps = dict["trackSteps"] as? Int ?? 0
     }
 
     private static func dayValues(_ raw: Any?) -> [DayValue] {

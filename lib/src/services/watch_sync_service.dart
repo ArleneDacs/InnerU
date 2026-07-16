@@ -71,6 +71,26 @@ class WatchSyncService {
     _push(data);
   }
 
+  /// Mirrors the phone's live walk track (map tracker) to the watch:
+  /// [points] are `[lat, lng]` pairs, already downsampled by the caller.
+  void syncTrack({
+    required bool active,
+    List<List<double>> points = const [],
+    double distanceMeters = 0,
+    DateTime? startedAt,
+    int steps = 0,
+  }) {
+    if (!_enabled) return;
+    _push({
+      'trackActive': active,
+      'trackPoints': active ? points : const <List<double>>[],
+      'trackDistanceM': active ? distanceMeters : 0,
+      if (active && startedAt != null)
+        'trackStartedAtMs': startedAt.millisecondsSinceEpoch,
+      'trackSteps': active ? steps : 0,
+    });
+  }
+
   void _push(Map<String, Object?> updates) {
     _snapshot.merge(updates);
     _snapshot.merge({'updatedAtMs': DateTime.now().millisecondsSinceEpoch});

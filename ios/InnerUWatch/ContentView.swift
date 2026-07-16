@@ -45,7 +45,7 @@ struct ContentView: View {
                     }
 
                     NavigationLink {
-                        TrackMapView(recorder: trackRecorder)
+                        TrackMapView(recorder: trackRecorder, connector: connector)
                     } label: {
                         CardView(
                             icon: "map.fill",
@@ -128,9 +128,15 @@ struct ContentView: View {
     }
 
     private var trackDetail: String {
-        guard trackRecorder.isTracking else { return "Record a walk route" }
-        let km = trackRecorder.distanceMeters / 1000
-        return String(format: "Tracking · %.2f km", km)
+        if trackRecorder.isTracking {
+            let km = trackRecorder.distanceMeters / 1000
+            return String(format: "Tracking · %.2f km", km)
+        }
+        if connector.state.trackActive {
+            let km = connector.state.trackDistanceM / 1000
+            return String(format: "Tracking on phone · %.2f km", km)
+        }
+        return "Record a walk route"
     }
 
     private func fastingDetail(at now: Date) -> String {
