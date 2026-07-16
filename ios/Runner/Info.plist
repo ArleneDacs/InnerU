@@ -52,6 +52,8 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>dev.flutter.background.refresh</string>
@@ -60,6 +62,8 @@
 	<string>Allow InnerU to scan barcodes and capture meal photos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Allow InnerU to show your walking route and track step sessions on the map.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow InnerU to track your walking route during active step sessions, including when the app needs to keep the session running.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow InnerU to access the microphone when media features need audio input.</string>
 	<key>NSMotionUsageDescription</key>
@@ -96,6 +100,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
