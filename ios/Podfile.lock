@@ -1439,6 +1439,8 @@ PODS:
   - video_player_avfoundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - watch_connectivity (0.0.1):
+    - Flutter
   - webview_flutter_wkwebview (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -1471,6 +1473,7 @@ DEPENDENCIES:
   - spotify_sdk (from `.symlinks/plugins/spotify_sdk/ios`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
+  - watch_connectivity (from `.symlinks/plugins/watch_connectivity/ios`)
   - webview_flutter_wkwebview (from `.symlinks/plugins/webview_flutter_wkwebview/darwin`)
 
 SPEC REPOS:
@@ -1558,6 +1561,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
   video_player_avfoundation:
     :path: ".symlinks/plugins/video_player_avfoundation/darwin"
+  watch_connectivity:
+    :path: ".symlinks/plugins/watch_connectivity/ios"
   webview_flutter_wkwebview:
     :path: ".symlinks/plugins/webview_flutter_wkwebview/darwin"
 
@@ -1616,8 +1621,9 @@ SPEC CHECKSUMS:
   spotify_sdk: a48400bb29f70c4fe251ebfdc9135c37097ac5ca
   url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
   video_player_avfoundation: 2cef49524dd1f16c5300b9cd6efd9611ce03639b
+  watch_connectivity: 208552a93286b3307a5359212a6bcaa44c4deaec
   webview_flutter_wkwebview: 8ebf4fded22593026f7dbff1fbff31ea98573c8d
 
-PODFILE CHECKSUM: a7a08150c27e89db1ea4ee15995ca35ee7bac68a
+PODFILE CHECKSUM: 13e2be85452679cc1e6b259e72556b13f3bed578
 
 COCOAPODS: 1.16.2
