@@ -7,14 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0B98FBA721B58CE726EB97E8 /* InnerUWatchWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
+		30CDD9A8BDABD77AD68B8A81 /* InnerUWatchWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 222A6BCE991E25B4E2544C4D /* InnerUWatchWidget.swift */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		33208DBE016D2DD8CDBB3E03 /* WatchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6F4A3BC494DF5D753786CF /* WatchState.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
+		7F06927D607B794C0E6686D6 /* WatchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6F4A3BC494DF5D753786CF /* WatchState.swift */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		9B7D1A670C6392497CDEC958 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1057657EC20B1A6EB92FB73B /* Foundation.framework */; };
 		A10000000000000000000000 /* InnerUWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* InnerUWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* ContentView.swift */; };
 		A10000000000000000000002 /* InnerUWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* InnerUWatchApp.swift */; };
@@ -26,6 +30,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		0BF4D2250CAB6C8F7FD9912F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB4BA949373A9B071D44C7AB;
+			remoteInfo = InnerUWatchWidget;
+		};
 		331C8085294A63A400263BE5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
@@ -64,11 +75,24 @@
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B5656BBBD879AC17696ECDDA /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0B98FBA721B58CE726EB97E8 /* InnerUWatchWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		1057657EC20B1A6EB92FB73B /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
+		222A6BCE991E25B4E2544C4D /* InnerUWatchWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InnerUWatchWidget.swift; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
@@ -95,9 +119,18 @@
 		B1D92A842DF670D46761364C /* PhoneConnector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhoneConnector.swift; sourceTree = "<group>"; };
 		B4203D800292EAAA985FB9AE /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA618DB3DBC4FF68E577A60E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
+		FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InnerUWatchWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		45B4406000B103278F879121 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B7D1A670C6392497CDEC958 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		97C146EB1CF9000F007C117D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -121,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				B4203D800292EAAA985FB9AE /* Pods_Runner.framework */,
+				EF06604731D446BBBA8FFD00 /* watchOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -146,6 +180,7 @@
 				331C8082294A63A400263BE5 /* RunnerTests */,
 				ADC4B303152A9A7AA4A206E7 /* Pods */,
 				529AF3058A8873CFBCAE013B /* Frameworks */,
+				A595AA3B224BD33AE99688DC /* InnerUWatchWidget */,
 			);
 			sourceTree = "<group>";
 		};
@@ -155,6 +190,7 @@
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				A10000000000000000000013 /* InnerUWatch.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
+				FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -189,6 +225,15 @@
 			path = InnerUWatch;
 			sourceTree = "<group>";
 		};
+		A595AA3B224BD33AE99688DC /* InnerUWatchWidget */ = {
+			isa = PBXGroup;
+			children = (
+				222A6BCE991E25B4E2544C4D /* InnerUWatchWidget.swift */,
+			);
+			name = InnerUWatchWidget;
+			path = InnerUWatchWidget;
+			sourceTree = "<group>";
+		};
 		ADC4B303152A9A7AA4A206E7 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
@@ -197,6 +242,14 @@
 				CA618DB3DBC4FF68E577A60E /* Pods-Runner.profile.xcconfig */,
 			);
 			path = Pods;
+			sourceTree = "<group>";
+		};
+		EF06604731D446BBBA8FFD00 /* watchOS */ = {
+			isa = PBXGroup;
+			children = (
+				1057657EC20B1A6EB92FB73B /* Foundation.framework */,
+			);
+			name = watchOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -251,15 +304,34 @@
 			buildPhases = (
 				A10000000000000000000040 /* Sources */,
 				A10000000000000000000041 /* Resources */,
+				B5656BBBD879AC17696ECDDA /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F3E6E5C5C007EC29B7573B64 /* PBXTargetDependency */,
 			);
 			name = InnerUWatch;
 			productName = InnerUWatch;
 			productReference = A10000000000000000000013 /* InnerUWatch.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AB4BA949373A9B071D44C7AB /* InnerUWatchWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2BF170B49F98CF2BD28DAF3D /* Build configuration list for PBXNativeTarget "InnerUWatchWidget" */;
+			buildPhases = (
+				C7F958FD39C5B03C9482672F /* Sources */,
+				45B4406000B103278F879121 /* Frameworks */,
+				E88F8E13E68C293116277563 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = InnerUWatchWidget;
+			productName = InnerUWatchWidget;
+			productReference = FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -300,6 +372,7 @@
 				97C146ED1CF9000F007C117D /* Runner */,
 				A10000000000000000000050 /* InnerUWatch */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
+				AB4BA949373A9B071D44C7AB /* InnerUWatchWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -330,6 +403,13 @@
 				A10000000000000000000003 /* Assets.xcassets in Resources */,
 				A10000000000000000000100 /* Icon-App-44x44@2x.png in Resources */,
 				A10000000000000000000101 /* Icon-App-50x50@2x.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E88F8E13E68C293116277563 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -470,6 +550,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C7F958FD39C5B03C9482672F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				30CDD9A8BDABD77AD68B8A81 /* InnerUWatchWidget.swift in Sources */,
+				7F06927D607B794C0E6686D6 /* WatchState.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -482,6 +571,12 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000050 /* InnerUWatch */;
 			targetProxy = A10000000000000000000009 /* PBXContainerItemProxy */;
+		};
+		F3E6E5C5C007EC29B7573B64 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = InnerUWatchWidget;
+			target = AB4BA949373A9B071D44C7AB /* InnerUWatchWidget */;
+			targetProxy = 0BF4D2250CAB6C8F7FD9912F /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -627,6 +722,59 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
 			};
 			name = Profile;
+		};
+		46AE195A98284920F8FE271C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InnerUWatchWidget/InnerUWatchWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 965T647JG7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = InnerUWatchWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.valenin.inneru.watchkitapp.widget;
+				PRODUCT_NAME = InnerUWatchWidget;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		5F6AC998943038A15B2C5404 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InnerUWatchWidget/InnerUWatchWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 965T647JG7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = InnerUWatchWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.valenin.inneru.watchkitapp.widget;
+				PRODUCT_NAME = InnerUWatchWidget;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
 		};
 		97C147031CF9000F007C117D /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -892,9 +1040,46 @@
 			};
 			name = Profile;
 		};
+		C1875E95D70F5E78AAA34CE5 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InnerUWatchWidget/InnerUWatchWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 965T647JG7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = InnerUWatchWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.valenin.inneru.watchkitapp.widget;
+				PRODUCT_NAME = InnerUWatchWidget;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Profile;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		2BF170B49F98CF2BD28DAF3D /* Build configuration list for PBXNativeTarget "InnerUWatchWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				46AE195A98284920F8FE271C /* Release */,
+				5F6AC998943038A15B2C5404 /* Debug */,
+				C1875E95D70F5E78AAA34CE5 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		331C8087294A63A400263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
