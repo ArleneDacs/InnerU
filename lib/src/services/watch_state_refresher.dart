@@ -31,7 +31,7 @@ class WatchStateRefresher {
     }
 
     await Future.wait([
-      _refreshSteps(userId, userData),
+      _refreshSteps(userId, userData, membership),
       _refreshMood(userId),
       _refreshMeditation(userId, userData, membership),
       _refreshFasting(userId),
@@ -65,22 +65,38 @@ class WatchStateRefresher {
         .toList();
   }
 
+  /// Today's live progress lives in `dailytracker.stepCount` (the same
+  /// source the step screen shows); `steps/{uid}/tracking` only gets a
+  /// day's total at rollover, so it can't be the source for today.
+  Future<int> _remoteTodaySteps(
+    String userId,
+    CompanyMembership? membership,
+  ) async {
+    final today = dayKey(DateTime.now());
+    final scopedDocId = CompanyMembershipService.scopedDailyDocId(
+      uid: userId,
+      date: today,
+      membership: membership,
+    );
+    final doc =
+        await _firestore.collection('dailytracker').doc(scopedDocId).get();
+    var value = (doc.data()?['stepCount'] as num?)?.toInt();
+    if (value == null && scopedDocId != '$userId-$today') {
+      final legacyDoc = await _firestore
+          .collection('dailytracker')
+          .doc('$userId-$today')
+          .get();
+      value = (legacyDoc.data()?['stepCount'] as num?)?.toInt();
+    }
+    return value ?? 0;
+  }
+
   Future<void> _refreshSteps(
     String userId,
     Map<String, dynamic> userData,
+    CompanyMembership? membership,
   ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final owner = prefs.getString(SessionCleanupService.stepCacheOwnerKey);
-      if (owner == userId) {
-        final steps =
-            prefs.getInt(SessionCleanupService.savedStepsKey(userId));
-        if (steps != null) {
-          final goal = prefs.getInt('daily_step_goal_$userId');
-          WatchSyncService.instance.syncSteps(steps, goal: goal);
-        }
-      }
-
       final weekly = <Map<String, Object>>[];
       for (final key in _lastSevenDayKeys()) {
         final doc = await _firestore
@@ -94,6 +110,23 @@ class WatchStateRefresher {
           'v': (doc.data()?['steps'] as num?)?.toInt() ?? 0,
         });
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      // The local step cache is only trustworthy if it belongs to this
+      // user; today's dailytracker doc is the fallback (synced from any
+      // device, including the watch itself).
+      final owner = prefs.getString(SessionCleanupService.stepCacheOwnerKey);
+      final localSteps = owner == userId
+          ? prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0
+          : 0;
+      final remoteToday = await _remoteTodaySteps(userId, membership);
+      final historyToday = weekly.last['v'] as int;
+      final steps = [localSteps, remoteToday, historyToday]
+          .reduce((a, b) => a > b ? a : b);
+      weekly.last['v'] = steps;
+      // The goal is stored per-user, so it needs no ownership check.
+      final goal = prefs.getInt('daily_step_goal_$userId');
+      WatchSyncService.instance.syncSteps(steps, goal: goal, force: true);
 
       WatchSyncService.instance.syncExtras({
         'weeklySteps': weekly,

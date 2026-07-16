@@ -19,10 +19,10 @@ class WatchSyncService {
 
   bool get _enabled => !kIsWeb && Platform.isIOS;
 
-  void syncSteps(int steps, {int? goal}) {
+  void syncSteps(int steps, {int? goal, bool force = false}) {
     if (!_enabled) return;
     final now = DateTime.now();
-    if (!_stepGate.shouldSync(steps, now)) return;
+    if (!force && !_stepGate.shouldSync(steps, now)) return;
     _push({
       'steps': steps,
       if (goal != null) 'stepGoal': goal,

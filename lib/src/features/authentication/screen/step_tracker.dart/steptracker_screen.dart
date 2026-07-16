@@ -178,6 +178,7 @@ class _StepTrackerState extends State<StepTracker>
     _lastRawStepCount = _steps;
     _lastStepEventAt = null;
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
+    WatchSyncService.instance.syncSteps(_steps, goal: _dailyGoal, force: true);
 
     if (mounted && !_isDisposed) {
       setState(() {
