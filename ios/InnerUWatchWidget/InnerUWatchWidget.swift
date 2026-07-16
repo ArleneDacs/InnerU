@@ -58,7 +58,8 @@ struct InnerUWidgetView: View {
 
     private var stepsLine: String {
         guard let steps = entry.state.displaySteps else { return "No steps yet" }
-        return "\(steps.formatted()) steps"
+        let km = Double(steps) * 0.67 / 1000
+        return String(format: "%@ steps · %.2f km", steps.formatted(), km)
     }
 
     private var bottomLine: String {

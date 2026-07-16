@@ -8,31 +8,66 @@ struct StepsDetailView: View {
     @ObservedObject var stepCounter: WatchStepCounter
     @State private var synced = false
 
-    private var steps: Int? {
+    /// Same formulas as the phone app's step tracker (tracking.dart).
+    private static let strideMetersPerStep = 0.67
+    private static let kcalPerStep = 0.04
+    private static let defaultGoal = 5000
+
+    private var steps: Int {
         [connector.state.stepsToday, stepCounter.stepsToday]
             .compactMap { $0 }
-            .max()
+            .max() ?? 0
+    }
+
+    private var goal: Int {
+        connector.state.stepGoal ?? Self.defaultGoal
+    }
+
+    private var distanceKm: Double {
+        Double(steps) * Self.strideMetersPerStep / 1000
+    }
+
+    private var calories: Int {
+        Int((Double(steps) * Self.kcalPerStep).rounded())
+    }
+
+    private var distanceText: String {
+        String(format: distanceKm >= 10 ? "%.1f km" : "%.2f km", distanceKm)
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
-                Text("\((steps ?? 0).formatted())")
+                Text("\(steps.formatted())")
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(InnerUTheme.steps)
+                    .contentTransition(.numericText())
 
                 Text("steps today")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                if let goal = connector.state.stepGoal, goal > 0 {
-                    Gauge(value: Double(min(steps ?? 0, goal)), in: 0...Double(goal)) {
-                        EmptyView()
-                    }
-                    .tint(InnerUTheme.steps)
-                    Text("Goal: \(goal.formatted())")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                Gauge(value: Double(min(steps, goal)), in: 0...Double(max(goal, 1))) {
+                    EmptyView()
+                }
+                .tint(InnerUTheme.steps)
+                Text("Goal: \(goal.formatted())")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    statTile(
+                        icon: "map.fill",
+                        value: distanceText,
+                        label: "distance",
+                        tint: InnerUTheme.accent
+                    )
+                    statTile(
+                        icon: "flame.fill",
+                        value: "\(calories)",
+                        label: "kcal",
+                        tint: InnerUTheme.fasting
+                    )
                 }
 
                 if let watch = stepCounter.stepsToday {
@@ -53,6 +88,26 @@ struct StepsDetailView: View {
         }
         .containerBackground(InnerUTheme.background, for: .navigation)
         .navigationTitle("Steps")
+    }
+
+    private func statTile(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(
+            InnerUTheme.card.opacity(0.7),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 }
 

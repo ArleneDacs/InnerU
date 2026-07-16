@@ -103,10 +103,12 @@ struct ContentView: View {
         let watch = stepCounter.stepsToday
         let steps = [phone, watch].compactMap { $0 }.max()
         guard let steps else { return "No steps yet today" }
-        if let goal = connector.state.stepGoal {
-            return "\(steps.formatted()) of \(goal.formatted())"
-        }
-        return "\(steps.formatted()) steps today"
+        let goal = connector.state.stepGoal ?? 5000
+        let km = Double(steps) * 0.67 / 1000
+        return String(
+            format: "%@ of %@ · %.2f km",
+            steps.formatted(), goal.formatted(), km
+        )
     }
 
     private func fastingDetail(at now: Date) -> String {
