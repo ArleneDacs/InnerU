@@ -14,7 +14,12 @@ raise 'InnerUWatch target not found' unless watch_target
 watch_group = project.main_group.find_subpath('InnerUWatch', false)
 raise 'InnerUWatch group not found' unless watch_group
 
-%w[WatchState.swift PhoneConnector.swift].each do |file_name|
+%w[
+  WatchState.swift
+  PhoneConnector.swift
+  WatchStepCounter.swift
+  CardDetailViews.swift
+].each do |file_name|
   next if watch_group.files.any? { |f| f.path == file_name }
   file_ref = watch_group.new_reference(file_name)
   watch_target.add_file_references([file_ref])

@@ -26,7 +26,9 @@
 		A10000000000000000000100 /* Icon-App-44x44@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000102 /* Icon-App-44x44@2x.png */; };
 		A10000000000000000000101 /* Icon-App-50x50@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000103 /* Icon-App-50x50@2x.png */; };
 		E7F44B5D79A153ADCC4DC71C /* PhoneConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D92A842DF670D46761364C /* PhoneConnector.swift */; };
+		EB6F32CE38E2CE9BAFC14322 /* WatchStepCounter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08662274992881E6EEEBD61 /* WatchStepCounter.swift */; };
 		F97FB48F02861A7600F070CE /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4203D800292EAAA985FB9AE /* Pods_Runner.framework */; };
+		FD910B763F5FF00623D08AB8 /* CardDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3438503564D46AC28342994B /* CardDetailViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,6 +97,7 @@
 		222A6BCE991E25B4E2544C4D /* InnerUWatchWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InnerUWatchWidget.swift; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3438503564D46AC28342994B /* CardDetailViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CardDetailViews.swift; sourceTree = "<group>"; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
 		4E6F4A3BC494DF5D753786CF /* WatchState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchState.swift; sourceTree = "<group>"; };
 		6D32B1894D4FC8AEAF80AE12 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
@@ -119,6 +122,7 @@
 		B1D92A842DF670D46761364C /* PhoneConnector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhoneConnector.swift; sourceTree = "<group>"; };
 		B4203D800292EAAA985FB9AE /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA618DB3DBC4FF68E577A60E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
+		D08662274992881E6EEEBD61 /* WatchStepCounter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchStepCounter.swift; sourceTree = "<group>"; };
 		FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InnerUWatchWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -221,6 +225,8 @@
 				A10000000000000000000014 /* Info.plist */,
 				4E6F4A3BC494DF5D753786CF /* WatchState.swift */,
 				B1D92A842DF670D46761364C /* PhoneConnector.swift */,
+				D08662274992881E6EEEBD61 /* WatchStepCounter.swift */,
+				3438503564D46AC28342994B /* CardDetailViews.swift */,
 			);
 			path = InnerUWatch;
 			sourceTree = "<group>";
@@ -547,6 +553,8 @@
 				A10000000000000000000001 /* ContentView.swift in Sources */,
 				33208DBE016D2DD8CDBB3E03 /* WatchState.swift in Sources */,
 				E7F44B5D79A153ADCC4DC71C /* PhoneConnector.swift in Sources */,
+				EB6F32CE38E2CE9BAFC14322 /* WatchStepCounter.swift in Sources */,
+				FD910B763F5FF00623D08AB8 /* CardDetailViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

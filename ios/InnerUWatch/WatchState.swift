@@ -3,6 +3,8 @@ import Foundation
 enum SharedStore {
     static let appGroupId = "group.com.valenin.inneru.watch"
     static let snapshotKey = "watchSnapshot"
+    static let watchStepsKey = "watchStepsToday"
+    static let watchStepsDateKey = "watchStepsDate"
 }
 
 /// Parsed snapshot received from the iPhone. All fields optional —
@@ -57,9 +59,28 @@ struct WatchState {
         return formatter.string(from: date)
     }
 
-    /// Steps only count if they were recorded today.
+    /// Steps reported by the phone, only if recorded today.
     var stepsToday: Int? {
         stepsDate == Self.todayKey() ? steps : nil
+    }
+
+    /// Steps counted by the watch's own sensors, only if from today.
+    var watchSteps: Int?
+    var watchStepsDate: String?
+
+    var watchStepsToday: Int? {
+        watchStepsDate == Self.todayKey() ? watchSteps : nil
+    }
+
+    /// What to show: the higher of phone-counted and watch-counted steps.
+    /// Both devices count the same walk, so max avoids double counting.
+    var displaySteps: Int? {
+        switch (stepsToday, watchStepsToday) {
+        case let (phone?, watch?): return max(phone, watch)
+        case let (phone?, nil): return phone
+        case let (nil, watch?): return watch
+        default: return nil
+        }
     }
 
     var meditatedToday: Bool {
@@ -73,8 +94,14 @@ struct WatchState {
     }
 
     static func loadFromSharedStore() -> WatchState {
-        let dict = UserDefaults(suiteName: SharedStore.appGroupId)?
-            .dictionary(forKey: SharedStore.snapshotKey) ?? [:]
-        return WatchState(dict: dict)
+        let defaults = UserDefaults(suiteName: SharedStore.appGroupId)
+        let dict = defaults?.dictionary(forKey: SharedStore.snapshotKey) ?? [:]
+        var state = WatchState(dict: dict)
+        if let steps = defaults?.object(forKey: SharedStore.watchStepsKey) as? Int {
+            state.watchSteps = steps
+            state.watchStepsDate =
+                defaults?.string(forKey: SharedStore.watchStepsDateKey)
+        }
+        return state
     }
 }

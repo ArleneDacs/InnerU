@@ -57,7 +57,7 @@ struct InnerUWidgetView: View {
     }
 
     private var stepsLine: String {
-        guard let steps = entry.state.stepsToday else { return "No steps yet" }
+        guard let steps = entry.state.displaySteps else { return "No steps yet" }
         return "\(steps.formatted()) steps"
     }
 

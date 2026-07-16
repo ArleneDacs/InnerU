@@ -2,41 +2,77 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var connector = PhoneConnector()
+    @StateObject private var stepCounter = WatchStepCounter()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("InnerU")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 8) {
+                    NavigationLink {
+                        StepsDetailView(connector: connector, stepCounter: stepCounter)
+                    } label: {
+                        CardView(
+                            icon: "figure.walk",
+                            tint: .green,
+                            title: "Steps",
+                            detail: stepsDetail
+                        )
+                    }
 
-                Text("Quick check-in")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    NavigationLink {
+                        FastingDetailView(connector: connector)
+                    } label: {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            CardView(
+                                icon: "timer",
+                                tint: .orange,
+                                title: "Fasting",
+                                detail: fastingDetail(at: context.date)
+                            )
+                        }
+                    }
 
-                card(title: "Steps", detail: stepsDetail)
-                fastingCard
-                meditationCard
-                card(title: "Mood", detail: moodDetail)
+                    NavigationLink {
+                        MeditationDetailView(connector: connector)
+                    } label: {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            CardView(
+                                icon: "leaf.fill",
+                                tint: .teal,
+                                title: "Meditate",
+                                detail: meditationDetail(at: context.date)
+                            )
+                        }
+                    }
+
+                    NavigationLink {
+                        MoodDetailView(connector: connector)
+                    } label: {
+                        CardView(
+                            icon: "face.smiling",
+                            tint: .purple,
+                            title: "Mood",
+                            detail: moodDetail
+                        )
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 4)
+            .navigationTitle("InnerU")
         }
+        .onAppear { stepCounter.start() }
     }
 
     private var stepsDetail: String {
-        guard let steps = connector.state.stepsToday else {
-            return "No steps yet today"
-        }
-        let formatted = steps.formatted()
+        let phone = connector.state.stepsToday
+        let watch = stepCounter.stepsToday
+        let steps = [phone, watch].compactMap { $0 }.max()
+        guard let steps else { return "No steps yet today" }
         if let goal = connector.state.stepGoal {
-            return "\(formatted) of \(goal.formatted()) steps"
+            return "\(steps.formatted()) of \(goal.formatted())"
         }
-        return "\(formatted) steps today"
-    }
-
-    private var fastingCard: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            card(title: "Fasting", detail: fastingDetail(at: context.date))
-        }
+        return "\(steps.formatted()) steps today"
     }
 
     private func fastingDetail(at now: Date) -> String {
@@ -50,12 +86,6 @@ struct ContentView: View {
             return "\(elapsed) of \(goal)h"
         }
         return "\(elapsed) elapsed"
-    }
-
-    private var meditationCard: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            card(title: "Meditate", detail: meditationDetail(at: context.date))
-        }
     }
 
     private func meditationDetail(at now: Date) -> String {
@@ -81,18 +111,41 @@ struct ContentView: View {
         }
         return detail
     }
+}
 
-    private func card(title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.headline)
-            Text(detail)
+struct CardView: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(tint)
+                .frame(width: 26)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color.green.opacity(0.18))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            tint.opacity(0.16),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
