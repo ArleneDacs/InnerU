@@ -64,6 +64,13 @@ class WatchSyncService {
     _push({'mood': mood, if (at != null) 'moodAtMs': at.millisecondsSinceEpoch});
   }
 
+  /// Pushes additional snapshot keys (weekly summaries, awards, logs).
+  /// Values must be property-list-safe (numbers, strings, lists, maps).
+  void syncExtras(Map<String, Object?> data) {
+    if (!_enabled) return;
+    _push(data);
+  }
+
   void _push(Map<String, Object?> updates) {
     _snapshot.merge(updates);
     _snapshot.merge({'updatedAtMs': DateTime.now().millisecondsSinceEpoch});

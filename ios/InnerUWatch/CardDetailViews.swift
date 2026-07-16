@@ -1,11 +1,37 @@
 import SwiftUI
 import WatchKit
 
+// MARK: - Shared components
+
+/// Seven-day mini bar chart used by the Steps and Meditate details.
+struct WeeklyBars: View {
+    let data: [WatchState.DayValue]
+    let tint: Color
+
+    var body: some View {
+        let peak = max(data.map(\.value).max() ?? 0, 1)
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(Array(data.enumerated()), id: \.offset) { _, day in
+                VStack(spacing: 2) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(day.value > 0 ? tint : tint.opacity(0.2))
+                        .frame(height: max(3, 28 * CGFloat(day.value) / CGFloat(peak)))
+                    Text(WatchState.weekdayLetter(for: day.date))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 // MARK: - Steps
 
 struct StepsDetailView: View {
     @ObservedObject var connector: PhoneConnector
     @ObservedObject var stepCounter: WatchStepCounter
+    @ObservedObject var trackRecorder: WatchTrackRecorder
     @State private var synced = false
 
     /// Same formulas as the phone app's step tracker (tracking.dart).
@@ -76,6 +102,39 @@ struct StepsDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                NavigationLink {
+                    TrackMapView(recorder: trackRecorder)
+                } label: {
+                    Label(
+                        trackRecorder.isTracking ? "Tracking…" : "Track walk",
+                        systemImage: "map.fill"
+                    )
+                }
+                .tint(InnerUTheme.accent)
+
+                if !connector.state.weeklySteps.isEmpty {
+                    sectionHeader("This week")
+                    WeeklyBars(data: connector.state.weeklySteps, tint: InnerUTheme.steps)
+                    Text("\(weeklyTotal.formatted()) steps · \(weeklyGoalDays) days on goal")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if connector.state.stepStreak > 0 || !connector.state.stepAwards.isEmpty {
+                    sectionHeader("Awards")
+                    if connector.state.stepStreak > 0 {
+                        Label("\(connector.state.stepStreak)-day streak",
+                              systemImage: "flame.fill")
+                            .font(.caption)
+                            .foregroundStyle(InnerUTheme.fasting)
+                    }
+                    ForEach(connector.state.stepAwards, id: \.self) { award in
+                        Label(award, systemImage: "medal.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                    }
+                }
+
                 Button {
                     WatchToPhoneSync.shared.flush()
                     synced = true
@@ -88,6 +147,22 @@ struct StepsDetailView: View {
         }
         .containerBackground(InnerUTheme.background, for: .navigation)
         .navigationTitle("Steps")
+    }
+
+    private var weeklyTotal: Int {
+        connector.state.weeklySteps.reduce(0) { $0 + $1.value }
+    }
+
+    private var weeklyGoalDays: Int {
+        connector.state.weeklySteps.filter { $0.value >= goal }.count
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
     }
 
     private func statTile(icon: String, value: String, label: String, tint: Color) -> some View {
@@ -357,7 +432,30 @@ struct MeditationDetailView: View {
                 Label("Begin", systemImage: "play.fill")
             }
             .tint(InnerUTheme.meditate)
+
+            if !connector.state.weeklyMeditation.isEmpty {
+                Text("This week")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+                WeeklyBars(
+                    data: connector.state.weeklyMeditation,
+                    tint: InnerUTheme.meditate
+                )
+                Text("\(weeklyMinutes) min · \(weeklyDays) days")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private var weeklyMinutes: Int {
+        connector.state.weeklyMeditation.reduce(0) { $0 + $1.value }
+    }
+
+    private var weeklyDays: Int {
+        connector.state.weeklyMeditation.filter { $0.value > 0 }.count
     }
 }
 
@@ -422,6 +520,35 @@ struct MoodDetailView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+
+                if !connector.state.moodLogs.isEmpty {
+                    Text("Today's log")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                    ForEach(
+                        Array(connector.state.moodLogs.reversed().enumerated()),
+                        id: \.offset
+                    ) { _, log in
+                        HStack {
+                            Text(emoji(for: log.mood))
+                            Text(log.mood.capitalized)
+                                .font(.caption2)
+                                .foregroundStyle(.white)
+                            Spacer()
+                            Text(log.at.formatted(date: .omitted, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 8)
+                        .background(
+                            InnerUTheme.card.opacity(0.5),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
                     }
                 }
             }

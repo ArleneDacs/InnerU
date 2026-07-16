@@ -23,6 +23,22 @@ struct WatchState {
     var mood: String?
     var moodAt: Date?
 
+    struct DayValue {
+        let date: String
+        let value: Int
+    }
+
+    struct MoodLog {
+        let mood: String
+        let at: Date
+    }
+
+    var weeklySteps: [DayValue] = []
+    var weeklyMeditation: [DayValue] = []
+    var stepStreak: Int = 0
+    var stepAwards: [String] = []
+    var moodLogs: [MoodLog] = []
+
     init() {}
 
     init(dict: [String: Any]) {
@@ -50,6 +66,40 @@ struct WatchState {
         } else if let ms = dict["moodAtMs"] as? Int {
             moodAt = Date(timeIntervalSince1970: Double(ms) / 1000)
         }
+        weeklySteps = Self.dayValues(dict["weeklySteps"])
+        weeklyMeditation = Self.dayValues(dict["weeklyMeditation"])
+        stepStreak = dict["stepStreak"] as? Int ?? 0
+        stepAwards = dict["stepAwards"] as? [String] ?? []
+        moodLogs = Self.parseMoodLogs(dict["moodLogs"])
+    }
+
+    private static func dayValues(_ raw: Any?) -> [DayValue] {
+        guard let list = raw as? [[String: Any]] else { return [] }
+        return list.compactMap { entry in
+            guard let date = entry["d"] as? String else { return nil }
+            let value = (entry["v"] as? Int) ?? Int(entry["v"] as? Double ?? 0)
+            return DayValue(date: date, value: value)
+        }
+    }
+
+    private static func parseMoodLogs(_ raw: Any?) -> [MoodLog] {
+        guard let list = raw as? [[String: Any]] else { return [] }
+        return list.compactMap { entry in
+            guard let mood = entry["m"] as? String else { return nil }
+            let ms = (entry["atMs"] as? Double)
+                ?? Double(entry["atMs"] as? Int ?? 0)
+            guard ms > 0 else { return nil }
+            return MoodLog(mood: mood, at: Date(timeIntervalSince1970: ms / 1000))
+        }
+    }
+
+    /// Short weekday letter for a `yyyy-MM-dd` key ("M", "T", …).
+    static func weekdayLetter(for dayKey: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: dayKey) else { return "" }
+        let letters = ["S", "M", "T", "W", "T", "F", "S"]
+        return letters[Calendar.current.component(.weekday, from: date) - 1]
     }
 
     static func todayKey(_ date: Date = Date()) -> String {

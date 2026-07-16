@@ -30,7 +30,11 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 8) {
                     NavigationLink {
-                        StepsDetailView(connector: connector, stepCounter: stepCounter)
+                        StepsDetailView(
+                            connector: connector,
+                            stepCounter: stepCounter,
+                            trackRecorder: trackRecorder
+                        )
                     } label: {
                         CardView(
                             icon: "figure.walk",
