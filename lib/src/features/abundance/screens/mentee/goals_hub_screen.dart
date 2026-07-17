@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
+import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_detail_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 
@@ -43,8 +44,14 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
   }
 
   void _openDetail(GoalSummary goal) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(goal.title)),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GoalDetailScreen(
+          goalId: goal.id,
+          service: _service,
+          uid: _uid,
+        ),
+      ),
     );
   }
 
