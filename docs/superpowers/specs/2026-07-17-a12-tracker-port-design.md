@@ -69,11 +69,11 @@ InnerU's existing `companies` collection plays A12's "organization" role.
 | CoachGroup, GroupMembership | `coach_groups` (existing, extended) | member list per group |
 | CoachDelegation | `coach_delegations` (new) | coachId, delegateId, menteeIds, expiresAt |
 | GoalCategory | Dart constants | Personal / Professional / Contribution; all three required; fixed, not admin-editable |
-| Goal | `goals` | userId, companyId, category, status, title, description, targetDate, cached `progress`, optional measurable target (startValue, targetValue, currentValue, linked core task) |
-| GoalTask | `goals/{id}/tasks` | title, weight (default 1), done, sortOrder |
-| GoalUpdate | `goals/{id}/updates` | progress-update timeline entries |
-| GoalComment | `goals/{id}/comments` | mentee + coach comments |
-| MeritLog | `goals/{id}/merits` | one per goal per day; amount added to currentValue; written when a linked core task is completed or logged manually |
+| Goal | `goals` | userId, companyId, category, status, title, description, notes, goalType (MERIT/MILESTONE), direction (GAIN/LOSE), targetValue, currentValue, unit, targetPeriod, startDate, targetDate, completedAt, cached `progress` |
+| GoalTask (action plan) | `goals/{id}/tasks` | title, status (NOT_STARTED/IN_PROGRESS/DONE), isComplete mirror, dueDate, completedAt, sortOrder, weight |
+| GoalUpdate | `goals/{id}/updates` | append-only ledger: progressFrom/To, statusFrom/To, note, authorId |
+| GoalComment | `goals/{id}/comments` | mentee + coach comments; isPrivate = coaches-only |
+| MeritLog | `goals/{id}/merits` | amount added to currentValue when the period target is logged (or "go the extra mile" adds more); period-dedup by querying recent log dates |
 | CoreTask | `core_tasks` | per company; name, description, icon, points, isActive, sortOrder; admin CRUD |
 | CoreTaskCompletion | `core_task_completions` | doc ID `{uid}_{taskId}_{yyyy-MM-dd}`; presence = done; un-ticking deletes the doc (no `false` tombstones) |
 | DailyCheckIn | `daily_checkins` | doc ID `{uid}_{yyyy-MM-dd}`; wins, challenges, lessons, gratitude, tomorrowFocus, mood 1–5 |
@@ -95,20 +95,22 @@ InnerU's existing `companies` collection plays A12's "organization" role.
   existing convention (used 32+ places), NOT A12's UTC buckets.
 - **Missed days are absences**: no completion doc means not done. History
   views re-expand the trailing window so gaps render as gaps.
-- **A goal requires at least one task at creation** — enforced in
-  `goals_service.createGoal` and by the form.
-- **`goals.progress` is a cached mirror** of the task-derived score, updated
-  on every task write, so lists read one field instead of the subcollection.
+- **`goals.progress` is a cached mirror** of the goal's score (the measure
+  for MERIT, plan completion for MILESTONE, 100 when COMPLETED), updated on
+  every goal/plan/merit write, so lists read one field instead of the
+  subcollections.
 
 ## Features per role
 
 ### Mentee (user area — new entries on the existing navbar/dashboard)
 
-- **Goals hub**: three category tabs; goal cards with progress bars. Goal
-  detail: task checklist (tick/untick, weighted), updates timeline, comments,
-  status changes. Completed → scores 100 regardless of tasks. Abandoned →
-  withdrawn from all averages (not zero). Measurable goals accrue progress via
-  daily merit logs, optionally auto-fed by a linked daily discipline.
+- **Goals hub**: three category tabs; goal cards with progress bars, rank
+  medals, status chips, and overdue badges. Goal detail: for MERIT goals a
+  measure panel (current / target / unit, "log period target" and "go the
+  extra mile" actions writing merit logs); for MILESTONE goals the action-plan
+  list (cycle Not started → In progress → Done); plus updates timeline,
+  comments, and status changes. Completed → scores 100 regardless of state.
+  Abandoned → withdrawn from all averages (not zero).
 - **Daily disciplines card** on the dashboard: today's core tasks as a tick
   list with points.
 - **Daily check-in**: one per day (wins, challenges, lessons, gratitude,
@@ -153,14 +155,34 @@ InnerU's existing `companies` collection plays A12's "organization" role.
 
 ## Scoring engine (Dart port of `scoring.ts`)
 
+> **Correction (2026-07-17):** A12's `docs/ARCHITECTURE.md` describes an older
+> formula (0.5/0.3/0.2 and weighted done-tasks). The current code —
+> `src/lib/domain.ts` and `src/lib/scoring.ts` — is what we port.
+
 ```
-overall = 0.5 × goals + 0.3 × disciplines + 0.2 × consistency   (each 0–100)
+overall = 1.0 × goals + 0.0 × disciplines + 0.0 × consistency   (each 0–100)
 ```
 
-- **Goals**: per-goal score = Σ weight(done tasks) / Σ weight(all tasks) × 100,
-  with the Completed/Abandoned rules above. Category score = mean of its
-  goals. Goal Total = the three categories equally weighted; an empty required
-  category scores zero deliberately.
+The Overall Score **is** the Goal Total Score. Disciplines and consistency are
+still computed and shown to the mentee, but carry zero weight. The weights are
+plain constants (`SCORE_WEIGHTS`, summing to 1) so the blend can be re-tuned
+without touching the engine.
+
+- **Goals are typed.** A **MERIT** goal is its numeric measure:
+  `currentValue ÷ targetValue × 100` (clamped), with a display `unit`, a
+  GAIN/LOSE `direction` label, and optionally a recurring per-period target
+  (`NONE | DAILY | EVERY_2..EVERY_6 | WEEKLY`) whose amount is the remaining
+  gap spread over the periods left before the target date. With no target set
+  it falls back to its stored `progress`. A **MILESTONE** goal is scored by
+  its action plans: the mean of status weights (Not started 0, In progress 50,
+  Done 100); with no plans it falls back to stored `progress`. Overrides:
+  COMPLETED → 100 always; ABANDONED → withdrawn from every average (null, not
+  zero). Category score = mean of its goals' scores; Goal Total = the three
+  categories equally weighted; an empty required category scores zero
+  deliberately. There is **no** minimum-task rule at creation (the
+  architecture doc's claim is stale; goals may be created with no plans).
+- **Goal rank medals** (display flavour only): each 10-point progress band
+  maps to a rank, Herald (0–10) up to Titan (90–100).
 - **Disciplines**: completions ÷ expected over a trailing 30 days
   (`SCORING_WINDOW_DAYS`), window clamped to the user's join date.
 - **Consistency**: 60% streak (saturating at 30 days) + 40% check-in rate over
