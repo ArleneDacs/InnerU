@@ -1869,6 +1869,20 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildMiniOverviewCard(
+                icon: CupertinoIcons.flag_fill,
+                title: "Goals",
+                value: "3 life areas",
+                accent: const Color(0xFFD6DEE8),
+                onTap: () => Navigator.pushNamed(context, '/goalsHub'),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
