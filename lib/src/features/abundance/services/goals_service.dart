@@ -643,6 +643,107 @@ class GoalsService {
     });
   }
 
+  /// One period's contribution to a MERIT goal. Writes the merit log,
+  /// advances the current value, and re-mirrors the progress bar — the
+  /// goal's currentValue is its starting value plus the sum of its logs.
+  Future<void> _addMerit({
+    required String goalId,
+    required String actorId,
+    required double amount,
+    required Map<String, dynamic> goal,
+  }) async {
+    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
+    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
+    final current =
+        ((goal['currentValue'] as num?)?.toDouble() ?? 0) + amount;
+    final progressTo = statusFrom == GoalStatus.completed
+        ? 100
+        : _measurePct(
+            (goal['targetValue'] as num?)?.toDouble() ?? 0,
+            current,
+            progressFrom,
+          );
+
+    final batch = _firestore.batch();
+    batch.set(_goals.doc(goalId).collection('merits').doc(), {
+      'userId': actorId,
+      'date': isoDay(DateTime.now()),
+      'amount': amount,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.update(_goals.doc(goalId), {
+      'currentValue': current,
+      'progress': progressTo,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    _addLedgerEntryTo(
+      batch,
+      goalId,
+      authorId: actorId,
+      progressFrom: progressFrom,
+      progressTo: progressTo,
+      statusFrom: statusFrom,
+      statusTo: statusFrom,
+    );
+    await batch.commit();
+  }
+
+  /// Logs this period's target amount. A second call within the same period
+  /// is a silent no-op, so a double-tap cannot double-log.
+  Future<void> logMeritTarget({
+    required String goalId,
+    required String actorId,
+  }) async {
+    final goal = await _loadGoalOrThrow(goalId);
+    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
+      throw StateError('Only a merit goal has a period target to log.');
+    }
+    final period = TargetPeriod.fromCode(goal['targetPeriod'] as String?);
+    if (period == TargetPeriod.none) {
+      throw StateError('This goal has no recurring target.');
+    }
+
+    final merits = await _goals
+        .doc(goalId)
+        .collection('merits')
+        .orderBy('date', descending: true)
+        .limit(10)
+        .get();
+    final logDays = merits.docs.map((d) => (d.data()['date'] as String?) ?? '');
+    if (periodLogged(logDays, period)) return;
+
+    final targetValue = (goal['targetValue'] as num?)?.toDouble() ?? 0;
+    final currentValue = (goal['currentValue'] as num?)?.toDouble() ?? 0;
+    final targetDate =
+        _asDate(goal['targetDate']) ?? addDays(DateTime.now(), 1);
+    final amount = perPeriodTarget(
+      targetValue,
+      currentValue,
+      daysUntil(targetDate),
+      period.days,
+    );
+    await _addMerit(
+        goalId: goalId, actorId: actorId, amount: amount, goal: goal);
+  }
+
+  /// Goes the extra mile: logs a custom amount on top of the period target.
+  Future<void> goExtraMile({
+    required String goalId,
+    required String actorId,
+    required double amount,
+  }) async {
+    final goal = await _loadGoalOrThrow(goalId);
+    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
+      throw StateError('Only a merit goal can log extra progress.');
+    }
+    await _addMerit(
+      goalId: goalId,
+      actorId: actorId,
+      amount: math.max(0.0, amount),
+      goal: goal,
+    );
+  }
+
   Future<void> deleteGoal(String goalId) async {
     // Firestore does not cascade-delete subcollections; sweep them first.
     for (final sub in ['tasks', 'updates', 'comments', 'merits']) {
