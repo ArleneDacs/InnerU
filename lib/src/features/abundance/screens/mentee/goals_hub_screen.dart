@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
+import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 
 /// The mentee's goals hub: one tab per required life category, goal cards
@@ -29,10 +30,15 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
     _uid = widget.uid ?? FirebaseAuth.instance.currentUser?.uid ?? '';
   }
 
-  // Replaced by Task 8 (form) and Task 9 (detail).
   void _openForm({GoalSummary? existing}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Goal form coming in the next step')),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GoalFormScreen(
+          service: _service,
+          uid: _uid,
+          existing: existing,
+        ),
+      ),
     );
   }
 
