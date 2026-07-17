@@ -82,6 +82,14 @@ void main() {
     expect(data['progress'], 80);
   });
 
+  test('setGoalMeasure on a milestone goal throws', () async {
+    final id = await milestoneGoal();
+    expect(
+      () => service.setGoalMeasure(goalId: id, actorId: 'u1', currentValue: 5),
+      throwsStateError,
+    );
+  });
+
   test('setActionPlanStatus re-mirrors a milestone goal progress', () async {
     final id = await milestoneGoal();
     final plans = await service.watchPlans(id).first;
@@ -105,7 +113,7 @@ void main() {
   test('addActionPlan appends with next sortOrder; delete re-mirrors',
       () async {
     final id = await milestoneGoal();
-    await service.addActionPlan(goalId: id, title: 'C');
+    await service.addActionPlan(goalId: id, title: 'C', actorId: 'u1');
     var plans = await service.watchPlans(id).first;
     expect(plans.length, 3);
     expect(plans.last.title, 'C');
@@ -115,6 +123,23 @@ void main() {
         goalId: id, planId: plans.last.id, actorId: 'u1');
     plans = await service.watchPlans(id).first;
     expect(plans.length, 2);
+  });
+
+  test('addActionPlan re-mirrors milestone progress', () async {
+    final id = await milestoneGoal();
+    final plans = await service.watchPlans(id).first;
+    await service.setActionPlanStatus(
+      goalId: id,
+      planId: plans.first.id,
+      status: ActionPlanStatus.done,
+      actorId: 'u1',
+    );
+    var data = (await firestore.collection('goals').doc(id).get()).data()!;
+    expect(data['progress'], 50); // one DONE of two plans
+
+    await service.addActionPlan(goalId: id, title: 'C', actorId: 'u1');
+    data = (await firestore.collection('goals').doc(id).get()).data()!;
+    expect(data['progress'], 33); // (100+0+0)/3 rounded
   });
 
   test('addComment stores body and privacy', () async {

@@ -404,7 +404,11 @@ class GoalsService {
     return data;
   }
 
-  Future<void> _addLedgerEntry(
+  /// Appends a ledger `set` to [batch] so the goal-doc update and its ledger
+  /// row commit atomically — a crash between two separate awaits would
+  /// otherwise break the "mirrored write always has a ledger row" guarantee.
+  void _addLedgerEntryTo(
+    WriteBatch batch,
     String goalId, {
     required String authorId,
     required int progressFrom,
@@ -413,7 +417,7 @@ class GoalsService {
     required GoalStatus statusTo,
     String? note,
   }) {
-    return _goals.doc(goalId).collection('updates').add({
+    batch.set(_goals.doc(goalId).collection('updates').doc(), {
       'authorId': authorId,
       'progressFrom': progressFrom,
       'progressTo': progressTo,
@@ -479,7 +483,8 @@ class GoalsService {
       progressTo = _measurePct(tv, cv, progressFrom);
     }
 
-    await _goals.doc(goalId).update({
+    final batch = _firestore.batch();
+    batch.update(_goals.doc(goalId), {
       if (title != null) 'title': title,
       if (description != null) 'description': description,
       if (notes != null) 'notes': notes,
@@ -496,8 +501,8 @@ class GoalsService {
       if (reopening) 'completedAt': null,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-
-    await _addLedgerEntry(
+    _addLedgerEntryTo(
+      batch,
       goalId,
       authorId: actorId,
       progressFrom: progressFrom,
@@ -505,6 +510,7 @@ class GoalsService {
       statusFrom: statusFrom,
       statusTo: statusTo,
     );
+    await batch.commit();
   }
 
   /// Updates just the "current" measure value and re-mirrors the bar.
@@ -514,6 +520,9 @@ class GoalsService {
     required double currentValue,
   }) async {
     final goal = await _loadGoalOrThrow(goalId);
+    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
+      throw StateError('Only a merit goal has a measure to set.');
+    }
     final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
     final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
     final current = math.max(0.0, currentValue);
@@ -525,12 +534,14 @@ class GoalsService {
             progressFrom,
           );
 
-    await _goals.doc(goalId).update({
+    final batch = _firestore.batch();
+    batch.update(_goals.doc(goalId), {
       'currentValue': current,
       'progress': progressTo,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await _addLedgerEntry(
+    _addLedgerEntryTo(
+      batch,
       goalId,
       authorId: actorId,
       progressFrom: progressFrom,
@@ -538,11 +549,13 @@ class GoalsService {
       statusFrom: statusFrom,
       statusTo: statusFrom,
     );
+    await batch.commit();
   }
 
   Future<String> addActionPlan({
     required String goalId,
     required String title,
+    required String actorId,
   }) async {
     final existing = await _goals.doc(goalId).collection('tasks').get();
     final doc = await _goals.doc(goalId).collection('tasks').add({
@@ -554,6 +567,7 @@ class GoalsService {
       'sortOrder': existing.docs.length,
       'weight': 1,
     });
+    await _mirrorMilestoneProgress(goalId, actorId);
     return doc.id;
   }
 
@@ -573,11 +587,13 @@ class GoalsService {
         .map((d) => ActionPlanStatus.fromCode(d.data()['status'] as String?)));
     if (progressTo == progressFrom) return;
 
-    await _goals.doc(goalId).update({
+    final batch = _firestore.batch();
+    batch.update(_goals.doc(goalId), {
       'progress': progressTo,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    await _addLedgerEntry(
+    _addLedgerEntryTo(
+      batch,
       goalId,
       authorId: actorId,
       progressFrom: progressFrom,
@@ -585,6 +601,7 @@ class GoalsService {
       statusFrom: statusNow,
       statusTo: statusNow,
     );
+    await batch.commit();
   }
 
   Future<void> setActionPlanStatus({
