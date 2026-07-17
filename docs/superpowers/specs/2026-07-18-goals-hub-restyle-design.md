@@ -14,11 +14,19 @@ mobile-native layout, while keeping the dark-navy + gold A12 brand.
 behavior stays identical. No changes to `GoalDetailScreen`, `GoalFormScreen`,
 services, domain, or scoring.
 
-The one deliberate character-level exception: goal-card titles render
-**as-authored** instead of through `.toUpperCase()`. This restores the stored
-content exactly and fixes the currently failing widget test
-(`test/widget/abundance/goals_hub_screen_test.dart` expects `Run 100 km`, the
-card renders `RUN 100 KM`).
+Two deliberate non-visual exceptions, both required to make the existing
+widget test (`test/widget/abundance/goals_hub_screen_test.dart`) pass:
+
+1. Goal-card titles render **as-authored** instead of through
+   `.toUpperCase()` (the test expects `Run 100 km`, the card renders
+   `RUN 100 KM`).
+2. `_resolveAccess` reads `users/{uid}` through the injected
+   `GoalsService.firestore` and parses it with the pure static
+   `CompanyMembershipService.fromUserData`, instead of calling
+   `CompanyMembershipService.loadForUser` (which is hardwired to the
+   `FirebaseFirestore.instance` singleton and errors in widget tests, making
+   the hub render the access-denied screen). Production reads the same
+   document with the same parsing; only the instance is injectable now.
 
 ## Design
 
