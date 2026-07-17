@@ -394,4 +394,246 @@ class GoalsService {
     await batch.commit();
     return doc.id;
   }
+
+  Future<Map<String, dynamic>> _loadGoalOrThrow(String goalId) async {
+    final doc = await _goals.doc(goalId).get();
+    final data = doc.data();
+    if (data == null) {
+      throw StateError('That goal no longer exists.');
+    }
+    return data;
+  }
+
+  Future<void> _addLedgerEntry(
+    String goalId, {
+    required String authorId,
+    required int progressFrom,
+    required int progressTo,
+    required GoalStatus statusFrom,
+    required GoalStatus statusTo,
+    String? note,
+  }) {
+    return _goals.doc(goalId).collection('updates').add({
+      'authorId': authorId,
+      'progressFrom': progressFrom,
+      'progressTo': progressTo,
+      'statusFrom': statusFrom.code,
+      'statusTo': statusTo.code,
+      'note': note,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> updateGoal({
+    required String goalId,
+    required String actorId,
+    String? title,
+    String? description,
+    String? notes,
+    GoalStatus? status,
+    DateTime? targetDate,
+    GoalDirection? direction,
+    double? targetValue,
+    double? currentValue,
+    String? unit,
+    GoalType? goalType,
+    TargetPeriod? targetPeriod,
+  }) async {
+    final goal = await _loadGoalOrThrow(goalId);
+
+    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
+    final statusTo = status ?? statusFrom;
+    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
+
+    final type = goalType ?? GoalType.fromCode(goal['goalType'] as String?);
+    final isMilestone = type == GoalType.milestone;
+    final period = isMilestone
+        ? TargetPeriod.none
+        : (targetPeriod ??
+            TargetPeriod.fromCode(goal['targetPeriod'] as String?));
+    final tv = isMilestone
+        ? 0.0
+        : (targetValue != null
+            ? math.max(0.0, targetValue)
+            : (goal['targetValue'] as num?)?.toDouble() ?? 0);
+    final cv = isMilestone
+        ? 0.0
+        : (currentValue != null
+            ? math.max(0.0, currentValue)
+            : (goal['currentValue'] as num?)?.toDouble() ?? 0);
+
+    // Progress mirrors the score: the measure for MERIT, plan completion
+    // for MILESTONE, pinned to 100 when the goal is marked complete.
+    final completing =
+        statusTo == GoalStatus.completed && statusFrom != GoalStatus.completed;
+    final reopening =
+        statusFrom == GoalStatus.completed && statusTo != GoalStatus.completed;
+    int progressTo;
+    if (statusTo == GoalStatus.completed) {
+      progressTo = 100;
+    } else if (isMilestone) {
+      final plans = await _goals.doc(goalId).collection('tasks').get();
+      progressTo = _planCompletionOf(plans.docs
+          .map((d) => ActionPlanStatus.fromCode(d.data()['status'] as String?)));
+    } else {
+      progressTo = _measurePct(tv, cv, progressFrom);
+    }
+
+    await _goals.doc(goalId).update({
+      if (title != null) 'title': title,
+      if (description != null) 'description': description,
+      if (notes != null) 'notes': notes,
+      if (targetDate != null) 'targetDate': Timestamp.fromDate(dayKey(targetDate)),
+      if (direction != null && !isMilestone) 'direction': direction.code,
+      if (unit != null && !isMilestone) 'unit': unit.trim(),
+      'goalType': type.code,
+      'targetPeriod': period.code,
+      'targetValue': tv,
+      'currentValue': cv,
+      'status': statusTo.code,
+      'progress': progressTo,
+      if (completing) 'completedAt': Timestamp.fromDate(DateTime.now()),
+      if (reopening) 'completedAt': null,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await _addLedgerEntry(
+      goalId,
+      authorId: actorId,
+      progressFrom: progressFrom,
+      progressTo: progressTo,
+      statusFrom: statusFrom,
+      statusTo: statusTo,
+    );
+  }
+
+  /// Updates just the "current" measure value and re-mirrors the bar.
+  Future<void> setGoalMeasure({
+    required String goalId,
+    required String actorId,
+    required double currentValue,
+  }) async {
+    final goal = await _loadGoalOrThrow(goalId);
+    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
+    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
+    final current = math.max(0.0, currentValue);
+    final progressTo = statusFrom == GoalStatus.completed
+        ? 100
+        : _measurePct(
+            (goal['targetValue'] as num?)?.toDouble() ?? 0,
+            current,
+            progressFrom,
+          );
+
+    await _goals.doc(goalId).update({
+      'currentValue': current,
+      'progress': progressTo,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _addLedgerEntry(
+      goalId,
+      authorId: actorId,
+      progressFrom: progressFrom,
+      progressTo: progressTo,
+      statusFrom: statusFrom,
+      statusTo: statusFrom,
+    );
+  }
+
+  Future<String> addActionPlan({
+    required String goalId,
+    required String title,
+  }) async {
+    final existing = await _goals.doc(goalId).collection('tasks').get();
+    final doc = await _goals.doc(goalId).collection('tasks').add({
+      'title': title.trim(),
+      'status': ActionPlanStatus.notStarted.code,
+      'isComplete': false,
+      'dueDate': null,
+      'completedAt': null,
+      'sortOrder': existing.docs.length,
+      'weight': 1,
+    });
+    return doc.id;
+  }
+
+  /// Re-mirrors a MILESTONE goal's progress after any plan change, unless
+  /// the goal is COMPLETED (pinned at 100).
+  Future<void> _mirrorMilestoneProgress(String goalId, String actorId) async {
+    final goal = await _loadGoalOrThrow(goalId);
+    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.milestone) {
+      return;
+    }
+    final statusNow = GoalStatus.fromCode(goal['status'] as String?);
+    if (statusNow == GoalStatus.completed) return;
+
+    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
+    final plans = await _goals.doc(goalId).collection('tasks').get();
+    final progressTo = _planCompletionOf(plans.docs
+        .map((d) => ActionPlanStatus.fromCode(d.data()['status'] as String?)));
+    if (progressTo == progressFrom) return;
+
+    await _goals.doc(goalId).update({
+      'progress': progressTo,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _addLedgerEntry(
+      goalId,
+      authorId: actorId,
+      progressFrom: progressFrom,
+      progressTo: progressTo,
+      statusFrom: statusNow,
+      statusTo: statusNow,
+    );
+  }
+
+  Future<void> setActionPlanStatus({
+    required String goalId,
+    required String planId,
+    required ActionPlanStatus status,
+    required String actorId,
+  }) async {
+    await _goals.doc(goalId).collection('tasks').doc(planId).update({
+      'status': status.code,
+      'isComplete': status == ActionPlanStatus.done,
+      'completedAt': status == ActionPlanStatus.done
+          ? Timestamp.fromDate(DateTime.now())
+          : null,
+    });
+    await _mirrorMilestoneProgress(goalId, actorId);
+  }
+
+  Future<void> deleteActionPlan({
+    required String goalId,
+    required String planId,
+    required String actorId,
+  }) async {
+    await _goals.doc(goalId).collection('tasks').doc(planId).delete();
+    await _mirrorMilestoneProgress(goalId, actorId);
+  }
+
+  Future<void> addComment({
+    required String goalId,
+    required String authorId,
+    required String body,
+    bool isPrivate = false,
+  }) {
+    return _goals.doc(goalId).collection('comments').add({
+      'authorId': authorId,
+      'body': body.trim(),
+      'isPrivate': isPrivate,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> deleteGoal(String goalId) async {
+    // Firestore does not cascade-delete subcollections; sweep them first.
+    for (final sub in ['tasks', 'updates', 'comments', 'merits']) {
+      final docs = await _goals.doc(goalId).collection(sub).get();
+      for (final doc in docs.docs) {
+        await doc.reference.delete();
+      }
+    }
+    await _goals.doc(goalId).delete();
+  }
 }
