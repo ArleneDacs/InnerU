@@ -10,7 +10,14 @@ void main() {
       (tester) async {
     final firestore = FakeFirebaseFirestore();
     final service = GoalsService(firestore);
-    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    await firestore.collection('users').doc('u1').set({
+      'companyId': 'A12',
+      'companyCode': 'A12',
+      'companyName': 'Abundance 12',
+      'activeCompanyId': 'A12',
+      'activeCompanyCode': 'A12',
+      'activeCompanyName': 'Abundance 12',
+    });
     await service.createGoal(
       uid: 'u1',
       category: GoalCategory.personal,
@@ -22,11 +29,15 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(
-      home: GoalsHubScreen(service: service, uid: 'u1'),
+      home: GoalsHubScreen(
+        service: service,
+        uid: 'u1',
+        accessResolver: (_) async => true,
+      ),
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Run 100 km'), findsOneWidget);
+    expect(find.text('RUN 100 KM'), findsOneWidget);
     // Personal is held; the other two required categories are named as gaps.
     expect(find.textContaining('Professional'), findsWidgets);
     expect(find.textContaining('Contribution'), findsWidgets);

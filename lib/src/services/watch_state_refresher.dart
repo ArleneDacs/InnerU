@@ -1,11 +1,15 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/emotion_service.dart';
+import 'package:selfcare_projects/src/services/fasting_api_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
-import 'package:selfcare_projects/src/services/watch_snapshot.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
 /// Pushes the user's current known state to the watch so it mirrors
@@ -13,17 +17,13 @@ import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 /// summaries, awards, and mood history for the watch detail screens.
 /// Fire-and-forget: failures are logged, never thrown.
 class WatchStateRefresher {
-  WatchStateRefresher({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
-
-  final FirebaseFirestore _firestore;
+  WatchStateRefresher();
 
   Future<void> refresh(String userId) async {
     Map<String, dynamic> userData = <String, dynamic>{};
     CompanyMembership? membership;
     try {
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      userData = userDoc.data() ?? <String, dynamic>{};
+      userData = await UserService.getUserData();
       membership =
           (await CompanyMembershipService.loadForUser(userId)).activeMembership;
     } catch (error) {
@@ -42,8 +42,33 @@ class WatchStateRefresher {
     final now = DateTime.now();
     return List.generate(
       7,
-      (index) => dayKey(now.subtract(Duration(days: 6 - index))),
+      (index) => isoDay(now.subtract(Duration(days: 6 - index))),
     );
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _trackerHistoryByDate() async {
+    final now = DateTime.now();
+    final months = <String>{
+      DateFormat('yyyy-MM').format(now),
+      DateFormat('yyyy-MM').format(DateTime(now.year, now.month - 1, 1)),
+    };
+
+    final history = <String, Map<String, dynamic>>{};
+    for (final month in months) {
+      try {
+        final trackers = await DailyTrackerApiService.instance.fetchHistory(
+          month: month,
+        );
+        for (final tracker in trackers) {
+          final date = tracker['date']?.toString();
+          if (date == null || date.isEmpty) continue;
+          history[date] = tracker;
+        }
+      } catch (error) {
+        debugPrint('Watch tracker history load failed: $error');
+      }
+    }
+    return history;
   }
 
   int _streakFor(ActivityStreakType type, Map<String, dynamic> userData) {
@@ -65,49 +90,19 @@ class WatchStateRefresher {
         .toList();
   }
 
-  /// Today's live progress lives in `dailytracker.stepCount` (the same
-  /// source the step screen shows); `steps/{uid}/tracking` only gets a
-  /// day's total at rollover, so it can't be the source for today.
-  Future<int> _remoteTodaySteps(
-    String userId,
-    CompanyMembership? membership,
-  ) async {
-    final today = dayKey(DateTime.now());
-    final scopedDocId = CompanyMembershipService.scopedDailyDocId(
-      uid: userId,
-      date: today,
-      membership: membership,
-    );
-    final doc =
-        await _firestore.collection('dailytracker').doc(scopedDocId).get();
-    var value = (doc.data()?['stepCount'] as num?)?.toInt();
-    if (value == null && scopedDocId != '$userId-$today') {
-      final legacyDoc = await _firestore
-          .collection('dailytracker')
-          .doc('$userId-$today')
-          .get();
-      value = (legacyDoc.data()?['stepCount'] as num?)?.toInt();
-    }
-    return value ?? 0;
-  }
-
   Future<void> _refreshSteps(
     String userId,
     Map<String, dynamic> userData,
     CompanyMembership? membership,
   ) async {
     try {
+      final historyByDate = await _trackerHistoryByDate();
       final weekly = <Map<String, Object>>[];
       for (final key in _lastSevenDayKeys()) {
-        final doc = await _firestore
-            .collection('steps')
-            .doc(userId)
-            .collection('tracking')
-            .doc(key)
-            .get();
+        final doc = historyByDate[key];
         weekly.add({
           'd': key,
-          'v': (doc.data()?['steps'] as num?)?.toInt() ?? 0,
+          'v': (doc?['stepCount'] as num?)?.toInt() ?? 0,
         });
       }
 
@@ -119,7 +114,10 @@ class WatchStateRefresher {
       final localSteps = owner == userId
           ? prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0
           : 0;
-      final remoteToday = await _remoteTodaySteps(userId, membership);
+      final remoteToday =
+          (historyByDate[_lastSevenDayKeys().last]?['stepCount'] as num?)
+                  ?.toInt() ??
+              0;
       final historyToday = weekly.last['v'] as int;
       final steps = [localSteps, remoteToday, historyToday]
           .reduce((a, b) => a > b ? a : b);
@@ -140,24 +138,22 @@ class WatchStateRefresher {
 
   Future<void> _refreshMood(String userId) async {
     try {
-      final snapshot = await _firestore
-          .collection('emotions')
-          .where('userId', isEqualTo: userId)
-          .where('date', isEqualTo: dayKey(DateTime.now()))
-          .get();
-      if (snapshot.docs.isEmpty) return;
-      final data = snapshot.docs.first.data();
-
-      final emotion = (data['emotion'] as String?)?.trim();
+      final emotion = await EmotionService().fetchTodayEmotion(userId);
       final logs = <Map<String, Object>>[];
-      final history = data['history'];
+      final currentMonth = DateFormat('yyyy-MM').format(DateTime.now());
+      final historyRecords = await EmotionService().fetchHistory(
+        month: currentMonth,
+      );
+      final latestRecord = historyRecords.isNotEmpty ? historyRecords.last : null;
+      final history = latestRecord?['history'];
       if (history is List) {
         for (final entry in history) {
           if (entry is Map) {
             final mood = (entry['emotion'] as String?)?.trim();
-            final at = entry['loggedAt'];
-            if (mood != null && mood.isNotEmpty && at is Timestamp) {
-              logs.add({'m': mood, 'atMs': at.millisecondsSinceEpoch});
+            final at = entry['loggedAt']?.toString();
+            final parsedAt = DateTime.tryParse(at ?? '');
+            if (mood != null && mood.isNotEmpty && parsedAt != null) {
+              logs.add({'m': mood, 'atMs': parsedAt.millisecondsSinceEpoch});
             }
           }
         }
@@ -194,18 +190,13 @@ class WatchStateRefresher {
         );
       }
 
+      final historyByDate = await _trackerHistoryByDate();
       final weekly = <Map<String, Object>>[];
       for (final key in _lastSevenDayKeys()) {
-        final docId = CompanyMembershipService.scopedDailyDocId(
-          uid: userId,
-          date: key,
-          membership: membership,
-        );
-        final doc =
-            await _firestore.collection('dailytracker').doc(docId).get();
+        final doc = historyByDate[key];
         weekly.add({
           'd': key,
-          'v': (doc.data()?['meditationMinutes'] as num?)?.toInt() ?? 0,
+          'v': (doc?['meditationMinutes'] as num?)?.toInt() ?? 0,
         });
       }
       WatchSyncService.instance.syncExtras({'weeklyMeditation': weekly});
@@ -216,21 +207,17 @@ class WatchStateRefresher {
 
   Future<void> _refreshFasting(String userId) async {
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('wellness')
-          .doc('fasting')
-          .get();
-      final data = snapshot.data();
-      if (data == null) return;
-      final start = (data['startTime'] as Timestamp?)?.toDate();
-      final end = (data['endTime'] as Timestamp?)?.toDate();
+      final response = await FastingApiService.instance.fetchSession();
+      final data = response['session'];
+      if (data is! Map) return;
+      final session = Map<String, dynamic>.from(data);
+      final start = DateTime.tryParse(session['startTime']?.toString() ?? '');
+      final end = DateTime.tryParse(session['endTime']?.toString() ?? '');
       final active = start != null && end != null;
       WatchSyncService.instance.syncFasting(
         active: active,
         start: start,
-        goalHours: (data['targetHours'] as num?)?.toInt(),
+        goalHours: (session['targetHours'] as num?)?.toInt(),
       );
     } catch (error) {
       debugPrint('Watch fasting refresh failed: $error');

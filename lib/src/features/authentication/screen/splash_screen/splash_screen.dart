@@ -7,21 +7,30 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  Timer? _redirectTimer;
+
   @override
   void initState() {
     super.initState();
-    Timer(Duration(seconds: 3), navigateToLogin);
+    _redirectTimer = Timer(const Duration(seconds: 3), navigateToLogin);
   }
 
   void navigateToLogin() {
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
     );
+  }
+
+  @override
+  void dispose() {
+    _redirectTimer?.cancel();
+    super.dispose();
   }
 
   @override

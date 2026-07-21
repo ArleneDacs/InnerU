@@ -1,6 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
+import 'package:selfcare_projects/src/services/api_client.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
 class EmotionSaveResult {
@@ -16,10 +17,9 @@ class EmotionSaveResult {
 }
 
 class EmotionService {
-  EmotionService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  EmotionService({ApiClient? apiClient}) : _api = apiClient ?? ApiClient.instance;
 
-  final FirebaseFirestore _firestore;
+  final ApiClient _api;
 
   static String todayKey([DateTime? now]) => dateKeyFor(now ?? DateTime.now());
 
@@ -30,21 +30,57 @@ class EmotionService {
     return '$year-$month-$day';
   }
 
-  Stream<String?> watchTodayEmotion(String userId, {DateTime? now}) {
-    return _todayEmotionQuery(userId, now: now).snapshots().map(
-          _readEmotionFromSnapshot,
-        );
+  Stream<String?> watchTodayEmotion(String userId, {DateTime? now}) async* {
+    yield await fetchTodayEmotion(userId, now: now);
+    while (true) {
+      await Future<void>.delayed(const Duration(seconds: 30));
+      yield await fetchTodayEmotion(userId, now: now);
+    }
   }
 
   Future<String?> fetchTodayEmotion(String userId, {DateTime? now}) async {
-    final snapshot = await _todayEmotionQuery(userId, now: now).get();
-    return _readEmotionFromSnapshot(snapshot);
+    try {
+      final response = await _api.getJson(
+        '/api/emotions/today?date=${dateKeyFor(now ?? DateTime.now())}',
+        token: AuthService.instance.currentSession?.token,
+      );
+      return response['emotion']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchHistory({String? month}) async {
+    final query = <String, String>{};
+    if (month != null && month.isNotEmpty) {
+      query['month'] = month;
+    }
+
+    final path = query.isEmpty
+        ? '/api/emotions/history'
+        : Uri(path: '/api/emotions/history', queryParameters: query).toString();
+
+    try {
+      final response = await _api.getJson(
+        path,
+        token: AuthService.instance.currentSession?.token,
+      );
+      final emotions = response['emotions'];
+      if (emotions is List) {
+        return emotions
+            .whereType<Map>()
+            .map((emotion) => Map<String, dynamic>.from(emotion))
+            .toList();
+      }
+    } catch (_) {}
+
+    return const [];
   }
 
   Future<EmotionSaveResult> saveTodayEmotion({
-    required User user,
-    required String emotion,
+    required String userId,
     required String username,
+    required String emotion,
     DateTime? now,
   }) async {
     final savedAt = now ?? DateTime.now();
@@ -52,89 +88,25 @@ class EmotionService {
     final normalizedEmotion = _normalizeEmotion(emotion) ?? emotion.trim();
     final normalizedUsername =
         username.trim().isEmpty ? 'Unknown' : username.trim();
-    final historyEntry = <String, dynamic>{
-      'emotion': normalizedEmotion,
-      'loggedAt': Timestamp.fromDate(savedAt),
-    };
-    final existingSnapshot = await _todayEmotionQuery(user.uid, now: now).get();
+    final previousEmotion = await fetchTodayEmotion(userId, now: now);
 
-    if (existingSnapshot.docs.isNotEmpty) {
-      final existingDoc = _latestEmotionDoc(existingSnapshot);
-      final previousEmotion = _normalizeEmotion(existingDoc?.data()['emotion']);
-      await existingDoc!.reference.set({
-        'username': normalizedUsername,
+    await _api.postJson(
+      '/api/emotions/today',
+      {
         'emotion': normalizedEmotion,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'lastLoggedAt': Timestamp.fromDate(savedAt),
-        'history': FieldValue.arrayUnion([historyEntry]),
-      }, SetOptions(merge: true));
-
-      WatchSyncService.instance.syncMood(normalizedEmotion, savedAt);
-
-      return EmotionSaveResult(
-        created: false,
-        emotion: normalizedEmotion,
-        previousEmotion: previousEmotion,
-      );
-    }
-
-    await _firestore.collection('emotions').add({
-      'userId': user.uid,
-      'username': normalizedUsername,
-      'emotion': normalizedEmotion,
-      'date': today,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'lastLoggedAt': Timestamp.fromDate(savedAt),
-      'history': [historyEntry],
-    });
+        'username': normalizedUsername,
+        'date': today,
+        'logged_at': savedAt.toIso8601String(),
+      },
+      token: AuthService.instance.currentSession?.token,
+    );
 
     WatchSyncService.instance.syncMood(normalizedEmotion, savedAt);
-
-    return EmotionSaveResult(created: true, emotion: normalizedEmotion);
-  }
-
-  Query<Map<String, dynamic>> _todayEmotionQuery(String userId,
-      {DateTime? now}) {
-    return _firestore
-        .collection('emotions')
-        .where('userId', isEqualTo: userId)
-        .where('date', isEqualTo: dateKeyFor(now ?? DateTime.now()));
-  }
-
-  String? _readEmotionFromSnapshot(
-      QuerySnapshot<Map<String, dynamic>> snapshot) {
-    final doc = _latestEmotionDoc(snapshot);
-    if (doc == null) {
-      return null;
-    }
-    return _normalizeEmotion(doc.data()['emotion']);
-  }
-
-  QueryDocumentSnapshot<Map<String, dynamic>>? _latestEmotionDoc(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) {
-    if (snapshot.docs.isEmpty) return null;
-    final docs = snapshot.docs.toList()
-      ..sort((a, b) {
-        final aTime = _emotionSortTime(a.data());
-        final bTime = _emotionSortTime(b.data());
-        return bTime.compareTo(aTime);
-      });
-    return docs.first;
-  }
-
-  int _emotionSortTime(Map<String, dynamic> data) {
-    for (final key in ['lastLoggedAt', 'updatedAt', 'createdAt']) {
-      final value = data[key];
-      if (value is Timestamp) return value.millisecondsSinceEpoch;
-      if (value is DateTime) return value.millisecondsSinceEpoch;
-      if (value is String) {
-        final parsed = DateTime.tryParse(value);
-        if (parsed != null) return parsed.millisecondsSinceEpoch;
-      }
-    }
-    return 0;
+    return EmotionSaveResult(
+      created: previousEmotion == null,
+      emotion: normalizedEmotion,
+      previousEmotion: previousEmotion,
+    );
   }
 
   String? _normalizeEmotion(dynamic value) {

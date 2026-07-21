@@ -27,15 +27,17 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Walk 300 km'), findsOneWidget);
+    expect(find.text('WALK 300 KM'), findsOneWidget);
     expect(find.textContaining('60'), findsWidgets); // current value shown
     expect(find.textContaining('300'), findsWidgets); // target shown
 
-    await tester.tap(find.byKey(const Key('log-period-target')));
+    await tester.enterText(find.byType(TextField).first, '100');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     final data = (await firestore.collection('goals').doc(id).get()).data()!;
-    expect((data['currentValue'] as num).toDouble(), greaterThan(60));
+    expect((data['currentValue'] as num).toDouble(), 100);
   });
 
   testWidgets('milestone detail cycles a plan status', (tester) async {
@@ -56,6 +58,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('Design'));
     await tester.tap(find.text('Design'));
     await tester.pumpAndSettle();
 

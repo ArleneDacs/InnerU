@@ -2,6 +2,8 @@
 
 A new Flutter project.
 
+This workspace now also includes a Laravel backend in [`/backend`](/Users/arlenedacanay/InnerU/backend) for the Firebase-to-PostgreSQL migration.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

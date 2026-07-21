@@ -2,16 +2,17 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watch_connectivity/watch_connectivity.dart';
 
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/watch_snapshot.dart';
 import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
@@ -39,7 +40,7 @@ class WatchStepsReceiver {
   Future<void> _handle(Map<String, dynamic> data) async {
     try {
       if (data['requestRefresh'] == true) {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
+        final uid = AuthService.instance.currentSession?.id.toString();
         if (uid != null && uid.isNotEmpty) {
           await WatchStateRefresher().refresh(uid);
         }
@@ -73,43 +74,32 @@ class WatchStepsReceiver {
     if (steps == null || steps <= 0 || date == null) return;
     if (date != dayKey(DateTime.now())) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final userId = session.id.toString();
 
     final prefs = await SharedPreferences.getInstance();
-    final recordedKey = 'watch_steps_${user.uid}_$date';
+    final recordedKey = 'watch_steps_${userId}_$date';
     final alreadyRecorded = prefs.getInt(recordedKey) ?? 0;
     if (steps <= alreadyRecorded) return;
     await prefs.setInt(recordedKey, steps);
 
     // Both devices count the same walk: record the higher, never the sum.
     final phoneSteps =
-        prefs.getInt(SessionCleanupService.savedStepsKey(user.uid)) ?? 0;
+        prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0;
     final combined = steps > phoneSteps ? steps : phoneSteps;
 
-    final membershipData = await CompanyMembershipService.loadForUser(user.uid);
-    final trackerDocId = CompanyMembershipService.scopedDailyDocId(
-      uid: user.uid,
+    final membershipData = await CompanyMembershipService.loadForUser(userId);
+    await DailyTrackerApiService.instance.upsert(
       date: date,
-      membership: membershipData.activeMembership,
+      stepCount: combined,
+      stepGoal: _dailyGoalForSession(),
+      steps: true,
+      username: session.name,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
     );
-    final firestore = FirebaseFirestore.instance;
-    await firestore.collection('dailytracker').doc(trackerDocId).set({
-      'stepCount': combined,
-      'date': date,
-      ...CompanyMembershipService.activeCompanyFields(
-        membershipData.activeMembership,
-      ),
-    }, SetOptions(merge: true));
-    await firestore
-        .collection('steps')
-        .doc(user.uid)
-        .collection('tracking')
-        .doc(date)
-        .set({
-      'steps': combined,
-      'timestamp': DateTime.parse(date).millisecondsSinceEpoch,
-    }, SetOptions(merge: true));
 
     // Reflect the merged count back to the watch/widget snapshot.
     WatchSyncService.instance.syncSteps(combined);
@@ -122,11 +112,12 @@ class WatchStepsReceiver {
     final type = command['type'] as String?;
     if (id == null || type == null) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final userId = session.id.toString();
 
     final prefs = await SharedPreferences.getInstance();
-    final processedKey = 'watch_cmd_ids_${user.uid}';
+    final processedKey = 'watch_cmd_ids_$userId';
     final processed = prefs.getStringList(processedKey) ?? <String>[];
     if (processed.contains(id)) return;
 
@@ -137,16 +128,16 @@ class WatchStepsReceiver {
 
     switch (type) {
       case 'startFast':
-        await _startFast(user.uid, command, at);
+        await _startFast(userId, command, at);
       case 'endFast':
-        await _endFast(user.uid, at);
+        await _endFast(userId, at);
       case 'meditationCompleted':
         final seconds = (command['seconds'] as num?)?.toInt() ?? 0;
-        await _recordMeditation(user, seconds, at);
+        await _recordMeditation(userId, session.name, seconds, at);
       case 'logMood':
-        await _logMood(user, command['mood'] as String?, at);
+        await _logMood(userId, session.name, command['mood'] as String?, at);
       case 'trackCompleted':
-        await _saveWatchTrack(user, command, at);
+        await _saveWatchTrack(userId, session.name, command, at);
       default:
         debugPrint('Unknown watch command: $type');
     }
@@ -156,7 +147,7 @@ class WatchStepsReceiver {
       processed.removeRange(0, processed.length - 100);
     }
     await prefs.setStringList(processedKey, processed);
-    await WatchStateRefresher().refresh(user.uid);
+    await WatchStateRefresher().refresh(userId);
     debugPrint('Applied watch command $type ($id)');
   }
 
@@ -225,42 +216,36 @@ class WatchStepsReceiver {
     WatchSyncService.instance.syncFasting(active: false);
   }
 
-  Future<void> _recordMeditation(User user, int seconds, DateTime at) async {
-    final firestore = FirebaseFirestore.instance;
-    final userDoc = await firestore.collection('users').doc(user.uid).get();
-    final username = userDoc.data()?['username'];
+  Future<void> _recordMeditation(
+    String userId,
+    String username,
+    int seconds,
+    DateTime at,
+  ) async {
+    final membershipData = await CompanyMembershipService.loadForUser(userId);
+    final minutes =
+        seconds <= 0 ? null : (seconds / Duration.secondsPerMinute).ceil();
+    await DailyTrackerApiService.instance.upsert(
+      date: dayKey(at),
+      meditation: true,
+      meditationMinutes: minutes,
+      username: username,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
+    );
 
-    if (username != null) {
-      final formattedDate = dayKey(at);
-      final membershipData =
-          await CompanyMembershipService.loadForUser(user.uid);
-      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
-        uid: user.uid,
-        date: formattedDate,
-        membership: membershipData.activeMembership,
-      );
-      final minutes =
-          seconds <= 0 ? null : (seconds / Duration.secondsPerMinute).ceil();
-      await firestore.collection('dailytracker').doc(trackerDocId).set({
-        'userId': user.uid,
-        'username': username,
-        'date': formattedDate,
-        'meditation': true,
-        if (minutes != null) 'meditationMinutes': FieldValue.increment(minutes),
-        ...CompanyMembershipService.activeCompanyFields(
-          membershipData.activeMembership,
-        ),
-      }, SetOptions(merge: true));
-    }
-
-    await MeditationStreakService()
-        .recordCompletedSession(userId: user.uid, completedAt: at);
+    await MeditationStreakService().recordCompletedSession(
+      userId: userId,
+      completedAt: at,
+    );
   }
 
   /// Saves a route recorded on the watch as a solo walk session, using
   /// the same shape the phone's map tracker writes.
   Future<void> _saveWatchTrack(
-    User user,
+    String userId,
+    String username,
     Map<String, dynamic> command,
     DateTime at,
   ) async {
@@ -281,46 +266,34 @@ class WatchStepsReceiver {
     }
     if (points.length < 2) return;
 
-    final firestore = FirebaseFirestore.instance;
-    final userDoc = await firestore.collection('users').doc(user.uid).get();
-    final username = (userDoc.data()?['username'] as String?) ?? 'Walker';
-
-    final sessionRef = firestore.collection('walk_sessions').doc();
-    await sessionRef.set({
-      'createdBy': user.uid,
-      'source': 'watch',
-      'createdAt': Timestamp.fromDate(at),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    await sessionRef.collection('members').doc(user.uid).set({
-      'userId': user.uid,
-      'username': username,
-      'status': 'accepted',
-      'isTracking': false,
-      'distanceMeters': distance,
-      'elapsedSeconds': seconds,
-      'routePoints': points,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await DailyTrackerApiService.instance.upsert(
+      date: dayKey(at),
+      steps: true,
+      username: username,
+    );
     debugPrint(
       'Saved watch track: ${points.length} points, '
       '${distance.toStringAsFixed(0)} m, ${seconds}s',
     );
   }
 
-  Future<void> _logMood(User user, String? mood, DateTime at) async {
+  Future<void> _logMood(
+    String userId,
+    String username,
+    String? mood,
+    DateTime at,
+  ) async {
     if (mood == null || mood.trim().isEmpty) return;
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    final username = (userDoc.data()?['username'] as String?) ?? 'Unknown';
     await EmotionService().saveTodayEmotion(
-      user: user,
+      userId: userId,
       emotion: mood,
       username: username,
       now: at,
     );
+  }
+
+  int _dailyGoalForSession() {
+    return 5000;
   }
 }
 
@@ -330,7 +303,8 @@ class _WatchResumeObserver with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final session = AuthService.instance.currentSession;
+    final uid = session?.id.toString();
     if (uid == null || uid.isEmpty) return;
     unawaited(WatchStateRefresher().refresh(uid));
   }

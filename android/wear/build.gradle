@@ -1,0 +1,26 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace = "com.valenin.inneru.wear"
+    compileSdk = 35
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        applicationId = "com.valenin.inneru.wear"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 13
+        versionName = "1.0.2"
+    }
+}

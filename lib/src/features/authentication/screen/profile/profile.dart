@@ -1,22 +1,91 @@
-import 'dart:convert';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
-import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/models/community_bottom_sheet.dart';
 import 'package:intl/intl.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/user_point_api_service.dart';
 
 const customColor1 = Color(0xFF6D849A); // Example primary color
 const customColor2 = Color(0xFFCE8F5A); // Example secondary color
 const customColor3 = Color(0xFF90A17D); // Example accent color
+
+String _dailyTaskFieldKey(String task) {
+  switch (task) {
+    case 'Call':
+      return 'call';
+    case 'Steps':
+      return 'steps';
+    case 'Meditation':
+      return 'meditation';
+    case 'Exercise':
+      return 'exercise';
+    case 'Learning':
+      return 'learning';
+    case 'Add Value':
+      return 'addValue';
+    case 'Todo List':
+      return 'todoList';
+    default:
+      return task.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  }
+}
+
+class _DailyTaskItem {
+  const _DailyTaskItem({
+    required this.id,
+    required this.title,
+    required this.isDefault,
+  });
+
+  final String id;
+  final String title;
+  final bool isDefault;
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'title': title,
+        'isDefault': isDefault,
+      };
+
+  static _DailyTaskItem? fromMap(dynamic value) {
+    if (value is! Map) return null;
+    final id = value['id'];
+    final title = value['title'];
+    if (id is! String || title is! String) return null;
+    final trimmedTitle = title.trim();
+    if (id.trim().isEmpty || trimmedTitle.isEmpty) return null;
+
+    return _DailyTaskItem(
+      id: id.trim(),
+      title: trimmedTitle,
+      isDefault: value['isDefault'] == true,
+    );
+  }
+}
+
+final List<_DailyTaskItem> _defaultDailyTaskItems = [
+  for (final title in [
+    'Call',
+    'Steps',
+    'Exercise',
+    'Meditation',
+    'Learning',
+    'Add Value',
+  ])
+    _DailyTaskItem(
+      id: _dailyTaskFieldKey(title),
+      title: title,
+      isDefault: true,
+    ),
+];
+
+Map<String, bool> _emptyTaskState(List<_DailyTaskItem> items) => {
+      for (final item in items) item.id: false,
+    };
 
 class EditProfileScreen extends StatelessWidget {
   const EditProfileScreen({super.key});
@@ -60,15 +129,12 @@ class _ProfilePageState extends State<ProfilePage> {
   // Daily Tracker related variables
   int selectedMonth = DateTime.now().month;
   int selectedYear = DateTime.now().year;
-  Map<String, Map<String, bool>> dailyTasks = {}; // Simulated database storage
-  Map<String, bool> todayTasks = {
-    'Call': false,
-    'Steps': false,
-    'Exercise': false,
-    'Meditation': false,
-    'Learning': false,
-    'Add Value': false,
-  };
+  List<_DailyTaskItem> dailyTrackerItems = List.of(_defaultDailyTaskItems);
+  Map<String, bool> todayTasks = _emptyTaskState(_defaultDailyTaskItems);
+  bool _isEditingDailyTracker = false;
+  int _todayTodoListScore = 0;
+  int _todayTodoListScoreContribution = 0;
+  bool _todayTodoListIncludedInTotal = false;
 
   @override
   void initState() {
@@ -80,104 +146,235 @@ class _ProfilePageState extends State<ProfilePage> {
       });
     });
     _fetchProfilePic();
-    fetchDailyTrackerData(); // Fetch Firestore data
-    listenToDailyTrackerUpdates(); // Start listening to database changes
-  }
-
-  void listenToDailyTrackerUpdates() {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String documentId = '$userId-$todayDate'; // Use UID for document ID
-
-    FirebaseFirestore.instance
-        .collection('dailytracker')
-        .doc(documentId)
-        .snapshots()
-        .listen((snapshot) {
-      if (snapshot.exists) {
-        fetchDailyTrackerData(); // Fetch data whenever there's a change
-      }
+    _loadDailyTrackerItems().then((_) {
+      if (!mounted) return;
+      fetchDailyTrackerData();
     });
   }
 
-  void fetchDailyTrackerData() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String documentId = '$userId-$todayDate'; // Use UID for document ID
+  Future<void> _loadDailyTrackerItems() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     try {
-      DocumentSnapshot snapshot = await FirebaseFirestore.instance
-          .collection('dailytracker')
-          .doc(documentId)
-          .get();
+      final userData = await UserService.getUserData();
+      final rawItems = userData['dailyTrackerItems'];
+      final parsedItems = rawItems is List
+          ? rawItems
+              .map(_DailyTaskItem.fromMap)
+              .whereType<_DailyTaskItem>()
+              .toList()
+          : <_DailyTaskItem>[];
+      final trackerOnlyItems =
+          parsedItems.where((item) => item.id != 'todoList').toList();
+      final resolvedItems = trackerOnlyItems.isEmpty
+          ? List.of(_defaultDailyTaskItems)
+          : trackerOnlyItems;
 
-      if (snapshot.exists) {
-        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
-        String lastUpdated = data['lastUpdated'] ?? "";
+      if (!mounted) return;
+      setState(() {
+        dailyTrackerItems = resolvedItems;
+        todayTasks = _emptyTaskState(resolvedItems);
+      });
 
-        // If last updated date is different from today, reset tasks
-        if (lastUpdated != todayDate) {
-          resetDailyTracker(todayDate, userId);
-        } else {
-          setState(() {
-            todayTasks['Meditation'] = data['meditation'] ?? false;
-            todayTasks['Steps'] = data['steps'] ?? false;
-            todayTasks['Exercise'] = data['exercise'] ?? false;
-            todayTasks['Call'] = data['call'] ?? false;
-            todayTasks['Learning'] = data['learning'] ?? false;
-            todayTasks['Add Value'] = data['addValue'] ?? false;
-            isLoading = false;
-          });
-        }
-        checkAndAssignPoints();
-      } else {
-        resetDailyTracker(
-            todayDate, userId); // If no data exists, create a fresh tracker
+      if (parsedItems.any((item) => item.id == 'todoList')) {
+        await _saveDailyTrackerItems();
       }
     } catch (e) {
-      print("Error fetching Firestore data: $e");
+      print("Error loading daily tracker items: $e");
+    }
+  }
+
+  Future<void> _saveDailyTrackerItems() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    await UserService.updateUserFields({
+      'daily_tracker_items': dailyTrackerItems.map((item) => item.toMap()).toList(),
+    });
+  }
+
+  bool _readTaskCompletion(Map<String, dynamic> data, _DailyTaskItem item) {
+    if (item.isDefault) {
+      return data[item.id] == true;
+    }
+
+    final customTasks = data['customDailyTasks'];
+    if (customTasks is Map) {
+      final customTask = customTasks[item.id];
+      if (customTask is Map) {
+        return customTask['completed'] == true;
+      }
+      if (customTask is bool) return customTask;
+    }
+
+    return false;
+  }
+
+  int get _dailyTrackerTaskCount => dailyTrackerItems.length;
+
+  double _dailyTrackerTaskProgress(_DailyTaskItem item) {
+    return todayTasks[item.id] == true ? 1 : 0;
+  }
+
+  int get _dailyTrackerCompletedCount => dailyTrackerItems
+      .where((item) => _dailyTrackerTaskProgress(item) >= 1)
+      .length;
+
+  double get _dailyTrackerCompletedWeight => dailyTrackerItems.fold<double>(
+        0,
+        (total, item) => total + _dailyTrackerTaskProgress(item),
+      );
+
+  double get _dailyTrackerTaskValue {
+    if (_dailyTrackerTaskCount == 0) return 0;
+    return 100 / _dailyTrackerTaskCount;
+  }
+
+  int get _dailyTrackerScore {
+    if (_dailyTrackerTaskCount == 0) return 0;
+    return ((_dailyTrackerCompletedWeight / _dailyTrackerTaskCount) * 100)
+        .round()
+        .clamp(0, 100);
+  }
+
+  num get _combinedDailyAndTodoScore {
+    if (!_todayTodoListIncludedInTotal) return _dailyTrackerScore;
+    return ((_dailyTrackerScore + _todayTodoListScoreContribution) / 2)
+        .clamp(0, 100);
+  }
+
+  Future<void> _syncDailyTrackerScore() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final membershipData =
+        await CompanyMembershipService.loadForUser(session.id.toString());
+
+    await DailyTrackerApiService.instance.upsert(
+      date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+      username: username,
+      meditation: todayTasks['meditation'],
+      steps: todayTasks['steps'],
+      call: todayTasks['call'],
+      exercise: todayTasks['exercise'],
+      learning: todayTasks['learning'],
+      addValue: todayTasks['addValue'],
+      todoList: todayTasks['todoList'],
+      callCount: todayTasks['call'] == true ? 1 : 0,
+      exerciseCount: todayTasks['exercise'] == true ? 1 : 0,
+      exerciseMinutes: todayTasks['exercise'] == true ? 10 : 0,
+      learningCount: todayTasks['learning'] == true ? 1 : 0,
+      valueCount: todayTasks['addValue'] == true ? 1 : 0,
+      todoListCount: _todayTodoListScore,
+      todoListScore: _todayTodoListScore,
+      todoListScoreDailyContribution: _todayTodoListScoreContribution,
+      todoListIncludedInTotal: _todayTodoListIncludedInTotal,
+      userTotalScore: _combinedDailyAndTodoScore.round(),
+      customDailyTasks: {
+        for (final item in dailyTrackerItems.where((item) => !item.isDefault))
+          item.id: {
+            'title': item.title,
+            'completed': todayTasks[item.id] == true,
+          },
+      },
+      meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
+    );
+  }
+
+  void listenToDailyTrackerUpdates() {
+    // Realtime Firestore listeners are no longer needed for profile tracker data.
+  }
+
+  Future<void> fetchDailyTrackerData() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    try {
+      final response = await DailyTrackerApiService.instance.fetch(
+        date: todayDate,
+      );
+      final tracker = response['tracker'];
+      if (tracker is! Map<String, dynamic>) {
+        await resetDailyTracker(todayDate, session.id.toString());
+        await checkAndAssignPoints();
+        return;
+      }
+
+      setState(() {
+        final rawTodoListScore = tracker['todoListScore'];
+        _todayTodoListScore = rawTodoListScore is num
+            ? rawTodoListScore.round().clamp(0, 100)
+            : 0;
+        final rawTodoListContribution =
+            tracker['todoListScoreDailyContribution'];
+        _todayTodoListScoreContribution = rawTodoListContribution is num
+            ? rawTodoListContribution.round().clamp(0, 100)
+            : 0;
+        _todayTodoListIncludedInTotal = tracker['todoListIncludedInTotal'] == true;
+        todayTasks = {
+          for (final item in dailyTrackerItems)
+            item.id: _readTaskCompletion(tracker, item),
+        };
+        isLoading = false;
+      });
+      await checkAndAssignPoints();
+    } catch (e) {
+      print("Error fetching tracker data: $e");
       setState(() => isLoading = false);
     }
   }
 
-  void resetDailyTracker(String todayDate, String userId) async {
-    String documentId = '$userId-$todayDate'; // Use UID for document ID
+  Future<void> resetDailyTracker(String todayDate, String userId) async {
+    final membershipData = await CompanyMembershipService.loadForUser(userId);
     final trackerUsername = await _resolveTrackerUsername(userId);
 
     // Reset task values
     setState(() {
-      todayTasks = {
-        'Call': false,
-        'Steps': false,
-        'Exercise': false,
-        'Meditation': false,
-        'Learning': false,
-        'Add Value': false,
-      };
+      todayTasks = _emptyTaskState(dailyTrackerItems);
+      _todayTodoListScore = 0;
+      _todayTodoListScoreContribution = 0;
+      _todayTodoListIncludedInTotal = false;
       isLoading = false;
     });
 
-    // Save the reset tracker to Firestore
-    final trackerData = <String, dynamic>{
-      'userId': userId,
-      'meditation': false,
-      'steps': false,
-      'exercise': false,
-      'call': false,
-      'learning': false,
-      'addValue': false,
-      'date': todayDate,
-      'lastUpdated': todayDate, // Store last updated date
-    };
-
-    if (trackerUsername != null) {
-      trackerData['username'] = trackerUsername;
-    }
-
-    await FirebaseFirestore.instance
-        .collection('dailytracker')
-        .doc(documentId)
-        .set(trackerData);
+    await DailyTrackerApiService.instance.upsert(
+      date: todayDate,
+      username: trackerUsername ?? username,
+      stepCount: 0,
+      stepGoal: 5000,
+      meditation: false,
+      steps: false,
+      call: false,
+      exercise: false,
+      learning: false,
+      addValue: false,
+      todoList: false,
+      callCount: 0,
+      exerciseCount: 0,
+      exerciseMinutes: 0,
+      learningCount: 0,
+      valueCount: 0,
+      todoListCount: 0,
+      todoListScore: 0,
+      todoListScoreDailyContribution: 0,
+      todoListIncludedInTotal: false,
+      userTotalScore: 0,
+      customDailyTasks: {
+        for (final item in dailyTrackerItems.where((item) => !item.isDefault))
+          item.id: {
+            'title': item.title,
+            'completed': false,
+          },
+      },
+      meditationMinutes: 0,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
+    );
   }
 
   Future<String?> _resolveTrackerUsername(String userId) async {
@@ -187,12 +384,9 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
-      final dynamic rawUsername = userDoc.data()?['username'];
-      final resolvedUsername = rawUsername is String ? rawUsername.trim() : '';
+      final userData = await UserService.getUserData();
+      final resolvedUsername =
+          userData['username']?.toString().trim() ?? userData['name']?.toString().trim() ?? '';
 
       if (resolvedUsername.isEmpty) {
         return null;
@@ -205,86 +399,225 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String _taskFieldKey(String task) {
-    switch (task) {
-      case 'Call':
-        return 'call';
-      case 'Steps':
-        return 'steps';
-      case 'Meditation':
-        return 'meditation';
-      case 'Exercise':
-        return 'exercise';
-      case 'Learning':
-        return 'learning';
-      case 'Add Value':
-        return 'addValue';
-      default:
-        return task.toLowerCase();
-    }
-  }
-
-  Future<void> _toggleTodayTask(String task, bool? value) async {
+  Future<void> _toggleTodayTask(_DailyTaskItem item, bool? value) async {
     if (value == null) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final documentId = '${user.uid}-$todayDate';
-    final fieldKey = _taskFieldKey(task);
-
+    final membershipData =
+        await CompanyMembershipService.loadForUser(session.id.toString());
     setState(() {
-      todayTasks[task] = value;
+      todayTasks[item.id] = value;
     });
 
     try {
-      await FirebaseFirestore.instance
-          .collection('dailytracker')
-          .doc(documentId)
-          .set({
-        'userId': user.uid,
-        'username': username,
-        'date': todayDate,
-        'lastUpdated': todayDate,
-        fieldKey: value,
-        if (fieldKey == 'exercise') 'exerciseCount': value ? 1 : 0,
-      }, SetOptions(merge: true));
+      await DailyTrackerApiService.instance.upsert(
+        date: todayDate,
+        username: username,
+        meditation: todayTasks['meditation'],
+        steps: todayTasks['steps'],
+        call: todayTasks['call'],
+        exercise: todayTasks['exercise'],
+        learning: todayTasks['learning'],
+        addValue: todayTasks['addValue'],
+        todoList: todayTasks['todoList'],
+        callCount: todayTasks['call'] == true ? 1 : 0,
+        exerciseCount: todayTasks['exercise'] == true ? 1 : 0,
+        exerciseMinutes: todayTasks['exercise'] == true ? 10 : 0,
+        learningCount: todayTasks['learning'] == true ? 1 : 0,
+        valueCount: todayTasks['addValue'] == true ? 1 : 0,
+        todoListCount: _todayTodoListScore,
+        todoListScore: _todayTodoListScore,
+        todoListScoreDailyContribution: _todayTodoListScoreContribution,
+        todoListIncludedInTotal: _todayTodoListIncludedInTotal,
+        userTotalScore: _combinedDailyAndTodoScore.round(),
+        customDailyTasks: {
+          for (final customItem
+              in dailyTrackerItems.where((task) => !task.isDefault))
+            customItem.id: {
+              'title': customItem.title,
+              'completed': todayTasks[customItem.id] == true,
+            },
+        },
+        meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
+        companyId: membershipData.activeMembership?.id,
+        companyCode: membershipData.activeMembership?.code,
+        companyName: membershipData.activeMembership?.name,
+      );
 
-      checkAndAssignPoints();
+      await checkAndAssignPoints();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        todayTasks[task] = !(value);
+        todayTasks[item.id] = !(value);
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to update $task. Please try again.'),
+          content: Text('Failed to update ${item.title}. Please try again.'),
         ),
       );
     }
   }
 
-  Future<Set<int>> _fetchTrackedDays() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String monthPrefix =
-        '$selectedYear-${selectedMonth.toString().padLeft(2, '0')}';
+  Future<void> _showAddDailyTaskDialog() async {
+    final availableItems = _defaultDailyTaskItems
+        .where(
+          (module) =>
+              module.id != 'todoList' &&
+              !dailyTrackerItems.any((item) => item.id == module.id),
+        )
+        .toList();
+
+    if (availableItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All available modules are already in Daily Tracker.'),
+        ),
+      );
+      return;
+    }
+
+    _DailyTaskItem selectedItem = availableItems.first;
+
+    final item = await showDialog<_DailyTaskItem>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add Daily Module'),
+              content: DropdownButtonFormField<_DailyTaskItem>(
+                initialValue: selectedItem,
+                decoration: const InputDecoration(
+                  labelText: 'Module',
+                  border: OutlineInputBorder(),
+                ),
+                items: availableItems.map((module) {
+                  return DropdownMenuItem<_DailyTaskItem>(
+                    value: module,
+                    child: Text(module.title),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() {
+                    selectedItem = value;
+                  });
+                },
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('CANCEL'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, selectedItem),
+                  child: const Text('ADD'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (item == null) return;
+
+    setState(() {
+      dailyTrackerItems = [...dailyTrackerItems, item];
+      todayTasks[item.id] = false;
+    });
 
     try {
-      QuerySnapshot snapshot = await FirebaseFirestore.instance
-          .collection('dailytracker')
-          .where(FieldPath.documentId,
-              isGreaterThanOrEqualTo: "$userId-$monthPrefix-01")
-          .where(FieldPath.documentId,
-              isLessThanOrEqualTo: "$userId-$monthPrefix-31")
-          .get();
+      await _saveDailyTrackerItems();
+      await _syncDailyTrackerScore();
+      await checkAndAssignPoints();
+      await fetchDailyTrackerData();
+    } catch (e) {
+      print('Error saving daily task item: $e');
+    }
+  }
 
-      Set<int> trackedDays = snapshot.docs
-          .map((doc) {
-            String datePart = doc.id.split('-').last;
-            return int.tryParse(datePart) ?? 0;
-          })
-          .where((day) => day > 0)
+  Future<void> _removeDailyTask(_DailyTaskItem item) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove Daily Task'),
+        content: Text('Remove ${item.title} from your Daily Tracker?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('REMOVE'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldRemove != true) return;
+
+    final previousItems = List<_DailyTaskItem>.of(dailyTrackerItems);
+    final previousTasks = Map<String, bool>.of(todayTasks);
+
+    setState(() {
+      dailyTrackerItems =
+          dailyTrackerItems.where((task) => task.id != item.id).toList();
+      todayTasks.remove(item.id);
+    });
+
+    try {
+      await _saveDailyTrackerItems();
+      await _syncDailyTrackerScore();
+      await checkAndAssignPoints();
+      await fetchDailyTrackerData();
+    } catch (e) {
+      print('Error removing daily task item: $e');
+      if (!mounted) return;
+      setState(() {
+        dailyTrackerItems = previousItems;
+        todayTasks = previousTasks;
+      });
+    }
+  }
+
+  Future<void> _restoreDefaultDailyTasks() async {
+    setState(() {
+      dailyTrackerItems = List.of(_defaultDailyTaskItems);
+      todayTasks = _emptyTaskState(dailyTrackerItems);
+    });
+
+    try {
+      await _saveDailyTrackerItems();
+      await _syncDailyTrackerScore();
+      await checkAndAssignPoints();
+      await fetchDailyTrackerData();
+    } catch (e) {
+      print('Error restoring daily tracker defaults: $e');
+    }
+  }
+
+  Future<Set<int>> _fetchTrackedDays() async {
+    final month = DateFormat('yyyy-MM')
+        .format(DateTime(selectedYear, selectedMonth, 1));
+
+    try {
+      final trackers = await DailyTrackerApiService.instance.fetchHistory(
+        month: month,
+      );
+      final trackedDays = trackers
+          .map((tracker) => tracker['date']?.toString())
+          .whereType<String>()
+          .map((date) => DateTime.tryParse(date))
+          .whereType<DateTime>()
+          .where((date) =>
+              date.year == selectedYear && date.month == selectedMonth)
+          .map((date) => date.day)
           .toSet();
 
       return trackedDays;
@@ -295,136 +628,141 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _fetchProfilePic() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection("users")
-          .doc(user.uid)
-          .get();
-
-      if (userDoc.exists) {
-        final dynamic rawProfilePic = userDoc.data()?["profilePic"];
-        final String cleanedUrl =
-            rawProfilePic is String ? rawProfilePic.trim() : "";
-        if (!mounted) return;
-        setState(() {
-          _profilePicUrl = cleanedUrl.isEmpty ? null : cleanedUrl;
-        });
-      }
+      final userData = await UserService.getUserData();
+      final dynamic rawProfilePic =
+          userData["profilePic"] ?? userData["profile_pic"];
+      final String cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
+      if (!mounted) return;
+      setState(() {
+        _profilePicUrl = cleanedUrl.isEmpty ? null : cleanedUrl;
+      });
     } catch (e) {
       print("Error fetching profile picture: $e");
     }
   }
 
-  void checkAndAssignPoints() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  Future<void> checkAndAssignPoints() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     try {
-      DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
+      final userData = await UserService.getUserData();
+      final usernameValue = userData['username']?.toString() ?? username;
+      final membershipData = CompanyMembershipService.fromUserData(userData);
 
-      if (userSnapshot.exists) {
-        Map<String, dynamic> userData =
-            userSnapshot.data() as Map<String, dynamic>;
-        String username = userData['username'];
-        String server = userData['team'] ?? "Default"; // Get user's team
-        String trackerDocId = '$userId-$todayDate';
-        String pointsDocId =
-            '$userId-$todayDate'; // or '$username-$todayDate', up to you
+      final trackerResponse = await DailyTrackerApiService.instance.fetch(
+        date: todayDate,
+      );
+      final tracker = trackerResponse['tracker'];
+      if (tracker is! Map<String, dynamic>) return;
 
-        DocumentSnapshot snapshot = await FirebaseFirestore.instance
-            .collection('dailytracker')
-            .doc(trackerDocId)
-            .get();
+      final meditationMinutes = (tracker['meditationMinutes'] as num?)?.toInt() ?? 0;
+      final stepsTaken = (tracker['stepCount'] as num?)?.toInt() ?? 0;
+      final exerciseCount = (tracker['exerciseCount'] as num?)?.toInt() ?? 0;
+      final callsMade = (tracker['callCount'] as num?)?.toInt() ?? 0;
+      final learningEntries = (tracker['learningCount'] as num?)?.toInt() ?? 0;
+      final valueEntries = (tracker['valueCount'] as num?)?.toInt() ?? 0;
+      final todoListCount = (tracker['todoListCount'] as num?)?.toInt() ?? 0;
+      final todoListScore = (tracker['todoListScore'] as num?)?.toInt() ?? todoListCount;
+      final rawTodoListContribution = tracker['todoListScoreDailyContribution'];
+      final todoListScoreContribution = rawTodoListContribution is num
+          ? rawTodoListContribution.round()
+          : todoListScore;
+      final includeTodoListScore = tracker['todoListIncludedInTotal'] == true;
+      final rawDailyTrackerScore = tracker['dailyTrackerScore'];
+      final dailyTrackerScore = rawDailyTrackerScore is num
+          ? rawDailyTrackerScore.round()
+          : _dailyTrackerScore;
 
-        if (snapshot.exists) {
-          Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+      final taskCompletion = <String, bool>{
+        'Meditation': tracker['meditation'] == true,
+        'Steps': tracker['steps'] == true,
+        'Exercise': tracker['exercise'] == true,
+        'Call': tracker['call'] == true,
+        'Learning': tracker['learning'] == true,
+        'Add Value': tracker['addValue'] == true,
+        'Todo List': tracker['todoList'] == true,
+      };
 
-          // Get actual activity counts from dailytracker (if available)
-          int meditationMinutes = data['meditationMinutes'] ?? 0;
-          int stepsTaken = data['stepCount'] ?? 0;
-          int exerciseCount = data['exerciseCount'] ?? 0;
-          int callsMade = data['callCount'] ?? 0;
-          int learningEntries = data['learningCount'] ?? 0;
-          int valueEntries = data['valueCount'] ?? 0;
+      final taskPoints = <String, int>{
+        'Meditation Points': meditationMinutes,
+        'Steps Points': (stepsTaken / 200).floor(),
+        'Exercise Points': exerciseCount * 10,
+        'Call Points': callsMade,
+        'Learning Points': learningEntries,
+        'Add Value Points': valueEntries,
+        'Todo List Points': todoListScore,
+      };
 
-          // Define tasks and points for individual tasks
-          Map<String, bool> taskCompletion = {
-            'Meditation': data['meditation'] ?? false,
-            'Steps': data['steps'] ?? false,
-            'Exercise': data['exercise'] ?? false,
-            'Call': data['call'] ?? false,
-            'Learning': data['learning'] ?? false,
-            'Add Value': data['addValue'] ?? false,
-          };
-
-          // Calculate points based on actual activity
-          Map<String, int> taskPoints = {
-            'Meditation Points': meditationMinutes, // 1 point per minute
-            'Steps Points': (stepsTaken / 200).floor(), // 1 point per 200 steps
-            'Exercise Points': exerciseCount * 10,
-            'Call Points': callsMade, // 1 point per call
-            'Learning Points': learningEntries, // 1 point per entry
-            'Add Value Points': valueEntries, // 1 point per entry
-          };
-
-          // Fallback to fixed points if activity counts are not available
-          if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
-            taskPoints['Meditation Points'] = 5;
-          }
-          if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
-            taskPoints['Steps Points'] = 10;
-          }
-          if (exerciseCount == 0 && taskCompletion['Exercise'] == true) {
-            taskPoints['Exercise Points'] = 10;
-          }
-          if (callsMade == 0 && taskCompletion['Call'] == true) {
-            taskPoints['Call Points'] = 10;
-          }
-          if (learningEntries == 0 && taskCompletion['Learning'] == true) {
-            taskPoints['Learning Points'] = 15;
-          }
-          if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
-            taskPoints['Add Value Points'] = 15;
-          }
-
-          int totalPoints = taskPoints.values.reduce((a, b) => a + b);
-
-          // Save points in the userpoints collection
-          await FirebaseFirestore.instance
-              .collection('userpoints')
-              .doc(pointsDocId)
-              .set({
-            'username': username,
-            'date': todayDate,
-            'totalPoints': totalPoints,
-            'taskPoints': taskPoints,
-            'tasks': taskCompletion,
-            'server': server,
-            // Store raw activity counts for better display
-            'activityCounts': {
-              'meditationMinutes': meditationMinutes,
-              'stepsTaken': stepsTaken,
-              'exerciseCount': exerciseCount,
-              'callsMade': callsMade,
-              'learningEntries': learningEntries,
-              'valueEntries': valueEntries,
-            }
-          });
-
-          print("Total points assigned: $totalPoints");
-          print("Points per task: $taskPoints");
-        } else {
-          print("No daily tracker data found for today.");
-        }
-      } else {
-        print("Error: User document does not exist.");
+      if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
+        taskPoints['Meditation Points'] = 5;
       }
+      if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
+        taskPoints['Steps Points'] = 10;
+      }
+      if (exerciseCount == 0 && taskCompletion['Exercise'] == true) {
+        taskPoints['Exercise Points'] = 10;
+      }
+      if (callsMade == 0 && taskCompletion['Call'] == true) {
+        taskPoints['Call Points'] = 10;
+      }
+      if (learningEntries == 0 && taskCompletion['Learning'] == true) {
+        taskPoints['Learning Points'] = 15;
+      }
+      if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
+        taskPoints['Add Value Points'] = 15;
+      }
+      if (todoListScore == 0 && taskCompletion['Todo List'] == true) {
+        taskPoints['Todo List Points'] = 1;
+      }
+
+      final activityPoints = taskPoints.values.fold<int>(0, (a, b) => a + b);
+      final clampedDailyTrackerScore = dailyTrackerScore.clamp(0, 100);
+      final clampedTodoListScore = todoListScore.clamp(0, 100);
+      final clampedTodoListContribution =
+          todoListScoreContribution.clamp(0, 100);
+      final totalPoints = includeTodoListScore
+          ? ((clampedDailyTrackerScore + clampedTodoListContribution) / 2)
+              .clamp(0, 100)
+          : clampedDailyTrackerScore;
+
+      await UserPointApiService.instance.upsert(
+        date: todayDate,
+        username: usernameValue,
+        totalPoints: totalPoints,
+        activityPoints: activityPoints,
+        dailyTrackerScore: clampedDailyTrackerScore,
+        todoListScore: clampedTodoListScore,
+        todoListScoreDailyContribution: clampedTodoListContribution,
+        todoListIncludedInTotal: includeTodoListScore,
+        userTotalScore: totalPoints.round(),
+        taskPoints: taskPoints.map((key, value) => MapEntry(key, value)),
+        tasks: taskCompletion.map((key, value) => MapEntry(key, value)),
+        server: userData['team']?.toString() ?? 'Default',
+        companyId: membershipData.activeMembership?.id,
+        companyCode: membershipData.activeMembership?.code,
+        companyName: membershipData.activeMembership?.name,
+        activityCounts: {
+          'meditationMinutes': meditationMinutes,
+          'stepsTaken': stepsTaken,
+          'exerciseCount': exerciseCount,
+          'callsMade': callsMade,
+          'learningEntries': learningEntries,
+          'valueEntries': valueEntries,
+          'todoListCount': todoListCount,
+          'todoListScore': clampedTodoListScore,
+          'todoListScoreDailyContribution': clampedTodoListContribution,
+          'todoListIncludedInTotal': includeTodoListScore,
+          'dailyTrackerScore': clampedDailyTrackerScore,
+          'userTotalScore': totalPoints,
+          'activityPoints': activityPoints,
+        },
+      );
+
+      print("Total points assigned: $totalPoints");
+      print("Points per task: $taskPoints");
     } catch (e) {
       print("Error in assigning points: $e");
     }
@@ -433,140 +771,296 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
-    double containerWidth = screenWidth * 0.85;
+    final avatarSize = (screenWidth * 0.35).clamp(96.0, 180.0);
 
-    return WillPopScope(
-      onWillPop: () async {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => const AuthRoleHome()),
           (route) => false, // Removes all previous routes from the stack
         );
-        return false; // Prevent the default back navigation
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.title),
-          actions: [
-            IconButton(
-                onPressed: () => CommunityBottomSheet.show(context),
-                icon: Icon(Icons.edit))
-          ],
-        ),
-        body: SingleChildScrollView(
-          child: Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-              child: Column(
-                children: [
-                  (_profilePicUrl == null || _profilePicUrl!.trim().isEmpty)
-                      ? Image.asset(
-                          'assets/images/avatar.png', // Default image if no profilePic is available
-                          width: screenWidth * 0.35,
-                          height: screenWidth * 0.35,
-                        )
-                      : ClipOval(
-                          child: Image.network(
-                            _profilePicUrl!,
-                            width: screenWidth * 0.35,
-                            height: screenWidth * 0.35,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return SizedBox(
-                                width: screenWidth * 0.35,
-                                height: screenWidth * 0.35,
-                                child:
-                                    CircularProgressIndicator(), // Loading indicator
-                              );
-                            },
-                            errorBuilder: (context, error, stackTrace) {
-                              return Image.asset(
-                                'assets/images/avatar.png', // Fallback image on error
-                                width: screenWidth * 0.35,
-                                height: screenWidth * 0.35,
-                              );
-                            },
+      child: CompanyThemeBuilder(
+        builder: (context, companyTheme) {
+          return Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor:
+                  companyTheme.isDark ? companyTheme.surfaceColor : null,
+              foregroundColor:
+                  companyTheme.isDark ? companyTheme.inkColor : null,
+              iconTheme: IconThemeData(
+                color: companyTheme.isDark
+                    ? Colors.white.withValues(alpha: 0.92)
+                    : companyTheme.iconColor,
+              ),
+              actionsIconTheme: IconThemeData(
+                color: companyTheme.isDark
+                    ? Colors.white.withValues(alpha: 0.92)
+                    : companyTheme.iconColor,
+              ),
+              surfaceTintColor: Colors.transparent,
+              title: Text(widget.title),
+              actions: [
+                IconButton(
+                    onPressed: () => CommunityBottomSheet.show(context),
+                    icon: Icon(Icons.edit))
+              ],
+            ),
+            body: SingleChildScrollView(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                    child: Column(
+                      children: [
+                        (_profilePicUrl == null ||
+                                _profilePicUrl!.trim().isEmpty)
+                            ? Image.asset(
+                                'assets/images/avatar.png',
+                                width: avatarSize,
+                                height: avatarSize,
+                              )
+                            : ClipOval(
+                                child: Image.network(
+                                  _profilePicUrl!,
+                                  width: avatarSize,
+                                  height: avatarSize,
+                                  fit: BoxFit.cover,
+                                  loadingBuilder:
+                                      (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return SizedBox(
+                                      width: avatarSize,
+                                      height: avatarSize,
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  },
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Image.asset(
+                                      'assets/images/avatar.png',
+                                      width: avatarSize,
+                                      height: avatarSize,
+                                    );
+                                  },
+                                ),
+                              ),
+
+                        SizedBox(height: 10),
+                        Column(
+                          children: [
+                            Text(
+                              username,
+                              style: TextStyle(
+                                fontSize: 25,
+                                fontWeight: FontWeight.bold,
+                                color: companyTheme.inkColor,
+                              ),
+                            ),
+                            Text(
+                              email,
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: companyTheme.mutedInkColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 20),
+
+                        // Start of Daily Tracker Section
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Daily Tracker',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: companyTheme.inkColor,
+                                ),
+                              ),
+                            ),
+                            if (_isEditingDailyTracker) ...[
+                              IconButton(
+                                tooltip: 'Restore defaults',
+                                onPressed: _restoreDefaultDailyTasks,
+                                icon: Icon(
+                                  Icons.restart_alt_rounded,
+                                  color: companyTheme.mutedInkColor,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Add daily task',
+                                onPressed: _showAddDailyTaskDialog,
+                                icon: Icon(
+                                  Icons.add_circle_outline_rounded,
+                                  color: companyTheme.iconColor,
+                                ),
+                              ),
+                            ],
+                            TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _isEditingDailyTracker =
+                                      !_isEditingDailyTracker;
+                                });
+                              },
+                              icon: Icon(
+                                _isEditingDailyTracker
+                                    ? Icons.check_rounded
+                                    : Icons.edit_outlined,
+                                size: 18,
+                              ),
+                              label: Text(
+                                _isEditingDailyTracker ? 'Done' : 'Edit',
+                              ),
+                              style: TextButton.styleFrom(
+                                foregroundColor: companyTheme.iconColor,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: companyTheme.surfaceColor,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: companyTheme.isDark
+                                  ? companyTheme.primaryColor
+                                      .withValues(alpha: 0.18)
+                                  : const Color(0xFFE3EAE8),
+                            ),
+                          ),
+                          child: Column(
+                            children: dailyTrackerItems.isEmpty
+                                ? [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 18,
+                                        horizontal: 8,
+                                      ),
+                                      child: Text(
+                                        _isEditingDailyTracker
+                                            ? 'No daily tasks yet. Tap + to add one.'
+                                            : 'No daily tasks yet. Tap Edit to add one.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: companyTheme.mutedInkColor,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ]
+                                : [
+                                    _buildDailyTrackerScore(companyTheme),
+                                    Divider(
+                                      color: companyTheme.mutedInkColor
+                                          .withValues(alpha: 0.18),
+                                      height: 20,
+                                    ),
+                                    for (final item in dailyTrackerItems)
+                                      _buildTaskRow(
+                                        item,
+                                        todayTasks,
+                                        companyTheme,
+                                      ),
+                                  ],
                           ),
                         ),
 
-                  SizedBox(height: 10),
-                  Column(
-                    children: [
-                      Text(
-                        username,
-                        style: TextStyle(
-                            fontSize: 25, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        email,
-                        style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
+                        SizedBox(height: 16),
 
-                  // Start of Daily Tracker Section
-                  Text(
-                    'Daily Tracker',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-
-                  SizedBox(height: 16),
-                  _buildTaskRow('Call', todayTasks),
-                  _buildTaskRow('Steps', todayTasks),
-                  _buildTaskRow('Exercise', todayTasks),
-                  _buildTaskRow('Meditation', todayTasks),
-                  _buildTaskRow('Learning', todayTasks),
-                  _buildTaskRow('Add Value', todayTasks),
-
-                  SizedBox(height: 16),
-
-                  ExpansionTile(
-                    title: Text(
-                      'View Previous Progress',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ExpansionTile(
+                          title: Text(
+                            'View Previous Progress',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: companyTheme.inkColor,
+                            ),
+                          ),
+                          children: [_buildCalendar(companyTheme)],
+                        ),
+                      ],
                     ),
-                    children: [_buildCalendar()],
                   ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
-  // Builds each task row for Today's tracker
-  Widget _buildTaskRow(String task, Map<String, bool> taskMap) {
-    bool isCompleted = taskMap[task] ?? false;
+  Widget _buildDailyTrackerScore(CompanyThemeData companyTheme) {
+    final taskValue = _dailyTrackerTaskValue;
+    final score = _dailyTrackerScore;
+    final scoreLabel =
+        '$_dailyTrackerCompletedCount of $_dailyTrackerTaskCount complete • each task ${taskValue.toStringAsFixed(taskValue == taskValue.roundToDouble() ? 0 : 1)}%';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Checkbox(
-            value: isCompleted,
-            activeColor: customColor1, // Applied customColor1 here
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            onChanged: (value) => _toggleTodayTask(task, value),
-          ),
-          InkWell(
-            onTap: () {
-              print('Tapped on $task');
-            },
-            child: Text(
-              task,
-              style: TextStyle(
-                color: isCompleted
-                    ? customColor3
-                    : Colors.black, // Applied customColor3 for completed tasks
-                fontWeight: isCompleted ? FontWeight.bold : FontWeight.normal,
-                fontSize: 16,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Daily score',
+                  style: TextStyle(
+                    color: companyTheme.inkColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
               ),
+              Text(
+                '$score%',
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: (score / 100).clamp(0.0, 1.0),
+              backgroundColor: companyTheme.mutedInkColor.withValues(
+                alpha: 0.16,
+              ),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                companyTheme.iconColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            scoreLabel,
+            style: TextStyle(
+              color: companyTheme.mutedInkColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -574,8 +1068,69 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // Builds each task row for Today's tracker
+  Widget _buildTaskRow(
+    _DailyTaskItem item,
+    Map<String, bool> taskMap,
+    CompanyThemeData companyTheme,
+  ) {
+    bool isCompleted = taskMap[item.id] ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Checkbox(
+            value: isCompleted,
+            activeColor: companyTheme.isDark
+                ? companyTheme.iconColor
+                : companyTheme.primaryColor,
+            checkColor: companyTheme.isDark ? Colors.black : Colors.white,
+            side: BorderSide(
+              color: companyTheme.isDark
+                  ? Colors.white.withValues(alpha: 0.7)
+                  : companyTheme.mutedInkColor,
+              width: 1.8,
+            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            onChanged: (value) => _toggleTodayTask(item, value),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                _toggleTodayTask(item, !isCompleted);
+              },
+              child: Text(
+                item.title,
+                style: TextStyle(
+                  color: isCompleted
+                      ? companyTheme.primaryColor
+                      : companyTheme.inkColor,
+                  fontWeight: isCompleted ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          if (_isEditingDailyTracker)
+            IconButton(
+              tooltip: 'Remove ${item.title}',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.close_rounded,
+                size: 20,
+                color: companyTheme.mutedInkColor,
+              ),
+              onPressed: () => _removeDailyTask(item),
+            ),
+        ],
+      ),
+    );
+  }
+
   // Builds the Calendar for Previous Days
-  Widget _buildCalendar() {
+  Widget _buildCalendar(CompanyThemeData companyTheme) {
     int daysInMonth = DateTime(selectedYear, selectedMonth + 1, 0).day;
     int firstDayOfWeek = DateTime(selectedYear, selectedMonth, 1).weekday % 7;
     List<String> weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -590,17 +1145,16 @@ class _ProfilePageState extends State<ProfilePage> {
           padding: EdgeInsets.all(16),
           constraints: BoxConstraints(maxWidth: 500),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: companyTheme.surfaceColor,
             border: Border.all(
-                color: customColor2,
-                width: 2), // Applied customColor2 for the calendar border
-            borderRadius: BorderRadius.circular(12),
+              color: companyTheme.primaryColor.withValues(alpha: 0.35),
+            ),
+            borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color: Colors.black26,
-                blurRadius: 8,
-                spreadRadius: 2,
-                offset: Offset(4, 4),
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: Offset(0, 8),
               ),
             ],
           ),
@@ -720,48 +1274,46 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
 // Popup for Previous Days
-  void _showDailyTrackerDialog(int day) async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    String selectedDate = DateFormat('yyyy-MM-dd')
+  Future<void> _showDailyTrackerDialog(int day) async {
+    final selectedDate = DateFormat('yyyy-MM-dd')
         .format(DateTime(selectedYear, selectedMonth, day));
 
-    // Use userId to fetch data instead of username
-    String documentId = '$userId-$selectedDate'; // Document ID now uses UID
-
-    // Fetch the daily tracker data for the selected date from Firestore
     Map<String, bool> selectedDateTasks = {
-      'Call': false,
-      'Steps': false,
-      'Exercise': false,
-      'Meditation': false,
-      'Learning': false,
-      'Add Value': false,
+      for (final item in dailyTrackerItems) item.title: false,
     };
 
     try {
-      DocumentSnapshot snapshot = await FirebaseFirestore.instance
-          .collection('dailytracker')
-          .doc(documentId)
-          .get();
-
-      if (snapshot.exists) {
-        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+      final response = await DailyTrackerApiService.instance.fetch(
+        date: selectedDate,
+      );
+      final data = response['tracker'];
+      if (data is Map<String, dynamic>) {
         selectedDateTasks = {
-          'Call': data['call'] ?? false,
-          'Steps': data['steps'] ?? false,
-          'Exercise': data['exercise'] ?? false,
-          'Meditation': data['meditation'] ?? false,
-          'Learning': data['learning'] ?? false,
-          'Add Value': data['addValue'] ?? false,
+          for (final item in dailyTrackerItems)
+            item.title: _readTaskCompletion(data, item),
         };
+
+        final customTasks = data['customDailyTasks'];
+        if (customTasks is Map) {
+          for (final entry in customTasks.entries) {
+            final value = entry.value;
+            if (value is Map) {
+              final title = value['title'];
+              if (title is String && title.trim().isNotEmpty) {
+                selectedDateTasks[title.trim()] = value['completed'] == true;
+              }
+            }
+          }
+        }
       } else {
         print("No data found for $selectedDate.");
       }
     } catch (e) {
-      print("Error fetching Firestore data for $selectedDate: $e");
+      print("Error fetching tracker data for $selectedDate: $e");
     }
 
     // Show the dialog with fetched data
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (BuildContext context) {

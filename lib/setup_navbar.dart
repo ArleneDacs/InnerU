@@ -8,29 +8,34 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
-// Firebase Auth for user management
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class Setuppage extends StatefulWidget {
   const Setuppage({
     super.key,
     this.initialIndex = 2,
+    this.initialCompanyTheme,
   });
 
   final int initialIndex;
+  final CompanyThemeData? initialCompanyTheme;
   @override
   State<Setuppage> createState() => _SetuppageState();
 }
 
 class _SetuppageState extends State<Setuppage> {
   late int index;
+  late CompanyThemeData _companyTheme;
 
-  final _screens = [
-    Meditation(),
-    StepTracker(),
-    DashboardScreen(),
-    TodoList(),
-    CommunityScreen()
-  ];
+  List<Widget> get _screens => [
+        Meditation(),
+        StepTracker(),
+        DashboardScreen(initialCompanyTheme: _companyTheme),
+        TodoList(),
+        CommunityScreen(),
+      ];
 
   final _titles = ["Meditation", "Step Tracker", "", "To Do List", "Community"];
 
@@ -55,43 +60,77 @@ class _SetuppageState extends State<Setuppage> {
   @override
   void initState() {
     super.initState();
-    index = widget.initialIndex.clamp(0, _screens.length - 1) as int;
+    _companyTheme = widget.initialCompanyTheme ??
+        CompanyThemeService.cachedThemeForUser(
+          AuthService.instance.currentUserId ?? '',
+        ) ??
+        CompanyThemeData.standard;
+    index = widget.initialIndex.clamp(0, 4);
+    _loadCompanyTheme();
+  }
+
+  @override
+  void didUpdateWidget(covariant Setuppage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final updatedTheme = widget.initialCompanyTheme;
+    if (updatedTheme != null && updatedTheme != oldWidget.initialCompanyTheme) {
+      setState(() {
+        _companyTheme = updatedTheme;
+      });
+    }
+  }
+
+  Future<void> _loadCompanyTheme() async {
+    final userId = AuthService.instance.currentUserId;
+    if (userId == null) return;
+    try {
+      final theme = await CompanyThemeService.resolveForUser(userId);
+      if (!mounted) return;
+      setState(() => _companyTheme = theme);
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: index == 2
-          ? null
-          : AppBar(
-              backgroundColor: Colors.white,
-              surfaceTintColor: Colors.transparent,
-              title: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(_titles[index]),
-              ),
-              actions: [
-                IconButton(
-                  icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-                  onPressed: () {
-                    BottomSheetWidget.show(context);
-                  },
+    final theme = _companyTheme;
+    return Theme(
+      data: AppTheme.company(theme),
+      child: Scaffold(
+        backgroundColor: theme.backgroundColor,
+        appBar: index == 2
+            ? null
+            : AppBar(
+                backgroundColor: theme.surfaceColor,
+                surfaceTintColor: Colors.transparent,
+                title: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    _titles[index],
+                    style: TextStyle(color: theme.inkColor),
+                  ),
                 ),
-              ],
-            ),
-      body: _screens[index],
-      bottomNavigationBar: CurvedNavigationBar(
-        height: 60,
-        animationDuration: Duration(milliseconds: 300),
-        backgroundColor: Colors.transparent,
-        buttonBackgroundColor: const Color(0xFFEFD199),
-        color: const Color(0xFF90A17D),
-        index: index,
-        items: List.generate(_defaultIcons.length,
-            (i) => i == index ? _selectedIcons[i] : _defaultIcons[i]),
-        onTap: (newIndex) {
-          setState(() => index = newIndex); // Normal navigation for other icons
-        },
+                actions: [
+                  IconButton(
+                    color: theme.iconColor,
+                    icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
+                    onPressed: () {
+                      BottomSheetWidget.show(context);
+                    },
+                  ),
+                ],
+              ),
+        body: SetupBottomNavigationScope(
+          child: _screens[index],
+        ),
+        bottomNavigationBar: _ThemedBottomNavigationBar(
+          theme: theme,
+          index: index,
+          defaultIcons: _defaultIcons,
+          selectedIcons: _selectedIcons,
+          onTap: (newIndex) {
+            setState(() => index = newIndex);
+          },
+        ),
       ),
     );
   }
@@ -101,9 +140,11 @@ class CoachSetuppage extends StatefulWidget {
   const CoachSetuppage({
     super.key,
     this.initialIndex = 2,
+    this.initialCompanyTheme,
   });
 
   final int initialIndex;
+  final CompanyThemeData? initialCompanyTheme;
 
   @override
   State<CoachSetuppage> createState() => _CoachSetuppageState();
@@ -111,14 +152,15 @@ class CoachSetuppage extends StatefulWidget {
 
 class _CoachSetuppageState extends State<CoachSetuppage> {
   late int index;
+  late CompanyThemeData _companyTheme;
 
-  final _screens = [
-    Meditation(),
-    StepTracker(),
-    CoachDashboardScreen(),
-    TodoList(),
-    CommunityScreen()
-  ];
+  List<Widget> get _screens => [
+        Meditation(),
+        StepTracker(),
+        CoachDashboardScreen(),
+        TodoList(),
+        CommunityScreen(),
+      ];
 
   final _titles = ["Meditation", "Step Tracker", "", "To Do List", "Community"];
 
@@ -141,44 +183,135 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
   @override
   void initState() {
     super.initState();
-    index = widget.initialIndex.clamp(0, _screens.length - 1) as int;
+    _companyTheme = widget.initialCompanyTheme ??
+        CompanyThemeService.cachedThemeForUser(
+          AuthService.instance.currentUserId ?? '',
+        ) ??
+        CompanyThemeData.standard;
+    index = widget.initialIndex.clamp(0, 4);
+    _loadCompanyTheme();
+  }
+
+  @override
+  void didUpdateWidget(covariant CoachSetuppage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final updatedTheme = widget.initialCompanyTheme;
+    if (updatedTheme != null && updatedTheme != oldWidget.initialCompanyTheme) {
+      setState(() {
+        _companyTheme = updatedTheme;
+      });
+    }
+  }
+
+  Future<void> _loadCompanyTheme() async {
+    final userId = AuthService.instance.currentUserId;
+    if (userId == null) return;
+    try {
+      final theme = await CompanyThemeService.resolveForUser(userId);
+      if (!mounted) return;
+      setState(() => _companyTheme = theme);
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: index == 2
-          ? null
-          : AppBar(
-              backgroundColor: Colors.white,
-              surfaceTintColor: Colors.transparent,
-              title: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(_titles[index]),
-              ),
-              actions: [
-                IconButton(
-                  icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
-                  onPressed: () {
-                    BottomSheetWidget.show(context);
-                  },
+    final theme = _companyTheme;
+    return Theme(
+      data: AppTheme.company(theme),
+      child: Scaffold(
+        backgroundColor: theme.backgroundColor,
+        appBar: index == 2
+            ? null
+            : AppBar(
+                backgroundColor: theme.surfaceColor,
+                surfaceTintColor: Colors.transparent,
+                title: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    _titles[index],
+                    style: TextStyle(color: theme.inkColor),
+                  ),
                 ),
-              ],
-            ),
-      body: _screens[index],
-      bottomNavigationBar: CurvedNavigationBar(
-        height: 60,
-        animationDuration: Duration(milliseconds: 300),
-        backgroundColor: Colors.transparent,
-        buttonBackgroundColor: const Color(0xFFEFD199),
-        color: const Color(0xFF90A17D),
-        index: index,
-        items: List.generate(_defaultIcons.length,
-            (i) => i == index ? _selectedIcons[i] : _defaultIcons[i]),
-        onTap: (newIndex) {
-          setState(() => index = newIndex);
-        },
+                actions: [
+                  IconButton(
+                    color: theme.iconColor,
+                    icon: Icon(CupertinoIcons.line_horizontal_3, size: 28),
+                    onPressed: () {
+                      BottomSheetWidget.show(context);
+                    },
+                  ),
+                ],
+              ),
+        body: SetupBottomNavigationScope(
+          child: _screens[index],
+        ),
+        bottomNavigationBar: _ThemedBottomNavigationBar(
+          theme: theme,
+          index: index,
+          defaultIcons: _defaultIcons,
+          selectedIcons: _selectedIcons,
+          onTap: (newIndex) {
+            setState(() => index = newIndex);
+          },
+        ),
       ),
+    );
+  }
+}
+
+class SetupBottomNavigationScope extends InheritedWidget {
+  const SetupBottomNavigationScope({
+    super.key,
+    required super.child,
+  });
+
+  static bool hasBottomNavigation(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<SetupBottomNavigationScope>() !=
+        null;
+  }
+
+  @override
+  bool updateShouldNotify(SetupBottomNavigationScope oldWidget) => false;
+}
+
+class _ThemedBottomNavigationBar extends StatelessWidget {
+  const _ThemedBottomNavigationBar({
+    required this.theme,
+    required this.index,
+    required this.defaultIcons,
+    required this.selectedIcons,
+    required this.onTap,
+  });
+
+  final CompanyThemeData theme;
+  final int index;
+  final List<Widget> defaultIcons;
+  final List<Widget> selectedIcons;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return CurvedNavigationBar(
+      height: 60,
+      animationDuration: const Duration(milliseconds: 300),
+      backgroundColor: theme.backgroundColor,
+      buttonBackgroundColor:
+          theme.isDark ? theme.primaryColor : const Color(0xFFEFD199),
+      color: theme.isDark ? theme.surfaceColor : const Color(0xFF90A17D),
+      index: index,
+      items: List.generate(
+        defaultIcons.length,
+        (i) => IconTheme(
+          data: IconThemeData(
+            color: theme.isDark
+                ? (i == index ? theme.backgroundColor : theme.primaryColor)
+                : null,
+          ),
+          child: i == index ? selectedIcons[i] : defaultIcons[i],
+        ),
+      ),
+      onTap: onTap,
     );
   }
 }

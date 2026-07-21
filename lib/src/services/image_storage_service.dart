@@ -3,29 +3,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
-import 'package:selfcare_projects/src/config/cloudinary_config.dart';
+import 'package:selfcare_projects/src/services/api_config.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 
 class ImageStorageService {
-  static const String _cloudNameFromDefine =
-      String.fromEnvironment('CLOUDINARY_CLOUD_NAME');
-  static const String _uploadPresetFromDefine =
-      String.fromEnvironment('CLOUDINARY_UPLOAD_PRESET');
-
-  static String get cloudName => _cloudNameFromDefine.isNotEmpty
-      ? _cloudNameFromDefine
-      : CloudinaryConfig.cloudName;
-  static String get uploadPreset => _uploadPresetFromDefine.isNotEmpty
-      ? _uploadPresetFromDefine
-      : CloudinaryConfig.uploadPreset;
-
   static bool get isConfigured =>
-      cloudName.isNotEmpty && uploadPreset.isNotEmpty;
+      AuthService.instance.currentSession?.token.isNotEmpty ?? false;
   static String? lastError;
-
-  static Uri get _uploadUri =>
-      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
-  static Uri get _videoUploadUri =>
-      Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/video/upload');
 
   static Future<String?> uploadImageBytes(
     Uint8List bytes, {
@@ -34,7 +18,7 @@ class ImageStorageService {
     return _uploadBytes(
       bytes,
       fileName: fileName,
-      uploadUri: _uploadUri,
+      kind: 'avatar',
     );
   }
 
@@ -43,26 +27,46 @@ class ImageStorageService {
     return _uploadBytes(
       bytes,
       fileName: file.uri.pathSegments.last,
-      uploadUri: _videoUploadUri,
+      kind: 'video',
+    );
+  }
+
+  static Future<String?> uploadVideoBytes(
+    Uint8List bytes, {
+    String fileName = 'loading-video.mp4',
+  }) async {
+    return _uploadBytes(
+      bytes,
+      fileName: fileName,
+      kind: 'video',
     );
   }
 
   static Future<String?> _uploadBytes(
     Uint8List bytes, {
     required String fileName,
-    required Uri uploadUri,
+    required String kind,
   }) async {
     lastError = null;
     if (!isConfigured) {
-      lastError =
-          'Cloudinary is not configured. Missing cloud/preset. cloud="$cloudName" preset="$uploadPreset"';
+      lastError = 'Media upload is not configured. Sign in first.';
       print(lastError);
       return null;
     }
 
     try {
-      final request = http.MultipartRequest('POST', uploadUri)
-        ..fields['upload_preset'] = uploadPreset
+      final session = AuthService.instance.currentSession;
+      if (session == null) {
+        lastError = 'Media upload requires a signed-in session.';
+        return null;
+      }
+
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.baseUrl}/api/media/upload'),
+      )
+        ..headers['Authorization'] = 'Bearer ${session.token}'
+        ..fields['kind'] = kind
         ..files.add(
           http.MultipartFile.fromBytes(
             'file',
@@ -75,26 +79,24 @@ class ImageStorageService {
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode != 200 && response.statusCode != 201) {
-        String message = 'Cloudinary upload failed (${response.statusCode}).';
+        String message = 'Media upload failed (${response.statusCode}).';
         try {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final error = data['error'];
-          if (error is Map<String, dynamic> && error['message'] != null) {
-            message = error['message'].toString();
+          final error = data['message'];
+          if (error != null) {
+            message = error.toString();
           }
         } catch (_) {}
-        message =
-            '$message (cloud="$cloudName", preset="$uploadPreset")';
         lastError = message;
-        print('Cloudinary upload failed: ${response.statusCode} ${response.body}');
+        print('Media upload failed: ${response.statusCode} ${response.body}');
         return null;
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['secure_url'] as String?;
+      return data['url'] as String? ?? data['profile_pic'] as String?;
     } catch (e) {
       lastError = e.toString();
-      print('Cloudinary upload error: $e');
+      print('Media upload error: $e');
       return null;
     }
   }
@@ -104,7 +106,7 @@ class ImageStorageService {
     return _uploadBytes(
       bytes,
       fileName: file.uri.pathSegments.last,
-      uploadUri: _uploadUri,
+      kind: 'avatar',
     );
   }
 }

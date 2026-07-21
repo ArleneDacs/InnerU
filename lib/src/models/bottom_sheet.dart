@@ -1,13 +1,14 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/addcoach.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 
 class BottomSheetWidget {
   static void show(BuildContext context) async {
-    User? currentUser = FirebaseAuth.instance.currentUser;
+    final currentUser = AuthService.instance.currentSession;
     String allowedUserId =
         "hG1FxGW2xrVXtKZnnDWERJpPQof2"; // Replace with actual allowed user ID
 
@@ -81,7 +82,7 @@ class BottomSheetWidget {
                 Divider(),
 
                 // Conditionally show "Add Coach" icon only for specific user
-                if (currentUser?.uid == allowedUserId) ...[
+                if (currentUser?.id.toString() == allowedUserId) ...[
                   ListTile(
                     leading: Icon(Icons.supervisor_account),
                     title: Text("Add Coach"),
@@ -120,27 +121,27 @@ class BottomSheetWidget {
 
   // Log out dialog
   static Future<void> _showLogOutDialog(BuildContext context) async {
+    final navigator = Navigator.of(context);
     showDialog(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Log out'),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
-              // Sign out the user from Firebase
-              await FirebaseAuth.instance.signOut();
+              await SessionCleanupService.signOut();
+              if (!navigator.mounted) return;
 
               // Close the dialog
-              Navigator.pop(context);
+              navigator.pop();
 
               // Navigate to LoginScreen and remove all previous routes
-              Navigator.pushAndRemoveUntil(
-                context,
+              navigator.pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => LoginScreen()),
                 (route) => false, // Removes all previous routes from the stack
               );

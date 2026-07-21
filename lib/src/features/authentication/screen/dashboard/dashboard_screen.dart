@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/setup_navbar.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/abundance_dashboard_section.dart';
+import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
@@ -18,6 +18,10 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
@@ -45,10 +49,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
+  Map<String, dynamic>? _dashboardData;
   late CompanyThemeData _companyTheme;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
   final EmotionService _emotionService = EmotionService();
+  final GoalsService _abundanceGoalsService = GoalsService();
   final GlobalKey _dashboardStackKey = GlobalKey();
   late final AnimationController _introController;
   late final AnimationController _tileTransitionController;
@@ -77,10 +83,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
+    final currentUserId =
+        AuthService.instance.currentSession?.id.toString() ?? '';
     _companyTheme = widget.initialCompanyTheme ??
-        CompanyThemeService.cachedThemeForUser(
-          FirebaseAuth.instance.currentUser?.uid ?? '',
-        ) ??
+        CompanyThemeService.cachedThemeForUser(currentUserId) ??
         CompanyThemeData.standard;
     _introController = AnimationController(
       vsync: this,
@@ -90,13 +96,13 @@ class _DashboardScreenState extends State<DashboardScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     );
-    _fetchProfilePic();
     _loadCompanyTheme();
+    _fetchProfilePic();
     fetchQuote();
     _restoreTodayEmotionFromCache();
     _listenToTodayEmotion();
     _loadLocalChatReadOverrides();
-    final watchUserId = FirebaseAuth.instance.currentUser?.uid;
+    final watchUserId = AuthService.instance.currentSession?.id.toString();
     if (watchUserId != null && watchUserId.isNotEmpty) {
       unawaited(WatchStateRefresher().refresh(watchUserId));
     }
@@ -114,11 +120,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _loadLocalChatReadOverrides() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
+    final currentUser = AuthService.instance.currentSession;
     if (currentUser == null) return;
     final prefs = await SharedPreferences.getInstance();
     final overrides = <String, DateTime>{};
-    final prefix = 'chat_read_override_${currentUser.uid}_';
+    final prefix = 'chat_read_override_${currentUser.id}_';
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(prefix)) continue;
       final rawValue = prefs.getInt(key);
@@ -135,11 +141,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _loadCompanyTheme() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     try {
-      final companyTheme = await CompanyThemeService.resolveForUser(user.uid);
+      final companyTheme =
+          await CompanyThemeService.resolveForUser(session.id.toString());
       if (!mounted) return;
       setState(() {
         _companyTheme = companyTheme;
@@ -150,19 +157,24 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _fetchProfilePic() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection("users")
-          .doc(user.uid)
-          .get();
-      final rawProfilePic = userDoc.data()?["profilePic"];
+      final dashboard = await DashboardApiService.instance.fetchDashboard();
+      _dashboardData = dashboard;
+      final user = dashboard['user'];
+      final rawProfilePic =
+          user is Map<String, dynamic> ? user['profile_pic'] : null;
       final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
       if (!mounted) return;
       setState(() {
         _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
+        final summary = dashboard['summary'];
+        if (summary is Map<String, dynamic>) {
+          quote = summary['quote']?.toString() ?? quote;
+          author = summary['author']?.toString() ?? author;
+        }
       });
     } catch (e) {
       debugPrint("Error fetching profile picture: $e");
@@ -170,8 +182,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> selectEmotion(String emotion) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || _isEmotionLoading || _isSavingEmotion) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null || _isEmotionLoading || _isSavingEmotion) return;
 
     final username = await _getUsername();
     if (!mounted) return;
@@ -182,9 +194,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     try {
       final result = await _emotionService.saveTodayEmotion(
-        user: user,
-        emotion: emotion,
+        userId: session.id.toString(),
         username: username,
+        emotion: emotion,
       );
 
       if (!mounted) return;
@@ -212,8 +224,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _restoreTodayEmotionFromCache() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       if (!mounted) return;
       setState(() {
         _isEmotionLoading = false;
@@ -222,8 +234,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
-    final savedDate = prefs.getString('emotion_date_${user.uid}');
+    final savedEmotion = prefs.getString('selected_emotion_${session.id}');
+    final savedDate = prefs.getString('emotion_date_${session.id}');
 
     if (!mounted) return;
     if (savedDate == _todayDate &&
@@ -237,8 +249,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _listenToTodayEmotion() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       if (!mounted) return;
       setState(() {
         _isEmotionLoading = false;
@@ -248,7 +260,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     await _todayEmotionSubscription?.cancel();
     _todayEmotionSubscription =
-        _emotionService.watchTodayEmotion(user.uid).listen(
+        _emotionService.watchTodayEmotion(session.id.toString()).listen(
       (emotion) async {
         if (!mounted) return;
         setState(() {
@@ -268,12 +280,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _cacheTodayEmotion(String? emotion) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final emotionKey = 'selected_emotion_${user.uid}';
-    final dateKey = 'emotion_date_${user.uid}';
+    final emotionKey = 'selected_emotion_${session.id}';
+    final dateKey = 'emotion_date_${session.id}';
 
     if (emotion == null || emotion.isEmpty) {
       await prefs.remove(emotionKey);
@@ -325,47 +337,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<Coach?> _loadAssignedCoach(String coachId) async {
-    final firestore = FirebaseFirestore.instance;
+    final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
+    final coach = coaches.where((entry) => entry.id == coachId).toList();
+    if (coach.isEmpty) return null;
 
-    final coachDoc = await firestore.collection('coaches').doc(coachId).get();
-    if (coachDoc.exists) {
-      final data = coachDoc.data() ?? <String, dynamic>{};
-      return Coach(
-        id: coachDoc.id,
-        name: (data['fullName'] as String?)?.trim().isNotEmpty == true
-            ? (data['fullName'] as String).trim()
-            : ((data['username'] as String?)?.trim().isNotEmpty == true
-                ? (data['username'] as String).trim()
-                : 'My Coach'),
-        phone: (data['phone'] as String?)?.trim().isNotEmpty == true
-            ? (data['phone'] as String).trim()
-            : ((data['phonenumber'] as String?)?.trim() ?? ''),
-        bio: (data['bio'] as String?)?.trim() ?? 'Your support coach',
-        profilePic: (data['profilePic'] as String?)?.trim() ?? '',
-        backgroundColor: const Color(0xFFDCE5D4),
-      );
-    }
-
-    final userDoc = await firestore.collection('users').doc(coachId).get();
-    final userData = userDoc.data();
-    if (userData == null) return null;
-
-    final role = (userData['role'] as String?)?.toLowerCase().trim();
-    final isCoach = userData['isCoach'] == true || role == 'coach';
-    if (!isCoach) return null;
-
+    final data = coach.first;
     return Coach(
-      id: userDoc.id,
-      name: (userData['fullName'] as String?)?.trim().isNotEmpty == true
-          ? (userData['fullName'] as String).trim()
-          : ((userData['username'] as String?)?.trim().isNotEmpty == true
-              ? (userData['username'] as String).trim()
-              : 'My Coach'),
-      phone: (userData['phone'] as String?)?.trim().isNotEmpty == true
-          ? (userData['phone'] as String).trim()
-          : ((userData['phonenumber'] as String?)?.trim() ?? ''),
-      bio: (userData['bio'] as String?)?.trim() ?? 'Your support coach',
-      profilePic: (userData['profilePic'] as String?)?.trim() ?? '',
+      id: data.id,
+      name: data.name.isNotEmpty ? data.name : 'My Coach',
+      phone: data.number ?? '',
+      bio: 'Your support coach',
+      profilePic: data.profilePic ?? '',
       backgroundColor: const Color(0xFFDCE5D4),
     );
   }
@@ -907,13 +889,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(0.84),
+                    Colors.white.withValues(alpha: 0.84),
                     Color.alphaBlend(const Color(0x33FFFFFF), color),
                   ],
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: color.withOpacity(0.14),
+                    color: color.withValues(alpha: 0.14),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -935,18 +917,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<String> _getUsername() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return "User";
+    final session = AuthService.instance.currentSession;
+    if (session == null) return "User";
 
-    final userDoc = await FirebaseFirestore.instance
-        .collection("users")
-        .doc(user.uid)
-        .get();
+    final userData = await UserService.getUserData();
+    final username = userData['username']?.toString().trim() ?? '';
+    if (username.isNotEmpty) {
+      return username;
+    }
 
-    if (userDoc.exists && userDoc["username"] != null) {
-      return userDoc["username"];
-    } else if (user.email != null) {
-      return user.email!.split('@')[0];
+    if (session.email.isNotEmpty) {
+      return session.email.split('@')[0];
     }
 
     return "User";
@@ -961,6 +942,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       final today = DateTime.now().toString().split(' ')[0];
 
       if (savedQuote != null && savedAuthor != null && savedDate == today) {
+        if (!mounted) return;
         setState(() {
           quote = savedQuote;
           author = savedAuthor;
@@ -976,6 +958,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         final newQuote = data[0]['q'] ?? "No quote available.";
         final newAuthor = data[0]['a'] ?? "Unknown";
 
+        if (!mounted) return;
         setState(() {
           quote = newQuote;
           author = newAuthor;
@@ -985,6 +968,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         await prefs.setString('author', newAuthor);
         await prefs.setString('quote_date', today);
       } else {
+        if (!mounted) return;
         setState(() {
           quote = "Failed to load quote.";
           author = "Unknown";
@@ -992,6 +976,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
     } catch (e) {
       debugPrint("Error fetching quote: $e");
+      if (!mounted) return;
       setState(() {
         quote = "Failed to load quote.";
         author = "Unknown";
@@ -1003,18 +988,19 @@ class _DashboardScreenState extends State<DashboardScreen>
     required BuildContext context,
     required Coach coach,
   }) async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     final username = await _getUsername();
     if (!mounted) return;
 
+    if (!context.mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ChatRoomScreen(
           coach: coach,
-          userId: currentUser.uid,
+          userId: session.id.toString(),
           userName: username,
         ),
       ),
@@ -1022,243 +1008,126 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildInboxAction() {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       return const SizedBox.shrink();
     }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('chatRooms')
-          .where('participants', arrayContains: currentUser.uid)
-          .snapshots(),
-      builder: (context, snapshot) {
-        var unreadCount = 0;
-        for (final doc in snapshot.data?.docs ??
-            <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
-          final chatData = doc.data();
-          final localReadTime = _localChatReadOverrides[doc.id];
-          final lastMessageTimeRaw = chatData['lastMessageTime'];
-          final lastMessageTime = lastMessageTimeRaw is Timestamp
-              ? lastMessageTimeRaw.toDate()
-              : DateTime.fromMillisecondsSinceEpoch(0);
-          final lastReadAt = Map<String, dynamic>.from(
-            chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
-          );
-          final lastReadAtRaw = lastReadAt[currentUser.uid];
-          final readTime =
-              lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
-          final effectiveReadTime = [
-            if (readTime != null) readTime,
-            if (localReadTime != null) localReadTime,
-          ].fold<DateTime?>(
-            null,
-            (latest, candidate) => latest == null || candidate.isAfter(latest)
-                ? candidate
-                : latest,
-          );
-          if (effectiveReadTime != null &&
-              !lastMessageTime.isAfter(effectiveReadTime)) {
-            continue;
-          }
-
-          final unreadCounts = Map<String, dynamic>.from(
-            chatData['unreadCounts'] as Map? ?? <String, dynamic>{},
-          );
-          if (unreadCounts.containsKey(currentUser.uid)) {
-            final rawValue = unreadCounts[currentUser.uid];
-            if (rawValue is int) {
-              unreadCount += rawValue;
-            } else if (rawValue is num) {
-              unreadCount += rawValue.toInt();
-            }
-          } else {
-            final lastSenderId =
-                (chatData['lastSenderId'] as String?)?.trim() ?? '';
-            if (lastSenderId.isNotEmpty &&
-                lastSenderId != currentUser.uid &&
-                (effectiveReadTime == null ||
-                    lastMessageTime.isAfter(effectiveReadTime))) {
-              unreadCount += 1;
-            }
-          }
-        }
-
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            IconButton(
-              icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
-              onPressed: () async {
-                final username = await _getUsername();
-                if (!context.mounted) return;
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatListScreen(
-                      userId: currentUser.uid,
-                      userName: username,
-                    ),
-                  ),
-                );
-                if (!mounted) return;
-                await _loadLocalChatReadOverrides();
-              },
+    return IconButton(
+      icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
+      onPressed: () async {
+        final navigator = Navigator.of(context);
+        final username = await _getUsername();
+        if (!context.mounted) return;
+        await navigator.push(
+          MaterialPageRoute(
+            builder: (context) => ChatListScreen(
+              userId: session.id.toString(),
+              userName: username,
             ),
-            if (unreadCount > 0)
-              Positioned(
-                right: 6,
-                top: 6,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE56B6F),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  constraints: const BoxConstraints(minWidth: 18),
-                  child: Text(
-                    unreadCount > 99 ? '99+' : '$unreadCount',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+          ),
         );
+        if (!mounted) return;
+        await _loadLocalChatReadOverrides();
       },
     );
   }
 
   Widget _buildProfileAndPoints(BuildContext context) {
-    final currentUser = FirebaseAuth.instance.currentUser;
     final theme = _companyTheme;
-    if (currentUser == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       return const SizedBox.shrink();
     }
 
-    num scoreFromData(Map<String, dynamic>? data) {
-      final rawPoints = data?['totalPoints'];
-      final rawDailyTrackerScore = data?['dailyTrackerScore'];
-      final rawTodoListScore = data?['todoListScore'];
-      final rawTodoListContribution = data?['todoListScoreDailyContribution'];
-      final includeTodoListScore = data?['todoListIncludedInTotal'] == true;
+    final dashboardUser = _dashboardData?['user'];
+    final summary = _dashboardData?['summary'];
+    final rawScore = dashboardUser is Map<String, dynamic>
+        ? dashboardUser['score']
+        : summary is Map<String, dynamic>
+            ? summary['score']
+            : null;
+    final totalPointsLabel = rawScore is num
+        ? (rawScore == rawScore.roundToDouble()
+            ? rawScore.toStringAsFixed(0)
+            : rawScore.toStringAsFixed(1))
+        : '0';
 
-      if (rawDailyTrackerScore is num && rawTodoListScore is num) {
-        final dailyScore = rawDailyTrackerScore.clamp(0, 100);
-        final todoScore = rawTodoListContribution is num
-            ? rawTodoListContribution.clamp(0, 100)
-            : rawTodoListScore.clamp(0, 100);
-        return includeTodoListScore
-            ? ((dailyScore + todoScore) / 2).clamp(0, 100)
-            : dailyScore;
-      }
-
-      return rawPoints is num ? rawPoints.clamp(0, 100) : 0;
-    }
-
-    String scoreLabel(num score) {
-      return score == score.roundToDouble()
-          ? score.toStringAsFixed(0)
-          : score.toStringAsFixed(1);
-    }
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('userpoints')
-          .where('userId', isEqualTo: currentUser.uid)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? const [];
-        final totalPoints = docs.isEmpty
-            ? 0
-            : docs
-                    .map((doc) => scoreFromData(doc.data()))
-                    .fold<num>(0, (total, score) => total + score) /
-                docs.length;
-        final totalPointsLabel = scoreLabel(totalPoints);
-
-        return InkWell(
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () => Navigator.pushNamed(context, '/profile'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+        decoration: BoxDecoration(
+          color: theme.surfaceColor.withValues(alpha: 0.86),
           borderRadius: BorderRadius.circular(999),
-          onTap: () => Navigator.pushNamed(context, '/profile'),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-            decoration: BoxDecoration(
-              color: theme.surfaceColor.withValues(alpha: 0.86),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: theme.isDark
-                    ? theme.primaryColor.withValues(alpha: 0.18)
-                    : const Color(0xFFDCE5D4),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                (_profilePic == null || _profilePic!.trim().isEmpty)
-                    ? Image.asset(
-                        'assets/images/avatar.png',
-                        width: 22,
-                        height: 22,
-                      )
-                    : ClipOval(
-                        child: Image.network(
-                          _profilePic!,
+          border: Border.all(
+            color: theme.isDark
+                ? theme.primaryColor.withValues(alpha: 0.18)
+                : const Color(0xFFDCE5D4),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            (_profilePic == null || _profilePic!.trim().isEmpty)
+                ? Image.asset(
+                    'assets/images/avatar.png',
+                    width: 22,
+                    height: 22,
+                  )
+                : ClipOval(
+                    child: Image.network(
+                      _profilePic!,
+                      width: 22,
+                      height: 22,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Image.asset(
+                          'assets/images/avatar.png',
                           width: 22,
                           height: 22,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Image.asset(
-                              'assets/images/avatar.png',
-                              width: 22,
-                              height: 22,
-                            );
-                          },
-                        ),
-                      ),
-                const SizedBox(width: 5),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 5,
-                    vertical: 2,
+                        );
+                      },
+                    ),
                   ),
-                  decoration: BoxDecoration(
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 5,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.1)
+                    : const Color(0xFFEEF3E8),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    CupertinoIcons.star_fill,
+                    size: 10,
                     color: theme.isDark
-                        ? theme.primaryColor.withValues(alpha: 0.1)
-                        : const Color(0xFFEEF3E8),
-                    borderRadius: BorderRadius.circular(999),
+                        ? theme.primaryColor
+                        : const Color(0xFFCE8F5A),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        CupertinoIcons.star_fill,
-                        size: 10,
-                        color: theme.isDark
-                            ? theme.primaryColor
-                            : const Color(0xFFCE8F5A),
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        totalPointsLabel,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: theme.inkColor,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 4),
+                  Text(
+                    totalPointsLabel,
+                    style: TextStyle(
+                      color: theme.inkColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 
@@ -1363,7 +1232,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   ConnectionState.done &&
                               snapshot.hasData) {
                             final userId =
-                                FirebaseAuth.instance.currentUser?.uid;
+                                AuthService.instance.currentSession?.id
+                                    .toString();
                             if (userId == null || userId.isEmpty) {
                               UserPreferences.saveUsername(snapshot.data!);
                             } else {
@@ -1396,6 +1266,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                       child: _buildQuickOverviewSection(),
                     ),
                     const SizedBox(height: 28),
+                    if (_isAbundance12Company(
+                      name: companyTheme.companyName,
+                      code: companyTheme.companyCode,
+                    )) ...[
+                      _buildIntroMotion(
+                        start: 0.12,
+                        end: 0.52,
+                        child: _buildAbundanceDashboardSection(),
+                      ),
+                      const SizedBox(height: 28),
+                    ],
                     _buildIntroMotion(
                       start: 0.14,
                       end: 0.54,
@@ -1869,44 +1750,50 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildMiniOverviewCard(
-                icon: CupertinoIcons.flag_fill,
-                title: "Goals",
-                value: "3 life areas",
-                accent: const Color(0xFFD6DEE8),
-                onTap: () => Navigator.pushNamed(context, '/goalsHub'),
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }
 
-  Widget _buildStreakMedalsSection() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const SizedBox.shrink();
+  Widget _buildAbundanceDashboardSection() {
+    return AbundanceDashboardSection(
+      theme: _companyTheme,
+      goalsService: _abundanceGoalsService,
+    );
+  }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-          "Streak medals",
-          subtitle: "Your unlocked habit rewards across core routines.",
-        ),
-        const SizedBox(height: 16),
-        StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .snapshots(),
-          builder: (context, snapshot) {
-            final data = snapshot.data?.data() ?? <String, dynamic>{};
-            return _buildGlassSectionCard(
+  bool _isAbundance12Company({
+    String name = '',
+    String code = '',
+  }) {
+    final normalizedName =
+        name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final normalizedCode =
+        code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    return normalizedName.contains('abundance12') ||
+        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
+        normalizedCode.contains('ABUNDANCE12') ||
+        normalizedCode.contains('ABUND12') ||
+        normalizedCode == 'A12' ||
+        normalizedCode.startsWith('AB12');
+  }
+
+  Widget _buildStreakMedalsSection() {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return const SizedBox.shrink();
+
+    return FutureBuilder<Map<String, dynamic>>(
+      future: UserService.getUserData(),
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? <String, dynamic>{};
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeader(
+              "Streak medals",
+              subtitle: "Your unlocked habit rewards across core routines.",
+            ),
+            const SizedBox(height: 16),
+            _buildGlassSectionCard(
               padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -1944,10 +1831,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                   );
                 },
               ),
-            );
-          },
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -2465,22 +2352,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildCoachSection(BuildContext context) {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       return const SizedBox.shrink();
     }
 
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .snapshots(),
+    return FutureBuilder<Map<String, dynamic>>(
+      future: UserService.getUserData(),
       builder: (context, userSnapshot) {
-        if (userSnapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final userData = userSnapshot.data?.data();
+        final userData = userSnapshot.data;
         final coachIds = List<String>.from(
           userData?['coachIds'] as List? ?? const <String>[],
         ).where((id) => id.trim().isNotEmpty).toList();
@@ -2499,7 +2379,9 @@ class _DashboardScreenState extends State<DashboardScreen>
               subtitle: 'Support that feels close and easy to reach.',
             ),
             const SizedBox(height: 14),
-            if (activeCoachIds.isEmpty)
+            if (userSnapshot.connectionState == ConnectionState.waiting)
+              const Center(child: CircularProgressIndicator())
+            else if (activeCoachIds.isEmpty)
               _buildNoCoachCard(context)
             else
               FutureBuilder<List<Coach>>(
@@ -2998,7 +2880,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       children: [
         _buildMoodOverlay(emotion),
         Container(
-          color: Colors.black.withOpacity(0.24),
+          color: Colors.black.withValues(alpha: 0.24),
         ),
         Center(
           child: Padding(
@@ -3006,11 +2888,11 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: Container(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.98),
+                color: Colors.white.withValues(alpha: 0.98),
                 borderRadius: BorderRadius.circular(28),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.18),
+                    color: Colors.black.withValues(alpha: 0.18),
                     blurRadius: 28,
                     offset: const Offset(0, 12),
                   ),
@@ -3053,6 +2935,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                       GestureDetector(
                         onTap: () {
+                          if (!mounted) return;
                           setState(() {
                             selectedEmotion = null;
                           });

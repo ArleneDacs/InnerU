@@ -3,24 +3,25 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lottie/lottie.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
-import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
+import 'package:selfcare_projects/src/services/step_background_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
@@ -58,8 +59,14 @@ class _StepTrackerState extends State<StepTracker>
   bool _stepGoalDialogVisible = false;
   String? _stepPermissionMessage;
   Timer? _checkTimer;
+  Timer? _statePersistTimer;
   final ImagePicker _memoryPicker = ImagePicker();
   final ActivityStreakService _activityStreakService = ActivityStreakService();
+  final DailyTrackerApiService _dailyTrackerApiService =
+      DailyTrackerApiService.instance;
+
+  String? get _currentUserId =>
+      AuthService.instance.currentSession?.id.toString();
 
   // iOS exposes motion access as sensors, while Android uses activity recognition.
   Permission get _stepPermission =>
@@ -94,17 +101,17 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _loadDailyGoal() async {
-    final user = FirebaseAuth.instance.currentUser;
+    final userId = _currentUserId;
     final prefs = await SharedPreferences.getInstance();
 
-    if (user == null) {
+    if (userId == null || userId.isEmpty) {
       setState(() {
         _dailyGoal = 5000;
       });
       return;
     }
 
-    final cachedGoal = prefs.getInt('daily_step_goal_${user.uid}');
+    final cachedGoal = prefs.getInt('daily_step_goal_$userId');
     if (cachedGoal != null && cachedGoal > 0) {
       setState(() {
         _dailyGoal = cachedGoal;
@@ -112,18 +119,20 @@ class _StepTrackerState extends State<StepTracker>
     }
 
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final dynamic rawGoal = userDoc.data()?['dailyStepGoal'];
-      final int? remoteGoal = rawGoal is int ? rawGoal : null;
+      final userData = await UserService.getUserData();
+      final dynamic rawGoal = userData['daily_step_goal'] ??
+          userData['dailyStepGoal'] ??
+          userData['daily_goal'] ??
+          userData['dailyGoal'];
+      final int? remoteGoal = rawGoal is num
+          ? rawGoal.toInt()
+          : int.tryParse(rawGoal?.toString() ?? '');
 
       if (remoteGoal != null && remoteGoal > 0 && mounted) {
         setState(() {
           _dailyGoal = remoteGoal;
         });
-        await prefs.setInt('daily_step_goal_${user.uid}', remoteGoal);
+        await prefs.setInt('daily_step_goal_$userId', remoteGoal);
       }
     } catch (error) {
       debugPrint("Failed to load step goal: $error");
@@ -131,7 +140,7 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _loadSteps() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null || userId.isEmpty) {
       _steps = 0;
       _initialSteps = -1;
@@ -153,7 +162,6 @@ class _StepTrackerState extends State<StepTracker>
 
       // Save yesterday's steps to Firestore before resetting
       await _saveDailyStepsToHistory(
-        userId: userId,
         steps: previousSteps,
         date: lastSavedDate,
       );
@@ -190,6 +198,32 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
+  Future<void> _persistCurrentStepState() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      await prefs.setInt(
+        SessionCleanupService.savedStepsKey(userId),
+        _steps,
+      );
+      await prefs.setInt(
+        SessionCleanupService.initialStepsKey(userId),
+        _initialSteps,
+      );
+      await prefs.setInt(
+        SessionCleanupService.stepOffsetKey(userId),
+        _stepCountOffset,
+      );
+      await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
+      await prefs.setString(SessionCleanupService.lastSavedDateKey(userId), today);
+    } catch (error) {
+      debugPrint("Failed to persist local step state: $error");
+    }
+  }
+
   Future<bool> _requestPermission() async {
     var status = await _stepPermission.status;
     if (!status.isGranted) {
@@ -220,22 +254,11 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<int> _loadRemoteTodaySteps(String userId, String date) async {
     try {
-      final firestore = FirebaseFirestore.instance;
-      final membershipData = await CompanyMembershipService.loadForUser(userId);
-      final scopedDocId = CompanyMembershipService.scopedDailyDocId(
-        uid: userId,
-        date: date,
-        membership: membershipData.activeMembership,
-      );
-      final doc =
-          await firestore.collection('dailytracker').doc(scopedDocId).get();
-      final legacyDoc = scopedDocId == '$userId-$date'
-          ? null
-          : await firestore
-              .collection('dailytracker')
-              .doc('$userId-$date')
-              .get();
-      final value = doc.data()?['stepCount'] ?? legacyDoc?.data()?['stepCount'];
+      final response = await _dailyTrackerApiService.fetch(date: date);
+      final tracker = response['tracker'];
+      final value = tracker is Map<String, dynamic>
+          ? tracker['stepCount'] ?? tracker['step_count']
+          : null;
       if (value is num && value > 0) {
         return value.toInt();
       }
@@ -246,33 +269,32 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _saveDailyStepsToHistory({
-    required String userId,
     required int steps,
     required String? date,
   }) async {
     if (date == null) return;
 
-    final firestore = FirebaseFirestore.instance;
+    try {
+      await _dailyTrackerApiService.upsert(
+        date: date,
+        stepCount: steps,
+        stepGoal: _dailyGoal,
+        steps: true,
+      );
 
-    await firestore
-        .collection('steps')
-        .doc(userId)
-        .collection('tracking')
-        .doc(date)
-        .set({
-      'steps': steps,
-      'timestamp': DateTime.parse(date).millisecondsSinceEpoch,
-    });
-
-    print("Saved $steps steps for $date");
+      print("Saved $steps steps for $date");
+    } catch (error) {
+      debugPrint("Failed to save step history: $error");
+    }
   }
 
   void _initStepCounter() async {
     if (_stepCounterInitialized) return;
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
 
     _stepCounterInitialized = true;
+    unawaited(StepBackgroundService.instance.startTracking());
 
     final prefs = await SharedPreferences.getInstance();
     final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
@@ -285,7 +307,7 @@ class _StepTrackerState extends State<StepTracker>
       (StepCount event) async {
         if (!mounted || _isDisposed) return;
 
-        final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+        final currentUserId = _currentUserId;
         if (currentUserId != userId) {
           await _stopStepCounterForAccountSwitch();
           return;
@@ -338,6 +360,12 @@ class _StepTrackerState extends State<StepTracker>
       },
     );
 
+    _startStepWatchdogTimer();
+    _startStepStateAutosave();
+  }
+
+  void _startStepWatchdogTimer() {
+    _checkTimer?.cancel();
     _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (!mounted || _isDisposed) return;
 
@@ -348,11 +376,22 @@ class _StepTrackerState extends State<StepTracker>
     });
   }
 
+  void _startStepStateAutosave() {
+    _statePersistTimer?.cancel();
+    _statePersistTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted || _isDisposed) return;
+      unawaited(_persistCurrentStepState());
+    });
+  }
+
   Future<void> _stopStepCounterForAccountSwitch() async {
+    unawaited(StepBackgroundService.instance.stopTracking());
     await _stepCountStream?.cancel();
     _stepCountStream = null;
     _checkTimer?.cancel();
     _checkTimer = null;
+    _statePersistTimer?.cancel();
+    _statePersistTimer = null;
     _stepCounterInitialized = false;
     _steps = 0;
     _initialSteps = -1;
@@ -370,16 +409,28 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
+  Future<void> _pauseStepCounterForLifecycle() async {
+    _checkTimer?.cancel();
+    _checkTimer = null;
+  }
+
+  Future<void> _stopStepCounterForLifecycle() async {
+    await _stepCountStream?.cancel();
+    _stepCountStream = null;
+    _checkTimer?.cancel();
+    _checkTimer = null;
+    _statePersistTimer?.cancel();
+    _statePersistTimer = null;
+    _stepCounterInitialized = false;
+  }
+
   void _updateStepCount(int newSteps) async {
     if (!mounted || _isDisposed) {
       return; // Prevent updates if widget is disposed
     }
 
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted || _isDisposed) return;
 
     final previousSteps = _steps;
 
@@ -388,16 +439,7 @@ class _StepTrackerState extends State<StepTracker>
       _steps = newSteps;
     });
 
-    await prefs.setInt(SessionCleanupService.savedStepsKey(userId), _steps);
-    await prefs.setInt(
-      SessionCleanupService.initialStepsKey(userId),
-      _initialSteps,
-    );
-    await prefs.setInt(
-      SessionCleanupService.stepOffsetKey(userId),
-      _stepCountOffset,
-    );
-    await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
+    await _persistCurrentStepState();
     if (!mounted || _isDisposed) return;
 
     if (!_stepStreamController.isClosed) {
@@ -407,11 +449,11 @@ class _StepTrackerState extends State<StepTracker>
     WatchSyncService.instance.syncSteps(_steps, goal: _dailyGoal);
 
     if (_shouldSyncProgress()) {
-      await _syncStepProgress();
+      unawaited(_syncStepProgress());
     }
 
     if (_steps >= _dailyGoal) {
-      await _saveDailyActivity(steps: true);
+      unawaited(_saveDailyActivity(steps: true));
     }
 
     if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
@@ -433,47 +475,28 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<void> _saveDailyActivity(
       {bool meditation = false, bool steps = false}) async {
-    String? userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null) return;
+    final userData = await UserService.getUserData();
+    final username = userData['username']?.toString() ??
+        userData['name']?.toString() ??
+        userData['displayName']?.toString();
 
-    FirebaseFirestore firestore = FirebaseFirestore.instance;
-
-    // Fetch username from Firestore user document
-    DocumentSnapshot userDoc =
-        await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.exists ? userDoc.get('username') : null;
-
-    if (username != null) {
-      String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final membershipData = await CompanyMembershipService.loadForUser(userId);
-      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
-        uid: userId,
-        date: formattedDate,
-        membership: membershipData.activeMembership,
-      );
-
-      DocumentReference docRef =
-          firestore.collection('dailytracker').doc(trackerDocId);
-
-      // Use Firestore's FieldValue.merge to update without overwriting other fields
-      await docRef.set({
-        'userId': userId,
-        'username': username,
-        'date': formattedDate,
-        'stepCount': _steps,
-        'stepGoal': _dailyGoal,
-        if (meditation) 'meditation': true,
-        if (steps) 'steps': true,
-        ...CompanyMembershipService.activeCompanyFields(
-          membershipData.activeMembership,
-        ),
-      }, SetOptions(merge: true));
-
-      print(
-          "Updated Firestore: Meditation = $meditation, Steps = $steps, for userId: $userId, username: $username");
-    } else {
-      print("Error: Username not found for userId: $userId");
-    }
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await _dailyTrackerApiService.upsert(
+      date: formattedDate,
+      stepCount: _steps,
+      stepGoal: _dailyGoal,
+      meditation: meditation,
+      steps: steps,
+      username: username,
+      companyId: userData['company_id']?.toString() ??
+          userData['companyId']?.toString(),
+      companyCode: userData['company_code']?.toString() ??
+          userData['companyCode']?.toString(),
+      companyName: userData['company_name']?.toString() ??
+          userData['companyName']?.toString(),
+    );
   }
 
   void _setWalkingState(bool isWalking) {
@@ -526,29 +549,18 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _syncStepProgress() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null) return;
 
     final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     try {
-      final membershipData = await CompanyMembershipService.loadForUser(userId);
-      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
-        uid: userId,
+      await _dailyTrackerApiService.upsert(
         date: formattedDate,
-        membership: membershipData.activeMembership,
+        stepCount: _steps,
+        stepGoal: _dailyGoal,
+        steps: _steps > 0,
       );
-      await FirebaseFirestore.instance
-          .collection('dailytracker')
-          .doc(trackerDocId)
-          .set({
-        'stepCount': _steps,
-        'stepGoal': _dailyGoal,
-        'date': formattedDate,
-        ...CompanyMembershipService.activeCompanyFields(
-          membershipData.activeMembership,
-        ),
-      }, SetOptions(merge: true));
       _lastSyncedStepCount = _steps;
     } catch (error) {
       debugPrint("Failed to sync step progress: $error");
@@ -572,7 +584,7 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<bool> _markStepGoalPromptIfNeeded() async {
     final prefs = await SharedPreferences.getInstance();
-    final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    final userId = _currentUserId ?? 'guest';
     final promptKey =
         'step_goal_memory_prompt_${userId}_${_todayKey()}_$_dailyGoal';
 
@@ -599,7 +611,7 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<List<ActivityStreakMilestone>> _recordStepStreak() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = _currentUserId;
     if (userId == null) return <ActivityStreakMilestone>[];
 
     try {
@@ -880,7 +892,7 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _resumeStepCounterIfNeeded() async {
-    if (!mounted || _stepCounterInitialized) return;
+    if (!mounted) return;
 
     final status = await _stepPermission.status;
     if (!mounted || !status.isGranted) return;
@@ -889,6 +901,18 @@ class _StepTrackerState extends State<StepTracker>
       _hasStepPermission = true;
       _stepPermissionMessage = null;
     });
+
+    if (_stepCounterInitialized) {
+      unawaited(StepBackgroundService.instance.startTracking());
+      if (_checkTimer == null) {
+        _startStepWatchdogTimer();
+      }
+      if (_statePersistTimer == null) {
+        _startStepStateAutosave();
+      }
+      return;
+    }
+
     _initStepCounter();
   }
 
@@ -903,8 +927,23 @@ class _StepTrackerState extends State<StepTracker>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _resumeStepCounterIfNeeded();
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(_resumeStepCounterIfNeeded());
+        break;
+      case AppLifecycleState.paused:
+        unawaited(_persistCurrentStepState());
+        unawaited(_pauseStepCounterForLifecycle());
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        unawaited(_persistCurrentStepState());
+        unawaited(_pauseStepCounterForLifecycle());
+        break;
+      case AppLifecycleState.detached:
+        unawaited(_persistCurrentStepState());
+        unawaited(_stopStepCounterForLifecycle());
+        break;
     }
   }
 
@@ -912,8 +951,10 @@ class _StepTrackerState extends State<StepTracker>
   void dispose() {
     _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_persistCurrentStepState());
     _stepCountStream?.cancel();
     _checkTimer?.cancel();
+    _statePersistTimer?.cancel();
     _stepStreamController.close();
     _lottieController.dispose();
     super.dispose();

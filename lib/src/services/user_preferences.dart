@@ -3,9 +3,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserPreferences {
   static const String _keyUsername = "username"; // Key for storing username
 
+  static String _usernameKey(String userId) => "username_$userId";
+  static String _favoriteSongKey(String accountKey) =>
+      "favoriteSong_$accountKey";
+  static String _favoriteSongSourceKey(String accountKey) =>
+      "favoriteSongSource_$accountKey";
+  static String _favoriteSpotifyUrlKey(String accountKey) =>
+      "favoriteSpotifyUrl_$accountKey";
+
   // Save the currently logged-in username
   static Future<void> saveUsername(String username) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyUsername, username);
+  }
+
+  static Future<void> saveUsernameForUser(
+      String userId, String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_usernameKey(userId), username);
     await prefs.setString(_keyUsername, username);
   }
 
@@ -15,41 +30,46 @@ class UserPreferences {
     return prefs.getString(_keyUsername);
   }
 
-  // Save favorite song associated with the username
-  static Future<void> saveFavoriteSong(String username, String song) async {
+  static Future<String?> loadUsernameForUser(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString("favoriteSong_$username", song);
+    return prefs.getString(_usernameKey(userId));
   }
 
-  // Load favorite song based on the username
-  static Future<String?> loadFavoriteSong(String username) async {
+  // Save favorite song associated with an account-specific key.
+  static Future<void> saveFavoriteSong(String accountKey, String song) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString("favoriteSong_$username");
+    await prefs.setString(_favoriteSongKey(accountKey), song);
+  }
+
+  // Load favorite song based on an account-specific key.
+  static Future<String?> loadFavoriteSong(String accountKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_favoriteSongKey(accountKey));
   }
 
   static Future<void> saveFavoriteSongSource(
-    String username,
+    String accountKey,
     String source,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString("favoriteSongSource_$username", source);
+    await prefs.setString(_favoriteSongSourceKey(accountKey), source);
   }
 
-  static Future<String?> loadFavoriteSongSource(String username) async {
+  static Future<String?> loadFavoriteSongSource(String accountKey) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString("favoriteSongSource_$username");
+    return prefs.getString(_favoriteSongSourceKey(accountKey));
   }
 
   static Future<void> saveFavoriteSpotifyUrl(
-    String username,
+    String accountKey,
     String spotifyUrl,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString("favoriteSpotifyUrl_$username", spotifyUrl);
+    await prefs.setString(_favoriteSpotifyUrlKey(accountKey), spotifyUrl);
   }
 
-  static Future<String?> loadFavoriteSpotifyUrl(String username) async {
+  static Future<String?> loadFavoriteSpotifyUrl(String accountKey) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString("favoriteSpotifyUrl_$username");
+    return prefs.getString(_favoriteSpotifyUrlKey(accountKey));
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/services/password_reset_api_service.dart';
 
 class ChangePass extends StatefulWidget {
   const ChangePass({super.key, required this.title});
@@ -13,10 +12,9 @@ class ChangePass extends StatefulWidget {
 class _ChangePass extends State<ChangePass> {
   final TextEditingController _emailController = TextEditingController();
   bool _isEmailFormatCorrect = true;
-  bool _isEmailExist = false;
-  bool _isCheckingEmail = false;
   bool _isButtonEnabled = false;
   bool _isLoading = false;
+  String? _successMessage;
 
   bool _isEmailFormatValid(String email) {
     String emailPattern = r'^[a-zA-Z0-9._%+-]+@gmail\.com$';
@@ -26,49 +24,29 @@ class _ChangePass extends State<ChangePass> {
 
   Future<void> _checkEmailAvailability(String email) async {
     setState(() {
-      _isCheckingEmail = true;
-      _isButtonEnabled = false;
+      _isButtonEnabled = true;
     });
-
-    final querySnapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .where('email', isEqualTo: email)
-        .get();
-
-    setState(() {
-      _isEmailExist = querySnapshot.docs.isNotEmpty;
-      _isCheckingEmail = false;
-      _isButtonEnabled = _isEmailExist;
-    });
-
-    if (!_isEmailExist) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("This email does not exist in the system."),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
   }
 
   Future<void> _sendPasswordResetEmail() async {
     setState(() {
       _isLoading = true;
       _isButtonEnabled = false;
+      _successMessage = null;
     });
 
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: _emailController.text);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Password reset link sent to your email."),
-          backgroundColor: Colors.green,
-        ),
+      await PasswordResetApiService.instance.sendResetLink(
+        _emailController.text.trim(),
       );
 
-      _emailController.clear();
+      if (!mounted) return;
+      setState(() {
+        _successMessage = 'Password reset link sent to your email.';
+        _emailController.clear();
+      });
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Error: ${e.toString()}"),
@@ -76,9 +54,11 @@ class _ChangePass extends State<ChangePass> {
         ),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -101,39 +81,47 @@ class _ChangePass extends State<ChangePass> {
 
                     setState(() {
                       _isEmailFormatCorrect = isValidFormat;
-                      _isEmailExist = false;
-                      _isButtonEnabled = false;
+                      _isButtonEnabled = isValidFormat;
                     });
 
-                    if (isValidFormat) {
-                      _checkEmailAvailability(value);
-                    }
+                    if (isValidFormat) _checkEmailAvailability(value);
                   },
                   decoration: InputDecoration(
                     hintText: "Enter your email",
                     filled: true,
-                    fillColor: Color(0xFFffecc9),
+                    fillColor: Colors.amber.shade100,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: EdgeInsets.all(12),
-                    errorText: _isEmailFormatCorrect ? null : "Invalid email format",
+                    errorText:
+                        _isEmailFormatCorrect ? null : "Invalid email format",
                   ),
                 ),
               ),
-               SizedBox(height: 70.0),
+              if (_successMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _successMessage!,
+                  style: const TextStyle(color: Colors.green),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              SizedBox(height: 70.0),
               ElevatedButton(
                 onPressed: _isButtonEnabled ? _sendPasswordResetEmail : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _isButtonEnabled ? Color(0xFFce8f5a) : Colors.grey,
+                  backgroundColor:
+                      _isButtonEnabled ? Colors.deepOrange : Colors.grey,
                   padding: EdgeInsets.symmetric(horizontal: 25, vertical: 10),
                 ),
                 child: _isLoading
                     ? SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2),
                       )
                     : Text(
                         'Forgot Password',

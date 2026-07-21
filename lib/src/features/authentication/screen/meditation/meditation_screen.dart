@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,13 +8,15 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
-import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
+import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
-import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
@@ -43,6 +43,8 @@ class _MeditationState extends State<Meditation> {
   final ImagePicker _memoryPicker = ImagePicker();
   final MeditationStreakService _meditationStreakService =
       MeditationStreakService();
+  final DailyTrackerApiService _dailyTrackerApiService =
+      DailyTrackerApiService.instance;
   String? playingSong;
   String? favoriteSongPath;
 
@@ -72,7 +74,7 @@ class _MeditationState extends State<Meditation> {
   }
 
   Future<void> loadFavorite() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null || userId.isEmpty) return;
 
     final legacyUsername = await UserPreferences.loadUsername();
@@ -103,40 +105,31 @@ class _MeditationState extends State<Meditation> {
     bool steps = false,
     int? meditationSeconds,
   }) async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null) return;
 
-    final firestore = FirebaseFirestore.instance;
-    final userDoc = await firestore.collection('users').doc(userId).get();
-    final username = userDoc.exists ? userDoc.get('username') : null;
+    final userData = await UserService.getUserData();
+    final username = userData['username']?.toString() ??
+        userData['name']?.toString() ??
+        userData['displayName']?.toString();
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final meditationMinutes = meditationSeconds == null
+        ? null
+        : (meditationSeconds / Duration.secondsPerMinute).ceil();
 
-    if (username != null) {
-      final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final membershipData = await CompanyMembershipService.loadForUser(userId);
-      final trackerDocId = CompanyMembershipService.scopedDailyDocId(
-        uid: userId,
-        date: formattedDate,
-        membership: membershipData.activeMembership,
-      );
-      final docRef = firestore.collection('dailytracker').doc(trackerDocId);
-
-      final meditationMinutes = meditationSeconds == null
-          ? null
-          : (meditationSeconds / Duration.secondsPerMinute).ceil();
-
-      await docRef.set({
-        'userId': userId,
-        'username': username,
-        'date': formattedDate,
-        if (meditation) 'meditation': true,
-        if (meditation && meditationMinutes != null)
-          'meditationMinutes': FieldValue.increment(meditationMinutes),
-        if (steps) 'steps': true,
-        ...CompanyMembershipService.activeCompanyFields(
-          membershipData.activeMembership,
-        ),
-      }, SetOptions(merge: true));
-    }
+    await _dailyTrackerApiService.upsert(
+      date: formattedDate,
+      meditation: meditation,
+      steps: steps,
+      meditationMinutes: meditationMinutes,
+      username: username,
+      companyId: userData['company_id']?.toString() ??
+          userData['companyId']?.toString(),
+      companyCode: userData['company_code']?.toString() ??
+          userData['companyCode']?.toString(),
+      companyName: userData['company_name']?.toString() ??
+          userData['companyName']?.toString(),
+    );
   }
 
   Future<List<MeditationStreakMilestone>> _onMeditationComplete({
@@ -147,7 +140,7 @@ class _MeditationState extends State<Meditation> {
       meditationSeconds: completedSeconds,
     );
 
-    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null) return <MeditationStreakMilestone>[];
 
     try {
@@ -164,11 +157,7 @@ class _MeditationState extends State<Meditation> {
 
   Future<void> _syncMeditationToWatch(String userId) async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
-      final data = snapshot.data() ?? <String, dynamic>{};
+      final data = await UserService.getUserData();
       final streak = ActivityStreakService.activeCurrentStreak(
         lastDate: data[ActivityStreakService.lastDateFieldFor(
           ActivityStreakType.meditation,

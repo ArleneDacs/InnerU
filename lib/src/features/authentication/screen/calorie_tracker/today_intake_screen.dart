@@ -1,7 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class TodayIntakeScreen extends StatelessWidget {
   const TodayIntakeScreen({super.key});
@@ -15,8 +17,8 @@ class TodayIntakeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       return const Scaffold(
         body: Center(
           child: Text('Please log in to view today\'s intake.'),
@@ -25,66 +27,84 @@ class TodayIntakeScreen extends StatelessWidget {
     }
 
     final todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final dayRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('calorie_logs')
-        .doc(todayKey);
+    final calorieApi = CalorieTrackerApiService.instance;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Today\'s Intake'),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: dayRef.snapshots(),
-        builder: (context, daySnapshot) {
-          final dayData = daySnapshot.data?.data() ?? {};
-          final waterGlasses = (dayData['waterGlasses'] as num?)?.toInt() ?? 0;
-          final waterGoal = (dayData['waterGoal'] as num?)?.toInt() ?? 8;
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              iconTheme: IconThemeData(color: companyTheme.inkColor),
+              title: Text(
+                'Today\'s Intake',
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              elevation: 0,
+              scrolledUnderElevation: 0,
+            ),
+            body: FutureBuilder<Map<String, dynamic>>(
+              future: calorieApi.fetchDay(date: todayKey),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: dayRef
-                .collection('entries')
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
-            builder: (context, entriesSnapshot) {
-              final entries = entriesSnapshot.data?.docs ?? [];
-              final groupedEntries = <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{
-                for (final mealType in _mealTypes) mealType: [],
-              };
+                final dayResponse = snapshot.data ?? const <String, dynamic>{};
+                final dayData = dayResponse['day'] is Map
+                    ? (dayResponse['day'] as Map).cast<String, dynamic>()
+                    : <String, dynamic>{};
+                final waterGlasses =
+                    (dayData['waterGlasses'] as num?)?.toInt() ?? 0;
+                final waterGoal = (dayData['waterGoal'] as num?)?.toInt() ?? 8;
+                final entries = dayResponse['entries'] is List
+                    ? (dayResponse['entries'] as List)
+                        .whereType<Map>()
+                        .map((item) => item.cast<String, dynamic>())
+                        .toList()
+                    : <Map<String, dynamic>>[];
+                final groupedEntries =
+                    <String, List<Map<String, dynamic>>>{
+                  for (final mealType in _mealTypes) mealType: [],
+                };
 
-              for (final doc in entries) {
-                final mealType = (doc.data()['mealType'] as String?) ?? 'Snack';
-                groupedEntries.putIfAbsent(mealType, () => []);
-                groupedEntries[mealType]!.add(doc);
-              }
+                for (final entry in entries) {
+                  final mealType = (entry['mealType'] as String?) ?? 'Snack';
+                  groupedEntries.putIfAbsent(mealType, () => []);
+                  groupedEntries[mealType]!.add(entry);
+                }
 
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                children: [
-                  _WaterSummaryCard(
-                    waterGlasses: waterGlasses,
-                    waterGoal: waterGoal,
-                  ),
-                  const SizedBox(height: 20),
-                  ..._mealTypes.map((mealType) {
-                    final mealEntries = groupedEntries[mealType] ?? const [];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
-                      child: _MealSectionCard(
-                        title: mealType,
-                        entries: mealEntries,
-                      ),
-                    );
-                  }),
-                ],
-              );
-            },
-          );
-        },
-      ),
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  children: [
+                    _WaterSummaryCard(
+                      waterGlasses: waterGlasses,
+                      waterGoal: waterGoal,
+                    ),
+                    const SizedBox(height: 20),
+                    ..._mealTypes.map((mealType) {
+                      final mealEntries = groupedEntries[mealType] ?? const [];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 18),
+                        child: _MealSectionCard(
+                          title: mealType,
+                          entries: mealEntries,
+                        ),
+                      );
+                    }),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -100,16 +120,19 @@ class _WaterSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = waterGoal <= 0 ? 0.0 : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
+    final theme = Theme.of(context);
+    final progress = waterGoal <= 0
+        ? 0.0
+        : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F4FB),
+        color: theme.colorScheme.primary.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69A9D5).withOpacity(0.12),
+            color: theme.colorScheme.primary.withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -118,23 +141,27 @@ class _WaterSummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.water_drop_outlined, color: Color(0xFF4F96C8)),
-              SizedBox(width: 8),
+              Icon(Icons.water_drop_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
               Text(
                 'Water Intake Today',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
             '$waterGlasses of $waterGoal glasses',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: Colors.black54,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
             ),
           ),
           const SizedBox(height: 12),
@@ -143,8 +170,9 @@ class _WaterSummaryCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 12,
-              backgroundColor: Colors.white,
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF69A9D5)),
+              backgroundColor: theme.colorScheme.surface,
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
             ),
           ),
         ],
@@ -160,13 +188,13 @@ class _MealSectionCard extends StatelessWidget {
   });
 
   final String title;
-  final List<QueryDocumentSnapshot<Map<String, dynamic>>> entries;
+  final List<Map<String, dynamic>> entries;
 
   @override
   Widget build(BuildContext context) {
     final totalCalories = entries.fold<int>(
       0,
-      (sum, doc) => sum + ((doc.data()['calories'] as num?)?.toInt() ?? 0),
+      (sum, doc) => sum + ((doc['calories'] as num?)?.toInt() ?? 0),
     );
 
     return Container(
@@ -190,7 +218,8 @@ class _MealSectionCard extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               Text(
@@ -211,12 +240,11 @@ class _MealSectionCard extends StatelessWidget {
             )
           else
             ...entries.map((doc) {
-              final data = doc.data();
-              final meal = (data['meal'] as String?) ?? 'Meal';
-              final calories = (data['calories'] as num?)?.toInt() ?? 0;
-              final protein = (data['protein'] as num?)?.toInt() ?? 0;
-              final carbs = (data['carbs'] as num?)?.toInt() ?? 0;
-              final fat = (data['fat'] as num?)?.toInt() ?? 0;
+              final meal = (doc['meal'] as String?) ?? 'Meal';
+              final calories = (doc['calories'] as num?)?.toInt() ?? 0;
+              final protein = (doc['protein'] as num?)?.toInt() ?? 0;
+              final carbs = (doc['carbs'] as num?)?.toInt() ?? 0;
+              final fat = (doc['fat'] as num?)?.toInt() ?? 0;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),

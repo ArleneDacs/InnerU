@@ -81,7 +81,12 @@ class SpotifyHelper {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Spotify authentication failed.');
+      throw Exception(
+        _extractSpotifyErrorMessage(
+          response.body,
+          fallback: 'Spotify authentication failed.',
+        ),
+      );
     }
 
     final payload = jsonDecode(response.body) as Map<String, dynamic>;
@@ -107,50 +112,93 @@ class SpotifyHelper {
         ? suggestedSearchTerms
         : <String>[trimmedQuery];
 
+    Object? lastError;
+
     for (final term in searchTerms) {
-      final uri = Uri.https('api.spotify.com', '/v1/search', {
-        'q': term,
-        'type': 'track',
-        'limit': '10',
-        'market': 'US',
-      });
+      try {
+        final uri = Uri.https('api.spotify.com', '/v1/search', {
+          'q': term,
+          'type': 'track',
+          'limit': '10',
+          'market': 'US',
+        });
 
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+        final response = await http.get(
+          uri,
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        );
 
-      if (response.statusCode != 200) {
-        final payload =
-            jsonDecode(response.body) as Map<String, dynamic>? ?? const {};
-        final error =
-            payload['error'] as Map<String, dynamic>? ?? const <String, dynamic>{};
-        final message = error['message'] as String? ?? 'Spotify search failed.';
-        throw Exception(message);
-      }
-
-      final payload = jsonDecode(response.body) as Map<String, dynamic>;
-      final items =
-          ((payload['tracks'] as Map<String, dynamic>?)?['items'] as List<dynamic>? ??
-              const []);
-
-      for (final item in items) {
-        final track = SpotifyTrack.fromJson(item as Map<String, dynamic>);
-        if (track.id.isEmpty ||
-            track.spotifyUrl.isEmpty ||
-            !seenIds.add(track.id)) {
-          continue;
+        if (response.statusCode != 200) {
+          throw Exception(
+            _extractSpotifyErrorMessage(
+              response.body,
+              fallback: 'Spotify search failed.',
+            ),
+          );
         }
-        tracks.add(track);
+
+        final payload = jsonDecode(response.body) as Map<String, dynamic>;
+        final items = ((payload['tracks'] as Map<String, dynamic>?)
+                ?['items'] as List<dynamic>? ??
+            const []);
+
+        for (final item in items) {
+          final track = SpotifyTrack.fromJson(item as Map<String, dynamic>);
+          if (track.id.isEmpty ||
+              track.spotifyUrl.isEmpty ||
+              !seenIds.add(track.id)) {
+            continue;
+          }
+          tracks.add(track);
+        }
+      } catch (error) {
+        lastError = error;
       }
+    }
+
+    if (tracks.isEmpty && lastError != null) {
+      throw Exception(lastError.toString().replaceFirst('Exception: ', ''));
     }
 
     if (trimmedQuery.isNotEmpty) {
       tracks.sort((a, b) => _compareSongSearchResults(a, b, trimmedQuery));
     }
     return tracks;
+  }
+
+  static String _extractSpotifyErrorMessage(
+    String responseBody, {
+    required String fallback,
+  }) {
+    final body = responseBody.trim();
+    if (body.isEmpty) return fallback;
+
+    try {
+      final payload = jsonDecode(body);
+      if (payload is Map<String, dynamic>) {
+        final error = payload['error'];
+        if (error is Map<String, dynamic>) {
+          final message = error['message'];
+          if (message is String && message.trim().isNotEmpty) {
+            return message.trim();
+          }
+        }
+
+        final message = payload['message'];
+        if (message is String && message.trim().isNotEmpty) {
+          return message.trim();
+        }
+      }
+    } catch (_) {
+      // Spotify sometimes returns a plain-text or HTML error body when the
+      // app is blocked, rate-limited, or misconfigured. Fall back below.
+    }
+
+    if (body.startsWith('<')) return fallback;
+
+    return body.replaceAll(RegExp(r'\s+'), ' ');
   }
 
   static int _compareSongSearchResults(

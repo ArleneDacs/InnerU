@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
@@ -7,9 +8,13 @@ class SignupScreen extends StatefulWidget {
   const SignupScreen({
     super.key,
     required this.selectedRole,
+    this.initialCompanyCode = '',
+    this.continueWithoutCompany = false,
   });
 
   final String selectedRole;
+  final String initialCompanyCode;
+  final bool continueWithoutCompany;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -22,10 +27,24 @@ class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _numberController = TextEditingController();
   final TextEditingController _retypepassController = TextEditingController();
+  late final TextEditingController _companyCodeController;
 
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   bool _acceptedTerms = false;
+  late bool _continueWithoutCompany;
+
+  @override
+  void initState() {
+    super.initState();
+    _companyCodeController = TextEditingController(
+      text: widget.initialCompanyCode.trim().toUpperCase(),
+    );
+    _continueWithoutCompany = widget.continueWithoutCompany;
+    if (_continueWithoutCompany) {
+      _companyCodeController.clear();
+    }
+  }
 
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(
@@ -42,6 +61,14 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isValidPassword(String password) {
     final passwordRegex = RegExp(r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).{8,}$');
     return passwordRegex.hasMatch(password);
+  }
+
+  bool _isAbundance12Code(String value) {
+    final normalized = value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    return normalized == 'A12' ||
+        normalized.startsWith('AB12') ||
+        normalized.contains('ABUND12') ||
+        normalized.contains('ABUNDANCE12');
   }
 
   Future<void> _handleSignup() async {
@@ -68,6 +95,9 @@ class _SignupScreenState extends State<SignupScreen> {
       number: _numberController.text.trim(),
       retypepassword: _retypepassController.text.trim(),
       role: widget.selectedRole,
+      companyCode:
+          _continueWithoutCompany ? '' : _companyCodeController.text.trim(),
+      continueWithoutCompany: _continueWithoutCompany,
       termsAccepted: _acceptedTerms,
     );
 
@@ -78,32 +108,98 @@ class _SignupScreenState extends State<SignupScreen> {
     });
 
     if (error == null) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: const Text("Verify Your Email"),
-            content: Text(
-              "A verification email has been sent. Please check your email and verify your ${widget.selectedRole} account.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                },
-                child: const Text("OK"),
-              ),
-            ],
-          );
-        },
-      );
+      _showAccountCreatedDialog();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error), backgroundColor: Colors.red),
       );
     }
+  }
+
+  void _showAccountCreatedDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          title: Column(
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFEAF4DE),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  CupertinoIcons.mail_solid,
+                  color: Color(0xFF4C6B43),
+                  size: 34,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Account created",
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "Your account is ready.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                "Continue to the app to start using your ${widget.selectedRole} account.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AuthRoleHome(),
+                    ),
+                  );
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF4C6B43),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: const Text("Continue"),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -113,13 +209,13 @@ class _SignupScreenState extends State<SignupScreen> {
     _passwordController.dispose();
     _numberController.dispose();
     _retypepassController.dispose();
+    _companyCodeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final topSpacing = context.screenHeight * 0.12;
+    final topSpacing = context.screenHeight * 0.1;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -129,9 +225,15 @@ class _SignupScreenState extends State<SignupScreen> {
             top: 0,
             left: 0,
             right: 0,
-            child: Image.asset(
-              "assets/images/login-image/signup.png",
-              fit: BoxFit.cover,
+            child: IgnorePointer(
+              child: SizedBox(
+                height: (context.screenHeight * 0.32).clamp(170.0, 280.0),
+                child: Image.asset(
+                  "assets/images/login-image/signup.png",
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                ),
+              ),
             ),
           ),
           SafeArea(
@@ -146,13 +248,22 @@ class _SignupScreenState extends State<SignupScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(height: topSpacing.clamp(72, 130)),
+                      SizedBox(height: topSpacing.clamp(58, 112)),
                       Text(
                         "Create an Account",
                         style: TextStyle(
-                          fontSize: context.responsiveFont(26),
+                          fontSize: context.responsiveFont(28),
                           fontWeight: FontWeight.bold,
                           fontFamily: 'Parisienne',
+                          color: const Color(0xFF245A55),
+                        ),
+                      ),
+                      SizedBox(height: context.responsiveValue(4)),
+                      Text(
+                        "A few details and you're in.",
+                        style: TextStyle(
+                          fontSize: context.responsiveFont(14),
+                          color: Colors.black54,
                         ),
                       ),
                       SizedBox(height: context.responsiveValue(14)),
@@ -165,7 +276,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           color: const Color(0xFFE8F6F3),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: const Color(0xFF59BDB3).withOpacity(0.3),
+                            color:
+                                const Color(0xFF59BDB3).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
@@ -177,17 +289,58 @@ class _SignupScreenState extends State<SignupScreen> {
                               size: 18,
                             ),
                             SizedBox(width: context.responsiveValue(8)),
-                            Text(
-                              "Selected role: ${widget.selectedRole == 'coach' ? 'Coach' : 'User'}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF245A55),
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  "Selected role: ${widget.selectedRole == 'coach' ? 'Coach' : 'User'}",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF245A55),
+                                  ),
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
                       SizedBox(height: context.responsiveValue(18)),
+                      TextFormField(
+                        controller: _companyCodeController,
+                        enabled: !_isLoading && !_continueWithoutCompany,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: InputDecoration(
+                          labelText: widget.selectedRole == 'coach'
+                              ? "Coach Company Code"
+                              : "Company Code",
+                        ),
+                        onChanged: (value) {
+                          final upperValue = value.toUpperCase();
+                          if (value != upperValue) {
+                            _companyCodeController.value =
+                                _companyCodeController.value.copyWith(
+                              text: upperValue,
+                              selection: TextSelection.collapsed(
+                                offset: upperValue.length,
+                              ),
+                            );
+                          }
+                        },
+                        validator: (value) {
+                          if (_continueWithoutCompany) return null;
+                          if (value == null || value.trim().isEmpty) {
+                            return "Enter a company code or tick no company";
+                          }
+                          if (value.trim().length < 4 &&
+                              !_isAbundance12Code(value)) {
+                            return "Enter a valid company code";
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(10)),
+                      _buildNoCompanyToggle(context),
+                      SizedBox(height: context.responsiveValue(10)),
                       TextFormField(
                         controller: _usernameController,
                         maxLength: 20,
@@ -300,22 +453,23 @@ class _SignupScreenState extends State<SignupScreen> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(25),
                             ),
-                            backgroundColor:
-                                const Color.fromARGB(255, 89, 189, 179),
                           ),
                           onPressed: _isLoading ? null : _handleSignup,
                           child: _isLoading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
                                 )
                               : Text(
                                   "Register",
                                   style: TextStyle(
-                                    fontSize: context.responsiveFont(12),
-                                    fontWeight: FontWeight.bold,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black,
+                                    fontSize: context.responsiveFont(15),
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
                                   ),
                                 ),
                         ),
@@ -338,49 +492,89 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Widget _buildTermsAgreement(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(context.responsiveValue(12)),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FBF8),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDCE5D4)),
-      ),
+    return SizedBox(
+      width: double.infinity,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Checkbox(
-            value: _acceptedTerms,
-            activeColor: const Color(0xFF59BDB3),
-            onChanged: _isLoading
-                ? null
-                : (value) {
-                    setState(() {
-                      _acceptedTerms = value ?? false;
-                    });
-                  },
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: Checkbox(
+              value: _acceptedTerms,
+              activeColor: const Color(0xFF59BDB3),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: _isLoading
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _acceptedTerms = value ?? false;
+                      });
+                    },
+            ),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: GestureDetector(
-                onTap: _showTermsAndConditions,
-                child: const Text.rich(
-                  TextSpan(
-                    text: "I agree to InnerU's ",
-                    children: [
-                      TextSpan(
-                        text: "Terms and Conditions",
-                        style: TextStyle(
-                          color: Color(0xFF3E9189),
-                          decoration: TextDecoration.underline,
-                          fontWeight: FontWeight.w600,
-                        ),
+            child: GestureDetector(
+              onTap: _showTermsAndConditions,
+              child: const Text.rich(
+                TextSpan(
+                  text: "I agree to InnerU's ",
+                  children: [
+                    TextSpan(
+                      text: "Terms and Conditions",
+                      style: TextStyle(
+                        color: Color(0xFF3E9189),
+                        decoration: TextDecoration.underline,
+                        fontWeight: FontWeight.w600,
                       ),
-                      TextSpan(text: "."),
-                    ],
-                  ),
-                  style: TextStyle(height: 1.35),
+                    ),
+                    TextSpan(text: "."),
+                  ],
                 ),
+                style: TextStyle(height: 1.2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoCompanyToggle(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: Checkbox(
+              value: _continueWithoutCompany,
+              activeColor: const Color(0xFF59BDB3),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: _isLoading
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _continueWithoutCompany = value ?? false;
+                        if (_continueWithoutCompany) {
+                          _companyCodeController.clear();
+                        }
+                      });
+                    },
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              "I don't have a company yet.",
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                height: 1.2,
               ),
             ),
           ),

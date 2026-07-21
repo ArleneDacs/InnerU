@@ -29,12 +29,6 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = localProperties.getProperty("ndkVersion") ?: flutter.ndkVersion
 
-    packaging {
-        jniLibs {
-            keepDebugSymbols += ["**/*.so"]
-        }
-    }
-
 compileOptions {
     coreLibraryDesugaringEnabled true
     sourceCompatibility JavaVersion.VERSION_17
@@ -75,6 +69,12 @@ kotlinOptions {
         release {
             signingConfig = signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    packaging {
+        jniLibs {
+            keepDebugSymbols += ['**/*.so']
         }
     }
 }

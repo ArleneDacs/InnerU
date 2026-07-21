@@ -1,10 +1,15 @@
 import 'dart:math' as math;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TrackingScreen extends StatefulWidget {
@@ -16,8 +21,8 @@ class TrackingScreen extends StatefulWidget {
   State<TrackingScreen> createState() => _TrackingScreenState();
 }
 
-class _TrackingScreenState extends State<TrackingScreen> {
-  static const Color _backgroundColor = Color(0xFFF7F4EE);
+class _TrackingScreenState extends State<TrackingScreen>
+    with WidgetsBindingObserver {
   static const Color _surfaceColor = Colors.white;
   static const Color _softSurfaceColor = Color(0xFFFCF5EA);
   static const Color _softGreenSurfaceColor = Color(0xFFF8FAF5);
@@ -34,9 +39,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
   static const double _kcalPerStep = 0.04;
   static const int _defaultStepGoal = 5000;
   static const int _defaultCalorieGoal = 2000;
-
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _isLoading = true;
   bool _isLoadingHistoryMonth = false;
@@ -57,8 +59,22 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _selectedDayIndex = DateTime.now().weekday - 1;
     _loadWeeklySummary();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reloadSoon();
+    }
   }
 
   Future<void> _loadWeeklySummary() async {
@@ -114,25 +130,31 @@ class _TrackingScreenState extends State<TrackingScreen> {
   }
 
   Future<_StepLoadContext?> _resolveLoadContext() async {
-    final userId = _auth.currentUser?.uid;
+    final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null || userId.isEmpty) {
       return null;
     }
 
     final prefs = await SharedPreferences.getInstance();
     final cachedGoal = prefs.getInt('daily_step_goal_$userId');
-    final localTodaySteps = prefs.getInt('saved_steps') ?? 0;
+    final owner = prefs.getString(SessionCleanupService.stepCacheOwnerKey);
+    final localTodaySteps = owner == userId
+        ? prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0
+        : 0;
     var resolvedStepGoal =
         cachedGoal != null && cachedGoal > 0 ? cachedGoal : _defaultStepGoal;
 
     try {
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      final remoteGoal = _readInt(userDoc.data()?['dailyStepGoal']);
-      if (remoteGoal != null && remoteGoal > 0) {
+      final userData = await UserService.getUserData();
+      final remoteGoal = _readInt(
+            userData['dailyStepGoal'] ?? userData['daily_step_goal'],
+          ) ??
+          0;
+      if (remoteGoal > 0) {
         resolvedStepGoal = remoteGoal;
       }
     } catch (_) {
-      // Keep the cached goal if Firestore is temporarily unavailable.
+      // Keep the cached goal if the profile API is temporarily unavailable.
     }
 
     return _StepLoadContext(
@@ -150,7 +172,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
     return Future.wait(
       dates.map(
         (date) => _loadDaySummary(
-          userId: context.userId,
           date: date,
           today: context.today,
           todaySteps: context.todaySteps,
@@ -195,50 +216,39 @@ class _TrackingScreenState extends State<TrackingScreen> {
   }
 
   Future<_DayStepSummary> _loadDaySummary({
-    required String userId,
     required DateTime date,
     required DateTime today,
     required int todaySteps,
     required int fallbackStepGoal,
   }) async {
     final dateKey = _dateKeyFor(date);
-
-    final results = await Future.wait<DocumentSnapshot<Map<String, dynamic>>>([
-      _firestore.collection('dailytracker').doc('$userId-$dateKey').get(),
-      _firestore
-          .collection('steps')
-          .doc(userId)
-          .collection('tracking')
-          .doc(dateKey)
-          .get(),
-      _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('calorie_logs')
-          .doc(dateKey)
-          .get(),
+    final results = await Future.wait<Map<String, dynamic>>([
+      DailyTrackerApiService.instance.fetch(date: dateKey),
+      CalorieTrackerApiService.instance.fetchDay(date: dateKey),
     ]);
 
-    final trackerData = results[0].data();
-    final historyData = results[1].data();
-    final calorieData = results[2].data();
+    final trackerResponse = results[0];
+    final trackerData = trackerResponse['tracker'] is Map
+        ? (trackerResponse['tracker'] as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
+    final calorieResponse = results[1];
+    final calorieData = calorieResponse['day'] is Map
+        ? (calorieResponse['day'] as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
 
-    var steps = _readInt(trackerData?['stepCount']) ??
-        _readInt(historyData?['steps']) ??
-        0;
+    var steps = _readInt(trackerData['stepCount']) ?? 0;
     if (DateUtils.isSameDay(date, today)) {
       steps = math.max(steps, todaySteps);
     }
 
-    final resolvedStepGoal =
-        _readInt(trackerData?['stepGoal']) ?? fallbackStepGoal;
+    final resolvedStepGoal = _readInt(trackerData['stepGoal']) ?? fallbackStepGoal;
     final stepGoal = resolvedStepGoal > 0 ? resolvedStepGoal : fallbackStepGoal;
 
     final resolvedCalorieGoal =
-        _readInt(calorieData?['dailyGoal']) ?? _defaultCalorieGoal;
+        _readInt(calorieData['dailyGoal']) ?? _defaultCalorieGoal;
     final calorieGoal =
         resolvedCalorieGoal > 0 ? resolvedCalorieGoal : _defaultCalorieGoal;
-    final caloriesLogged = _readInt(calorieData?['totalCalories']) ?? 0;
+    final caloriesLogged = _readInt(calorieData['totalCalories']) ?? 0;
 
     return _DayStepSummary(
       date: date,
@@ -446,8 +456,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
   Future<void> _editCalorieGoal([_DayStepSummary? summaryOverride]) async {
     final selectedSummary = summaryOverride ?? _selectedSummary;
-    final userId = _auth.currentUser?.uid;
-    if (selectedSummary == null || userId == null) return;
+    if (selectedSummary == null) return;
 
     var goalText = selectedSummary.calorieGoal.toString();
 
@@ -498,16 +507,10 @@ class _TrackingScreenState extends State<TrackingScreen> {
     });
 
     try {
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('calorie_logs')
-          .doc(_dateKeyFor(selectedSummary.date))
-          .set({
-        'dailyGoal': updatedGoal,
-        'date': _dateKeyFor(selectedSummary.date),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await CalorieTrackerApiService.instance.updateDay(
+        date: _dateKeyFor(selectedSummary.date),
+        dailyGoal: updatedGoal,
+      );
 
       if (!mounted) return;
       _reloadSoon();
@@ -544,54 +547,61 @@ class _TrackingScreenState extends State<TrackingScreen> {
   Widget build(BuildContext context) {
     final selectedSummary = _selectedSummary;
 
-    return Scaffold(
-      backgroundColor: _backgroundColor,
-      appBar: AppBar(
-        backgroundColor: _backgroundColor,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
-        foregroundColor: _primaryDarkColor,
-        titleSpacing: 0,
-        title: Text(
-          selectedSummary == null
-              ? 'Step Summary'
-              : _formatSelectedDate(selectedSummary.date),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: _textPrimaryColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        actions: [
-          IconButton(
-            onPressed: _loadWeeklySummary,
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Refresh',
-          ),
-        ],
-      ),
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              _backgroundColor,
-              Color(0xFFF9F6F1),
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(
-                  color: _primaryDarkColor,
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              foregroundColor: companyTheme.inkColor,
+              titleSpacing: 0,
+              title: Text(
+                selectedSummary == null
+                    ? 'Step Summary'
+                    : _formatSelectedDate(selectedSummary.date),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
                 ),
-              )
-            : _buildContent(selectedSummary),
-      ),
+              ),
+              actions: [
+                IconButton(
+                  onPressed: _loadWeeklySummary,
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: 'Refresh',
+                ),
+              ],
+            ),
+            body: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    companyTheme.backgroundColor,
+                    companyTheme.backgroundColor,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: _primaryDarkColor,
+                      ),
+                    )
+                  : _buildContent(selectedSummary),
+            ),
+          ),
+        );
+      },
     );
   }
 

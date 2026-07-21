@@ -1,22 +1,18 @@
-/// Firestore access for the Goals feature — a port of A12-Tracker's
-/// `src/server/goals.ts` write rules onto Firestore. Screens never touch
-/// Firestore directly; they go through this service. The Firestore instance
-/// is injected so tests can pass a FakeFirebaseFirestore.
+/// Laravel-backed access for the Goals feature.
 library;
 
-import 'dart:math' as math;
+import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
+import 'package:selfcare_projects/src/services/api_client.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 
-import '../domain/day_keys.dart';
-import '../domain/domain.dart';
-import '../domain/scoring.dart';
-
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-
-DateTime? _asDate(Object? v) => v is Timestamp ? v.toDate() : null;
+DateTime _parseDate(Object? value) {
+  if (value == null) return DateTime.now();
+  return DateTime.tryParse(value.toString()) ?? DateTime.now();
+}
 
 class GoalSummary {
   const GoalSummary({
@@ -40,27 +36,28 @@ class GoalSummary {
     required this.completedAt,
   });
 
-  factory GoalSummary.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? const <String, dynamic>{};
+  factory GoalSummary.fromJson(Map<String, dynamic> json) {
     return GoalSummary(
-      id: doc.id,
-      userId: (data['userId'] as String?) ?? '',
-      companyId: (data['companyId'] as String?) ?? '',
-      title: (data['title'] as String?) ?? '',
-      description: data['description'] as String?,
-      notes: data['notes'] as String?,
-      status: GoalStatus.fromCode(data['status'] as String?),
-      progress: (data['progress'] as num?)?.toInt() ?? 0,
-      category: GoalCategory.fromCode(data['category'] as String?),
-      goalType: GoalType.fromCode(data['goalType'] as String?),
-      targetPeriod: TargetPeriod.fromCode(data['targetPeriod'] as String?),
-      direction: GoalDirection.fromCode(data['direction'] as String?),
-      targetValue: (data['targetValue'] as num?)?.toDouble() ?? 0,
-      currentValue: (data['currentValue'] as num?)?.toDouble() ?? 0,
-      unit: (data['unit'] as String?) ?? '',
-      startDate: _asDate(data['startDate']) ?? DateTime.now(),
-      targetDate: _asDate(data['targetDate']) ?? DateTime.now(),
-      completedAt: _asDate(data['completedAt']),
+      id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      companyId: json['companyId']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString(),
+      notes: json['notes']?.toString(),
+      status: GoalStatus.fromCode(json['status']?.toString()),
+      progress: (json['progress'] as num?)?.toInt() ?? 0,
+      category: GoalCategory.fromCode(json['category']?.toString()),
+      goalType: GoalType.fromCode(json['goalType']?.toString()),
+      targetPeriod: TargetPeriod.fromCode(json['targetPeriod']?.toString()),
+      direction: GoalDirection.fromCode(json['direction']?.toString()),
+      targetValue: (json['targetValue'] as num?)?.toDouble() ?? 0,
+      currentValue: (json['currentValue'] as num?)?.toDouble() ?? 0,
+      unit: json['unit']?.toString() ?? '',
+      startDate: _parseDate(json['startDate']),
+      targetDate: _parseDate(json['targetDate']),
+      completedAt: json['completedAt'] == null
+          ? null
+          : DateTime.tryParse(json['completedAt'].toString()),
     );
   }
 
@@ -83,9 +80,6 @@ class GoalSummary {
   final DateTime targetDate;
   final DateTime? completedAt;
 
-  /// Scored by the same engine that will rank leaderboards. For MILESTONE
-  /// goals the stored progress already mirrors plan completion, so the
-  /// summary needs no subcollection read.
   double? get score => scoreGoal(ScorableGoal(
         status: status,
         progress: progress,
@@ -104,7 +98,6 @@ class GoalSummary {
       status != GoalStatus.abandoned &&
       daysUntilDue < 0;
 
-  /// A periodic MERIT goal's per-period target; 0 otherwise.
   double get periodTarget =>
       goalType == GoalType.merit && targetPeriod != TargetPeriod.none
           ? perPeriodTarget(
@@ -122,15 +115,18 @@ class ActionPlanItem {
     this.completedAt,
   });
 
-  factory ActionPlanItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? const <String, dynamic>{};
+  factory ActionPlanItem.fromJson(Map<String, dynamic> json) {
     return ActionPlanItem(
-      id: doc.id,
-      title: (data['title'] as String?) ?? '',
-      status: ActionPlanStatus.fromCode(data['status'] as String?),
-      sortOrder: (data['sortOrder'] as num?)?.toInt() ?? 0,
-      dueDate: _asDate(data['dueDate']),
-      completedAt: _asDate(data['completedAt']),
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      status: ActionPlanStatus.fromCode(json['status']?.toString()),
+      sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+      dueDate: json['dueDate'] == null
+          ? null
+          : DateTime.tryParse(json['dueDate'].toString()),
+      completedAt: json['completedAt'] == null
+          ? null
+          : DateTime.tryParse(json['completedAt'].toString()),
     );
   }
 
@@ -154,17 +150,18 @@ class GoalUpdateEntry {
     this.createdAt,
   });
 
-  factory GoalUpdateEntry.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? const <String, dynamic>{};
+  factory GoalUpdateEntry.fromJson(Map<String, dynamic> json) {
     return GoalUpdateEntry(
-      id: doc.id,
-      authorId: (data['authorId'] as String?) ?? '',
-      progressFrom: (data['progressFrom'] as num?)?.toInt() ?? 0,
-      progressTo: (data['progressTo'] as num?)?.toInt() ?? 0,
-      statusFrom: GoalStatus.fromCode(data['statusFrom'] as String?),
-      statusTo: GoalStatus.fromCode(data['statusTo'] as String?),
-      note: data['note'] as String?,
-      createdAt: _asDate(data['createdAt']),
+      id: json['id']?.toString() ?? '',
+      authorId: json['authorId']?.toString() ?? '',
+      progressFrom: (json['progressFrom'] as num?)?.toInt() ?? 0,
+      progressTo: (json['progressTo'] as num?)?.toInt() ?? 0,
+      statusFrom: GoalStatus.fromCode(json['statusFrom']?.toString()),
+      statusTo: GoalStatus.fromCode(json['statusTo']?.toString()),
+      note: json['note']?.toString(),
+      createdAt: json['createdAt'] == null
+          ? null
+          : DateTime.tryParse(json['createdAt'].toString()),
     );
   }
 
@@ -187,48 +184,45 @@ class GoalCommentItem {
     this.createdAt,
   });
 
-  factory GoalCommentItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? const <String, dynamic>{};
+  factory GoalCommentItem.fromJson(Map<String, dynamic> json) {
     return GoalCommentItem(
-      id: doc.id,
-      authorId: (data['authorId'] as String?) ?? '',
-      body: (data['body'] as String?) ?? '',
-      isPrivate: data['isPrivate'] == true,
-      createdAt: _asDate(data['createdAt']),
+      id: json['id']?.toString() ?? '',
+      authorId: json['authorId']?.toString() ?? '',
+      body: json['body']?.toString() ?? '',
+      isPrivate: json['isPrivate'] == true,
+      createdAt: json['createdAt'] == null
+          ? null
+          : DateTime.tryParse(json['createdAt'].toString()),
     );
   }
 
   final String id;
   final String authorId;
   final String body;
-
-  /// Private = visible to coaches only (enforced when coach views arrive
-  /// in Phase 4; mentees always see their own goals' comments).
   final bool isPrivate;
   final DateTime? createdAt;
 }
 
 class MeritLogItem {
-  const MeritLogItem({required this.id, required this.date, required this.amount});
+  const MeritLogItem({
+    required this.id,
+    required this.date,
+    required this.amount,
+  });
 
-  factory MeritLogItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? const <String, dynamic>{};
+  factory MeritLogItem.fromJson(Map<String, dynamic> json) {
     return MeritLogItem(
-      id: doc.id,
-      date: (data['date'] as String?) ?? '',
-      amount: (data['amount'] as num?)?.toDouble() ?? 0,
+      id: json['id']?.toString() ?? '',
+      date: json['date']?.toString() ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
     );
   }
 
   final String id;
-
-  /// isoDay string of the day the merit was logged.
   final String date;
   final double amount;
 }
 
-/// The required categories a user has no live goal in. Abandoned goals do
-/// not hold a category.
 List<GoalCategory> requiredGoalGaps(List<GoalSummary> goals) {
   final held = goals
       .where((g) => g.status != GoalStatus.abandoned)
@@ -237,96 +231,112 @@ List<GoalCategory> requiredGoalGaps(List<GoalSummary> goals) {
   return GoalCategory.values.where((c) => !held.contains(c)).toList();
 }
 
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
-
 class GoalsService {
-  GoalsService(this._firestore);
+  GoalsService([Object? legacyFirestore]);
 
-  final FirebaseFirestore _firestore;
+  final ApiClient _api = ApiClient.instance;
 
-  CollectionReference<Map<String, dynamic>> get _goals =>
-      _firestore.collection('goals');
+  String? get _token => AuthService.instance.currentSession?.token;
 
-  /// The stored `progress` mirror must use the same rule `scoreGoal` does,
-  /// or the bar and the score would disagree.
-  int _measurePct(double targetValue, double currentValue, int fallback) {
-    if (targetValue > 0) {
-      return ((currentValue / targetValue) * 100).round().clamp(0, 100);
+  Stream<T> _poll<T>(
+    Future<T> Function() fetch, {
+    required T fallback,
+    Duration interval = const Duration(seconds: 3),
+  }) async* {
+    while (true) {
+      try {
+        yield await fetch();
+      } catch (_) {
+        yield fallback;
+      }
+      await Future.delayed(interval);
     }
-    return fallback.clamp(0, 100);
   }
 
-  /// Informational for MERIT, the score itself for MILESTONE.
-  int _planCompletionOf(Iterable<ActionPlanStatus> statuses) {
-    final list = statuses.toList();
-    if (list.isEmpty) return 0;
-    final sum = list.fold<int>(0, (acc, s) => acc + s.weight);
-    return (sum / list.length).round();
+  Future<List<GoalSummary>> _fetchGoals(String uid) async {
+    final response = await _api.getJson(
+      '/api/goals?userId=$uid',
+      token: _token,
+    );
+    final raw = response['goals'];
+    if (raw is! List) return const <GoalSummary>[];
+    return raw
+        .whereType<Map>()
+        .map((goal) => GoalSummary.fromJson(Map<String, dynamic>.from(goal)))
+        .toList()
+      ..sort((a, b) => a.targetDate.compareTo(b.targetDate));
   }
 
-  Future<String> _activeCompanyId(String uid) async {
-    final doc = await _firestore.collection('users').doc(uid).get();
-    final data = doc.data() ?? const <String, dynamic>{};
-    return (data['activeCompanyId'] as String?) ??
-        (data['companyId'] as String?) ??
-        '';
+  Future<GoalSummary?> _fetchGoal(String goalId) async {
+    try {
+      final response = await _api.getJson('/api/goals/$goalId', token: _token);
+      final raw = response['goal'];
+      if (raw is! Map<String, dynamic>) return null;
+      return GoalSummary.fromJson(raw);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
   }
 
-  // -------------------------------------------------------------------------
-  // Reads
-  // -------------------------------------------------------------------------
+  Future<List<ActionPlanItem>> _fetchPlans(String goalId) async {
+    final response = await _api.getJson('/api/goals/$goalId/tasks', token: _token);
+    final raw = response['tasks'];
+    if (raw is! List) return const <ActionPlanItem>[];
+    return raw
+        .whereType<Map>()
+        .map((task) => ActionPlanItem.fromJson(Map<String, dynamic>.from(task)))
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
 
-  Stream<List<GoalSummary>> watchGoals(String uid) => _goals
-          .where('userId', isEqualTo: uid)
-          .snapshots()
-          .map((snapshot) {
-        final goals = snapshot.docs.map(GoalSummary.fromDoc).toList()
-          ..sort((a, b) => a.targetDate.compareTo(b.targetDate));
-        return goals;
-      });
+  Future<List<GoalUpdateEntry>> _fetchUpdates(String goalId) async {
+    final response = await _api.getJson('/api/goals/$goalId/updates', token: _token);
+    final raw = response['updates'];
+    if (raw is! List) return const <GoalUpdateEntry>[];
+    return raw
+        .whereType<Map>()
+        .map((item) => GoalUpdateEntry.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
 
-  Stream<GoalSummary?> watchGoal(String goalId) => _goals
-      .doc(goalId)
-      .snapshots()
-      .map((doc) => doc.exists ? GoalSummary.fromDoc(doc) : null);
+  Future<List<GoalCommentItem>> _fetchComments(String goalId) async {
+    final response = await _api.getJson('/api/goals/$goalId/comments', token: _token);
+    final raw = response['comments'];
+    if (raw is! List) return const <GoalCommentItem>[];
+    return raw
+        .whereType<Map>()
+        .map((item) => GoalCommentItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
 
-  Stream<List<ActionPlanItem>> watchPlans(String goalId) => _goals
-          .doc(goalId)
-          .collection('tasks')
-          .snapshots()
-          .map((snapshot) {
-        final plans = snapshot.docs.map(ActionPlanItem.fromDoc).toList()
-          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-        return plans;
-      });
+  Future<List<MeritLogItem>> _fetchMerits(String goalId) async {
+    final response = await _api.getJson('/api/goals/$goalId/merits', token: _token);
+    final raw = response['merits'];
+    if (raw is! List) return const <MeritLogItem>[];
+    return raw
+        .whereType<Map>()
+        .map((item) => MeritLogItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
 
-  Stream<List<GoalUpdateEntry>> watchUpdates(String goalId) => _goals
-      .doc(goalId)
-      .collection('updates')
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((s) => s.docs.map(GoalUpdateEntry.fromDoc).toList());
+  Stream<List<GoalSummary>> watchGoals(String uid) =>
+      _poll(() => _fetchGoals(uid), fallback: const <GoalSummary>[]);
 
-  Stream<List<GoalCommentItem>> watchComments(String goalId) => _goals
-      .doc(goalId)
-      .collection('comments')
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((s) => s.docs.map(GoalCommentItem.fromDoc).toList());
+  Stream<GoalSummary?> watchGoal(String goalId) =>
+      _poll(() => _fetchGoal(goalId), fallback: null);
 
-  Stream<List<MeritLogItem>> watchMerits(String goalId) => _goals
-      .doc(goalId)
-      .collection('merits')
-      .orderBy('date', descending: true)
-      .limit(30)
-      .snapshots()
-      .map((s) => s.docs.map(MeritLogItem.fromDoc).toList());
+  Stream<List<ActionPlanItem>> watchPlans(String goalId) =>
+      _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
 
-  // -------------------------------------------------------------------------
-  // Writes
-  // -------------------------------------------------------------------------
+  Stream<List<GoalUpdateEntry>> watchUpdates(String goalId) =>
+      _poll(() => _fetchUpdates(goalId), fallback: const <GoalUpdateEntry>[]);
+
+  Stream<List<GoalCommentItem>> watchComments(String goalId) =>
+      _poll(() => _fetchComments(goalId), fallback: const <GoalCommentItem>[]);
+
+  Stream<List<MeritLogItem>> watchMerits(String goalId) =>
+      _poll(() => _fetchMerits(goalId), fallback: const <MeritLogItem>[]);
 
   Future<String> createGoal({
     required String uid,
@@ -343,89 +353,30 @@ class GoalsService {
     TargetPeriod targetPeriod = TargetPeriod.none,
     List<String> planTitles = const [],
   }) async {
-    final companyId = await _activeCompanyId(uid);
-
-    // A milestone goal has no numeric measure — its plans are the score.
-    final isMilestone = goalType == GoalType.milestone;
-    final tv = isMilestone ? 0.0 : math.max(0.0, targetValue);
-    final cv = isMilestone ? 0.0 : math.max(0.0, currentValue);
-
-    final doc = _goals.doc();
-    final batch = _firestore.batch();
-    batch.set(doc, {
-      'userId': uid,
-      'companyId': companyId,
-      'category': category.code,
-      'title': title,
-      'description': description,
-      'notes': notes,
-      'status': GoalStatus.notStarted.code,
-      'goalType': goalType.code,
-      'direction': (isMilestone ? GoalDirection.gain : direction).code,
-      'targetValue': tv,
-      'currentValue': cv,
-      'unit': isMilestone ? '' : unit.trim(),
-      'targetPeriod':
-          (isMilestone ? TargetPeriod.none : targetPeriod).code,
-      'startDate': Timestamp.fromDate(dayKey(DateTime.now())),
-      'targetDate': Timestamp.fromDate(dayKey(targetDate)),
-      'completedAt': null,
-      'progress': isMilestone ? 0 : _measurePct(tv, cv, 0),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    final titles = planTitles
-        .map((t) => t.trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-    for (var i = 0; i < titles.length; i++) {
-      batch.set(doc.collection('tasks').doc(), {
-        'title': titles[i],
-        'status': ActionPlanStatus.notStarted.code,
-        'isComplete': false,
-        'dueDate': null,
-        'completedAt': null,
-        'sortOrder': i,
-        'weight': 1,
-      });
+    final response = await _api.postJson(
+      '/api/goals',
+      {
+        'category': category.code,
+        'title': title.trim(),
+        'description': description,
+        'notes': notes,
+        'status': GoalStatus.notStarted.code,
+        'goal_type': goalType.code,
+        'direction': direction.code,
+        'target_value': targetValue,
+        'current_value': currentValue,
+        'unit': unit.trim(),
+        'target_period': targetPeriod.code,
+        'target_date': isoDay(targetDate),
+        'plan_titles': planTitles,
+      },
+      token: _token,
+    );
+    final raw = response['goal'];
+    if (raw is Map<String, dynamic>) {
+      return GoalSummary.fromJson(raw).id;
     }
-
-    await batch.commit();
-    return doc.id;
-  }
-
-  Future<Map<String, dynamic>> _loadGoalOrThrow(String goalId) async {
-    final doc = await _goals.doc(goalId).get();
-    final data = doc.data();
-    if (data == null) {
-      throw StateError('That goal no longer exists.');
-    }
-    return data;
-  }
-
-  /// Appends a ledger `set` to [batch] so the goal-doc update and its ledger
-  /// row commit atomically — a crash between two separate awaits would
-  /// otherwise break the "mirrored write always has a ledger row" guarantee.
-  void _addLedgerEntryTo(
-    WriteBatch batch,
-    String goalId, {
-    required String authorId,
-    required int progressFrom,
-    required int progressTo,
-    required GoalStatus statusFrom,
-    required GoalStatus statusTo,
-    String? note,
-  }) {
-    batch.set(_goals.doc(goalId).collection('updates').doc(), {
-      'authorId': authorId,
-      'progressFrom': progressFrom,
-      'progressTo': progressTo,
-      'statusFrom': statusFrom.code,
-      'statusTo': statusTo.code,
-      'note': note,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    throw ApiException(500, 'Goal response was invalid.');
   }
 
   Future<void> updateGoal({
@@ -443,113 +394,37 @@ class GoalsService {
     GoalType? goalType,
     TargetPeriod? targetPeriod,
   }) async {
-    final goal = await _loadGoalOrThrow(goalId);
-
-    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
-    final statusTo = status ?? statusFrom;
-    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
-
-    final type = goalType ?? GoalType.fromCode(goal['goalType'] as String?);
-    final isMilestone = type == GoalType.milestone;
-    final period = isMilestone
-        ? TargetPeriod.none
-        : (targetPeriod ??
-            TargetPeriod.fromCode(goal['targetPeriod'] as String?));
-    final tv = isMilestone
-        ? 0.0
-        : (targetValue != null
-            ? math.max(0.0, targetValue)
-            : (goal['targetValue'] as num?)?.toDouble() ?? 0);
-    final cv = isMilestone
-        ? 0.0
-        : (currentValue != null
-            ? math.max(0.0, currentValue)
-            : (goal['currentValue'] as num?)?.toDouble() ?? 0);
-
-    // Progress mirrors the score: the measure for MERIT, plan completion
-    // for MILESTONE, pinned to 100 when the goal is marked complete.
-    final completing =
-        statusTo == GoalStatus.completed && statusFrom != GoalStatus.completed;
-    final reopening =
-        statusFrom == GoalStatus.completed && statusTo != GoalStatus.completed;
-    int progressTo;
-    if (statusTo == GoalStatus.completed) {
-      progressTo = 100;
-    } else if (isMilestone) {
-      final plans = await _goals.doc(goalId).collection('tasks').get();
-      progressTo = _planCompletionOf(plans.docs
-          .map((d) => ActionPlanStatus.fromCode(d.data()['status'] as String?)));
-    } else {
-      progressTo = _measurePct(tv, cv, progressFrom);
-    }
-
-    final batch = _firestore.batch();
-    batch.update(_goals.doc(goalId), {
-      if (title != null) 'title': title,
-      if (description != null) 'description': description,
+    final payload = <String, dynamic>{
+      if (title != null) 'title': title.trim(),
+      if (description != null || notes != null) 'description': description,
       if (notes != null) 'notes': notes,
-      if (targetDate != null) 'targetDate': Timestamp.fromDate(dayKey(targetDate)),
-      if (direction != null && !isMilestone) 'direction': direction.code,
-      if (unit != null && !isMilestone) 'unit': unit.trim(),
-      'goalType': type.code,
-      'targetPeriod': period.code,
-      'targetValue': tv,
-      'currentValue': cv,
-      'status': statusTo.code,
-      'progress': progressTo,
-      if (completing) 'completedAt': Timestamp.fromDate(DateTime.now()),
-      if (reopening) 'completedAt': null,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    _addLedgerEntryTo(
-      batch,
-      goalId,
-      authorId: actorId,
-      progressFrom: progressFrom,
-      progressTo: progressTo,
-      statusFrom: statusFrom,
-      statusTo: statusTo,
+      if (status != null) 'status': status.code,
+      if (targetDate != null) 'target_date': isoDay(targetDate),
+      if (direction != null) 'direction': direction.code,
+      if (targetValue != null) 'target_value': targetValue,
+      if (currentValue != null) 'current_value': currentValue,
+      if (unit != null) 'unit': unit.trim(),
+      if (goalType != null) 'goal_type': goalType.code,
+      if (targetPeriod != null) 'target_period': targetPeriod.code,
+    };
+
+    await _api.patchJson(
+      '/api/goals/$goalId',
+      payload,
+      token: _token,
     );
-    await batch.commit();
   }
 
-  /// Updates just the "current" measure value and re-mirrors the bar.
   Future<void> setGoalMeasure({
     required String goalId,
     required String actorId,
     required double currentValue,
   }) async {
-    final goal = await _loadGoalOrThrow(goalId);
-    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
-      throw StateError('Only a merit goal has a measure to set.');
-    }
-    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
-    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
-    final current = math.max(0.0, currentValue);
-    final progressTo = statusFrom == GoalStatus.completed
-        ? 100
-        : _measurePct(
-            (goal['targetValue'] as num?)?.toDouble() ?? 0,
-            current,
-            progressFrom,
-          );
-
-    final batch = _firestore.batch();
-    batch.update(_goals.doc(goalId), {
-      'currentValue': current,
-      'progress': progressTo,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    _addLedgerEntryTo(
-      batch,
-      goalId,
-      authorId: actorId,
-      progressFrom: progressFrom,
-      progressTo: progressTo,
-      statusFrom: statusFrom,
-      statusTo: statusFrom,
+    await _api.postJson(
+      '/api/goals/$goalId/measure',
+      {'current_value': currentValue},
+      token: _token,
     );
-    await batch.commit();
   }
 
   Future<String> addActionPlan({
@@ -557,51 +432,16 @@ class GoalsService {
     required String title,
     required String actorId,
   }) async {
-    final existing = await _goals.doc(goalId).collection('tasks').get();
-    final doc = await _goals.doc(goalId).collection('tasks').add({
-      'title': title.trim(),
-      'status': ActionPlanStatus.notStarted.code,
-      'isComplete': false,
-      'dueDate': null,
-      'completedAt': null,
-      'sortOrder': existing.docs.length,
-      'weight': 1,
-    });
-    await _mirrorMilestoneProgress(goalId, actorId);
-    return doc.id;
-  }
-
-  /// Re-mirrors a MILESTONE goal's progress after any plan change, unless
-  /// the goal is COMPLETED (pinned at 100).
-  Future<void> _mirrorMilestoneProgress(String goalId, String actorId) async {
-    final goal = await _loadGoalOrThrow(goalId);
-    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.milestone) {
-      return;
-    }
-    final statusNow = GoalStatus.fromCode(goal['status'] as String?);
-    if (statusNow == GoalStatus.completed) return;
-
-    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
-    final plans = await _goals.doc(goalId).collection('tasks').get();
-    final progressTo = _planCompletionOf(plans.docs
-        .map((d) => ActionPlanStatus.fromCode(d.data()['status'] as String?)));
-    if (progressTo == progressFrom) return;
-
-    final batch = _firestore.batch();
-    batch.update(_goals.doc(goalId), {
-      'progress': progressTo,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    _addLedgerEntryTo(
-      batch,
-      goalId,
-      authorId: actorId,
-      progressFrom: progressFrom,
-      progressTo: progressTo,
-      statusFrom: statusNow,
-      statusTo: statusNow,
+    final response = await _api.postJson(
+      '/api/goals/$goalId/tasks',
+      {'title': title},
+      token: _token,
     );
-    await batch.commit();
+    final raw = response['task'];
+    if (raw is Map<String, dynamic>) {
+      return ActionPlanItem.fromJson(raw).id;
+    }
+    throw ApiException(500, 'Task response was invalid.');
   }
 
   Future<void> setActionPlanStatus({
@@ -610,14 +450,11 @@ class GoalsService {
     required ActionPlanStatus status,
     required String actorId,
   }) async {
-    await _goals.doc(goalId).collection('tasks').doc(planId).update({
-      'status': status.code,
-      'isComplete': status == ActionPlanStatus.done,
-      'completedAt': status == ActionPlanStatus.done
-          ? Timestamp.fromDate(DateTime.now())
-          : null,
-    });
-    await _mirrorMilestoneProgress(goalId, actorId);
+    await _api.patchJson(
+      '/api/goals/$goalId/tasks/$planId',
+      {'status': status.code},
+      token: _token,
+    );
   }
 
   Future<void> deleteActionPlan({
@@ -625,8 +462,10 @@ class GoalsService {
     required String planId,
     required String actorId,
   }) async {
-    await _goals.doc(goalId).collection('tasks').doc(planId).delete();
-    await _mirrorMilestoneProgress(goalId, actorId);
+    await _api.deleteJson(
+      '/api/goals/$goalId/tasks/$planId',
+      token: _token,
+    );
   }
 
   Future<void> addComment({
@@ -634,124 +473,44 @@ class GoalsService {
     required String authorId,
     required String body,
     bool isPrivate = false,
-  }) {
-    return _goals.doc(goalId).collection('comments').add({
-      'authorId': authorId,
-      'body': body.trim(),
-      'isPrivate': isPrivate,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  /// One period's contribution to a MERIT goal. Writes the merit log,
-  /// advances the current value, and re-mirrors the progress bar — the
-  /// goal's currentValue is its starting value plus the sum of its logs.
-  Future<void> _addMerit({
-    required String goalId,
-    required String actorId,
-    required double amount,
-    required Map<String, dynamic> goal,
   }) async {
-    final statusFrom = GoalStatus.fromCode(goal['status'] as String?);
-    final progressFrom = (goal['progress'] as num?)?.toInt() ?? 0;
-    final current =
-        ((goal['currentValue'] as num?)?.toDouble() ?? 0) + amount;
-    final progressTo = statusFrom == GoalStatus.completed
-        ? 100
-        : _measurePct(
-            (goal['targetValue'] as num?)?.toDouble() ?? 0,
-            current,
-            progressFrom,
-          );
-
-    final batch = _firestore.batch();
-    batch.set(_goals.doc(goalId).collection('merits').doc(), {
-      'userId': actorId,
-      'date': isoDay(DateTime.now()),
-      'amount': amount,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    batch.update(_goals.doc(goalId), {
-      'currentValue': current,
-      'progress': progressTo,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    _addLedgerEntryTo(
-      batch,
-      goalId,
-      authorId: actorId,
-      progressFrom: progressFrom,
-      progressTo: progressTo,
-      statusFrom: statusFrom,
-      statusTo: statusFrom,
+    await _api.postJson(
+      '/api/goals/$goalId/comments',
+      {
+        'body': body.trim(),
+        'is_private': isPrivate,
+      },
+      token: _token,
     );
-    await batch.commit();
   }
 
-  /// Logs this period's target amount. A second call within the same period
-  /// is a silent no-op, so a double-tap cannot double-log.
   Future<void> logMeritTarget({
     required String goalId,
     required String actorId,
   }) async {
-    final goal = await _loadGoalOrThrow(goalId);
-    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
-      throw StateError('Only a merit goal has a period target to log.');
-    }
-    final period = TargetPeriod.fromCode(goal['targetPeriod'] as String?);
-    if (period == TargetPeriod.none) {
-      throw StateError('This goal has no recurring target.');
-    }
-
-    final merits = await _goals
-        .doc(goalId)
-        .collection('merits')
-        .orderBy('date', descending: true)
-        .limit(10)
-        .get();
-    final logDays = merits.docs.map((d) => (d.data()['date'] as String?) ?? '');
-    if (periodLogged(logDays, period)) return;
-
-    final targetValue = (goal['targetValue'] as num?)?.toDouble() ?? 0;
-    final currentValue = (goal['currentValue'] as num?)?.toDouble() ?? 0;
-    final targetDate =
-        _asDate(goal['targetDate']) ?? addDays(DateTime.now(), 1);
-    final amount = perPeriodTarget(
-      targetValue,
-      currentValue,
-      daysUntil(targetDate),
-      period.days,
+    await _api.postJson(
+      '/api/goals/$goalId/merits/target',
+      const <String, dynamic>{},
+      token: _token,
     );
-    await _addMerit(
-        goalId: goalId, actorId: actorId, amount: amount, goal: goal);
   }
 
-  /// Goes the extra mile: logs a custom amount on top of the period target.
   Future<void> goExtraMile({
     required String goalId,
     required String actorId,
     required double amount,
   }) async {
-    final goal = await _loadGoalOrThrow(goalId);
-    if (GoalType.fromCode(goal['goalType'] as String?) != GoalType.merit) {
-      throw StateError('Only a merit goal can log extra progress.');
-    }
-    await _addMerit(
-      goalId: goalId,
-      actorId: actorId,
-      amount: math.max(0.0, amount),
-      goal: goal,
+    await _api.postJson(
+      '/api/goals/$goalId/merits/extra',
+      {'amount': amount},
+      token: _token,
     );
   }
 
   Future<void> deleteGoal(String goalId) async {
-    // Firestore does not cascade-delete subcollections; sweep them first.
-    for (final sub in ['tasks', 'updates', 'comments', 'merits']) {
-      final docs = await _goals.doc(goalId).collection(sub).get();
-      for (final doc in docs.docs) {
-        await doc.reference.delete();
-      }
-    }
-    await _goals.doc(goalId).delete();
+    await _api.deleteJson(
+      '/api/goals/$goalId',
+      token: _token,
+    );
   }
 }

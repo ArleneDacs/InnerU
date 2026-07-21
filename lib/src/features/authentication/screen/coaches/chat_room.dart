@@ -1,10 +1,15 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
+import 'package:selfcare_projects/src/services/admin_user_api_service.dart';
+import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/chat_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Message {
@@ -24,23 +29,15 @@ class Message {
   final String? senderProfilePic;
   final String? imageUrl;
 
-  factory Message.fromDocument(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data();
-    final serverTimestamp = data['timestamp'];
-    final clientTimestamp = data['clientTimestamp'];
-
-    DateTime resolvedTime = DateTime.now();
-    if (serverTimestamp is Timestamp) {
-      resolvedTime = serverTimestamp.toDate();
-    } else if (clientTimestamp is Timestamp) {
-      resolvedTime = clientTimestamp.toDate();
-    }
-
+  factory Message.fromJson(Map<String, dynamic> data) {
     return Message(
       senderId: data['senderId'] as String? ?? '',
       senderName: data['senderName'] as String? ?? '',
       message: data['message'] as String? ?? '',
-      timestamp: resolvedTime,
+      timestamp: DateTime.tryParse(
+            (data['timestamp'] ?? data['clientTimestamp'])?.toString() ?? '',
+          ) ??
+          DateTime.now(),
       senderProfilePic: (data['senderProfilePic'] as String?)?.trim(),
       imageUrl: (data['imageUrl'] as String?)?.trim(),
     );
@@ -75,10 +72,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _imagePicker = ImagePicker();
+  final ChatApiService _chatApi = ChatApiService.instance;
   bool _isSending = false;
   bool _isUploadingImage = false;
   String? _currentUserProfilePic;
-  Timestamp? _lastMarkedReadAt;
   String? _resolvedChatRoomId;
 
   @override
@@ -105,21 +102,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
 
     try {
-      final roomsSnapshot = await FirebaseFirestore.instance
-          .collection('chatRooms')
-          .where('participants', arrayContains: widget.userId)
-          .get();
-
-      for (final room in roomsSnapshot.docs) {
-        final data = room.data();
+      final rooms = await _chatApi.fetchRooms(widget.userId);
+      for (final room in rooms) {
         final participants = List<String>.from(
-          data['participants'] as List? ?? const <String>[],
+          room['participants'] as List? ?? const <String>[],
         );
-        if (data['isGroupChat'] == true) {
+        if (room['isGroupChat'] == true) {
           continue;
         }
         if (participants.contains(widget.coach.id)) {
-          _resolvedChatRoomId = room.id;
+          _resolvedChatRoomId = room['chatRoomId']?.toString();
           return;
         }
       }
@@ -140,61 +132,39 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _markChatAsRead() async {
     try {
-      final roomRef =
-          FirebaseFirestore.instance.collection('chatRooms').doc(getChatRoomId());
-      final roomSnapshot = await roomRef.get();
-      final roomData = roomSnapshot.data() ?? <String, dynamic>{};
-      final readTimestamp = () {
-        final lastMessageTime = roomData['lastMessageTime'];
-        if (lastMessageTime is Timestamp) return lastMessageTime;
-
-        final updatedAt = roomData['updatedAt'];
-        if (updatedAt is Timestamp) return updatedAt;
-
-        return Timestamp.now();
-      }();
-      await roomRef.set({
-        'unreadCounts.${widget.userId}': 0,
-        'lastReadAt.${widget.userId}': readTimestamp,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await _chatApi.markRead(getChatRoomId());
     } catch (_) {}
   }
 
-  Future<void> _markChatAsReadUpTo(Timestamp timestamp) async {
-    if (_lastMarkedReadAt != null &&
-        _lastMarkedReadAt!.millisecondsSinceEpoch >=
-            timestamp.millisecondsSinceEpoch) {
-      return;
-    }
-
-    _lastMarkedReadAt = timestamp;
-
+  Future<void> _markChatAsReadUpTo(DateTime timestamp) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('chatRooms')
-          .doc(getChatRoomId())
-          .set({
-        'unreadCounts.${widget.userId}': 0,
-        'lastReadAt.${widget.userId}': timestamp,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await _chatApi.markRead(getChatRoomId());
     } catch (_) {}
   }
 
   Future<String?> _fetchProfilePicForUser(String uid) async {
     try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      final userPic = (userDoc.data()?['profilePic'] as String?)?.trim();
-      if (userPic != null && userPic.isNotEmpty) {
-        return userPic;
+      if (uid == widget.userId) {
+        final userData = await UserService.getUserData();
+        final userPic = (userData['profilePic'] as String?)?.trim();
+        if (userPic != null && userPic.isNotEmpty) {
+          return userPic;
+        }
       }
 
-      final coachDoc =
-          await FirebaseFirestore.instance.collection('coaches').doc(uid).get();
-      final coachPic = (coachDoc.data()?['profilePic'] as String?)?.trim();
-      if (coachPic != null && coachPic.isNotEmpty) {
-        return coachPic;
+      final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
+      for (final coach in coaches) {
+        if (coach.id == uid &&
+            (coach.profilePic ?? '').trim().isNotEmpty) {
+          return coach.profilePic!.trim();
+        }
+      }
+
+      final users = await AdminUserApiService.instance.fetchUsers();
+      for (final user in users) {
+        if (user.id == uid && (user.profilePic ?? '').trim().isNotEmpty) {
+          return user.profilePic!.trim();
+        }
       }
     } catch (_) {}
 
@@ -211,33 +181,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _sendMessage({String? imageUrl}) async {
     final trimmedMessage = _messageController.text.trim();
-    if ((trimmedMessage.isEmpty && (imageUrl ?? '').trim().isEmpty) || _isSending) {
+    if ((trimmedMessage.isEmpty && (imageUrl ?? '').trim().isEmpty) ||
+        _isSending) {
       return;
     }
 
     setState(() => _isSending = true);
     final chatRoomId = getChatRoomId();
     final now = DateTime.now();
-    final roomRef =
-        FirebaseFirestore.instance.collection('chatRooms').doc(chatRoomId);
-    final messageRef = roomRef.collection('messages').doc();
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
-      final roomSnapshot = await roomRef.get();
-      final roomData = roomSnapshot.data() ?? <String, dynamic>{};
-      final participants = List<String>.from(
-        roomData['participants'] as List? ??
-            (widget.isGroupChat
-                ? <String>[widget.userId]
-                : <String>[widget.userId, widget.coach.id]),
-      );
-      final participantNames = Map<String, dynamic>.from(
-        roomData['participantNames'] as Map? ?? <String, dynamic>{},
-      );
-      final participantProfiles = Map<String, dynamic>.from(
-        roomData['participantProfiles'] as Map? ?? <String, dynamic>{},
-      );
+      final participants = widget.isGroupChat
+          ? <String>[widget.userId]
+          : <String>[widget.userId, widget.coach.id];
+      final participantNames = <String, dynamic>{
+        widget.userId: widget.userName,
+        if (!widget.isGroupChat) widget.coach.id: widget.coach.name,
+      };
+      final participantProfiles = <String, dynamic>{
+        widget.userId: _currentUserProfilePic ?? '',
+        if (!widget.isGroupChat) widget.coach.id: widget.coach.profilePic.trim(),
+      };
 
       if (!participants.contains(widget.userId)) {
         participants.add(widget.userId);
@@ -254,53 +218,47 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
 
       final roomPayload = <String, dynamic>{
-        'chatRoomId': chatRoomId,
-        'lastMessage': trimmedMessage.isNotEmpty
+        'id': chatRoomId,
+        'is_group_chat': widget.isGroupChat,
+        'last_message': trimmedMessage.isNotEmpty
             ? trimmedMessage
             : ((imageUrl ?? '').isNotEmpty ? 'Sent a photo' : ''),
-        'lastMessageTime': FieldValue.serverTimestamp(),
-        'lastSenderId': widget.userId,
+        'last_sender_id': widget.userId,
         'participants': participants,
-        'participantNames': participantNames,
-        'participantProfiles': participantProfiles,
-        'coachId': widget.coach.id,
-        'coachName': widget.coach.name,
-        'userId': widget.userId,
-        'userName': widget.userName,
-        'lastReadAt.${widget.userId}': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'participant_names': participantNames,
+        'participant_profiles': participantProfiles,
+        'coach_id': widget.coach.id,
+        'coach_name': widget.coach.name,
+        'user_id': widget.userId,
+        'user_name': widget.userName,
+        'unread_counts': {
+          for (final participantId in participants)
+            participantId: participantId == widget.userId ? 0 : 1,
+        },
+        'last_read_at': {
+          widget.userId: now.toIso8601String(),
+        },
+        'updated_at': now.toIso8601String(),
       };
 
       if (widget.isGroupChat) {
-        roomPayload['isGroupChat'] = true;
-        roomPayload['groupName'] = _chatTitle;
-        roomPayload['groupProfilePic'] = _chatProfilePic;
+        roomPayload['group_name'] = _chatTitle;
+        roomPayload['group_profile_pic'] = _chatProfilePic;
       } else {
-        roomPayload['unreadCounts.${widget.userId}'] = 0;
-        roomPayload['unreadCounts.${widget.coach.id}'] = FieldValue.increment(1);
+        roomPayload['company_id'] = null;
+        roomPayload['company_code'] = null;
+        roomPayload['company_name'] = null;
       }
 
-      for (final participantId in participants) {
-        if (participantId == widget.userId) {
-          roomPayload['unreadCounts.$participantId'] = 0;
-        } else {
-          roomPayload['unreadCounts.$participantId'] = FieldValue.increment(1);
-        }
-      }
-
-      batch.set(messageRef, {
-        'senderId': widget.userId,
-        'senderName': widget.userName,
+      await _chatApi.saveRoom(roomPayload);
+      await _chatApi.sendMessage(chatRoomId, {
+        'sender_id': widget.userId,
+        'sender_name': widget.userName,
         'message': trimmedMessage,
-        'imageUrl': imageUrl ?? '',
-        'senderProfilePic': _currentUserProfilePic ?? '',
-        'timestamp': FieldValue.serverTimestamp(),
-        'clientTimestamp': Timestamp.fromDate(now),
+        'image_url': imageUrl ?? '',
+        'sender_profile_pic': _currentUserProfilePic ?? '',
+        'client_timestamp': now.toIso8601String(),
       });
-
-      batch.set(roomRef, roomPayload, SetOptions(merge: true));
-
-      await batch.commit();
       _messageController.clear();
       _scrollToBottom(animated: true);
     } catch (e) {
@@ -319,7 +277,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (_isUploadingImage) return;
 
     try {
-      final pickedFile = await _imagePicker.pickImage(source: ImageSource.gallery);
+      final pickedFile =
+          await _imagePicker.pickImage(source: ImageSource.gallery);
       if (pickedFile == null) return;
 
       setState(() => _isUploadingImage = true);
@@ -375,26 +334,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(
+            builder: (context) => _buildContent(context, companyTheme),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, CompanyThemeData companyTheme) {
+    final theme = Theme.of(context);
+    final accentColor = companyTheme.primaryColor;
     final chatRoomId = getChatRoomId();
-    final accentColor = widget.coach.backgroundColor;
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: accentColor,
+        backgroundColor: theme.colorScheme.primary,
         leading: IconButton(
-          icon: const Icon(CupertinoIcons.arrow_left, color: Colors.white),
+          icon: Icon(CupertinoIcons.arrow_left,
+              color: theme.colorScheme.onPrimary),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
           children: [
             CircleAvatar(
-              backgroundColor: Colors.white,
-              backgroundImage:
-                  _chatProfilePic.isNotEmpty ? NetworkImage(_chatProfilePic) : null,
+              backgroundColor: theme.colorScheme.surface,
+              backgroundImage: _chatProfilePic.isNotEmpty
+                  ? NetworkImage(_chatProfilePic)
+                  : null,
               child: _chatProfilePic.isEmpty
                   ? Icon(
                       widget.isGroupChat ? Icons.groups : Icons.person,
-                      color: Colors.grey,
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.65),
                     )
                   : null,
             ),
@@ -402,8 +378,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             Flexible(
               child: Text(
                 _chatTitle,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: theme.colorScheme.onPrimary,
                   fontWeight: FontWeight.w600,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -416,8 +392,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
       body: Column(
         children: [
-          if (widget.isGroupChat)
-            _buildGroupMembersBanner(chatRoomId),
+          if (widget.isGroupChat) _buildGroupMembersBanner(chatRoomId),
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -428,19 +403,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   repeat: ImageRepeat.repeat,
                 ),
               ),
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('chatRooms')
-                    .doc(chatRoomId)
-                    .collection('messages')
-                    .orderBy('clientTimestamp', descending: false)
-                    .snapshots(),
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _chatApi.watchMessages(chatRoomId),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -465,18 +435,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     );
                   }
 
-                  final messages = snapshot.data!.docs
-                      .map((doc) => Message.fromDocument(doc))
+                  final messages = snapshot.data!
+                      .map((doc) => Message.fromJson(doc))
                       .toList();
-                  final latestMessageDoc = snapshot.data!.docs.last.data();
-                  final latestServerTimestamp = latestMessageDoc['timestamp'];
-                  final latestClientTimestamp = latestMessageDoc['clientTimestamp'];
-                  final latestReadTimestamp =
-                      latestServerTimestamp is Timestamp
-                          ? latestServerTimestamp
-                          : latestClientTimestamp is Timestamp
-                              ? latestClientTimestamp
-                              : Timestamp.fromDate(messages.last.timestamp);
+                  final latestReadTimestamp = messages.last.timestamp;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     _markChatAsReadUpTo(latestReadTimestamp);
                   });
@@ -497,7 +459,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       final previousSender =
                           index > 0 ? messages[index - 1].senderId : '';
                       final showSenderName =
-                          previousSender != message.senderId || showDateSeparator;
+                          previousSender != message.senderId ||
+                              showDateSeparator;
 
                       return Column(
                         children: [
@@ -661,7 +624,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             CircleAvatar(
               radius: 16,
               backgroundColor: Colors.white,
-              backgroundImage: profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
+              backgroundImage:
+                  profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
               child: profilePic.isEmpty
                   ? const Icon(Icons.person, size: 20, color: Colors.grey)
                   : null,
@@ -676,7 +640,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 borderRadius: BorderRadius.circular(18),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 2,
                     offset: const Offset(0, 1),
                   ),
@@ -750,13 +714,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Widget _buildGroupMembersBanner(String chatRoomId) {
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('chatRooms')
-          .doc(chatRoomId)
-          .snapshots(),
+    return StreamBuilder<Map<String, dynamic>?>(
+      stream: _chatApi.watchRoom(chatRoomId),
       builder: (context, snapshot) {
-        final chatData = snapshot.data?.data() ?? <String, dynamic>{};
+        final chatData = snapshot.data ?? <String, dynamic>{};
         final participantNames = Map<String, dynamic>.from(
           chatData['participantNames'] as Map? ?? <String, dynamic>{},
         );
@@ -792,18 +753,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: participants.length,
-                  separatorBuilder: (context, index) => const SizedBox(width: 10),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 10),
                   itemBuilder: (context, index) {
                     final participantId = participants[index];
                     final profilePic =
-                        (participantProfiles[participantId] as String?)?.trim() ?? '';
-                    final name = (participantNames[participantId] as String?)?.trim().isNotEmpty ==
+                        (participantProfiles[participantId] as String?)
+                                ?.trim() ??
+                            '';
+                    final name = (participantNames[participantId] as String?)
+                                ?.trim()
+                                .isNotEmpty ==
                             true
                         ? (participantNames[participantId] as String).trim()
                         : 'Member';
 
                     return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF5F7F2),
                         borderRadius: BorderRadius.circular(16),
@@ -814,10 +781,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           CircleAvatar(
                             radius: 16,
                             backgroundColor: Colors.white,
-                            backgroundImage:
-                                profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
+                            backgroundImage: profilePic.isNotEmpty
+                                ? NetworkImage(profilePic)
+                                : null,
                             child: profilePic.isEmpty
-                                ? const Icon(Icons.person, size: 18, color: Colors.grey)
+                                ? const Icon(Icons.person,
+                                    size: 18, color: Colors.grey)
                                 : null,
                           ),
                           const SizedBox(width: 8),
@@ -862,6 +831,7 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   final Map<String, DateTime> _localReadOverrides = <String, DateTime>{};
+  final ChatApiService _chatApi = ChatApiService.instance;
 
   @override
   void initState() {
@@ -895,7 +865,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     String chatRoomId,
     Map<String, dynamic> chatData,
   ) async {
-    final readTimestamp = _resolveReadTimestamp(chatData).toDate();
+    final readTimestamp = _resolveReadTimestamp(chatData);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(
       _chatReadOverrideKey(chatRoomId),
@@ -912,18 +882,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
       chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
     );
     final rawValue = lastReadAt[widget.userId];
-    if (rawValue is Timestamp) return rawValue.toDate();
+    if (rawValue is String) return DateTime.tryParse(rawValue);
+    if (rawValue is DateTime) return rawValue;
     return null;
   }
 
-  Timestamp _resolveReadTimestamp(Map<String, dynamic> chatData) {
+  DateTime _resolveReadTimestamp(Map<String, dynamic> chatData) {
     final lastMessageTime = chatData['lastMessageTime'];
-    if (lastMessageTime is Timestamp) return lastMessageTime;
+    if (lastMessageTime is String) {
+      return DateTime.tryParse(lastMessageTime) ?? DateTime.now();
+    }
+    if (lastMessageTime is DateTime) return lastMessageTime;
 
     final updatedAt = chatData['updatedAt'];
-    if (updatedAt is Timestamp) return updatedAt;
+    if (updatedAt is String) {
+      return DateTime.tryParse(updatedAt) ?? DateTime.now();
+    }
+    if (updatedAt is DateTime) return updatedAt;
 
-    return Timestamp.now();
+    return DateTime.now();
   }
 
   int _extractUnreadCount(String chatRoomId, Map<String, dynamic> chatData) {
@@ -961,13 +938,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   DateTime _resolveChatSortTime(Map<String, dynamic> chatData) {
     final lastMessageTime = chatData['lastMessageTime'];
-    if (lastMessageTime is Timestamp) {
-      return lastMessageTime.toDate();
+    if (lastMessageTime is String) {
+      return DateTime.tryParse(lastMessageTime) ?? DateTime.fromMillisecondsSinceEpoch(0);
+    }
+    if (lastMessageTime is DateTime) {
+      return lastMessageTime;
     }
 
     final updatedAt = chatData['updatedAt'];
-    if (updatedAt is Timestamp) {
-      return updatedAt.toDate();
+    if (updatedAt is String) {
+      return DateTime.tryParse(updatedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+    }
+    if (updatedAt is DateTime) {
+      return updatedAt;
     }
 
     return DateTime.fromMillisecondsSinceEpoch(0);
@@ -987,13 +970,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Future<void> _markAllChatsAsRead(BuildContext context) async {
     try {
-      final firestore = FirebaseFirestore.instance;
-      final roomsSnapshot = await firestore
-          .collection('chatRooms')
-          .where('participants', arrayContains: widget.userId)
-          .get();
+      final rooms = await _chatApi.fetchRooms(widget.userId);
 
-      if (roomsSnapshot.docs.isEmpty) {
+      if (rooms.isEmpty) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No messages to mark as read.')),
@@ -1001,18 +980,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         return;
       }
 
-      final batch = firestore.batch();
-      for (final room in roomsSnapshot.docs) {
-        final readTimestamp = _resolveReadTimestamp(room.data());
-        batch.set(room.reference, {
-          'unreadCounts.${widget.userId}': 0,
-          'lastReadAt.${widget.userId}': readTimestamp,
-        }, SetOptions(merge: true));
-      }
-
-      await batch.commit();
-      for (final room in roomsSnapshot.docs) {
-        await _setLocalReadOverride(room.id, room.data());
+      for (final room in rooms) {
+        final roomId = room['chatRoomId']?.toString() ?? '';
+        if (roomId.isEmpty) continue;
+        await _chatApi.markRead(roomId);
+        await _setLocalReadOverride(roomId, room);
       }
 
       if (!context.mounted) return;
@@ -1028,79 +1000,237 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Future<void> _markChatAsReadById(String chatRoomId) async {
-    final roomRef = FirebaseFirestore.instance.collection('chatRooms').doc(chatRoomId);
-    final roomSnapshot = await roomRef.get();
-    final readTimestamp = _resolveReadTimestamp(
-      roomSnapshot.data() ?? <String, dynamic>{},
-    );
-    await roomRef.set({
-      'unreadCounts.${widget.userId}': 0,
-      'lastReadAt.${widget.userId}': readTimestamp,
-    }, SetOptions(merge: true));
+    await _chatApi.markRead(chatRoomId);
   }
 
   Future<void> _createOrOpenGroupChat(BuildContext context) async {
-    final firestore = FirebaseFirestore.instance;
-    final menteesSnapshot = await firestore
-        .collection('users')
-        .where('coachId', isEqualTo: widget.userId)
-        .get();
+    final userData = await UserService.getUserData();
+    final allUsers = await AdminUserApiService.instance.fetchUsers();
 
-    if (menteesSnapshot.docs.isEmpty) {
+    Set<String> companyKeys(Map<String, dynamic> data) {
+      final keys = <String>{};
+      for (final field in const [
+        'companyId',
+        'activeCompanyId',
+        'companyCode',
+        'activeCompanyCode',
+        'companyName',
+        'company',
+      ]) {
+        final value = (data[field] as String?)?.trim().toLowerCase();
+        if (value != null && value.isNotEmpty) {
+          keys.add('$field:$value');
+        }
+      }
+      return keys;
+    }
+
+    String displayNameFor(Map<String, dynamic> data) {
+      for (final field in const ['username', 'fullName', 'name', 'email']) {
+        final value = (data[field] as String?)?.trim();
+        if (value != null && value.isNotEmpty) return value;
+      }
+      return 'Mentee';
+    }
+
+    final coachCompanyKeys = {
+      ...companyKeys(userData),
+      ...companyKeys(userData),
+    };
+    final eligibleMentees = allUsers.where((user) {
+      if (user.id == widget.userId) return false;
+      final data = <String, dynamic>{
+        'companyId': user.companyCode,
+        'companyCode': user.companyCode,
+        'companyName': user.companyName,
+        'company': user.companyName,
+      };
+      if (coachCompanyKeys.isEmpty) return true;
+      return companyKeys(data).intersection(coachCompanyKeys).isNotEmpty;
+    }).toList();
+
+    if (eligibleMentees.isEmpty) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add mentees first to create a group chat.')),
+        const SnackBar(
+          content:
+              Text('Add same-company mentees first to create a group chat.'),
+        ),
       );
       return;
     }
 
-    final coachDoc = await firestore.collection('coaches').doc(widget.userId).get();
-    final userDoc = await firestore.collection('users').doc(widget.userId).get();
-    final coachData = coachDoc.data() ?? <String, dynamic>{};
-    final userData = userDoc.data() ?? <String, dynamic>{};
     final teamTitle = (widget.groupName ?? '').trim().isNotEmpty
         ? widget.groupName!.trim()
-        : ((coachData['fullName'] as String?)?.trim().isNotEmpty == true
-              ? (coachData['fullName'] as String).trim()
-              : 'My Team');
+        : ((userData['fullName'] as String?)?.trim().isNotEmpty == true
+            ? (userData['fullName'] as String).trim()
+            : 'My Team');
     final coachProfilePic =
-        (coachData['profilePic'] as String?)?.trim().isNotEmpty == true
-            ? (coachData['profilePic'] as String).trim()
+        (userData['profilePic'] as String?)?.trim().isNotEmpty == true
+            ? (userData['profilePic'] as String).trim()
             : (userData['profilePic'] as String?)?.trim() ?? '';
+
+    if (!context.mounted) return;
+    final groupNameController = TextEditingController(text: teamTitle);
+    final selectedIds = eligibleMentees.map((doc) => doc.id).toSet();
+    final selection = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 18,
+                  bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 18,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Create group chat',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: groupNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Group name',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Same-company mentees',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 360),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: eligibleMentees.map((user) {
+                          final data = <String, dynamic>{
+                            'email': user.email,
+                            'profilePic': user.profilePic,
+                            'name': user.name,
+                          };
+                          final checked = selectedIds.contains(user.id);
+                          return CheckboxListTile(
+                            value: checked,
+                            onChanged: (value) {
+                              setModalState(() {
+                                if (value == true) {
+                                  selectedIds.add(user.id);
+                                } else {
+                                  selectedIds.remove(user.id);
+                                }
+                              });
+                            },
+                            title: Text(displayNameFor(data)),
+                            subtitle: Text(
+                              (data['email'] as String?)?.trim() ?? '',
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: selectedIds.isEmpty
+                                ? null
+                                : () {
+                                    Navigator.pop(sheetContext, {
+                                      'name': groupNameController.text.trim(),
+                                      'ids': selectedIds.toList(),
+                                    });
+                                  },
+                            child: const Text('Create'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    groupNameController.dispose();
+    if (selection == null) return;
+
+    final selectedMenteeIds =
+        List<String>.from(selection['ids'] as List? ?? const []);
+    if (selectedMenteeIds.isEmpty) return;
+    final selectedMentees =
+        eligibleMentees.where((user) => selectedMenteeIds.contains(user.id));
+    final selectedGroupTitle =
+        (selection['name'] as String?)?.trim().isNotEmpty == true
+            ? (selection['name'] as String).trim()
+            : teamTitle;
 
     final participantIds = <String>{widget.userId};
     final participantNames = <String, String>{widget.userId: widget.userName};
-    final participantProfiles = <String, String>{widget.userId: coachProfilePic};
+    final participantProfiles = <String, String>{
+      widget.userId: coachProfilePic
+    };
 
-    for (final mentee in menteesSnapshot.docs) {
-      final data = mentee.data();
+    for (final mentee in selectedMentees) {
+      final data = <String, dynamic>{
+        'email': mentee.email,
+        'profilePic': mentee.profilePic,
+        'name': mentee.name,
+      };
       participantIds.add(mentee.id);
-      participantNames[mentee.id] =
-          (data['username'] as String?)?.trim().isNotEmpty == true
-              ? (data['username'] as String).trim()
-              : 'Mentee';
-      participantProfiles[mentee.id] = (data['profilePic'] as String?)?.trim() ?? '';
+      participantNames[mentee.id] = displayNameFor(data);
+      participantProfiles[mentee.id] =
+          (data['profilePic'] as String?)?.trim() ?? '';
     }
 
-    final chatRoomId = 'group_${widget.userId}';
-    final unreadCounts = <String, int>{};
-    for (final participantId in participantIds) {
-      unreadCounts[participantId] = 0;
-    }
-
-    await firestore.collection('chatRooms').doc(chatRoomId).set({
-      'chatRoomId': chatRoomId,
-      'isGroupChat': true,
-      'groupName': teamTitle,
-      'groupProfilePic': coachProfilePic,
+    final chatRoomId = participantIds.toList()..sort();
+    final roomId = chatRoomId.join('_');
+    await _chatApi.saveRoom({
+      'id': roomId,
+      'is_group_chat': true,
+      'group_name': selectedGroupTitle,
+      'group_profile_pic': coachProfilePic,
       'participants': participantIds.toList(),
-      'participantNames': participantNames,
-      'participantProfiles': participantProfiles,
-      'unreadCounts': unreadCounts,
-      'coachId': widget.userId,
-      'coachName': teamTitle,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+      'participant_names': participantNames,
+      'participant_profiles': participantProfiles,
+      'unread_counts': {
+        for (final participantId in participantIds) participantId: 0,
+      },
+      'last_read_at': {
+        widget.userId: DateTime.now().toIso8601String(),
+      },
+      'coach_id': widget.userId,
+      'coach_name': teamTitle,
+      'company_id': (userData['companyId'] as String?)?.trim(),
+      'company_code': (userData['companyCode'] as String?)?.trim(),
+      'company_name': (userData['companyName'] as String?)?.trim(),
+    });
 
     if (!context.mounted) return;
     Navigator.push(
@@ -1109,14 +1239,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
         builder: (context) => ChatRoomScreen(
           coach: Coach(
             id: widget.userId,
-            name: teamTitle,
+            name: selectedGroupTitle,
             profilePic: coachProfilePic,
             backgroundColor: const Color(0xFF90A17D),
           ),
           userId: widget.userId,
           userName: widget.userName,
-          chatRoomId: chatRoomId,
-          chatTitle: teamTitle,
+          chatRoomId: roomId,
+          chatTitle: selectedGroupTitle,
           chatProfilePic: coachProfilePic,
           isGroupChat: true,
         ),
@@ -1126,180 +1256,196 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Messages'),
-        backgroundColor: const Color(0xFF90A17D),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.done_all),
-            tooltip: 'Read all',
-            onPressed: () => _markAllChatsAsRead(context),
-          ),
-          if (widget.allowGroupChat)
-            IconButton(
-              icon: const Icon(Icons.groups_2_outlined),
-              onPressed: () => _createOrOpenGroupChat(context),
-            ),
-        ],
-      ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection('chatRooms')
-            .where('participants', arrayContains: widget.userId)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final docs = [...?snapshot.data?.docs]
-            ..sort((a, b) {
-              final aTime = _resolveChatSortTime(a.data());
-              final bTime = _resolveChatSortTime(b.data());
-              return bTime.compareTo(aTime);
-            });
-
-          if (docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(
-                    'assets/images/star1.png',
-                    width: 80,
-                    height: 80,
-                    opacity: const AlwaysStoppedAnimation(0.6),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No conversations yet',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              title: Text(
+                'My Messages',
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            );
-          }
-
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final chatDoc = docs[index];
-              final chatData = chatDoc.data();
-              final participants =
-                  List<String>.from(chatData['participants'] as List? ?? []);
-              final participantNames = Map<String, dynamic>.from(
-                chatData['participantNames'] as Map? ?? {},
-              );
-              final otherParticipantId = participants.firstWhere(
-                (participantId) => participantId != widget.userId,
-                orElse: () => chatData['coachId'] as String? ?? '',
-              );
-              final otherName =
-                  chatData['isGroupChat'] == true
-                      ? (chatData['groupName'] as String?)?.trim() ?? 'My Team'
-                      : participantNames[otherParticipantId] as String? ??
-                          (chatData['coachId'] == widget.userId
-                              ? chatData['userName'] as String? ?? 'User'
-                              : chatData['coachName'] as String? ?? 'Coach');
-              final lastMessage = chatData['lastMessage'] as String? ?? '';
-              final lastMessageTime = _resolveChatSortTime(chatData);
-              final unreadCount = _extractUnreadCount(chatDoc.id, chatData);
-              final isGroupChat = chatData['isGroupChat'] == true;
-              final peerProfilePic = _resolvePeerProfilePic(chatData, otherParticipantId);
-
-              final peer = Coach(
-                id: otherParticipantId,
-                name: otherName,
-                bio: '',
-                profilePic: peerProfilePic,
-                backgroundColor: const Color(0xFF90A17D),
-              );
-
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: const Color(0xFF90A17D),
-                  backgroundImage:
-                      peerProfilePic.isNotEmpty ? NetworkImage(peerProfilePic) : null,
-                  child: peerProfilePic.isEmpty
-                      ? Icon(
-                          isGroupChat ? Icons.groups : Icons.person,
-                          color: Colors.white,
-                        )
-                      : null,
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              iconTheme: IconThemeData(color: companyTheme.inkColor),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.done_all),
+                  tooltip: 'Read all',
+                  onPressed: () => _markAllChatsAsRead(context),
                 ),
-                title: Text(otherName),
-                subtitle: Text(
-                  lastMessage.isEmpty && chatData['isGroupChat'] == true
-                      ? 'Group chat'
-                      : lastMessage,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _formatChatTime(lastMessageTime),
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    if (unreadCount > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
+                if (widget.allowGroupChat)
+                  IconButton(
+                    icon: const Icon(Icons.groups_2_outlined),
+                    onPressed: () => _createOrOpenGroupChat(context),
+                  ),
+              ],
+            ),
+            body: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: ChatApiService.instance.watchRooms(widget.userId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final docs = [...?snapshot.data]..sort((a, b) {
+                    final aTime = _resolveChatSortTime(a);
+                    final bTime = _resolveChatSortTime(b);
+                    return bTime.compareTo(aTime);
+                  });
+
+                if (docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/images/star1.png',
+                          width: 80,
+                          height: 80,
+                          opacity: const AlwaysStoppedAnimation(0.6),
                         ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE56B6F),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          unreadCount > 99 ? '99+' : '$unreadCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                        const SizedBox(height: 16),
+                        Text(
+                          'No conversations yet',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey.shade600,
                           ),
                         ),
-                      ),
-                  ],
-                ),
-                onTap: () async {
-                  if (!context.mounted) return;
-                  await _setLocalReadOverride(chatDoc.id, chatData);
-                  _markChatAsReadById(chatDoc.id);
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ChatRoomScreen(
-                        coach: peer,
-                        userId: widget.userId,
-                        userName: widget.userName,
-                        chatRoomId: chatDoc.id,
-                        chatTitle: isGroupChat ? otherName : null,
-                        chatProfilePic: isGroupChat ? peerProfilePic : null,
-                        isGroupChat: isGroupChat,
-                      ),
+                      ],
                     ),
                   );
-                  await _setLocalReadOverride(chatDoc.id, chatData);
-                  await _markChatAsReadById(chatDoc.id);
-                  if (!mounted) return;
-                  setState(() {});
-                },
-              );
-            },
-          );
-        },
-      ),
+                }
+
+                return ListView.builder(
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final chatData = docs[index];
+                    final participants = List<String>.from(
+                        chatData['participants'] as List? ?? []);
+                    final participantNames = Map<String, dynamic>.from(
+                      chatData['participantNames'] as Map? ?? {},
+                    );
+                    final otherParticipantId = participants.firstWhere(
+                      (participantId) => participantId != widget.userId,
+                      orElse: () => chatData['coachId'] as String? ?? '',
+                    );
+                    final otherName = chatData['isGroupChat'] == true
+                        ? (chatData['groupName'] as String?)?.trim() ??
+                            'My Team'
+                        : participantNames[otherParticipantId] as String? ??
+                            (chatData['coachId'] == widget.userId
+                                ? chatData['userName'] as String? ?? 'User'
+                                : chatData['coachName'] as String? ?? 'Coach');
+                    final lastMessage =
+                        chatData['lastMessage'] as String? ?? '';
+                    final lastMessageTime = _resolveChatSortTime(chatData);
+                    final unreadCount =
+                        _extractUnreadCount(chatData['chatRoomId'] as String? ?? '', chatData);
+                    final isGroupChat = chatData['isGroupChat'] == true;
+                    final peerProfilePic =
+                        _resolvePeerProfilePic(chatData, otherParticipantId);
+
+                    final peer = Coach(
+                      id: otherParticipantId,
+                      name: otherName,
+                      bio: '',
+                      profilePic: peerProfilePic,
+                      backgroundColor: const Color(0xFF90A17D),
+                    );
+
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: const Color(0xFF90A17D),
+                        backgroundImage: peerProfilePic.isNotEmpty
+                            ? NetworkImage(peerProfilePic)
+                            : null,
+                        child: peerProfilePic.isEmpty
+                            ? Icon(
+                                isGroupChat ? Icons.groups : Icons.person,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      title: Text(otherName),
+                      subtitle: Text(
+                        lastMessage.isEmpty && chatData['isGroupChat'] == true
+                            ? 'Group chat'
+                            : lastMessage,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            _formatChatTime(lastMessageTime),
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (unreadCount > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE56B6F),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                unreadCount > 99 ? '99+' : '$unreadCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      onTap: () async {
+                        final navigator = Navigator.of(context);
+                        await _setLocalReadOverride(chatData['chatRoomId'] as String? ?? '', chatData);
+                        _markChatAsReadById(chatData['chatRoomId'] as String? ?? '');
+                        if (!mounted) return;
+                        await navigator.push(
+                          MaterialPageRoute(
+                            builder: (context) => ChatRoomScreen(
+                              coach: peer,
+                              userId: widget.userId,
+                              userName: widget.userName,
+                              chatRoomId: chatData['chatRoomId'] as String? ?? '',
+                              chatTitle: isGroupChat ? otherName : null,
+                              chatProfilePic:
+                                  isGroupChat ? peerProfilePic : null,
+                              isGroupChat: isGroupChat,
+                            ),
+                          ),
+                        );
+                        await _setLocalReadOverride(chatData['chatRoomId'] as String? ?? '', chatData);
+                        await _markChatAsReadById(chatData['chatRoomId'] as String? ?? '');
+                        if (!mounted) return;
+                        setState(() {});
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1316,5 +1462,4 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
     return DateFormat('MM/dd/yy').format(dateTime);
   }
-
 }

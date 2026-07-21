@@ -11,12 +11,10 @@ void main() {
     final service = GoalsService(firestore);
     await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
 
-    // The form's fields (title through the recurring-target dropdown and
-    // Save button) are taller than the default 800x600 test surface, which
-    // would otherwise leave "Save goal" scrolled below the fold. Use a
-    // taller — but same-width, so horizontal layout is unaffected — surface
-    // so every field and the button are reachable without scrolling, as
-    // they would be on a typical phone screen.
+    // The form's fields are taller than the default 800x600 test surface,
+    // which would otherwise leave the submit button below the fold. Use a
+    // taller - but same-width, so horizontal layout is unaffected - surface
+    // so every field and the button are reachable without scrolling.
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     tester.view.physicalSize = const Size(800, 1400);
@@ -28,14 +26,14 @@ void main() {
     await tester.pumpAndSettle();
 
     // Saving with no title trips the validator.
-    await tester.tap(find.text('Save goal'));
+    await tester.tap(find.text('Create goal'));
     await tester.pumpAndSettle();
     expect(find.text('Title is required'), findsOneWidget);
 
     await tester.enterText(
         find.byKey(const Key('goal-title')), 'Read 12 books');
     await tester.enterText(find.byKey(const Key('goal-target-value')), '12');
-    await tester.tap(find.text('Save goal'));
+    await tester.tap(find.text('Create goal'));
     await tester.pumpAndSettle();
 
     final goals = await firestore.collection('goals').get();

@@ -4,7 +4,6 @@ import 'dart:math';
 
 import 'package:app_links/app_links.dart';
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/config/spotify_config.dart';
 import 'package:url_launcher/url_launcher.dart';

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -34,10 +33,13 @@ import 'package:selfcare_projects/src/features/authentication/screen/todo_list.d
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
+import 'package:selfcare_projects/src/services/app_session_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
+import 'package:selfcare_projects/src/services/step_background_service.dart';
 import 'package:selfcare_projects/src/services/watch_steps_receiver.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
@@ -46,7 +48,9 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await AuthService.instance.initialize();
   await FastingNotificationService.instance.initialize();
+  await StepBackgroundService.instance.configure();
   WatchStepsReceiver.instance.start();
 
   runApp(const App());
@@ -178,10 +182,10 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+    return StreamBuilder<AppSession?>(
+      stream: AuthService.instance.sessionStream,
       builder: (context, snapshot) {
-        final currentUserId = snapshot.data?.uid;
+        final currentUserId = snapshot.data?.id.toString();
         final previousUserId = _lastSeenUserId;
         if (previousUserId != currentUserId) {
           _lastSeenUserId = currentUserId;

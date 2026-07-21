@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
@@ -15,12 +16,28 @@ class RoleSelectionScreen extends StatefulWidget {
 }
 
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
+  final TextEditingController _companyCodeController = TextEditingController();
   String _selectedRole = 'user';
   bool _isLoading = false;
   bool _acceptedTerms = false;
+  bool _continueWithoutCompany = false;
 
   bool get _supportsAppleSignIn =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  String get _companyCode => _companyCodeController.text.trim().toUpperCase();
+
+  bool _validateCompanyChoice() {
+    if (_continueWithoutCompany || _companyCode.isNotEmpty) return true;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Enter a company code or tick no company."),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return false;
+  }
 
   Future<void> _handleGoogleSignup() async {
     if (!_acceptedTerms) {
@@ -32,6 +49,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       );
       return;
     }
+    if (!_validateCompanyChoice()) return;
 
     setState(() {
       _isLoading = true;
@@ -39,6 +57,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
     final error = await AuthService().signUpWithGoogle(
       role: _selectedRole,
+      companyCode: _continueWithoutCompany ? '' : _companyCode,
+      continueWithoutCompany: _continueWithoutCompany,
       termsAccepted: _acceptedTerms,
     );
 
@@ -83,6 +103,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       );
       return;
     }
+    if (!_validateCompanyChoice()) return;
 
     setState(() {
       _isLoading = true;
@@ -90,6 +111,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
     final error = await AuthService().signUpWithApple(
       role: _selectedRole,
+      companyCode: _continueWithoutCompany ? '' : _companyCode,
+      continueWithoutCompany: _continueWithoutCompany,
       termsAccepted: _acceptedTerms,
     );
 
@@ -125,11 +148,16 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   }
 
   @override
+  void dispose() {
+    _companyCodeController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final contentSpacing = context.responsiveValue(28);
-    final authOptionsLabel = _supportsAppleSignIn
-        ? "email, Google, or Apple"
-        : "email or Google";
+    final authOptionsLabel =
+        _supportsAppleSignIn ? "email, Google, or Apple" : "email or Google";
 
     return Scaffold(
       body: Stack(
@@ -195,7 +223,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                           borderRadius: BorderRadius.circular(40),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.06),
+                              color: Colors.black.withValues(alpha: 0.06),
                               blurRadius: 18,
                               offset: const Offset(0, 10),
                             ),
@@ -262,7 +290,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                           borderRadius: BorderRadius.circular(28),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Colors.black.withValues(alpha: 0.05),
                               blurRadius: 24,
                               offset: const Offset(0, 12),
                             ),
@@ -295,6 +323,44 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                         ),
                       ),
                       SizedBox(height: contentSpacing),
+                      TextField(
+                        controller: _companyCodeController,
+                        enabled: !_isLoading && !_continueWithoutCompany,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: InputDecoration(
+                          labelText: _selectedRole == 'coach'
+                              ? "Coach company code"
+                              : "Company code",
+                          filled: true,
+                          fillColor: Colors.white,
+                          prefixIcon:
+                              const Icon(CupertinoIcons.building_2_fill),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                        ),
+                        onChanged: (value) {
+                          if (_continueWithoutCompany) {
+                            setState(() {
+                              _continueWithoutCompany = false;
+                            });
+                          }
+                          final upperValue = value.toUpperCase();
+                          if (value != upperValue) {
+                            _companyCodeController.value =
+                                _companyCodeController.value.copyWith(
+                              text: upperValue,
+                              selection: TextSelection.collapsed(
+                                offset: upperValue.length,
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                      SizedBox(height: context.responsiveValue(14)),
+                      _buildNoCompanyToggle(context),
+                      SizedBox(height: context.responsiveValue(8)),
                       _buildTermsAgreement(context),
                       SizedBox(height: context.responsiveValue(16)),
                       SizedBox(
@@ -311,11 +377,18 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                           onPressed: _isLoading
                               ? null
                               : () {
+                                  if (!_validateCompanyChoice()) return;
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => SignupScreen(
                                         selectedRole: _selectedRole,
+                                        initialCompanyCode:
+                                            _continueWithoutCompany
+                                                ? ''
+                                                : _companyCode,
+                                        continueWithoutCompany:
+                                            _continueWithoutCompany,
                                       ),
                                     ),
                                   );
@@ -324,7 +397,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                             "Continue with email",
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: Colors.black,
+                              color: Colors.white,
                             ),
                           ),
                         ),
@@ -359,11 +432,16 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                                     ),
                                     SizedBox(
                                         width: context.responsiveValue(10)),
-                                    const Text(
-                                      "Continue with Google",
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.black87,
+                                    const Flexible(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          "Continue with Google",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -466,49 +544,89 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   }
 
   Widget _buildTermsAgreement(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(context.responsiveValue(12)),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFDCE5D4)),
-      ),
+    return SizedBox(
+      width: double.infinity,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Checkbox(
-            value: _acceptedTerms,
-            activeColor: const Color(0xFF59BDB3),
-            onChanged: _isLoading
-                ? null
-                : (value) {
-                    setState(() {
-                      _acceptedTerms = value ?? false;
-                    });
-                  },
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: Checkbox(
+              value: _acceptedTerms,
+              activeColor: const Color(0xFF59BDB3),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: _isLoading
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _acceptedTerms = value ?? false;
+                      });
+                    },
+            ),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: GestureDetector(
-                onTap: _showTermsAndConditions,
-                child: const Text.rich(
-                  TextSpan(
-                    text: "I agree to InnerU's ",
-                    children: [
-                      TextSpan(
-                        text: "Terms and Conditions",
-                        style: TextStyle(
-                          color: Color(0xFF3E9189),
-                          decoration: TextDecoration.underline,
-                          fontWeight: FontWeight.w600,
-                        ),
+            child: GestureDetector(
+              onTap: _showTermsAndConditions,
+              child: const Text.rich(
+                TextSpan(
+                  text: "I agree to InnerU's ",
+                  children: [
+                    TextSpan(
+                      text: "Terms and Conditions",
+                      style: TextStyle(
+                        color: Color(0xFF3E9189),
+                        decoration: TextDecoration.underline,
+                        fontWeight: FontWeight.w600,
                       ),
-                      TextSpan(text: "."),
-                    ],
-                  ),
-                  style: TextStyle(height: 1.35),
+                    ),
+                    TextSpan(text: "."),
+                  ],
                 ),
+                style: TextStyle(height: 1.2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoCompanyToggle(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: Checkbox(
+              value: _continueWithoutCompany,
+              activeColor: const Color(0xFF59BDB3),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: _isLoading
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _continueWithoutCompany = value ?? false;
+                        if (_continueWithoutCompany) {
+                          _companyCodeController.clear();
+                        }
+                      });
+                    },
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              "I don't have a company yet.",
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                height: 1.2,
               ),
             ),
           ),

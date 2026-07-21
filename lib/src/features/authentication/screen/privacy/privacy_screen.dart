@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
 class PrivacyScreen extends StatefulWidget {
   const PrivacyScreen({super.key, required this.title});
@@ -15,13 +15,6 @@ class _PrivacyScreen extends State<PrivacyScreen> {
   TextEditingController passwordController = TextEditingController();
   bool _isDeleting = false;
 
-  bool get _usesPasswordProvider {
-    final user = FirebaseAuth.instance.currentUser;
-    return user?.providerData
-            .any((provider) => provider.providerId == 'password') ??
-        false;
-  }
-
   @override
   void dispose() {
     verificationController.dispose();
@@ -31,55 +24,99 @@ class _PrivacyScreen extends State<PrivacyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(
-            children: [
-              _buildButtons(context, "Delete Account"),
-              SizedBox(height: 12),
-              Text(
-                "This permanently deletes your InnerU account and profile data.",
-                style: TextStyle(color: Colors.black54),
-              ),
-            ],
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Scaffold(
+          backgroundColor: companyTheme.backgroundColor,
+          appBar: AppBar(
+            backgroundColor:
+                companyTheme.isDark ? companyTheme.surfaceColor : null,
+            foregroundColor: companyTheme.isDark ? companyTheme.inkColor : null,
+            surfaceTintColor: Colors.transparent,
+            title: Text(widget.title),
           ),
-        ),
-      ),
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  _buildButtons(context, "Delete Account", companyTheme),
+                  SizedBox(height: 12),
+                  Text(
+                    "This permanently deletes your InnerU account and profile data.",
+                    style: TextStyle(color: companyTheme.mutedInkColor),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildButtons(BuildContext context, String label) {
+  Widget _buildButtons(
+    BuildContext context,
+    String label,
+    CompanyThemeData companyTheme,
+  ) {
     return Container(
       margin: EdgeInsets.only(bottom: 10),
       width: double.infinity,
-      child: TextButton(
-        onPressed: () {
-          openDelete();
-        },
-        style: ButtonStyle(
-          padding: WidgetStateProperty.all(
-              EdgeInsets.symmetric(vertical: 15, horizontal: 20)),
-          overlayColor: WidgetStateProperty.all(Colors.grey.shade200),
-          shape: WidgetStateProperty.all(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
+      decoration: BoxDecoration(
+        color: companyTheme.isDark
+            ? companyTheme.surfaceColor
+            : const Color(0xFFFDECEC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFD95555).withValues(alpha: 0.3),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Text(label, style: TextStyle(fontSize: 17, color: Colors.black)),
-            SizedBox(width: 10),
-            Image.asset(
-              "assets/images/reminder.png",
-              height: 25,
-              width: 25,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            openDelete();
+          },
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 16, horizontal: 18),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD95555).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.delete_forever_outlined,
+                    color: const Color(0xFFD95555),
+                    size: 22,
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFFD95555),
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 15,
+                  color: const Color(0xFFD95555),
+                ),
+              ],
             ),
-            Spacer(),
-            Icon(Icons.arrow_forward_ios, size: 20, color: Colors.black),
-          ],
+          ),
         ),
       ),
     );
@@ -89,159 +126,101 @@ class _PrivacyScreen extends State<PrivacyScreen> {
         context: context,
         barrierDismissible: !_isDeleting,
         builder: (context) => AlertDialog(
-          backgroundColor: Colors.grey[850],
-          title: Text(
-            'Are you sure you want to delete your account?',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFDECEC),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Color(0xFFD95555),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Delete account?',
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Text(
-                    '⚠️ This is extremely important!',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        fontStyle: FontStyle.italic),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                SizedBox(height: 30),
-                Text(
+                const Text(
                   'This permanently deletes your InnerU account and profile data. You will be signed out when deletion is complete.',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(fontSize: 14, height: 1.45),
                 ),
-                SizedBox(height: 10),
-                Text.rich(
+                const SizedBox(height: 16),
+                const Text.rich(
                   TextSpan(
                     children: [
                       TextSpan(
                         text: 'To verify, type ',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(fontSize: 14),
                       ),
                       TextSpan(
                         text: 'delete account',
                         style: TextStyle(
-                          color: Colors.white,
-                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w700,
                           fontSize: 14,
                         ),
                       ),
                       TextSpan(
                         text: ' below:',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(fontSize: 14),
                       ),
                     ],
                   ),
                 ),
-                SizedBox(height: 10),
-                SizedBox(
-                  height: 40,
-                  child: TextField(
-                    controller: verificationController,
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                    decoration: InputDecoration(
-                      labelStyle: TextStyle(color: Colors.white70),
-                      contentPadding:
-                          EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white, width: 2.0),
-                      ),
-                    ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: verificationController,
+                  decoration: const InputDecoration(
+                    hintText: 'delete account',
                   ),
                 ),
-                SizedBox(height: 10),
-                if (_usesPasswordProvider) ...[
-                  Text(
-                    'Confirm Password:',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm Password (optional)',
                   ),
-                  SizedBox(height: 10),
-                  SizedBox(
-                    height: 40,
-                    child: TextField(
-                      controller: passwordController,
-                      obscureText: true,
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                      decoration: InputDecoration(
-                        labelStyle: TextStyle(color: Colors.white70),
-                        contentPadding:
-                            EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide:
-                              BorderSide(color: Colors.white, width: 2.0),
-                        ),
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  Text(
-                    'You will be asked to confirm with your sign-in provider before deletion.',
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ],
+                ),
               ],
             ),
           ),
           actions: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                TextButton(
-                  onPressed: _isDeleting
-                      ? null
-                      : () {
-                          verificationController.clear();
-                          passwordController.clear();
-                          Navigator.of(context).pop();
-                        },
-                  child: Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-                TextButton(
-                  onPressed: _isDeleting ? null : deleteAccount,
-                  child: Text(
-                    _isDeleting ? 'Deleting...' : 'Delete this account',
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+            TextButton(
+              onPressed: _isDeleting
+                  ? null
+                  : () {
+                      verificationController.clear();
+                      passwordController.clear();
+                      Navigator.of(context).pop();
+                    },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD95555),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: _isDeleting ? null : deleteAccount,
+              child: Text(_isDeleting ? 'Deleting...' : 'Delete account'),
             ),
           ],
         ),
@@ -261,18 +240,8 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       return;
     }
 
-    if (_usesPasswordProvider && passwordText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Password cannot be empty."),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("No user signed in."),
@@ -288,7 +257,7 @@ class _PrivacyScreen extends State<PrivacyScreen> {
       });
 
       await AuthService().deleteCurrentUserAccount(
-        password: _usesPasswordProvider ? passwordText : null,
+        password: passwordText.isEmpty ? null : passwordText,
       );
 
       if (!mounted) return;

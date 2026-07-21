@@ -1,5 +1,5 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
@@ -8,16 +8,18 @@ import 'package:selfcare_projects/src/features/authentication/screen/forget_pass
 import 'package:selfcare_projects/src/features/authentication/screen/signup/role_selection_screen.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:flutter/cupertino.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _missingAccountMessage = AuthService.missingAccountMessage;
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   String? _loginError;
@@ -28,6 +30,28 @@ class _LoginScreenState extends State<LoginScreen> {
   bool get _supportsAppleSignIn =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
+  void _showLoginError(String message) {
+    if (message == _missingAccountMessage) {
+      setState(() {
+        _loginError = null;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      return;
+    }
+
+    setState(() {
+      _loginError = message;
+    });
+  }
+
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -36,84 +60,25 @@ class _LoginScreenState extends State<LoginScreen> {
       _loginError = null;
     });
 
-    try {
-      UserCredential userCredential =
-          await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+    final error = await AuthService.instance.signInWithEmailAndPassword(
+      email: _emailController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (error == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const AuthRoleHome()),
       );
-
-      User? user = userCredential.user;
-      if (user != null) {
-        await user.reload();
-        user = FirebaseAuth.instance.currentUser;
-
-        if (user!.emailVerified) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const AuthRoleHome()),
-          );
-        } else {
-          _showEmailNotVerifiedDialog(user);
-        }
-      }
-    } on FirebaseAuthException catch (e) {
-      String errorMessage = "Login failed. Wrong Email or Password";
-      if (e.code == 'user-not-found') {
-        errorMessage = "No user found with this email.";
-      } else if (e.code == 'wrong-password') {
-        errorMessage = "Incorrect password.";
-      } else if (e.code == 'invalid-email') {
-        errorMessage = "Invalid email format.";
-      }
-
-      setState(() {
-        _loginError = errorMessage;
-      });
+    } else {
+      _showLoginError(error);
     }
 
     setState(() {
       _isLoading = false;
     });
-  }
-
-  void _showEmailNotVerifiedDialog(User user) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Email Not Verified"),
-          content: const Text(
-              "Your email is not verified. Please verify before logging in."),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                try {
-                  await user.sendEmailVerification();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text("Verification email sent."),
-                        backgroundColor: Colors.green),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text("Error sending verification email."),
-                        backgroundColor: Colors.red),
-                  );
-                }
-                Navigator.pop(context);
-              },
-              child: const Text("Resend Email"),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("OK"),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   void _showForgotPasswordOptions() {
@@ -124,20 +89,29 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       builder: (context) {
         return Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 "Reset Password",
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
               ),
-              const SizedBox(height: 10),
-              const Text("Choose how you want to reset your password:"),
+              const SizedBox(height: 6),
+              const Text(
+                "Choose how you want to reset your password.",
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
               const SizedBox(height: 20),
-              ListTile(
-                leading: Icon(Icons.email, color: Colors.blue),
-                title: const Text("Reset via Email"),
+              _buildResetOption(
+                icon: CupertinoIcons.envelope_fill,
+                title: "Reset via Email",
+                subtitle: "We'll send a reset link to your inbox",
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -147,9 +121,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   );
                 },
               ),
-              ListTile(
-                leading: Icon(Icons.phone, color: Colors.green),
-                title: const Text("Reset via Phone"),
+              const SizedBox(height: 12),
+              _buildResetOption(
+                icon: CupertinoIcons.phone_fill,
+                title: "Reset via Phone",
+                subtitle: "We'll send a one-time code by SMS",
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -163,6 +139,66 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildResetOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: AppColors.background,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: AppColors.primaryDark, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                CupertinoIcons.chevron_right,
+                size: 16,
+                color: AppColors.textSecondary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -190,9 +226,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     } else {
-      setState(() {
-        _loginError = error;
-      });
+      _showLoginError(error);
     }
 
     setState(() {
@@ -225,15 +259,15 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    _showLoginError(error);
+
     setState(() {
-      _loginError = error;
       _isLoading = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final verticalTopSpace = context.screenHeight * 0.1;
 
     return Scaffold(
@@ -242,10 +276,17 @@ class _LoginScreenState extends State<LoginScreen> {
         children: [
           Align(
             alignment: Alignment.bottomCenter,
-            child: Image.asset(
-              "assets/images/login-image/login.png",
-              width: double.infinity,
-              fit: BoxFit.contain,
+            child: IgnorePointer(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: context.isTabletWidth ? 680 : double.infinity,
+                ),
+                child: Image.asset(
+                  "assets/images/login-image/login.png",
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                ),
+              ),
             ),
           ),
           SafeArea(
@@ -261,48 +302,76 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       SizedBox(height: verticalTopSpace.clamp(32, 90)),
-
                       if (_loginError != null)
                         Container(
-                          padding: EdgeInsets.all(context.responsiveValue(12)),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
                           margin: EdgeInsets.only(
                             bottom: context.responsiveValue(20),
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.red[100],
-                            borderRadius: BorderRadius.circular(10),
+                            color: AppColors.dangerSoft,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppColors.danger.withValues(alpha: 0.25),
+                            ),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.error_outline, color: Colors.red),
+                              const Icon(
+                                CupertinoIcons.exclamationmark_circle_fill,
+                                color: AppColors.danger,
+                                size: 20,
+                              ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   _loginError!,
-                                  style: const TextStyle(color: Colors.red),
+                                  style: const TextStyle(
+                                    color: AppColors.danger,
+                                    fontWeight: FontWeight.w500,
+                                    height: 1.3,
+                                  ),
                                 ),
                               ),
-                              IconButton(
-                                icon: const Icon(Icons.close, color: Colors.red),
-                                onPressed: () {
+                              GestureDetector(
+                                onTap: () {
                                   setState(() {
                                     _loginError = null;
                                   });
                                 },
+                                child: const Padding(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    CupertinoIcons.xmark,
+                                    color: AppColors.danger,
+                                    size: 16,
+                                  ),
+                                ),
                               )
                             ],
                           ),
                         ),
-
                       Text(
-                        "Selfcare",
+                        "InnerU",
                         style: TextStyle(
-                          fontSize: context.responsiveFont(35),
+                          fontSize: context.responsiveFont(38),
                           fontWeight: FontWeight.bold,
                           fontFamily: 'Parisienne',
+                          color: AppColors.primaryDeep,
                         ),
                       ),
-                      SizedBox(height: context.responsiveValue(36)),
+                      SizedBox(height: context.responsiveValue(6)),
+                      Text(
+                        "Welcome back — sign in to continue",
+                        style: TextStyle(
+                          fontSize: context.responsiveFont(14),
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      SizedBox(height: context.responsiveValue(30)),
                       TextFormField(
                         controller: _emailController,
                         decoration: const InputDecoration(labelText: "Email"),
@@ -348,45 +417,58 @@ class _LoginScreenState extends State<LoginScreen> {
                       SizedBox(height: context.responsiveValue(20)),
                       SizedBox(
                         width: double.infinity,
-                        height: context.responsiveValue(50, min: 0.95, max: 1.05),
+                        height:
+                            context.responsiveValue(50, min: 0.95, max: 1.05),
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(25),
                             ),
-                            backgroundColor:
-                                const Color.fromARGB(255, 89, 189, 179),
                           ),
                           onPressed: _isLoading ? null : _handleLogin,
                           child: _isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
                               : Text(
-                                  "Log-in",
+                                  "Log in",
                                   style: TextStyle(
-                                    fontSize: context.responsiveFont(12),
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                        isDarkMode ? Colors.white : Colors.black,
+                                    fontSize: context.responsiveFont(15),
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
                                   ),
                                 ),
                         ),
                       ),
                       SizedBox(height: context.responsiveValue(20)),
-                      Row(
+                      const Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Divider(
-                              color: Color.fromARGB(255, 91, 195, 183),
+                              color: AppColors.border,
                               thickness: 1,
                             ),
                           ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 10),
-                            child: Text("OR"),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              "OR",
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1,
+                              ),
+                            ),
                           ),
-                          const Expanded(
+                          Expanded(
                             child: Divider(
-                              color: Color.fromARGB(255, 91, 195, 183),
+                              color: AppColors.border,
                               thickness: 1,
                             ),
                           ),
@@ -402,15 +484,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             horizontal: context.responsiveValue(20),
                           ),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(16),
                             color: Colors.white,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.grey.withOpacity(0.5),
-                                blurRadius: 5,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: AppColors.softShadow,
                           ),
                           child: Wrap(
                             alignment: WrapAlignment.center,
@@ -420,12 +497,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             children: [
                               Image.asset(
                                 "assets/logo/Google.png",
-                                width: context.responsiveValue(30),
+                                width: context.responsiveValue(26),
                               ),
                               Text(
                                 "Sign in with Google",
                                 style: TextStyle(
-                                  fontSize: context.responsiveFont(16),
+                                  fontSize: context.responsiveFont(15),
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
                                 ),
                               ),
                             ],

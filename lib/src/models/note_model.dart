@@ -1,7 +1,5 @@
 import 'dart:math';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 class Note {
   String id;
   String userId;
@@ -12,6 +10,9 @@ class Note {
   DateTime createdAt;
   String category;
   bool saved; // Add the saved field
+  String companyId;
+  String companyCode;
+  String companyName;
 
   Note({
     required this.id,
@@ -23,9 +24,24 @@ class Note {
     required this.createdAt,
     required this.category,
     this.saved = false, // Default to false
+    this.companyId = '',
+    this.companyCode = '',
+    this.companyName = '',
   });
 
   factory Note.fromMap(Map<String, dynamic> data) {
+    final rawCreatedAt = data['createdAt'] ?? data['created_at'];
+    DateTime createdAt;
+    if (rawCreatedAt is String) {
+      createdAt = DateTime.tryParse(rawCreatedAt) ?? DateTime.now();
+    } else if (rawCreatedAt is DateTime) {
+      createdAt = rawCreatedAt;
+    } else if (rawCreatedAt is int) {
+      createdAt = DateTime.fromMillisecondsSinceEpoch(rawCreatedAt);
+    } else {
+      createdAt = DateTime.now();
+    }
+
     return Note(
       id: data['id'] ?? '',
       username: data['username'] ?? '',
@@ -34,10 +50,25 @@ class Note {
         (data['note'] as List<dynamic>)
             .map((item) => Map<String, String>.from(item)),
       ),
-      color: data['color'] is int ? data['color'] : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      category: data['category'] ?? '',userId: data['userId'] ?? '',
+      color: data['color'] is int
+          ? data['color']
+          : int.tryParse(data['color']?.toString() ?? '') ?? 0xFFFFFFFF,
+      createdAt: createdAt,
+      category: data['category'] ?? '',
+      userId: data['userId'] ?? '',
       saved: data['saved'] ?? false, // Default to false if missing
+      companyId:
+          (data['companyId'] as String?)?.trim() ??
+          (data['activeCompanyId'] as String?)?.trim() ??
+          '',
+      companyCode:
+          (data['companyCode'] as String?)?.trim() ??
+          (data['activeCompanyCode'] as String?)?.trim() ??
+          '',
+      companyName:
+          (data['companyName'] as String?)?.trim() ??
+          (data['activeCompanyName'] as String?)?.trim() ??
+          '',
     );
   }
 
@@ -51,6 +82,9 @@ class Note {
       "category": category,
       "userId": userId,
       "saved": saved, // Include saved field
+      "companyId": companyId,
+      "companyCode": companyCode,
+      "companyName": companyName,
     };
   }
 }

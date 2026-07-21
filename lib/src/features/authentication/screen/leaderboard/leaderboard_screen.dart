@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:math' as math;
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
 class UserActivity {
   const UserActivity({
@@ -13,6 +17,7 @@ class UserActivity {
     this.exerciseCount = 0,
     this.valueEntries = 0,
     this.learningEntries = 0,
+    this.todoListCount = 0,
   });
 
   final int callIntent;
@@ -21,6 +26,7 @@ class UserActivity {
   final int exerciseCount;
   final int valueEntries;
   final int learningEntries;
+  final int todoListCount;
 
   int calculatePoints() {
     return callIntent +
@@ -28,12 +34,20 @@ class UserActivity {
         (stepsTaken / 200).floor() +
         (exerciseCount * 10) +
         valueEntries +
-        learningEntries;
+        learningEntries +
+        todoListCount;
   }
+}
+
+String _formatLeaderboardScore(num score) {
+  return score == score.roundToDouble()
+      ? score.toStringAsFixed(0)
+      : score.toStringAsFixed(1);
 }
 
 class LeaderboardEntry {
   const LeaderboardEntry({
+    required this.userId,
     required this.name,
     required this.score,
     required this.rank,
@@ -42,22 +56,25 @@ class LeaderboardEntry {
     this.teamName,
   });
 
+  final String userId;
   final String name;
-  final int score;
+  final num score;
   final int rank;
   final UserActivity activity;
   final String? profilePic;
   final String? teamName;
 
   LeaderboardEntry copyWith({
+    String? userId,
     String? name,
-    int? score,
+    num? score,
     int? rank,
     UserActivity? activity,
     String? profilePic,
     String? teamName,
   }) {
     return LeaderboardEntry(
+      userId: userId ?? this.userId,
       name: name ?? this.name,
       score: score ?? this.score,
       rank: rank ?? this.rank,
@@ -66,6 +83,62 @@ class LeaderboardEntry {
       teamName: teamName ?? this.teamName,
     );
   }
+}
+
+class A12LeaderboardEntry {
+  const A12LeaderboardEntry({
+    required this.userId,
+    required this.name,
+    required this.score,
+    required this.rank,
+    required this.activity,
+    this.profilePic,
+    this.teamName,
+  });
+
+  final String userId;
+  final String name;
+  final UserScore score;
+  final GoalRank rank;
+  final UserActivity activity;
+  final String? profilePic;
+  final String? teamName;
+
+  A12LeaderboardEntry copyWith({
+    String? userId,
+    String? name,
+    UserScore? score,
+    GoalRank? rank,
+    UserActivity? activity,
+    String? profilePic,
+    String? teamName,
+  }) {
+    return A12LeaderboardEntry(
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+      score: score ?? this.score,
+      rank: rank ?? this.rank,
+      activity: activity ?? this.activity,
+      profilePic: profilePic ?? this.profilePic,
+      teamName: teamName ?? this.teamName,
+    );
+  }
+}
+
+class GroupLeaderboardSummary {
+  const GroupLeaderboardSummary({
+    required this.groupId,
+    required this.groupName,
+    required this.coachName,
+    required this.totalScore,
+    required this.entries,
+  });
+
+  final String groupId;
+  final String groupName;
+  final String coachName;
+  final num totalScore;
+  final List<LeaderboardEntry> entries;
 }
 
 class Leaderboard extends StatefulWidget {
@@ -77,336 +150,287 @@ class Leaderboard extends StatefulWidget {
   State<Leaderboard> createState() => _LeaderboardState();
 }
 
-class _LeaderboardState extends State<Leaderboard>
-    with SingleTickerProviderStateMixin {
+class _LeaderboardState extends State<Leaderboard> {
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  late final TabController _tabController;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
-      _userPointsSubscription;
 
   List<LeaderboardEntry> _allEntries = [];
-  List<LeaderboardEntry> _teamEntries = [];
+  List<A12LeaderboardEntry> _a12Entries = [];
+  List<LeaderboardEntry> _menteeEntries = [];
+  List<GroupLeaderboardSummary> _groupLeaderboards = [];
   bool _isLoading = true;
-  String _teamName = '';
+  bool _isA12Loading = true;
+  bool _isAbundance12Company = false;
   bool _isCoachUser = false;
-  Set<String> _teamMemberNames = <String>{};
 
-  String _normalizeName(String value) => value.trim().toLowerCase();
+  bool _isAbundance12CompanyByIdentity({
+    String name = '',
+    String code = '',
+  }) {
+    final normalizedName =
+        name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final normalizedCode =
+        code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    return normalizedName.contains('abundance12') ||
+        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
+        normalizedCode.contains('ABUNDANCE12') ||
+        normalizedCode.contains('ABUND12') ||
+        normalizedCode == 'A12' ||
+        normalizedCode.startsWith('AB12');
+  }
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
-    await _loadCurrentUserTeam();
-    _setupUserPointsListener();
+    await _loadLeaderboardFromApi();
   }
 
-  @override
-  void dispose() {
-    _userPointsSubscription?.cancel();
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadCurrentUserTeam() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    try {
-      final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      final data = userDoc.data();
-      final role = (data?['role'] as String?)?.toLowerCase();
-      final isCoach = data?['isCoach'] == true || role == 'coach';
-      final username =
-          (data?['username'] as String?)?.trim() ?? (isCoach ? 'Coach' : 'User');
-      final coachId = (data?['coachId'] as String?)?.trim() ?? '';
-      final teamName = ((data?['team'] as String?)?.trim().isNotEmpty ?? false)
-          ? (data!['team'] as String).trim()
-          : username;
-
-      final teamMemberNames = <String>{};
-
-      if (isCoach) {
-        final menteesSnapshot = await _firestore
-            .collection('users')
-            .where('coachId', isEqualTo: user.uid)
-            .get();
-
-        for (final mentee in menteesSnapshot.docs) {
-          final menteeUsername = (mentee.data()['username'] as String?)?.trim();
-          if (menteeUsername != null && menteeUsername.isNotEmpty) {
-            teamMemberNames.add(_normalizeName(menteeUsername));
-          }
-        }
-      } else if (coachId.isNotEmpty) {
-        final teammatesSnapshot = await _firestore
-            .collection('users')
-            .where('coachId', isEqualTo: coachId)
-            .get();
-
-        for (final teammate in teammatesSnapshot.docs) {
-          final teammateUsername = (teammate.data()['username'] as String?)?.trim();
-          if (teammateUsername != null && teammateUsername.isNotEmpty) {
-            teamMemberNames.add(_normalizeName(teammateUsername));
-          }
-        }
-      } else if (teamName.isNotEmpty) {
-        final teammatesSnapshot = await _firestore
-            .collection('users')
-            .where('team', isEqualTo: teamName)
-            .get();
-
-        for (final teammate in teammatesSnapshot.docs) {
-          final teammateUsername = (teammate.data()['username'] as String?)?.trim();
-          if (teammateUsername != null && teammateUsername.isNotEmpty) {
-            teamMemberNames.add(_normalizeName(teammateUsername));
-          }
-        }
-      } else if (username.isNotEmpty) {
-        teamMemberNames.add(_normalizeName(username));
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _teamName = teamName;
-        _isCoachUser = isCoach;
-        _teamMemberNames = teamMemberNames;
-      });
-    } catch (_) {}
-  }
-
-  void _setupUserPointsListener() {
-    _userPointsSubscription?.cancel();
-    _userPointsSubscription =
-        _firestore.collection('userpoints').snapshots().listen(
-      (snapshot) async {
-        await _processUserPointsData(snapshot);
-      },
-      onError: (_) {
-        if (!mounted) return;
-        setState(() {
-          _isLoading = false;
-        });
-      },
+  A12LeaderboardEntry _toA12Entry(LeaderboardApiCompanyEntry entry) {
+    final score = entry.score.toDouble();
+    return A12LeaderboardEntry(
+      userId: entry.userId,
+      name: entry.name,
+      score: UserScore(
+        userId: entry.userId,
+        categories: {for (final c in GoalCategory.values) c: 0.0},
+        goalScore: score,
+        coreTaskScore: 0,
+        consistencyScore: 0,
+        overallScore: score,
+        currentStreak: 0,
+        longestStreak: 0,
+        goalsTotal: 0,
+        goalsCompleted: 0,
+        taskCompletionRate: 0,
+        checkInRate: 0,
+      ),
+      rank: rankForPercent(score),
+      activity: const UserActivity(),
+      profilePic: entry.profilePic,
+      teamName: entry.teamName,
     );
   }
 
-  Future<Map<String, Map<String, dynamic>>> _loadUserProfiles() async {
-    final usersSnapshot = await _firestore.collection('users').get();
-    final profiles = <String, Map<String, dynamic>>{};
-
-    for (final doc in usersSnapshot.docs) {
-      final data = doc.data();
-      final username = (data['username'] as String?)?.trim() ?? '';
-      if (username.isEmpty) continue;
-      profiles[_normalizeName(username)] = {
-        'username': username,
-        'profilePic': (data['profilePic'] as String?)?.trim(),
-        'team': (data['team'] as String?)?.trim(),
-        'email': (data['email'] as String?)?.trim(),
-      };
+  Future<void> _loadLeaderboardFromApi() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
+      if (!mounted) return;
+      setState(() {
+        _allEntries = const <LeaderboardEntry>[];
+        _a12Entries = const <A12LeaderboardEntry>[];
+        _menteeEntries = const <LeaderboardEntry>[];
+        _groupLeaderboards = const <GroupLeaderboardSummary>[];
+        _isLoading = false;
+        _isA12Loading = false;
+        _isAbundance12Company = false;
+        _isCoachUser = false;
+      });
+      return;
     }
 
-    return profiles;
-  }
-
-  Future<void> _processUserPointsData(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) async {
     try {
-      final profiles = await _loadUserProfiles();
-      final entriesByName = <String, LeaderboardEntry>{};
+      final snapshot = await LeaderboardApiService.instance.fetchLeaderboard();
+      final companyEntries = snapshot.entries;
+      final rankedAll = companyEntries
+          .map(
+            (entry) => LeaderboardEntry(
+              userId: entry.userId,
+              name: entry.name,
+              score: entry.score,
+              rank: entry.rank,
+              activity: const UserActivity(),
+              profilePic: entry.profilePic,
+              teamName: entry.teamName,
+            ),
+          )
+          .toList()
+        ..sort((a, b) {
+          if (a.score != b.score) {
+            return b.score.compareTo(a.score);
+          }
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        });
 
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final username = (data['username'] as String?)?.trim() ?? 'Unknown User';
-        final normalizedName = _normalizeName(username);
-        final taskPoints = Map<String, dynamic>.from(
-          data['taskPoints'] as Map? ?? <String, dynamic>{},
-        );
-
-        final activity = UserActivity(
-          callIntent: _extractIntValue(
-            taskPoints,
-            ['Call Points', 'call_points', 'callPoints'],
-          ),
-          meditationMinutes: _extractIntValue(
-            taskPoints,
-            ['Meditation Points', 'meditation_points', 'meditationPoints'],
-          ),
-          stepsTaken: _extractIntValue(
-                taskPoints,
-                ['Steps Points', 'steps_points', 'stepsPoints'],
-              ) *
-              200,
-          exerciseCount: _extractIntValue(
-                taskPoints,
-                ['Exercise Points', 'exercise_points', 'exercisePoints'],
-              ) ~/
-              10,
-          valueEntries: _extractIntValue(
-            taskPoints,
-            ['Add Value Points', 'value_points', 'addValuePoints'],
-          ),
-          learningEntries: _extractIntValue(
-            taskPoints,
-            ['Learning Points', 'learning_points', 'learningPoints'],
-          ),
-        );
-
-        final entry = LeaderboardEntry(
-          name: username,
-          score: activity.calculatePoints(),
-          rank: 0,
-          activity: activity,
-          profilePic: profiles[normalizedName]?['profilePic'] as String?,
-          teamName: profiles[normalizedName]?['team'] as String?,
-        );
-
-        if (!entriesByName.containsKey(normalizedName) ||
-            entriesByName[normalizedName]!.score < entry.score) {
-          entriesByName[normalizedName] = entry;
-        }
-      }
-
-      for (final teamMemberName in _teamMemberNames) {
-        if (entriesByName.containsKey(teamMemberName)) continue;
-        final profile = profiles[teamMemberName];
-        final displayName =
-            (profile?['username'] as String?)?.trim().isNotEmpty == true
-                ? (profile!['username'] as String).trim()
-                : 'Team Member';
-
-        entriesByName[teamMemberName] = LeaderboardEntry(
-          name: displayName,
-          score: 0,
-          rank: 0,
-          activity: const UserActivity(),
-          profilePic: profile?['profilePic'] as String?,
-          teamName: profile?['team'] as String?,
-        );
-      }
-
-      final rankedAll = _rankEntries(entriesByName.values.toList());
-      final rankedTeam = _teamMemberNames.isEmpty
-          ? <LeaderboardEntry>[]
-          : _rankEntries(
-              rankedAll
-                  .where((entry) => _teamMemberNames.contains(_normalizeName(entry.name)))
+      final rankedCompany = rankedAll.asMap().entries.map((entry) {
+        return entry.value.copyWith(rank: entry.key + 1);
+      }).toList();
+      final a12Entries = companyEntries.map(_toA12Entry).toList();
+      final groups = snapshot.groups
+          .map(
+            (group) => GroupLeaderboardSummary(
+              groupId: group.groupId,
+              groupName: group.groupName,
+              coachName: group.coachName,
+              totalScore: group.totalScore,
+              entries: group.entries
+                  .map(
+                    (member) => LeaderboardEntry(
+                      userId: member.userId,
+                      name: member.name,
+                      score: member.score,
+                      rank: member.rank,
+                      activity: const UserActivity(),
+                      profilePic: member.profilePic,
+                      teamName: member.teamName,
+                    ),
+                  )
                   .toList(),
-            );
+            ),
+          )
+          .toList();
+      final menteeEntries = snapshot.menteeEntries
+          .map(
+            (member) => LeaderboardEntry(
+              userId: member.userId,
+              name: member.name,
+              score: member.score,
+              rank: member.rank,
+              activity: const UserActivity(),
+              profilePic: member.profilePic,
+              teamName: member.teamName,
+            ),
+          )
+          .toList();
 
       if (!mounted) return;
       setState(() {
-        _allEntries = rankedAll;
-        _teamEntries = rankedTeam;
+        _isAbundance12Company = _isAbundance12CompanyByIdentity(
+          name: snapshot.companyName,
+          code: snapshot.companyCode,
+        );
+        _isCoachUser = session.isCoach;
+        _a12Entries = a12Entries;
+        _allEntries = rankedCompany;
+        _menteeEntries = menteeEntries.isEmpty ? rankedCompany : menteeEntries;
+        _groupLeaderboards = groups;
         _isLoading = false;
+        _isA12Loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _isA12Loading = false;
       });
     }
-  }
-
-  List<LeaderboardEntry> _rankEntries(List<LeaderboardEntry> entries) {
-    final sorted = [...entries]..sort((a, b) => b.score.compareTo(a.score));
-    return sorted.asMap().entries.map((item) {
-      return item.value.copyWith(rank: item.key + 1);
-    }).toList();
-  }
-
-  int _extractIntValue(Map<String, dynamic> data, List<String> possibleKeys) {
-    for (final key in possibleKeys) {
-      if (!data.containsKey(key) || data[key] == null) continue;
-      final value = data[key];
-      if (value is int) return value;
-      if (value is double) return value.toInt();
-      if (value is num) return value.toInt();
-      if (value is String) return int.tryParse(value) ?? 0;
-    }
-    return 0;
   }
 
   Future<void> _refreshLeaderboard() async {
     setState(() {
       _isLoading = true;
+      _isA12Loading = true;
     });
-    await _loadCurrentUserTeam();
-    final snapshot = await _firestore.collection('userpoints').get();
-    await _processUserPointsData(snapshot);
+    await _loadLeaderboardFromApi();
   }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          elevation: 0,
-          title: const Text('Leaderboard'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _refreshLeaderboard,
-            ),
-            IconButton(
-              icon: const Icon(CupertinoIcons.line_horizontal_3, size: 28),
-              onPressed: () {
-                Navigator.pushNamed(context, '/profile');
-              },
-            ),
-          ],
-          bottom: TabBar(
-            controller: _tabController,
-            tabs: [
-              const Tab(text: 'All users'),
-              const Tab(text: 'My Team'),
-            ],
-          ),
-        ),
-        body: RefreshIndicator(
-          key: _refreshKey,
-          onRefresh: _refreshLeaderboard,
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _LeaderboardBoard(
-                entries: _allEntries,
-                isLoading: _isLoading,
-                emptyMessage: 'No leaderboard entries to display.',
-                onEntryTap: (entry) => _showPointsBreakdown(context, entry),
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return DefaultTabController(
+          length: 2,
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              scaffoldBackgroundColor: companyTheme.backgroundColor,
+              cardColor: companyTheme.surfaceColor,
+              textTheme: Theme.of(context).textTheme.apply(
+                    bodyColor: companyTheme.inkColor,
+                    displayColor: companyTheme.inkColor,
+                  ),
+              tabBarTheme: TabBarThemeData(
+                labelColor: companyTheme.isDark
+                    ? companyTheme.primaryColor
+                    : companyTheme.inkColor,
+                unselectedLabelColor: companyTheme.mutedInkColor,
+                labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+                unselectedLabelStyle:
+                    const TextStyle(fontWeight: FontWeight.w500),
               ),
-              _LeaderboardBoard(
-                entries: _teamEntries,
-                isLoading: _isLoading,
-                emptyMessage: _isCoachUser
-                    ? 'No mentees in your team leaderboard yet.'
-                    : _teamName.isEmpty
-                        ? 'Join a team to see the team leaderboard.'
-                        : 'No team leaderboard data yet.',
-                onEntryTap: (entry) => _showPointsBreakdown(context, entry),
+            ),
+            child: Scaffold(
+              backgroundColor: companyTheme.backgroundColor,
+              appBar: AppBar(
+                elevation: 0,
+                backgroundColor:
+                    companyTheme.isDark ? companyTheme.surfaceColor : null,
+                foregroundColor:
+                    companyTheme.isDark ? companyTheme.inkColor : null,
+                surfaceTintColor: Colors.transparent,
+                title: const Text('Leaderboard'),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _refreshLeaderboard,
+                  ),
+                  IconButton(
+                    icon:
+                        const Icon(CupertinoIcons.line_horizontal_3, size: 28),
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/profile');
+                    },
+                  ),
+                ],
+                bottom: TabBar(
+                  isScrollable: true,
+                  indicatorColor: companyTheme.primaryColor,
+                  tabs: [
+                    const Tab(text: 'Company'),
+                    const Tab(text: 'Groups'),
+                  ],
+                ),
               ),
-            ],
+              body: RefreshIndicator(
+                key: _refreshKey,
+                onRefresh: _refreshLeaderboard,
+                child: TabBarView(
+                  children: [
+                    _A12LeaderboardBoard(
+                      key: const ValueKey('company'),
+                      entries: _a12Entries,
+                      isLoading: _isA12Loading,
+                      theme: companyTheme,
+                      currentUserId:
+                          AuthService.instance.currentSession?.id.toString() ??
+                              '',
+                      showRankLabels: _isAbundance12Company,
+                      title: 'Company leaderboard',
+                      onEntryTap: (entry) =>
+                          _showA12PointsBreakdown(context, entry, companyTheme),
+                    ),
+                    _GroupLeaderboardsBoard(
+                      groups: _groupLeaderboards,
+                      allMenteeEntries:
+                          _isCoachUser ? _menteeEntries : _allEntries,
+                      isLoading: _isLoading,
+                      isCoachUser: _isCoachUser,
+                      view: _CoachLeaderboardView.groups,
+                      theme: companyTheme,
+                      onEntryTap: (entry) =>
+                          _showPointsBreakdown(context, entry, companyTheme),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  void _showPointsBreakdown(BuildContext context, LeaderboardEntry entry) {
+  void _showPointsBreakdown(
+    BuildContext context,
+    LeaderboardEntry entry,
+    CompanyThemeData theme,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: theme.surfaceColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -425,16 +449,20 @@ class _LeaderboardState extends State<Leaderboard>
               children: [
                 Text(
                   '${entry.name}\'s Points',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: theme.inkColor,
                   ),
                 ),
                 if ((entry.teamName ?? '').isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
                     'Team: ${entry.teamName}',
-                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.mutedInkColor,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -443,61 +471,77 @@ class _LeaderboardState extends State<Leaderboard>
                   entry.activity.callIntent,
                   '10 pt/call',
                   entry.activity.callIntent,
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
                   'Steps',
                   entry.activity.stepsTaken,
                   '10 pt/200 steps',
                   (entry.activity.stepsTaken / 200).floor(),
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
                   'Exercise',
                   entry.activity.exerciseCount,
                   '10 pt/exercise',
                   entry.activity.exerciseCount * 10,
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
                   'Meditation',
                   entry.activity.meditationMinutes,
                   '5 pt/minute',
                   entry.activity.meditationMinutes,
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
                   'Add Value',
                   entry.activity.valueEntries,
                   '15 pt/entry',
                   entry.activity.valueEntries,
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
                   'Learning',
                   entry.activity.learningEntries,
                   '15 pt/entry',
                   entry.activity.learningEntries,
+                  theme,
                 ),
-                const Divider(),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+                _buildPointsRow(
+                  'Todo List',
+                  entry.activity.todoListCount,
+                  '1 pt/task',
+                  entry.activity.todoListCount,
+                  theme,
+                ),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'Total Points',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
+                          color: theme.inkColor,
                         ),
                       ),
                       Text(
-                        '${entry.score}',
-                        style: const TextStyle(
+                        _formatLeaderboardScore(entry.score),
+                        style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: Colors.orange,
+                          color:
+                              theme.isDark ? theme.primaryColor : Colors.orange,
                         ),
                       ),
                     ],
@@ -511,22 +555,46 @@ class _LeaderboardState extends State<Leaderboard>
     );
   }
 
-  Widget _buildPointsRow(String title, int value, String rate, int points) {
+  Widget _buildPointsRow(
+    String title,
+    int value,
+    String rate,
+    int points,
+    CompanyThemeData theme,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Expanded(flex: 3, child: Text(title, style: const TextStyle(fontSize: 16))),
-          Expanded(flex: 3, child: Text('$value', style: const TextStyle(fontSize: 16))),
+          Expanded(
+            flex: 3,
+            child: Text(
+              title,
+              style: TextStyle(fontSize: 16, color: theme.inkColor),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              '$value',
+              style: TextStyle(fontSize: 16, color: theme.inkColor),
+            ),
+          ),
           Expanded(
             flex: 2,
-            child: Text(rate, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+            child: Text(
+              rate,
+              style: TextStyle(fontSize: 14, color: theme.mutedInkColor),
+            ),
           ),
           Expanded(
             flex: 2,
             child: Text(
               '$points pts',
-              style: const TextStyle(fontSize: 16, color: Colors.orange),
+              style: TextStyle(
+                fontSize: 16,
+                color: theme.isDark ? theme.primaryColor : Colors.orange,
+              ),
               textAlign: TextAlign.right,
             ),
           ),
@@ -534,19 +602,839 @@ class _LeaderboardState extends State<Leaderboard>
       ),
     );
   }
+
+  void _showA12PointsBreakdown(
+    BuildContext context,
+    A12LeaderboardEntry entry,
+    CompanyThemeData theme,
+  ) {
+    final rankColor = _isAbundance12Company
+        ? _rankColor(entry.rank)
+        : theme.primaryColor;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: theme.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SingleChildScrollView(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              left: 16,
+              right: 16,
+              top: 16,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${entry.name}\'s A12 Score',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: theme.inkColor,
+                  ),
+                ),
+                if ((entry.teamName ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Team: ${entry.teamName}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.mutedInkColor,
+                    ),
+                  ),
+                ],
+                if (_isAbundance12Company) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Level ${entry.rank.name} · ${entry.rank.min}–${entry.rank.max}%',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: rankColor,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _buildPointsRow(
+                  'Goal score',
+                  entry.score.goalScore.round(),
+                  'A12 goal total',
+                  entry.score.goalScore.round(),
+                  theme,
+                ),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+                _buildPointsRow(
+                  'Daily tracker',
+                  entry.score.coreTaskScore.round(),
+                  'Core task completion',
+                  entry.score.coreTaskScore.round(),
+                  theme,
+                ),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+                _buildPointsRow(
+                  'Consistency',
+                  entry.score.consistencyScore.round(),
+                  'Streak + check-ins',
+                  entry.score.consistencyScore.round(),
+                  theme,
+                ),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+                _buildPointsRow(
+                  'Streak',
+                  entry.score.currentStreak,
+                  'Consecutive active days',
+                  entry.score.currentStreak,
+                  theme,
+                ),
+                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Overall score',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: theme.inkColor,
+                        ),
+                      ),
+                      Text(
+                        _formatLeaderboardScore(entry.score.overallScore),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: rankColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Color _rankColor(GoalRank rank) {
+  switch (rank.key) {
+    case 'TITAN':
+      return const Color(0xFFE0A94F);
+    case 'MASTER_IMMORTAL':
+      return const Color(0xFFB56AE5);
+    case 'IMMORTAL':
+      return const Color(0xFF58A6FF);
+    case 'DIVINE':
+      return const Color(0xFF4DD4C6);
+    case 'ANCIENT':
+      return const Color(0xFF65B86B);
+    case 'LEGEND':
+      return const Color(0xFFEA8C55);
+    case 'ARCHON':
+      return const Color(0xFFE46D6D);
+    case 'CRUSADER':
+      return const Color(0xFF76A9FA);
+    case 'GUARDIAN':
+      return const Color(0xFF8FBC8F);
+    case 'HERALD':
+    default:
+      return const Color(0xFF8B927E);
+  }
+}
+
+enum _CoachLeaderboardView { groups }
+
+class _GroupLeaderboardsBoard extends StatefulWidget {
+  const _GroupLeaderboardsBoard({
+    required this.groups,
+    required this.allMenteeEntries,
+    required this.isLoading,
+    required this.isCoachUser,
+    required this.view,
+    required this.theme,
+    required this.onEntryTap,
+  });
+
+  final List<GroupLeaderboardSummary> groups;
+  final List<LeaderboardEntry> allMenteeEntries;
+  final bool isLoading;
+  final bool isCoachUser;
+  final _CoachLeaderboardView view;
+  final CompanyThemeData theme;
+  final ValueChanged<LeaderboardEntry> onEntryTap;
+
+  @override
+  State<_GroupLeaderboardsBoard> createState() =>
+      _GroupLeaderboardsBoardState();
+}
+
+class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
+  String? _selectedGroupId;
+
+  @override
+  void didUpdateWidget(covariant _GroupLeaderboardsBoard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedGroupId == null) return;
+    final stillExists = widget.groups.any(
+      (group) => group.groupId == _selectedGroupId,
+    );
+    if (!stillExists) {
+      _selectedGroupId = null;
+    }
+  }
+
+  GroupLeaderboardSummary? get _selectedGroup {
+    if (_selectedGroupId == null) return null;
+    for (final group in widget.groups) {
+      if (group.groupId == _selectedGroupId) return group;
+    }
+    return null;
+  }
+
+  List<LeaderboardEntry> get _selectedEntries {
+    final group = _selectedGroup;
+    return group == null ? widget.allMenteeEntries : group.entries;
+  }
+
+  num get _selectedTotalScore {
+    final group = _selectedGroup;
+    if (group != null) return group.totalScore;
+    return widget.allMenteeEntries.fold<num>(
+      0,
+      (runningTotal, entry) => runningTotal + entry.score,
+    );
+  }
+
+  String _formatScore(num score) {
+    return _formatLeaderboardScore(score);
+  }
+
+  String get _selectedTitle => _selectedGroup?.groupName ?? 'All mentees';
+
+  Widget _buildSelectionChips() {
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: const Text('All mentees'),
+              selected: _selectedGroupId == null,
+              onSelected: (_) => setState(() => _selectedGroupId = null),
+            ),
+          ),
+          ...widget.groups.map((group) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(group.groupName),
+                selected: _selectedGroupId == group.groupId,
+                onSelected: (_) {
+                  setState(() => _selectedGroupId = group.groupId);
+                },
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedSummaryCard() {
+    final group = _selectedGroup;
+    final theme = widget.theme;
+    final subtitle = group == null
+        ? 'Leaderboard of every accepted mentee under this coach.'
+        : 'Coach ${group.coachName} • ${group.entries.length} mentees in this group.';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.surfaceColor,
+        borderRadius: BorderRadius.circular(20),
+        border: theme.isDark
+            ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: (theme.isDark ? theme.primaryColor : Colors.black)
+                .withValues(alpha: theme.isDark ? 0.12 : 0.12),
+            blurRadius: 4,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: theme.isDark
+                  ? theme.primaryColor.withValues(alpha: 0.16)
+                  : const Color(0xFFF4E6C8),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              group == null
+                  ? CupertinoIcons.person_2_fill
+                  : CupertinoIcons.rectangle_grid_2x2_fill,
+              color:
+                  theme.isDark ? theme.primaryColor : const Color(0xFF6F7B5C),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _selectedTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: theme.inkColor,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: theme.mutedInkColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '${_formatScore(_selectedTotalScore)} pts',
+            style: TextStyle(
+              color: theme.isDark ? theme.primaryColor : Colors.orange,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupPodiumItem({
+    required GroupLeaderboardSummary group,
+    required int rank,
+    required double height,
+    required Color color,
+  }) {
+    return SizedBox(
+      width: 96,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          CircleAvatar(
+            radius: rank == 1 ? 27 : 23,
+            backgroundColor: color.withValues(alpha: 0.18),
+            child: Text(
+              '#$rank',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: 84,
+            height: height,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  color.withValues(alpha: 0.85),
+                  color,
+                ],
+              ),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(18),
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  group.groupName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  '${_formatScore(group.totalScore)} pts',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupPodium(List<GroupLeaderboardSummary> groups) {
+    final theme = widget.theme;
+    if (groups.length < 3) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: theme.surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: theme.isDark
+              ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: (theme.isDark ? theme.primaryColor : Colors.black)
+                  .withValues(alpha: 0.12),
+              blurRadius: 4,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Text(
+          'Create at least 3 groups to show a group podium.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: theme.mutedInkColor),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: theme.surfaceColor,
+        borderRadius: BorderRadius.circular(20),
+        border: theme.isDark
+            ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: (theme.isDark ? theme.primaryColor : Colors.black)
+                .withValues(alpha: 0.12),
+            blurRadius: 4,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Top 3 groups',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: theme.inkColor,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _buildGroupPodiumItem(
+                group: groups[1],
+                rank: 2,
+                height: 108,
+                color: const Color(0xFF8B927E),
+              ),
+              _buildGroupPodiumItem(
+                group: groups[0],
+                rank: 1,
+                height: 134,
+                color: const Color(0xFFE0A94F),
+              ),
+              _buildGroupPodiumItem(
+                group: groups[2],
+                rank: 3,
+                height: 92,
+                color: const Color(0xFF9B7B60),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupLeaderboardItem({
+    required BuildContext context,
+    required GroupLeaderboardSummary group,
+    required int rank,
+  }) {
+    final theme = widget.theme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      decoration: BoxDecoration(
+        color: theme.surfaceColor,
+        borderRadius: BorderRadius.circular(20),
+        border: theme.isDark
+            ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: (theme.isDark ? theme.primaryColor : Colors.black)
+                .withValues(alpha: 0.12),
+            blurRadius: 4,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+        ),
+        child: ExpansionTile(
+          key: PageStorageKey<String>(group.groupId),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          collapsedIconColor: theme.mutedInkColor,
+          iconColor: theme.primaryColor,
+          maintainState: true,
+          title: Text(
+            group.groupName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: theme.inkColor,
+            ),
+          ),
+          subtitle: Text(
+            'Coach ${group.coachName} · ${group.entries.length} mentees',
+            style: TextStyle(color: theme.mutedInkColor),
+          ),
+          trailing: Text(
+            '${_formatScore(group.totalScore)} pts',
+            style: TextStyle(
+              color: theme.isDark ? theme.primaryColor : Colors.orange,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          children: [
+            if (group.entries.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'No mentees yet.',
+                  style: TextStyle(color: theme.mutedInkColor),
+                ),
+              )
+            else
+              ...group.entries.asMap().entries.map(
+                (memberEntry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildGroupMemberRow(
+                      memberEntry.value,
+                      position: memberEntry.key + 1,
+                      theme: theme,
+                    ),
+                  );
+                },
+              ),
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.primaryColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Group total score',
+                    style: TextStyle(
+                      color: theme.inkColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    '${_formatScore(group.totalScore)} pts',
+                    style: TextStyle(
+                      color: theme.isDark ? theme.primaryColor : Colors.orange,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupMemberRow(
+    LeaderboardEntry entry, {
+    required int position,
+    required CompanyThemeData theme,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => widget.onEntryTap(entry),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: theme.backgroundColor.withValues(
+            alpha: theme.isDark ? 0.22 : 0.5,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: theme.mutedInkColor.withValues(alpha: 0.14),
+          ),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: theme.primaryColor.withValues(alpha: 0.16),
+              backgroundImage:
+                  entry.profilePic != null && entry.profilePic!.isNotEmpty
+                      ? NetworkImage(entry.profilePic!)
+                      : null,
+              child: entry.profilePic == null || entry.profilePic!.isEmpty
+                  ? Text(
+                      entry.name.isNotEmpty ? entry.name[0].toUpperCase() : '?',
+                      style: TextStyle(
+                        color: theme.primaryColor,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '#$position ${entry.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.inkColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if ((entry.teamName ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.teamName!,
+                      style: TextStyle(
+                        color: theme.mutedInkColor,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '${_formatScore(entry.score)} pts',
+              style: TextStyle(
+                color: theme.isDark ? theme.primaryColor : Colors.orange,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenteeLeaderboardTab(BuildContext context) {
+    final entries = _selectedEntries;
+    final listEntries =
+        entries.length >= 3 ? entries.skip(3).toList() : entries;
+
+    return Column(
+      children: [
+        const SizedBox(height: 14),
+        _buildSelectionChips(),
+        _buildSelectedSummaryCard(),
+        SizedBox(
+          height: 220,
+          child: _buildPodium(
+            context,
+            entries,
+            _selectedGroup == null
+                ? 'No mentee scores yet.'
+                : 'No scores in this group yet.',
+            widget.onEntryTap,
+            widget.theme,
+          ),
+        ),
+        Expanded(
+          child: entries.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      _selectedGroup == null
+                          ? 'No mentee scores yet.'
+                          : 'No mentees in this group yet.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  itemCount: listEntries.length,
+                  itemBuilder: (context, index) {
+                    return _buildLeaderboardItem(
+                      listEntries[index],
+                      widget.onEntryTap,
+                      widget.theme,
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupLeaderboardTab() {
+    final groups = widget.groups.toList()
+      ..sort((a, b) {
+        if (a.totalScore != b.totalScore) {
+          return b.totalScore.compareTo(a.totalScore);
+        }
+        return a.groupName.toLowerCase().compareTo(
+              b.groupName.toLowerCase(),
+            );
+      });
+
+    if (groups.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No coach groups yet. Create groups from the coach dashboard.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        _buildGroupPodium(groups),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Text(
+            'Group leaderboard',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        ...groups.asMap().entries.map((entry) {
+          return _buildGroupLeaderboardItem(
+            context: context,
+            group: entry.value,
+            rank: entry.key + 1,
+          );
+        }),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isLoading) {
+      return _LeaderboardBoard(
+        entries: const [],
+        isLoading: true,
+        emptyMessage: '',
+        theme: widget.theme,
+        onEntryTap: widget.onEntryTap,
+      );
+    }
+
+    if (widget.groups.isEmpty && widget.allMenteeEntries.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No accepted mentees yet. Once mentees connect, their leaderboard will appear here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    if (widget.view == _CoachLeaderboardView.groups) {
+      return _buildGroupLeaderboardTab();
+    }
+
+    return _buildMenteeLeaderboardTab(context);
+  }
 }
 
 class _LeaderboardBoard extends StatelessWidget {
   const _LeaderboardBoard({
+    super.key,
     required this.entries,
     required this.isLoading,
     required this.emptyMessage,
+    required this.theme,
     required this.onEntryTap,
   });
 
   final List<LeaderboardEntry> entries;
   final bool isLoading;
   final String emptyMessage;
+  final CompanyThemeData theme;
   final ValueChanged<LeaderboardEntry> onEntryTap;
 
   @override
@@ -557,7 +1445,13 @@ class _LeaderboardBoard extends StatelessWidget {
           height: 220,
           child: isLoading
               ? _buildSkeletonPodium()
-              : _buildPodium(context, entries, emptyMessage, onEntryTap),
+              : _buildPodium(
+                  context,
+                  entries,
+                  emptyMessage,
+                  onEntryTap,
+                  theme,
+                ),
         ),
         Expanded(
           child: isLoading
@@ -578,7 +1472,7 @@ class _LeaderboardBoard extends StatelessWidget {
                     final entry = entries[index + 3];
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: _buildLeaderboardItem(entry, onEntryTap),
+                      child: _buildLeaderboardItem(entry, onEntryTap, theme),
                     );
                   },
                 ),
@@ -660,11 +1554,741 @@ class _LeaderboardBoard extends StatelessWidget {
   }
 }
 
+class _AllUsersLeaderboardBoard extends StatefulWidget {
+  const _AllUsersLeaderboardBoard({
+    required this.legacyEntries,
+    required this.a12Entries,
+    required this.isLoading,
+    required this.isA12Loading,
+    required this.showRankLabels,
+    required this.theme,
+    required this.currentUserId,
+    required this.onLegacyEntryTap,
+    required this.onA12EntryTap,
+  });
+
+  final List<LeaderboardEntry> legacyEntries;
+  final List<A12LeaderboardEntry> a12Entries;
+  final bool isLoading;
+  final bool isA12Loading;
+  final bool showRankLabels;
+  final CompanyThemeData theme;
+  final String currentUserId;
+  final ValueChanged<LeaderboardEntry> onLegacyEntryTap;
+  final ValueChanged<A12LeaderboardEntry> onA12EntryTap;
+
+  @override
+  State<_AllUsersLeaderboardBoard> createState() =>
+      _AllUsersLeaderboardBoardState();
+}
+
+class _AllUsersLeaderboardBoardState extends State<_AllUsersLeaderboardBoard> {
+  bool _showA12 = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+
+    return Column(
+      children: [
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              ChoiceChip(
+                label: const Text('Legacy points'),
+                selected: !_showA12,
+                onSelected: (_) => setState(() => _showA12 = false),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('A12 score'),
+                selected: _showA12,
+                onSelected: (_) => setState(() => _showA12 = true),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              final offset = Tween<Offset>(
+                begin: const Offset(0.02, 0.04),
+                end: Offset.zero,
+              ).animate(animation);
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(position: offset, child: child),
+              );
+            },
+            child: _showA12
+                ? _A12LeaderboardBoard(
+                    key: const ValueKey('a12'),
+                    entries: widget.a12Entries,
+                    isLoading: widget.isA12Loading,
+                    theme: theme,
+                    currentUserId: widget.currentUserId,
+                    showRankLabels: widget.showRankLabels,
+                    onEntryTap: widget.onA12EntryTap,
+                  )
+                : _LeaderboardBoard(
+                    key: const ValueKey('legacy'),
+                    entries: widget.legacyEntries,
+                    isLoading: widget.isLoading,
+                    emptyMessage: 'No leaderboard entries to display.',
+                    theme: theme,
+                    onEntryTap: widget.onLegacyEntryTap,
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _A12LeaderboardBoard extends StatelessWidget {
+  const _A12LeaderboardBoard({
+    super.key,
+    required this.entries,
+    required this.isLoading,
+    required this.theme,
+    required this.currentUserId,
+    required this.showRankLabels,
+    this.title = 'A12 leaderboard',
+    required this.onEntryTap,
+  });
+
+  final List<A12LeaderboardEntry> entries;
+  final bool isLoading;
+  final CompanyThemeData theme;
+  final String currentUserId;
+  final bool showRankLabels;
+  final String title;
+  final ValueChanged<A12LeaderboardEntry> onEntryTap;
+
+  LeaderboardEntry _toLegacyEntry(A12LeaderboardEntry entry) {
+    return LeaderboardEntry(
+      userId: entry.userId,
+      name: entry.name,
+      score: entry.score.goalScore,
+      rank: 0,
+      activity: entry.activity,
+      profilePic: entry.profilePic,
+      teamName: entry.teamName,
+    );
+  }
+
+  Widget _buildCompanyPodium(
+    BuildContext context,
+    List<A12LeaderboardEntry> sortedEntries,
+  ) {
+    if (sortedEntries.length < 3) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: theme.surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: theme.isDark
+              ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: (theme.isDark ? theme.primaryColor : Colors.black)
+                  .withValues(alpha: 0.12),
+              blurRadius: 4,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Text(
+          'Create at least 3 company scores to show a podium.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: theme.mutedInkColor),
+        ),
+      );
+    }
+
+    final podiumEntries = sortedEntries.take(3).toList();
+    final podiumLegacy = podiumEntries.map(_toLegacyEntry).toList();
+
+    return SizedBox(
+      height: 220,
+      child: _buildPodium(
+        context,
+        podiumLegacy,
+        'No company scores yet.',
+        (entry) {
+          final original = sortedEntries.firstWhere(
+            (candidate) => candidate.userId == entry.userId,
+            orElse: () => sortedEntries.first,
+          );
+          onEntryTap(original);
+        },
+        theme,
+      ),
+    );
+  }
+
+  A12LeaderboardEntry? get _currentUserEntry {
+    for (final entry in entries) {
+      if (entry.userId == currentUserId) return entry;
+    }
+    return entries.isEmpty ? null : entries.first;
+  }
+
+  Widget _buildHeaderCard(A12LeaderboardEntry? entry) {
+    final score = entry?.score.goalScore ?? 0;
+    final rank = entry?.rank ?? rankForPercent(0);
+    final scoreColor = showRankLabels ? _rankColor(rank) : theme.primaryColor;
+
+    if (!showRankLabels) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.surfaceColor,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.22 : 0.14),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: theme.primaryColor.withValues(alpha: 0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scoreColor.withValues(alpha: 0.88),
+                    scoreColor.withValues(alpha: 0.58),
+                  ],
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    score.toStringAsFixed(0),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const Text(
+                    'Score',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry?.name.isNotEmpty == true ? entry!.name : 'Company score',
+                    style: TextStyle(
+                      color: theme.inkColor,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Goal total score, daily tracker completion, and check-ins.',
+                    style: TextStyle(
+                      color: theme.mutedInkColor,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.surfaceColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: scoreColor.withValues(alpha: theme.isDark ? 0.26 : 0.18),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: scoreColor.withValues(alpha: 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 92,
+            height: 92,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  scoreColor.withValues(alpha: 0.88),
+                  scoreColor.withValues(alpha: 0.58),
+                ],
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  score.toStringAsFixed(0),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Text(
+                  'Goals',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry?.name.isNotEmpty == true ? entry!.name : 'A12 score',
+                  style: TextStyle(
+                    color: theme.inkColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Goal total score, daily tracker completion, and check-ins.',
+                  style: TextStyle(
+                    color: theme.mutedInkColor,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 360),
+                  switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) {
+                    return ScaleTransition(
+                      scale: Tween<double>(begin: 0.88, end: 1).animate(
+                        CurvedAnimation(
+                          parent: animation,
+                          curve: Curves.easeOutBack,
+                        ),
+                      ),
+                      child: FadeTransition(opacity: animation, child: child),
+                    );
+                  },
+                  child: Container(
+                    key: ValueKey(rank.key),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scoreColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: scoreColor.withValues(alpha: 0.22)),
+                    ),
+                    child: Text(
+                      'Level ${rank.name}',
+                      style: TextStyle(
+                        color: scoreColor,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildA12MetricChip({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: theme.isDark ? 0.16 : 0.1),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: theme.mutedInkColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildItem(A12LeaderboardEntry entry, int position) {
+    final isCurrentUser = entry.userId == currentUserId;
+    final rankColor = showRankLabels ? _rankColor(entry.rank) : theme.primaryColor;
+    final progress = (entry.score.goalScore / 100).clamp(0.0, 1.0);
+    final scoreLabel = entry.score.goalScore.toStringAsFixed(0);
+
+    return GestureDetector(
+      onTap: () => onEntryTap(entry),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: theme.surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isCurrentUser
+                ? rankColor.withValues(alpha: 0.45)
+                : theme.primaryColor.withValues(alpha: 0.12),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: (isCurrentUser ? rankColor : Colors.black)
+                  .withValues(alpha: theme.isDark ? 0.12 : 0.08),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 23,
+              backgroundColor: rankColor.withValues(alpha: 0.18),
+              backgroundImage:
+                  entry.profilePic != null && entry.profilePic!.isNotEmpty
+                      ? NetworkImage(entry.profilePic!)
+                      : null,
+              child: entry.profilePic == null || entry.profilePic!.isEmpty
+                  ? Text(
+                      entry.name.isNotEmpty ? entry.name[0].toUpperCase() : '?',
+                      style: TextStyle(
+                        color: rankColor,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '#$position',
+                        style: TextStyle(
+                          color: theme.inkColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          entry.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: theme.inkColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      if (showRankLabels)
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 320),
+                          transitionBuilder: (child, animation) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: ScaleTransition(
+                                scale:
+                                    Tween<double>(begin: 0.92, end: 1).animate(
+                                  animation,
+                                ),
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Container(
+                            key: ValueKey(entry.rank.key),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: rankColor.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              entry.rank.name,
+                              style: TextStyle(
+                                color: rankColor,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (isCurrentUser) ...[
+                        if (showRankLabels) const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.primaryColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'You',
+                            style: TextStyle(
+                              color: theme.primaryColor,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 8,
+                      backgroundColor:
+                          theme.mutedInkColor.withValues(alpha: 0.14),
+                      valueColor: AlwaysStoppedAnimation<Color>(rankColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '$scoreLabel%',
+                  style: TextStyle(
+                    color: rankColor,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Goal score',
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color: theme.mutedInkColor,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: CircularProgressIndicator(
+            color: theme.primaryColor,
+          ),
+        ),
+      );
+    }
+
+    if (entries.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No A12 scores yet. Finish goals and daily tracker tasks to build your level.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    final sorted = [...entries]
+      ..sort((a, b) {
+        if (a.score.goalScore != b.score.goalScore) {
+          return b.score.goalScore.compareTo(a.score.goalScore);
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    final currentUserEntry = _currentUserEntry;
+    final remainingEntries =
+        sorted.length > 3 ? sorted.skip(3).toList() : const <A12LeaderboardEntry>[];
+    final scoreColor =
+        showRankLabels ? _rankColor(currentUserEntry?.rank ?? rankForPercent(0)) : theme.primaryColor;
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: Text(
+            'Company podium',
+            style: TextStyle(
+              color: theme.inkColor,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        _buildCompanyPodium(context, sorted),
+        _buildHeaderCard(currentUserEntry),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            children: [
+              _buildA12MetricChip(
+                label: 'Goal score',
+                value: '${currentUserEntry?.score.goalScore.toStringAsFixed(0) ?? '0'}%',
+                color: scoreColor,
+              ),
+              const SizedBox(width: 10),
+              _buildA12MetricChip(
+                label: 'Daily tracker',
+                value:
+                    '${currentUserEntry?.score.coreTaskScore.toStringAsFixed(0) ?? '0'}%',
+                color: theme.primaryColor,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            children: [
+              _buildA12MetricChip(
+                label: 'Consistency',
+                value:
+                    '${currentUserEntry?.score.consistencyScore.toStringAsFixed(0) ?? '0'}%',
+                color: showRankLabels ? theme.iconColor : theme.primaryColor,
+              ),
+              const SizedBox(width: 10),
+              _buildA12MetricChip(
+                label: 'Streak',
+                value:
+                    '${currentUserEntry?.score.currentStreak.toString()} days',
+                color: showRankLabels ? theme.accentColor : theme.primaryColor,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        ...remainingEntries.asMap().entries.map((entry) {
+          final item = entry.value;
+          return _buildItem(item, entry.key + 4);
+        }),
+      ],
+    );
+  }
+}
+
 Widget _buildPodium(
   BuildContext context,
   List<LeaderboardEntry> entries,
   String emptyMessage,
   ValueChanged<LeaderboardEntry> onEntryTap,
+  CompanyThemeData theme,
 ) {
   if (entries.isEmpty) {
     return Center(
@@ -672,7 +2296,7 @@ Widget _buildPodium(
         padding: const EdgeInsets.all(16),
         child: Text(
           emptyMessage,
-          style: const TextStyle(fontSize: 16, color: Colors.grey),
+          style: TextStyle(fontSize: 16, color: theme.mutedInkColor),
           textAlign: TextAlign.center,
         ),
       ),
@@ -685,7 +2309,7 @@ Widget _buildPodium(
         padding: const EdgeInsets.all(16),
         child: Text(
           'Not enough entries to display podium (need at least 3)',
-          style: const TextStyle(fontSize: 16, color: Colors.grey),
+          style: TextStyle(fontSize: 16, color: theme.mutedInkColor),
           textAlign: TextAlign.center,
         ),
       ),
@@ -703,9 +2327,10 @@ Widget _buildPodium(
           child: SizedBox(
             width: 100,
             height: 180,
-            child: Image.asset(
-              'assets/images/confetti_left.gif',
-              fit: BoxFit.cover,
+            child: _TransparentConfettiBurst(
+              mirror: false,
+              primaryColor: theme.primaryColor,
+              accentColor: theme.accentColor,
             ),
           ),
         ),
@@ -715,9 +2340,10 @@ Widget _buildPodium(
           child: SizedBox(
             width: 100,
             height: 180,
-            child: Image.asset(
-              'assets/images/confetti_right.gif',
-              fit: BoxFit.cover,
+            child: _TransparentConfettiBurst(
+              mirror: true,
+              primaryColor: theme.primaryColor,
+              accentColor: theme.accentColor,
             ),
           ),
         ),
@@ -725,9 +2351,9 @@ Widget _buildPodium(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _buildPodiumItem(entries[1], 120, 2, onEntryTap),
-            _buildPodiumItem(entries[0], 140, 1, onEntryTap),
-            _buildPodiumItem(entries[2], 100, 3, onEntryTap),
+            _buildPodiumItem(entries[1], 120, 2, onEntryTap, theme),
+            _buildPodiumItem(entries[0], 140, 1, onEntryTap, theme),
+            _buildPodiumItem(entries[2], 100, 3, onEntryTap, theme),
           ],
         ),
       ],
@@ -740,6 +2366,7 @@ Widget _buildPodiumItem(
   double height,
   int position,
   ValueChanged<LeaderboardEntry> onEntryTap,
+  CompanyThemeData theme,
 ) {
   return GestureDetector(
     onTap: () => onEntryTap(entry),
@@ -798,20 +2425,25 @@ Widget _buildPodiumItem(
                 width: 80,
                 height: height,
                 margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Color(0xFF90A17D),
-                      Color(0xFF6F7B5C),
+                      theme.isDark
+                          ? theme.primaryColor
+                          : const Color(0xFF59BDB3),
+                      theme.isDark
+                          ? theme.accentColor
+                          : const Color(0xFF3E9189),
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                   ),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(12)),
                 ),
                 child: Center(
                   child: Text(
-                    '${entry.score} pts',
+                    '${_formatLeaderboardScore(entry.score)} pts',
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w900,
@@ -860,18 +2492,26 @@ Widget _buildPodiumItem(
 Widget _buildLeaderboardItem(
   LeaderboardEntry entry,
   ValueChanged<LeaderboardEntry> onEntryTap,
+  CompanyThemeData theme,
 ) {
+  final cardColor = theme.surfaceColor;
+  final shadowColor = (theme.isDark ? theme.primaryColor : Colors.black)
+      .withValues(alpha: theme.isDark ? 0.12 : 0.12);
+
   return GestureDetector(
     onTap: () => onEntryTap(entry),
     child: Container(
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
+        border: theme.isDark
+            ? Border.all(color: theme.primaryColor.withValues(alpha: 0.18))
+            : null,
+        boxShadow: [
           BoxShadow(
-            color: Colors.black12,
+            color: shadowColor,
             blurRadius: 4,
             offset: Offset(0, 3),
           ),
@@ -881,15 +2521,20 @@ Widget _buildLeaderboardItem(
         children: [
           Text(
             '#${entry.rank}',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: theme.inkColor,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(width: 12),
           CircleAvatar(
             radius: 24,
             backgroundColor: Colors.grey[200],
-            backgroundImage: entry.profilePic != null && entry.profilePic!.isNotEmpty
-                ? NetworkImage(entry.profilePic!)
-                : null,
+            backgroundImage:
+                entry.profilePic != null && entry.profilePic!.isNotEmpty
+                    ? NetworkImage(entry.profilePic!)
+                    : null,
             child: entry.profilePic == null || entry.profilePic!.isEmpty
                 ? Icon(Icons.person, size: 30, color: Colors.grey[600])
                 : null,
@@ -901,7 +2546,8 @@ Widget _buildLeaderboardItem(
               children: [
                 Text(
                   entry.name,
-                  style: const TextStyle(
+                  style: TextStyle(
+                    color: theme.inkColor,
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
@@ -911,12 +2557,14 @@ Widget _buildLeaderboardItem(
                   borderRadius: BorderRadius.circular(12),
                   child: LinearProgressIndicator(
                     value: entry.score > 0
-                        ? (entry.score / 3000).clamp(0.0, 1.0)
+                        ? (entry.score / 100).clamp(0.0, 1.0)
                         : 0.0,
                     minHeight: 8,
-                    backgroundColor: Colors.grey[300],
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(Colors.orange),
+                    backgroundColor:
+                        theme.mutedInkColor.withValues(alpha: 0.18),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      theme.isDark ? theme.primaryColor : Colors.orange,
+                    ),
                   ),
                 ),
               ],
@@ -927,12 +2575,15 @@ Widget _buildLeaderboardItem(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${entry.score}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                _formatLeaderboardScore(entry.score),
+                style: TextStyle(
+                  color: theme.inkColor,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               Text(
                 'pts',
-                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                style: TextStyle(color: theme.mutedInkColor, fontSize: 12),
               ),
             ],
           ),
@@ -940,6 +2591,114 @@ Widget _buildLeaderboardItem(
       ),
     ),
   );
+}
+
+class _TransparentConfettiBurst extends StatelessWidget {
+  const _TransparentConfettiBurst({
+    required this.mirror,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final bool mirror;
+  final Color primaryColor;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: _TransparentConfettiPainter(
+          mirror: mirror,
+          primaryColor: primaryColor,
+          accentColor: accentColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _TransparentConfettiPainter extends CustomPainter {
+  const _TransparentConfettiPainter({
+    required this.mirror,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final bool mirror;
+  final Color primaryColor;
+  final Color accentColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pieces = <_ConfettiPiece>[
+      const _ConfettiPiece(0.18, 0.12, 8, 3, -0.6, 0),
+      const _ConfettiPiece(0.44, 0.08, 5, 5, 0.2, 1),
+      const _ConfettiPiece(0.72, 0.18, 10, 3, 0.7, 2),
+      const _ConfettiPiece(0.26, 0.34, 7, 3, 0.5, 3),
+      const _ConfettiPiece(0.58, 0.31, 4, 4, -0.2, 0),
+      const _ConfettiPiece(0.84, 0.42, 9, 3, -0.8, 1),
+      const _ConfettiPiece(0.16, 0.55, 5, 5, 0.3, 2),
+      const _ConfettiPiece(0.48, 0.61, 11, 3, 0.9, 3),
+      const _ConfettiPiece(0.72, 0.73, 6, 4, -0.4, 0),
+      const _ConfettiPiece(0.34, 0.84, 8, 3, -0.7, 1),
+    ];
+    final colors = <Color>[
+      primaryColor,
+      accentColor,
+      Colors.amber,
+      const Color(0xFF76E4F7),
+    ];
+
+    for (final piece in pieces) {
+      final dx = mirror ? 1 - piece.x : piece.x;
+      final center = Offset(dx * size.width, piece.y * size.height);
+      final paint = Paint()
+        ..color = colors[piece.colorIndex % colors.length].withValues(
+          alpha: 0.78,
+        )
+        ..style = PaintingStyle.fill;
+
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(piece.rotation * math.pi);
+      final rect = Rect.fromCenter(
+        center: Offset.zero,
+        width: piece.width,
+        height: piece.height,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(1.5)),
+        paint,
+      );
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TransparentConfettiPainter oldDelegate) {
+    return oldDelegate.mirror != mirror ||
+        oldDelegate.primaryColor != primaryColor ||
+        oldDelegate.accentColor != accentColor;
+  }
+}
+
+class _ConfettiPiece {
+  const _ConfettiPiece(
+    this.x,
+    this.y,
+    this.width,
+    this.height,
+    this.rotation,
+    this.colorIndex,
+  );
+
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final double rotation;
+  final int colorIndex;
 }
 
 class ShimmerWidget extends StatefulWidget {

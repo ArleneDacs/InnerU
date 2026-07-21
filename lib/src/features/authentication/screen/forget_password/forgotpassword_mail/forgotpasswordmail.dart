@@ -1,20 +1,24 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
+import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/services/password_reset_api_service.dart';
 
 class ForgotPasswordMail extends StatefulWidget {
   const ForgotPasswordMail({super.key});
 
   @override
-  _ForgotPasswordMailState createState() => _ForgotPasswordMailState();
+  State<ForgotPasswordMail> createState() => _ForgotPasswordMailState();
 }
 
 class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
   final TextEditingController _emailController = TextEditingController();
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  String? _errorMessage; // To hold the error message
+  String? _errorMessage;
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
 
   Future<void> _resetPassword() async {
     String email = _emailController.text.trim();
@@ -27,23 +31,13 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
     }
 
     try {
-      // Check if the email exists in Firestore
-      QuerySnapshot querySnapshot = await _firestore
-          .collection('users') // Change to your actual collection name
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
 
-      if (querySnapshot.docs.isEmpty) {
-        // Email not found in Firestore
-        setState(() {
-          _errorMessage = 'Email is not registered.';
-        });
-        return;
-      }
-
-      // Send reset password email
-      await _auth.sendPasswordResetEmail(email: email);
+      await PasswordResetApiService.instance.sendResetLink(email);
+      if (!mounted) return;
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -62,23 +56,23 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
       );
     } catch (e) {
       String errorMessage = 'An error occurred. Please try again.';
-      if (e is FirebaseAuthException) {
-        if (e.code == 'invalid-email') {
-          errorMessage =
-              'Invalid email format. Please enter a valid email address.';
-        }
-      }
+      if (!mounted) return;
       setState(() {
-        _errorMessage = errorMessage; // Update the error message
+        _errorMessage = errorMessage;
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final Color textColor = isDarkMode ? Colors.white : Colors.black;
-    final Color labelColor = isDarkMode ? Colors.grey[300]! : Colors.brown;
+    final textColor = Colors.black;
+    final labelColor = Colors.brown;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -92,7 +86,6 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
                 "Reset Password",
                 style: TextStyle(
                     fontSize: 28,
-                    fontWeight: FontWeight.bold,
                     color: textColor),
               ),
               const SizedBox(height: 40),
@@ -133,17 +126,26 @@ class _ForgotPasswordMailState extends State<ForgotPasswordMail> {
                       height: 50,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              const Color.fromARGB(255, 89, 189, 179),
+                          backgroundColor: Colors.teal,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         onPressed: _resetPassword,
-                        child: const Text(
-                          "Reset Password",
-                          style: TextStyle(fontSize: 18, color: Colors.white),
-                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                "Reset Password",
+                                style:
+                                    TextStyle(fontSize: 18, color: Colors.white),
+                              ),
                       ),
                     ),
                   ],

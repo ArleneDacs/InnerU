@@ -1,15 +1,38 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/fasting_api_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
-class FastingReportScreen extends StatelessWidget {
+class FastingReportScreen extends StatefulWidget {
   const FastingReportScreen({super.key});
 
   @override
+  State<FastingReportScreen> createState() => _FastingReportScreenState();
+}
+
+class _FastingReportScreenState extends State<FastingReportScreen> {
+  final FastingApiService _fastingApi = FastingApiService.instance;
+  late Future<List<Map<String, dynamic>>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = _fastingApi.fetchHistory(limit: 365);
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _historyFuture = _fastingApi.fetchHistory(limit: 365);
+    });
+    await _historyFuture;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       return const Scaffold(
         body: Center(
           child: Text('Please log in to view fasting reports.'),
@@ -17,80 +40,98 @@ class FastingReportScreen extends StatelessWidget {
       );
     }
 
-    final historyRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('wellness')
-        .doc('fasting')
-        .collection('history');
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F5F0),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF8F5F0),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const Text('Fasting Reports'),
-      ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: historyRef.orderBy('finishedAt', descending: true).snapshots(),
-        builder: (context, snapshot) {
-          final docs = snapshot.data?.docs ?? [];
-          final reports = _buildReports(docs);
-          final dailyHours = _buildDailyHours(docs);
+              return Scaffold(
+                backgroundColor: theme.scaffoldBackgroundColor,
+                appBar: AppBar(
+                  backgroundColor: companyTheme.surfaceColor,
+                  foregroundColor: companyTheme.inkColor,
+                  iconTheme: IconThemeData(color: companyTheme.inkColor),
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  title: Text(
+                    'Fasting Reports',
+                    style: TextStyle(
+                      color: companyTheme.inkColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                body: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _historyFuture,
+                  builder: (context, snapshot) {
+                    final history = snapshot.data ?? <Map<String, dynamic>>[];
+                    final reports = _buildReports(history);
+                    final dailyHours = _buildDailyHours(history);
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            children: [
-              _ReportHeroCard(reports: reports),
-              const SizedBox(height: 18),
-              _CalendarBarCard(dailyHours: dailyHours),
-              const SizedBox(height: 18),
-              _PeriodReportCard(
-                title: 'Weekly',
-                subtitle: 'Your last 7 days of fasting',
-                report: reports.weekly,
-                accentColor: const Color(0xFFFF4663),
-              ),
-              const SizedBox(height: 16),
-              _PeriodReportCard(
-                title: 'Monthly',
-                subtitle: 'Your last 30 days of fasting',
-                report: reports.monthly,
-                accentColor: const Color(0xFFFF9A31),
-              ),
-              const SizedBox(height: 16),
-              _PeriodReportCard(
-                title: 'Yearly',
-                subtitle: 'Your last 365 days of fasting',
-                report: reports.yearly,
-                accentColor: const Color(0xFF6B8BFF),
-              ),
-              const SizedBox(height: 18),
-              _RecentFastList(docs: docs.take(12).toList()),
-            ],
-          );
-        },
-      ),
+                    return RefreshIndicator(
+                      onRefresh: _refresh,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          _ReportHeroCard(reports: reports),
+                          const SizedBox(height: 18),
+                          _CalendarBarCard(dailyHours: dailyHours),
+                          const SizedBox(height: 18),
+                          _PeriodReportCard(
+                            title: 'Weekly',
+                            subtitle: 'Your last 7 days of fasting',
+                            report: reports.weekly,
+                            accentColor: const Color(0xFFFF4663),
+                          ),
+                          const SizedBox(height: 16),
+                          _PeriodReportCard(
+                            title: 'Monthly',
+                            subtitle: 'Your last 30 days of fasting',
+                            report: reports.monthly,
+                            accentColor: const Color(0xFFFF9A31),
+                          ),
+                          const SizedBox(height: 16),
+                          _PeriodReportCard(
+                            title: 'Yearly',
+                            subtitle: 'Your last 365 days of fasting',
+                            report: reports.yearly,
+                            accentColor: const Color(0xFF6B8BFF),
+                          ),
+                          const SizedBox(height: 18),
+                          _RecentFastList(history: history.take(12).toList()),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
 
-_ReportBundle _buildReports(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+_ReportBundle _buildReports(
+    List<Map<String, dynamic>> history) {
   final now = DateTime.now();
   return _ReportBundle(
     weekly: _summarizePeriod(
-      docs,
+      history,
       now.subtract(const Duration(days: 7)),
       now,
     ),
     monthly: _summarizePeriod(
-      docs,
+      history,
       now.subtract(const Duration(days: 30)),
       now,
     ),
     yearly: _summarizePeriod(
-      docs,
+      history,
       now.subtract(const Duration(days: 365)),
       now,
     ),
@@ -98,13 +139,12 @@ _ReportBundle _buildReports(List<QueryDocumentSnapshot<Map<String, dynamic>>> do
 }
 
 Map<String, double> _buildDailyHours(
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  List<Map<String, dynamic>> history,
 ) {
   final totals = <String, double>{};
 
-  for (final doc in docs) {
-    final data = doc.data();
-    final finishedAt = (data['finishedAt'] as Timestamp?)?.toDate();
+  for (final data in history) {
+    final finishedAt = DateTime.tryParse(data['finishedAt'].toString());
     if (finishedAt == null) continue;
 
     final key = DateFormat('yyyy-MM-dd').format(finishedAt);
@@ -116,12 +156,12 @@ Map<String, double> _buildDailyHours(
 }
 
 _PeriodReport _summarizePeriod(
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  List<Map<String, dynamic>> history,
   DateTime start,
   DateTime end,
 ) {
-  final filtered = docs.where((doc) {
-    final finishedAt = (doc.data()['finishedAt'] as Timestamp?)?.toDate();
+  final filtered = history.where((data) {
+    final finishedAt = DateTime.tryParse(data['finishedAt'].toString());
     if (finishedAt == null) return false;
     return !finishedAt.isBefore(start) && !finishedAt.isAfter(end);
   }).toList();
@@ -129,22 +169,21 @@ _PeriodReport _summarizePeriod(
   final completedFasts = filtered.length;
   final totalHours = filtered.fold<double>(
     0,
-    (sum, doc) => sum + ((doc.data()['completedHours'] as num?)?.toDouble() ?? 0),
+    (sum, data) => sum + ((data['completedHours'] as num?)?.toDouble() ?? 0),
   );
-  final goalHits = filtered.where((doc) {
-    return (doc.data()['completedTarget'] as bool?) ?? false;
+  final goalHits = filtered.where((data) {
+    return data['completedTarget'] == true;
   }).length;
   final longestHours = filtered.fold<double>(
     0,
-    (maxValue, doc) {
-      final hours = (doc.data()['completedHours'] as num?)?.toDouble() ?? 0;
+    (maxValue, data) {
+      final hours = (data['completedHours'] as num?)?.toDouble() ?? 0;
       return hours > maxValue ? hours : maxValue;
     },
   );
   final double averageHours =
       completedFasts == 0 ? 0.0 : totalHours / completedFasts;
-  final double hitRate =
-      completedFasts == 0 ? 0.0 : goalHits / completedFasts;
+  final double hitRate = completedFasts == 0 ? 0.0 : goalHits / completedFasts;
 
   return _PeriodReport(
     completedFasts: completedFasts,
@@ -196,15 +235,16 @@ class _ReportHeroCard extends StatelessWidget {
     final totalFasts = reports.yearly.completedFasts;
     final totalHours = reports.yearly.totalHours;
     final yearlyHitRate = (reports.yearly.hitRate * 100).round();
+    final theme = Theme.of(context);
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(30),
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           colors: [
-            Color(0xFFFFF3F5),
-            Color(0xFFFEEDE2),
+            theme.colorScheme.primary.withValues(alpha: 0.16),
+            theme.colorScheme.secondary.withValues(alpha: 0.14),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -215,7 +255,11 @@ class _ReportHeroCard extends StatelessWidget {
         children: [
           const Text(
             'Your Fasting Overview',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -279,7 +323,11 @@ class _ReportHeroCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             value,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -328,7 +376,7 @@ class _CalendarBarCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -339,7 +387,11 @@ class _CalendarBarCard extends StatelessWidget {
         children: [
           const Text(
             'Calendar Report',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -391,9 +443,8 @@ class _CalendarBarCard extends StatelessWidget {
                       final date = DateTime(now.year, now.month, dayNumber);
                       final key = DateFormat('yyyy-MM-dd').format(date);
                       final hours = dailyHours[key] ?? 0;
-                      final intensity = hours <= 0
-                          ? 0.0
-                          : (hours / 20).clamp(0.15, 1.0);
+                      final intensity =
+                          hours <= 0 ? 0.0 : (hours / 20).clamp(0.15, 1.0);
                       final isToday = date.year == now.year &&
                           date.month == now.month &&
                           date.day == now.day;
@@ -407,7 +458,8 @@ class _CalendarBarCard extends StatelessWidget {
                                   const Color(0xFFFF4663),
                                   intensity,
                                 ),
-                          borderRadius: BorderRadius.circular(compact ? 12 : 16),
+                          borderRadius:
+                              BorderRadius.circular(compact ? 12 : 16),
                           border: isToday
                               ? Border.all(
                                   color: const Color(0xFF2F2B29),
@@ -446,7 +498,9 @@ class _CalendarBarCard extends StatelessWidget {
                                   fontSize: compact ? 8 : 11,
                                   fontWeight: FontWeight.w700,
                                   height: 1,
-                                  color: hours > 0.5 ? Colors.white : Colors.black45,
+                                  color: hours > 0.5
+                                      ? Colors.white
+                                      : Colors.black45,
                                 ),
                               ),
                             ),
@@ -462,7 +516,11 @@ class _CalendarBarCard extends StatelessWidget {
           SizedBox(height: isSmallScreen ? 16 : 20),
           const Text(
             'Last 7 Days',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           SizedBox(height: isSmallScreen ? 8 : 12),
           SizedBox(
@@ -475,7 +533,8 @@ class _CalendarBarCard extends StatelessWidget {
                     : (point.value / maxBarValue) * (isSmallScreen ? 82 : 96);
                 return Expanded(
                   child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 2 : 3),
+                    padding:
+                        EdgeInsets.symmetric(horizontal: isSmallScreen ? 2 : 3),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
@@ -560,7 +619,7 @@ class _PeriodReportCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -582,7 +641,11 @@ class _PeriodReportCard extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 title,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF2E2A28),
+                ),
               ),
             ],
           ),
@@ -618,7 +681,10 @@ class _PeriodReportCard extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             'Goal completion $hitRatePercent%',
-            style: const TextStyle(fontWeight: FontWeight.w700),
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 8),
           ClipRRect(
@@ -647,7 +713,11 @@ class _PeriodReportCard extends StatelessWidget {
         children: [
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -661,9 +731,9 @@ class _PeriodReportCard extends StatelessWidget {
 }
 
 class _RecentFastList extends StatelessWidget {
-  const _RecentFastList({required this.docs});
+  const _RecentFastList({required this.history});
 
-  final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs;
+  final List<Map<String, dynamic>> history;
 
   @override
   Widget build(BuildContext context) {
@@ -678,23 +748,27 @@ class _RecentFastList extends StatelessWidget {
         children: [
           const Text(
             'Recent Sessions',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF2E2A28),
+            ),
           ),
           const SizedBox(height: 14),
-          if (docs.isEmpty)
+          if (history.isEmpty)
             const Text(
               'No completed fasting sessions yet.',
               style: TextStyle(color: Colors.black54),
             )
           else
-            ...docs.map((doc) {
-              final data = doc.data();
-              final completedTarget =
-                  (data['completedTarget'] as bool?) ?? false;
+            ...history.map((data) {
+              final completedTarget = data['completedTarget'] == true;
               final completedHours =
                   (data['completedHours'] as num?)?.toDouble() ?? 0;
               final targetHours = (data['targetHours'] as num?)?.toInt() ?? 0;
-              final finishedAt = (data['finishedAt'] as Timestamp?)?.toDate();
+              final finishedAt = DateTime.tryParse(
+                data['finishedAt']?.toString() ?? '',
+              );
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -723,6 +797,7 @@ class _RecentFastList extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
+                              color: Color(0xFF2E2A28),
                             ),
                           ),
                           const SizedBox(height: 3),

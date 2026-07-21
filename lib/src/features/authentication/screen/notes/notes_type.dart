@@ -1,19 +1,33 @@
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/models/customSnackbar.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/community_api_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class NotesType extends StatefulWidget {
   final Note note;
   final String? postId; // Nullable
-  const NotesType({super.key, required this.note, this.postId});
+  final XFile? initialImage;
+  final String? initialCategory;
+  final bool openCommunityAfterPost;
+
+  const NotesType({
+    super.key,
+    required this.note,
+    this.postId,
+    this.initialImage,
+    this.initialCategory,
+    this.openCommunityAfterPost = false,
+  });
 
   @override
   State<NotesType> createState() => _NotesTypeState();
@@ -25,10 +39,6 @@ class _NotesTypeState extends State<NotesType> {
   final ImagePicker _picker = ImagePicker();
   List<String> uploadedImageUrls = [];
   List<String> imagePaths = [];
-  XFile? _selectedImage;
-
-  final CollectionReference myNotes =
-      FirebaseFirestore.instance.collection('notes');
 
   String username = "Loading...";
   late Note note;
@@ -36,7 +46,6 @@ class _NotesTypeState extends State<NotesType> {
   late List<dynamic> noteString;
   late int color;
   bool _isSaving = false;
-  final bool _mounted = true;
   late SnackBar alertContent;
 
   late TextEditingController titleController;
@@ -44,10 +53,20 @@ class _NotesTypeState extends State<NotesType> {
 
   get todayTasks => null;
 
+  String? _validCategory(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == "Add Value" || trimmed == "Learning") {
+      return trimmed;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
     note = widget.note;
+    selectedCategory =
+        _validCategory(widget.initialCategory) ?? _validCategory(note.category);
     titleString = note.title;
     color = note.color == 0xFFFFFFFF ? generateRandomLightShade() : note.color;
     titleController = TextEditingController(text: titleString);
@@ -109,6 +128,15 @@ class _NotesTypeState extends State<NotesType> {
         username = data["username"]!;
       });
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _validateForm();
+      final initialImage = widget.initialImage;
+      if (initialImage != null) {
+        _addPickedImage(initialImage);
+      }
+    });
   }
 
   @override
@@ -130,7 +158,7 @@ class _NotesTypeState extends State<NotesType> {
     bool hasText = contentWidgets.any((widget) =>
         widget is TextField &&
         (widget.controller?.text.trim().isNotEmpty ?? false));
-    bool hasImage = uploadedImageUrls.isNotEmpty;
+    bool hasImage = uploadedImageUrls.any(_isValidImageUrl);
     bool hasCategory =
         selectedCategory != null && selectedCategory!.trim().isNotEmpty;
 
@@ -172,181 +200,288 @@ class _NotesTypeState extends State<NotesType> {
 
   Future<void> updateUsernameInComments(
       String userId, String newUsername) async {
-    final firestore = FirebaseFirestore.instance;
-
-    // Query all notes
-    final notesSnapshot = await firestore.collection('notes').get();
-
-    for (var noteDoc in notesSnapshot.docs) {
-      final commentsRef =
-          firestore.collection('notes').doc(noteDoc.id).collection('comments');
-
-      final commentsSnapshot =
-          await commentsRef.where('userId', isEqualTo: userId).get();
-
-      for (var commentDoc in commentsSnapshot.docs) {
-        await commentsRef.doc(commentDoc.id).update({'username': newUsername});
-      }
-    }
+    debugPrint(
+      'Username backfill is managed server-side for PostgreSQL comments.',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-        onWillPop: () async {
-          bool shouldLeave = await _showExitConfirmationDialog();
-          return shouldLeave;
-        },
-        child: Scaffold(
-          appBar: AppBar(
-            leading: IconButton(
-              onPressed: () async {
-                bool shouldLeave = await _showExitConfirmationDialog();
-                if (shouldLeave) {
-                  Navigator.pop(context);
-                }
-              },
-              icon: Icon(Icons.arrow_back),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: _isFormValid
-                    ? () {
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text("Save this note?"),
-                            content: Text(
-                                "Do you want to save this note for later?"),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text("Cancel"),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  saveNotes(isSaved: true);
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                },
-                                child: Text("Save",
-                                    style: TextStyle(color: Colors.blue)),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                    : null, // Disabled when _isFormValid is false
-                child: Text("Save",
-                    style: TextStyle(
-                        fontSize: 15,
-                        color: _isFormValid ? Colors.black : Colors.grey)),
-              ),
-              TextButton(
-                onPressed: _isFormValid
-                    ? () {
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text("Post this note?"),
-                            content: Text(
-                                "Are you sure you want to share this note?"),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text("Cancel"),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  saveNotes(isSaved: false);
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        final fieldFillColor =
+            companyTheme.isDark ? companyTheme.surfaceColor : Colors.white;
+        final panelColor = companyTheme.isDark
+            ? companyTheme.surfaceColor
+            : Colors.grey.shade100;
+        final borderColor = companyTheme.isDark
+            ? companyTheme.iconColor.withValues(alpha: 0.42)
+            : Colors.teal;
 
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                },
-                                child: Text("Yes",
-                                    style: TextStyle(color: Colors.green)),
+        InputDecoration multilineDecoration(InputDecoration? decoration) {
+          return (decoration ?? const InputDecoration()).copyWith(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            filled: false,
+            fillColor: Colors.transparent,
+            hintStyle: TextStyle(color: companyTheme.mutedInkColor),
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          );
+        }
+
+        return PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, result) async {
+              if (didPop) return;
+
+              final shouldLeave = await _showExitConfirmationDialog();
+              if (!mounted || !context.mounted) return;
+              if (shouldLeave) {
+                Navigator.pop(context);
+              }
+            },
+            child: Scaffold(
+              backgroundColor: companyTheme.backgroundColor,
+              appBar: AppBar(
+                backgroundColor: companyTheme.surfaceColor,
+                foregroundColor: companyTheme.inkColor,
+                iconTheme: IconThemeData(color: companyTheme.inkColor),
+                leading: IconButton(
+                  onPressed: () async {
+                    bool shouldLeave = await _showExitConfirmationDialog();
+                    if (!mounted || !context.mounted) return;
+                    if (shouldLeave) {
+                      Navigator.pop(context);
+                    }
+                  },
+                  icon: Icon(Icons.arrow_back),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: _isFormValid
+                        ? () {
+                            showDialog(
+                              context: context,
+                              builder: (dialogContext) => AlertDialog(
+                                title: Text("Save this note?"),
+                                content: Text(
+                                    "Do you want to save this note for later?"),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialogContext),
+                                    child: Text("Cancel"),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      final success =
+                                          await saveNotes(isSaved: true);
+                                      if (!mounted || !dialogContext.mounted) {
+                                        return;
+                                      }
+                                      Navigator.pop(dialogContext);
+                                      if (success) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                    child: Text("Save",
+                                        style: TextStyle(color: Colors.blue)),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        );
-                      }
-                    : null, // Disabled when _isFormValid is false
-                child: Text("Post",
-                    style: TextStyle(
-                        fontSize: 15,
-                        color: _isFormValid ? Colors.black : Colors.grey)),
-              ),
-            ],
-          ),
-          body: SafeArea(
-              child: Padding(
-            padding: EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 5),
-                  color: Colors.grey.shade100,
-                  child: DropdownButton<String>(
-                    value: selectedCategory,
-                    hint: Text("Select Category"),
-                    isExpanded: true, // Makes it full-width
-                    items: ["Add Value", "Learning"].map((String category) {
-                      return DropdownMenuItem<String>(
-                        value: category,
-                        child: Text(category),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() {
-                        selectedCategory = newValue;
-                      });
-                      _validateForm();
-                    },
+                            );
+                          }
+                        : null, // Disabled when _isFormValid is false
+                    child: Text("Save",
+                        style: TextStyle(
+                            fontSize: 15,
+                            color: _isFormValid
+                                ? companyTheme.inkColor
+                                : companyTheme.mutedInkColor)),
                   ),
-                ),
-                SizedBox(
-                  height: 20,
-                ),
+                  TextButton(
+                    onPressed: _isFormValid
+                        ? () {
+                            showDialog(
+                              context: context,
+                              builder: (dialogContext) => AlertDialog(
+                                title: Text("Post this note?"),
+                                content: Text(
+                                    "Are you sure you want to share this note?"),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialogContext),
+                                    child: Text("Cancel"),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      final success =
+                                          await saveNotes(isSaved: false);
+                                      if (!mounted || !dialogContext.mounted) {
+                                        return;
+                                      }
+                                      Navigator.pop(dialogContext);
+                                      if (!success) return;
 
-                TextField(
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  controller: titleController,
-                  maxLength: 40,
-                  onChanged: (value) => _validateForm(),
-                  decoration: InputDecoration(
-                    border: InputBorder.none,
-                    hintText: "Title",
+                                      if (widget.openCommunityAfterPost) {
+                                        Navigator.pushReplacementNamed(
+                                          context,
+                                          '/communityScreen',
+                                        );
+                                      } else {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                    child: Text("Yes",
+                                        style: TextStyle(color: Colors.green)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        : null, // Disabled when _isFormValid is false
+                    child: Text("Post",
+                        style: TextStyle(
+                            fontSize: 15,
+                            color: _isFormValid
+                                ? companyTheme.inkColor
+                                : companyTheme.mutedInkColor)),
                   ),
-                ),
-
-                Expanded(
-                  child: ListView(
-                    children: [
-                      ...contentWidgets.map((widget) {
-                        if (widget is TextField) {
-                          return TextField(
-                            controller: widget.controller,
-                            onChanged: (value) => _validateForm(),
-                            decoration: widget.decoration,
+                ],
+              ),
+              body: SafeArea(
+                  child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: panelColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: companyTheme.isDark
+                              ? companyTheme.iconColor.withValues(alpha: 0.3)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      child: DropdownButton<String>(
+                        value: selectedCategory,
+                        hint: Text(
+                          "Select Category",
+                          style: TextStyle(color: companyTheme.mutedInkColor),
+                        ),
+                        isExpanded: true, // Makes it full-width
+                        dropdownColor: fieldFillColor,
+                        iconEnabledColor: companyTheme.iconColor,
+                        style: TextStyle(color: companyTheme.inkColor),
+                        underline: SizedBox.shrink(),
+                        items: ["Add Value", "Learning"].map((String category) {
+                          return DropdownMenuItem<String>(
+                            value: category,
+                            child: Text(category),
                           );
-                        }
-                        return widget;
-                      }),
-                      buildImageSlider(),
-                      SizedBox(height: 10),
-                    ],
-                  ),
-                ),
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            selectedCategory = newValue;
+                          });
+                          _validateForm();
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      height: 20,
+                    ),
 
-                // Button for Adding Images
-                ElevatedButton(
-                  onPressed: pickImage,
-                  child: Icon(Icons.image_search, size: 30),
+                    TextField(
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: companyTheme.inkColor,
+                        height: 1.25,
+                      ),
+                      controller: titleController,
+                      minLines: 2,
+                      maxLines: 3,
+                      maxLength: 40,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      cursorColor: companyTheme.iconColor,
+                      onChanged: (value) => _validateForm(),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: fieldFillColor,
+                        hintText: "Title",
+                        hintStyle: TextStyle(color: companyTheme.mutedInkColor),
+                        counterStyle:
+                            TextStyle(color: companyTheme.mutedInkColor),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: companyTheme.iconColor,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          ...contentWidgets.map((widget) {
+                            if (widget is TextField) {
+                              return TextField(
+                                controller: widget.controller,
+                                onChanged: (value) => _validateForm(),
+                                minLines: 6,
+                                maxLines: null,
+                                keyboardType: TextInputType.multiline,
+                                textInputAction: TextInputAction.newline,
+                                style: TextStyle(
+                                  color: companyTheme.inkColor,
+                                  fontSize: 16,
+                                  height: 1.35,
+                                ),
+                                cursorColor: companyTheme.iconColor,
+                                decoration:
+                                    multilineDecoration(widget.decoration),
+                              );
+                            }
+                            return widget;
+                          }),
+                          buildImageSlider(),
+                          SizedBox(height: 10),
+                        ],
+                      ),
+                    ),
+
+                    // Button for Adding Images
+                    ElevatedButton(
+                      onPressed: pickImage,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: companyTheme.iconColor,
+                        foregroundColor:
+                            companyTheme.isDark ? Colors.black : Colors.white,
+                      ),
+                      child: Icon(Icons.image_search, size: 30),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          )),
-        ));
+              )),
+            ));
+      },
+    );
   }
 
   Future<void> _saveDailyActivity({
@@ -355,54 +490,45 @@ class _NotesTypeState extends State<NotesType> {
     bool learning = false,
     bool addValue = false,
   }) async {
-    String? userId = FirebaseAuth.instance.currentUser?.uid;
+    final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null) return;
-
-    FirebaseFirestore firestore = FirebaseFirestore.instance;
-
-    // Fetch username from Firestore user document
-    DocumentSnapshot userDoc =
-        await firestore.collection('users').doc(userId).get();
-    String? username = userDoc.exists ? userDoc.get('username') : null;
-
-    if (username != null) {
-      String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-      // Use UID for document ID
-      DocumentReference docRef =
-          firestore.collection('dailytracker').doc('$userId-$formattedDate');
-
-      // Use Firestore's FieldValue.merge to update without overwriting other fields
-      await docRef.set({
-        'userId': userId,
-        'username': username,
-        'date': formattedDate,
-        if (meditation) 'meditation': true,
-        if (steps) 'steps': true,
-        if (learning) 'learning': true,
-        if (addValue) 'addValue': true,
-      }, SetOptions(merge: true));
-
-      print(
-          "Updated Firestore: meditation=$meditation, steps=$steps, learning=$learning, addValue=$addValue for userId: $userId, username: $username");
-    } else {
-      print("Error: Username not found for userId: $userId");
-    }
+    final sessionUser = AuthService.instance.currentSession;
+    final displayName = (await UserService.getUserData())['username']?.toString() ??
+        sessionUser?.name ??
+        'Unknown';
+    final membershipData = await CompanyMembershipService.loadForUser(userId);
+    await DailyTrackerApiService.instance.upsert(
+      date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+      meditation: meditation,
+      steps: steps,
+      learning: learning,
+      addValue: addValue,
+      username: displayName,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
+    );
   }
 
-  Future<void> saveNotes({required bool isSaved}) async {
-    if (_isSaving) return;
+  Future<bool> saveNotes({required bool isSaved}) async {
+    if (_isSaving) return false;
     _isSaving = true;
 
     // Get the current user's ID
-    String? userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) {
+    final session = AuthService.instance.currentSession;
+    final userId = session?.id.toString();
+    if (userId == null || session == null) {
       print("Error: User not logged in.");
-      return;
+      _isSaving = false;
+      return false;
+    }
+    final category = selectedCategory?.trim();
+    if (category == null || category.isEmpty) {
+      _isSaving = false;
+      return false;
     }
 
     List<Map<String, String>> contentList = [];
-    DateTime now = DateTime.now();
 
     // Collect note content (text and images)
     for (var content in contentWidgets) {
@@ -427,41 +553,40 @@ class _NotesTypeState extends State<NotesType> {
     }
 
     try {
-      // Save the note to Firestore
-      await FirebaseFirestore.instance.collection('notes').add({
-        'username': username,
-        'userId': userId,
-        'title': titleController.text.trim(),
-        'note': contentList,
-        'color': color,
-        'createdAt': now,
-        'category': selectedCategory,
-        'saved': isSaved,
-      });
+      await CommunityApiService.instance.createPost(
+        title: titleController.text.trim(),
+        category: category,
+        note: contentList,
+        color: color,
+        saved: isSaved,
+      );
 
       // Add data to dailytracker if the category is 'Learning' or 'Add Value'
-      if (selectedCategory == "Learning") {
+      if (category == "Learning") {
         await _saveDailyActivity(learning: true);
-      } else if (selectedCategory == "Add Value") {
+      } else if (category == "Add Value") {
         await _saveDailyActivity(addValue: true);
       }
 
       // Show a confirmation message
-      if (_mounted) {
+      if (mounted) {
         CustomSnackBar.showCustomSnackBar(
           context,
           isSaved ? "Note saved successfully." : "Note posted successfully.",
           Colors.white,
         );
       }
+      _isSaving = false;
+      return true;
     } catch (e) {
       print("Error saving note: $e");
     }
 
     _isSaving = false;
+    return false;
   }
 
-  Future<void> pickImage() async {
+  Future<void> _addPickedImage(XFile image) async {
     if (!ImageStorageService.isConfigured) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -475,48 +600,49 @@ class _NotesTypeState extends State<NotesType> {
       return;
     }
 
+    if (!mounted) return;
+
+    setState(() {
+      uploadedImageUrls.add("loading");
+    });
+    _validateForm();
+
+    String imageUrl = await uploadImage(File(image.path));
+
+    if (imageUrl.isNotEmpty && mounted) {
+      setState(() {
+        // Find the "loading" state and replace it with the actual URL
+        int loadingIndex = uploadedImageUrls.indexOf("loading");
+        if (loadingIndex != -1) {
+          uploadedImageUrls[loadingIndex] = imageUrl;
+        } else {
+          uploadedImageUrls.add(imageUrl); // Add new image URL
+        }
+      });
+      _validateForm();
+    } else if (mounted) {
+      final reason = ImageStorageService.lastError;
+      setState(() {
+        uploadedImageUrls.remove("loading");
+      });
+      _validateForm();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(reason == null || reason.isEmpty
+              ? "Failed to upload image. Please try again."
+              : "Failed to upload image: $reason"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> pickImage() async {
     final List<XFile> images = await _picker.pickMultiImage();
 
-    if (images != null && images.isNotEmpty) {
-      if (!mounted) return;
-
+    if (images.isNotEmpty) {
       for (var image in images) {
-        if (!mounted) return;
-
-        // Add a temporary "loading" state while image is uploading
-        setState(() {
-          uploadedImageUrls.add("loading"); // Placeholder during upload
-        });
-
-        // Upload the image and get its URL
-        String imageUrl = await uploadImage(File(image.path));
-
-        if (imageUrl.isNotEmpty && mounted) {
-          setState(() {
-            // Find the "loading" state and replace it with the actual URL
-            int loadingIndex = uploadedImageUrls.indexOf("loading");
-            if (loadingIndex != -1) {
-              uploadedImageUrls[loadingIndex] = imageUrl;
-            } else {
-              uploadedImageUrls.add(imageUrl); // Add new image URL
-            }
-            _validateForm(); // <- Add this line here
-          });
-        } else if (mounted) {
-          final reason = ImageStorageService.lastError;
-          setState(() {
-            uploadedImageUrls.remove("loading");
-            _validateForm();
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(reason == null || reason.isEmpty
-                  ? "Failed to upload image. Please try again."
-                  : "Failed to upload image: $reason"),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        await _addPickedImage(image);
       }
     }
   }
@@ -580,7 +706,7 @@ class _NotesTypeState extends State<NotesType> {
                               onTap: () => removeImage(index),
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.grey.withOpacity(0.8),
+                                  color: Colors.grey.withValues(alpha: 0.8),
                                   shape: BoxShape.circle,
                                 ),
                                 padding: EdgeInsets.all(6),
@@ -606,21 +732,6 @@ class _NotesTypeState extends State<NotesType> {
     setState(() {
       uploadedImageUrls.removeAt(index);
     });
-
-    // You may want to update Firestore and remove the image if needed
-    await FirebaseFirestore.instance
-        .collection('notes')
-        .where('note', arrayContains: {"type": "image", "value": imageUrl})
-        .get()
-        .then((querySnapshot) {
-          for (var doc in querySnapshot.docs) {
-            doc.reference.update({
-              'note': FieldValue.arrayRemove([
-                {"type": "image", "value": imageUrl}
-              ])
-            });
-          }
-        });
 
     await deleteImageFromStorage(imageUrl);
   }

@@ -1,12 +1,17 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:intl/intl.dart';
 import 'chat_room.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
+import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 import 'package:selfcare_projects/src/utils/phone_launcher.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,27 +34,65 @@ class MyApp extends StatelessWidget {
 class Coach {
   final String id;
   final String name;
+  final String email;
   final String phone;
   final String bio;
   final String profilePic; // New field for profile picture URL
+  final String companyId;
+  final String companyName;
   final Color backgroundColor;
 
   Coach({
     required this.id,
     required this.name,
+    this.email = '',
     this.phone = '',
     this.bio = '',
     this.profilePic = '', // Default empty if no image
+    this.companyId = '',
+    this.companyName = '',
     required this.backgroundColor,
   });
 }
 
+enum CoachApplicationStatus {
+  none,
+  pending,
+  accepted,
+  rejected,
+}
+
+class CoachApplication {
+  const CoachApplication({
+    required this.coachId,
+    required this.status,
+  });
+
+  final String coachId;
+  final CoachApplicationStatus status;
+
+  factory CoachApplication.fromJson(Map<String, dynamic> data) {
+    final statusName = (data['status'] as String?)?.toLowerCase().trim() ?? '';
+    return CoachApplication(
+      coachId: (data['coachId'] as String?)?.trim() ?? '',
+      status: switch (statusName) {
+        'pending' => CoachApplicationStatus.pending,
+        'accepted' => CoachApplicationStatus.accepted,
+        'rejected' => CoachApplicationStatus.rejected,
+        _ => CoachApplicationStatus.none,
+      },
+    );
+  }
+}
+
 class CoachProfileDialog extends StatelessWidget {
   final Coach coach;
+  final CoachApplicationStatus applicationStatus;
 
   const CoachProfileDialog({
     super.key,
     required this.coach,
+    this.applicationStatus = CoachApplicationStatus.accepted,
   });
 
   Future<void> _launchDialer(BuildContext context, String phoneNumber) async {
@@ -63,72 +106,53 @@ class CoachProfileDialog extends StatelessWidget {
       return;
     }
 
-    // Get current date dynamically in the format 'yyyy-MM-dd'
-    String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
+      debugPrint('No user logged in');
+      return;
+    }
 
-    // Get the current logged-in user from FirebaseAuth
-    User? currentUser = FirebaseAuth.instance.currentUser;
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    if (currentUser != null) {
-      String userId = currentUser.uid; // Get the userId from FirebaseAuth
+    try {
+      final userData = await UserService.getUserData();
+      final username = (userData['username'] as String?)?.trim().isNotEmpty == true
+          ? (userData['username'] as String).trim()
+          : (session.name.trim().isNotEmpty ? session.name.trim() : 'Unknown User');
+      final membershipData = await CompanyMembershipService.loadForUser(
+        session.id.toString(),
+      );
 
-      try {
-        // Fetch username from Firestore user document
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .get();
-
-        if (userDoc.exists) {
-          String username = userDoc.get('username') ?? 'Unknown User';
-
-          // Use UID instead of username for Firestore document ID
-          String documentId = '$userId-$formattedDate';
-
-          bool launched = false;
-          try {
-            launched = await launchPhoneNumber(normalizedPhoneNumber);
-          } catch (e) {
-            debugPrint("Error launching dialer: $e");
-          }
-
-          if (launched) {
-            debugPrint("Dialer launched successfully");
-
-            // Update or create Firestore document using UID instead of username
-            await FirebaseFirestore.instance
-                .collection('dailytracker')
-                .doc(documentId)
-                .set({
-              'userId': userId, // Store userId
-              'username': username, // Store username for display purposes
-              'date': formattedDate,
-              'call': true, // Mark 'call' as true
-            }, SetOptions(merge: true));
-
-            debugPrint(
-                "Firestore updated successfully: 'call' field set to true");
-          } else {
-            debugPrint("Could not launch dialer");
-            if (!context.mounted) {
-              return;
-            }
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(
-                content: Text(
-                  "Couldn't open the dialer on this device. If you're using the iPhone simulator, the Phone app isn't available there.",
-                ),
-              ),
-            );
-          }
-        } else {
-          debugPrint("Error: User document not found for userId: $userId");
+      final launched = await launchPhoneNumber(normalizedPhoneNumber);
+      if (!launched) {
+        debugPrint('Could not launch dialer');
+        if (!context.mounted) {
+          return;
         }
-      } catch (e) {
-        debugPrint("Error fetching user data: $e");
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Couldn't open the dialer on this device. If you're using the iPhone simulator, the Phone app isn't available there.",
+            ),
+          ),
+        );
+        return;
       }
-    } else {
-      debugPrint("No user logged in");
+
+      final companyFields = CompanyMembershipService.activeCompanyFields(
+        membershipData.activeMembership,
+      );
+      await DailyTrackerApiService.instance.upsert(
+        date: formattedDate,
+        call: true,
+        username: username,
+        companyId: companyFields['companyId']?.toString(),
+        companyCode: companyFields['companyCode']?.toString(),
+        companyName: companyFields['companyName']?.toString(),
+      );
+      debugPrint('Daily tracker call saved successfully.');
+    } catch (e) {
+      debugPrint('Error saving call tracker: $e');
     }
   }
 
@@ -137,10 +161,10 @@ class CoachProfileDialog extends StatelessWidget {
     return Dialog(
       backgroundColor: coach.backgroundColor,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(24),
       ),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -161,10 +185,21 @@ class CoachProfileDialog extends StatelessWidget {
                     color: Colors.white,
                   ),
                   onPressed: () async {
+                    if (applicationStatus != CoachApplicationStatus.accepted) {
+                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Chat opens after this coach accepts your application.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
                     final navigator = Navigator.of(context);
                     final messenger = ScaffoldMessenger.maybeOf(context);
-                    final currentUser = FirebaseAuth.instance.currentUser;
-                    if (currentUser == null) {
+                    final session = AuthService.instance.currentSession;
+                    if (session == null) {
                       messenger?.showSnackBar(
                         const SnackBar(content: Text('Please log in first.')),
                       );
@@ -173,18 +208,18 @@ class CoachProfileDialog extends StatelessWidget {
 
                     String userName = 'User';
                     try {
-                      final userDoc = await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(currentUser.uid)
-                          .get();
-                      final data = userDoc.data();
+                      final data = await UserService.getUserData();
                       userName =
-                          (data?['username'] as String?)?.trim().isNotEmpty ==
+                          (data['username'] as String?)?.trim().isNotEmpty ==
                                   true
-                              ? (data!['username'] as String)
-                              : (currentUser.email?.split('@').first ?? 'User');
+                              ? (data['username'] as String)
+                              : (session.email.trim().isNotEmpty
+                                  ? session.email.split('@').first
+                                  : 'User');
                     } catch (_) {
-                      userName = currentUser.email?.split('@').first ?? 'User';
+                      userName = session.email.trim().isNotEmpty
+                          ? session.email.split('@').first
+                          : 'User';
                     }
 
                     navigator.pop();
@@ -192,7 +227,7 @@ class CoachProfileDialog extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (context) => ChatRoomScreen(
                           coach: coach,
-                          userId: currentUser.uid,
+                          userId: session.id.toString(),
                           userName: userName,
                         ),
                       ),
@@ -201,21 +236,31 @@ class CoachProfileDialog extends StatelessWidget {
                 ),
               ],
             ),
-            CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.white,
-              backgroundImage: coach.profilePic.isNotEmpty
-                  ? NetworkImage(coach.profilePic)
-                  : null,
-              child: coach.profilePic.isEmpty
-                  ? const Icon(
-                      Icons.person,
-                      size: 50,
-                      color: Colors.grey,
-                    )
-                  : null,
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  width: 2,
+                ),
+              ),
+              child: CircleAvatar(
+                radius: 48,
+                backgroundColor: Colors.white,
+                backgroundImage: coach.profilePic.isNotEmpty
+                    ? NetworkImage(coach.profilePic)
+                    : null,
+                child: coach.profilePic.isEmpty
+                    ? const Icon(
+                        Icons.person,
+                        size: 48,
+                        color: Colors.grey,
+                      )
+                    : null,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             Text(
               coach.name,
               style: const TextStyle(
@@ -243,30 +288,33 @@ class CoachProfileDialog extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
             const Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Bio:',
+                'About',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
+                  color: Colors.white70,
                 ),
               ),
             ),
             const SizedBox(height: 8),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
                 coach.bio.isEmpty ? 'No bio available' : coach.bio,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
+                  fontSize: 15,
+                  height: 1.45,
                 ),
               ),
             ),
@@ -286,11 +334,18 @@ class CoachesScreen extends StatefulWidget {
 
 class _CoachesScreenState extends State<CoachesScreen> {
   late TextEditingController _searchController;
+  String _currentCompanyId = '';
+  String _currentCompanyName = '';
+  String _currentCompanyCode = '';
+  Future<List<Coach>> _coachesFuture = Future.value(const <Coach>[]);
+  Future<Map<String, CoachApplication>> _applicationsFuture =
+      Future.value(const <String, CoachApplication>{});
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController();
+    _bootstrap();
   }
 
   @override
@@ -299,181 +354,514 @@ class _CoachesScreenState extends State<CoachesScreen> {
     super.dispose();
   }
 
-  Stream<List<Coach>> getCoachesStream() {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      return Stream.value(const <Coach>[]);
+  String _companyIdFromData(Map<String, dynamic>? data) {
+    return ((data?['activeCompanyId'] as String?)?.trim() ??
+            (data?['companyId'] as String?)?.trim() ??
+            '')
+        .toLowerCase();
+  }
+
+  String _companyNameFromData(Map<String, dynamic>? data) {
+    return ((data?['activeCompanyName'] as String?)?.trim() ??
+            (data?['companyName'] as String?)?.trim() ??
+            '')
+        .toLowerCase();
+  }
+
+  String _companyCodeFromData(Map<String, dynamic>? data) {
+    return ((data?['activeCompanyCode'] as String?)?.trim() ??
+            (data?['companyCode'] as String?)?.trim() ??
+            '')
+        .toLowerCase();
+  }
+
+  Future<void> _bootstrap() async {
+    await _loadCurrentCompany();
+    if (!mounted) return;
+    setState(() {
+      _coachesFuture = _loadCoaches();
+      _applicationsFuture = _loadApplications();
+    });
+  }
+
+  Future<void> _loadCurrentCompany() async {
+    try {
+      final data = await UserService.getUserData();
+      if (!mounted) return;
+      setState(() {
+        _currentCompanyId = _companyIdFromData(data);
+        _currentCompanyName = _companyNameFromData(data);
+        _currentCompanyCode = _companyCodeFromData(data);
+      });
+    } catch (error) {
+      debugPrint('Failed to load current company for coaches: $error');
+    }
+  }
+
+  bool _isSameCompanyCoach(Coach coach) {
+    if (_currentCompanyCode.isNotEmpty && coach.companyId.isNotEmpty) {
+      return coach.companyId == _currentCompanyCode;
+    }
+    if (_currentCompanyId.isNotEmpty && coach.companyId.isNotEmpty) {
+      return coach.companyId == _currentCompanyId;
+    }
+    if (_currentCompanyName.isNotEmpty && coach.companyName.isNotEmpty) {
+      return coach.companyName == _currentCompanyName;
+    }
+    return false;
+  }
+
+  List<Coach> _filterCoaches(
+    List<Coach> coaches, {
+    required bool sameCompanyOnly,
+  }) {
+    final query = _searchController.text.trim().toLowerCase();
+    return coaches.where((coach) {
+      if (sameCompanyOnly && !_isSameCompanyCoach(coach)) return false;
+      if (query.isEmpty) return true;
+      return coach.name.toLowerCase().contains(query) ||
+          coach.bio.toLowerCase().contains(query) ||
+          coach.email.toLowerCase().contains(query) ||
+          coach.phone.toLowerCase().contains(query);
+    }).toList();
+  }
+
+  Future<void> _applyToCoach(Coach coach) async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in first.')),
+      );
+      return;
+    }
+    if (coach.id == session.id.toString()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose another coach to apply as a mentee.'),
+        ),
+      );
+      return;
     }
 
-    return FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUser.uid)
-        .snapshots()
-        .asyncMap((userSnapshot) async {
-      final userData = userSnapshot.data();
-      final coachId = (userData?['coachId'] as String?)?.trim() ?? '';
-      if (coachId.isEmpty) {
-        return <Coach>[];
-      }
+    final userData = await UserService.getUserData();
+    final role = (userData['role'] as String?)?.trim().toLowerCase() ?? '';
+    final isCoachApplicant = userData['isCoach'] == true || role == 'coach';
+    final userName =
+        (userData['username'] as String?)?.trim().isNotEmpty == true
+            ? (userData['username'] as String).trim()
+            : (session.name.trim().isNotEmpty
+                ? session.name.trim()
+                : (session.email.split('@').first));
+    await CoachApiService.instance.createRequest(
+      coachId: coach.id,
+      coachName: coach.name,
+      coachEmail: coach.email,
+      applicantRole:
+          isCoachApplicant ? 'coach' : (role.isNotEmpty ? role : 'user'),
+      applicantIsCoach: isCoachApplicant,
+      applyingAs: 'mentee',
+      status: 'pending',
+      menteeName: userName,
+      menteeEmail: (userData['email'] as String?)?.trim() ?? session.email,
+    );
 
-      final coachDoc = await FirebaseFirestore.instance
-          .collection('coaches')
-          .doc(coachId)
-          .get();
-      if (!coachDoc.exists) {
-        return <Coach>[];
-      }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Application sent to ${coach.name}.')),
+    );
+  }
 
-      final data = coachDoc.data() ?? <String, dynamic>{};
-      return [
-        Coach(
-          id: coachDoc.id,
-          name: data['fullName'] ?? '',
-          phone: data['phonenumber'] ?? '',
-          bio: data['bio'] ?? '',
-          profilePic: data['profilePic'] ?? '',
-          backgroundColor: data['backgroundColor'] == 'green'
-              ? const Color(0xFF90A17D)
-              : const Color(0xFF6D849A),
+  Future<List<Coach>> _loadCoaches() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return const <Coach>[];
+
+    final currentUserId = session.id.toString();
+    final currentCompanyId = _currentCompanyId;
+    final currentCompanyName = _currentCompanyName;
+
+    final directory = await CoachDirectoryApiService.instance.fetchCoaches();
+    final coaches = directory
+        .where((coach) => coach.id != currentUserId)
+        .where((coach) {
+          if (currentCompanyId.isEmpty && currentCompanyName.isEmpty) {
+            return true;
+          }
+          final sameCompanyId =
+              currentCompanyId.isNotEmpty &&
+                  coach.companyCode?.trim().isNotEmpty == true &&
+                  coach.companyCode!.trim().toLowerCase() ==
+                      currentCompanyId.toLowerCase();
+          final sameCompanyName =
+              currentCompanyName.isNotEmpty &&
+                  coach.companyName?.trim().isNotEmpty == true &&
+                  coach.companyName!.trim().toLowerCase() ==
+                      currentCompanyName.toLowerCase();
+          return sameCompanyId || sameCompanyName;
+        })
+        .map(
+          (entry) => Coach(
+            id: entry.id,
+            name: entry.name.isNotEmpty ? entry.name : 'Coach',
+            email: entry.email,
+            phone: entry.number ?? '',
+            bio: '',
+            profilePic: entry.profilePic ?? '',
+            companyId: entry.companyCode ?? '',
+            companyName: entry.companyName ?? '',
+            backgroundColor: const Color(0xFF6D849A),
+          ),
+        )
+        .toList();
+
+    coaches.sort((a, b) => a.name.toLowerCase().compareTo(
+          b.name.toLowerCase(),
+        ));
+    return coaches;
+  }
+
+  Future<Map<String, CoachApplication>> _loadApplications() async {
+    try {
+      final requests = await CoachApiService.instance.fetchRequests();
+      final applications = <String, CoachApplication>{};
+      for (final request in requests) {
+        final application = CoachApplication.fromJson(request);
+        if (application.coachId.isNotEmpty) {
+          applications[application.coachId] = application;
+        }
+      }
+      return applications;
+    } catch (_) {
+      return const <String, CoachApplication>{};
+    }
+  }
+
+  String _applicationLabel(CoachApplicationStatus status) {
+    return switch (status) {
+      CoachApplicationStatus.pending => 'Pending',
+      CoachApplicationStatus.accepted => 'Connected',
+      CoachApplicationStatus.rejected => 'Apply again',
+      CoachApplicationStatus.none => 'Apply',
+    };
+  }
+
+  IconData _applicationIcon(CoachApplicationStatus status) {
+    return switch (status) {
+      CoachApplicationStatus.pending => CupertinoIcons.clock,
+      CoachApplicationStatus.accepted =>
+        CupertinoIcons.check_mark_circled_solid,
+      CoachApplicationStatus.rejected => CupertinoIcons.arrow_clockwise,
+      CoachApplicationStatus.none => CupertinoIcons.person_badge_plus,
+    };
+  }
+
+  Widget _buildCoachList({
+    required BuildContext context,
+    required List<Coach> coaches,
+    required Map<String, CoachApplication> applications,
+    required CompanyThemeData companyTheme,
+    required String emptyMessage,
+  }) {
+    if (coaches.isEmpty) {
+      return Center(
+        child: Text(
+          emptyMessage,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: companyTheme.mutedInkColor),
         ),
-      ];
-    });
+      );
+    }
+
+    return ListView.builder(
+      padding: EdgeInsets.all(context.responsiveValue(16)),
+      itemCount: coaches.length,
+      itemBuilder: (context, index) {
+        final coach = coaches[index];
+        final application = applications[coach.id];
+        final status = application?.status ?? CoachApplicationStatus.none;
+        final canApply = status == CoachApplicationStatus.none ||
+            status == CoachApplicationStatus.rejected;
+        return Container(
+          margin: EdgeInsets.only(
+            bottom: context.responsiveValue(10),
+          ),
+          decoration: BoxDecoration(
+            color: companyTheme.isDark
+                ? companyTheme.surfaceColor
+                : coach.backgroundColor,
+            borderRadius: BorderRadius.circular(18),
+            border: companyTheme.isDark
+                ? Border.all(
+                    color: companyTheme.primaryColor.withValues(alpha: 0.18),
+                  )
+                : null,
+            boxShadow: companyTheme.isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: coach.backgroundColor.withValues(alpha: 0.35),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+          ),
+          child: ListTile(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: context.responsiveValue(16),
+              vertical: context.responsiveValue(6),
+            ),
+            leading: CircleAvatar(
+              backgroundColor: companyTheme.isDark
+                  ? companyTheme.primaryColor.withValues(alpha: 0.16)
+                  : Colors.white,
+              backgroundImage: coach.profilePic.isNotEmpty
+                  ? NetworkImage(coach.profilePic)
+                  : null,
+              child: coach.profilePic.isEmpty
+                  ? const Icon(Icons.person, color: Colors.grey)
+                  : null,
+            ),
+            title: Text(
+              coach.name,
+              style: TextStyle(
+                color:
+                    companyTheme.isDark ? companyTheme.inkColor : Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: context.responsiveFont(16),
+              ),
+            ),
+            subtitle: Text(
+              coach.bio.isEmpty ? 'Coach profile' : coach.bio,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: companyTheme.isDark
+                    ? companyTheme.mutedInkColor
+                    : Colors.white70,
+                fontSize: context.responsiveFont(13),
+              ),
+            ),
+            trailing: FilledButton.icon(
+              onPressed: canApply ? () => _applyToCoach(coach) : null,
+              icon: Icon(
+                _applicationIcon(status),
+                size: 18,
+              ),
+              label: Text(
+                _applicationLabel(status),
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: status == CoachApplicationStatus.accepted
+                    ? companyTheme.primaryColor
+                    : companyTheme.accentColor,
+                disabledBackgroundColor:
+                    companyTheme.primaryColor.withValues(alpha: 0.18),
+                disabledForegroundColor:
+                    companyTheme.inkColor.withValues(alpha: 0.72),
+              ),
+            ),
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => CoachProfileDialog(
+                  coach: coach,
+                  applicationStatus: status,
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final heroHeight = context.isTabletWidth ? 320.0 : 220.0;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Our Coaches'),
-      ),
-      body: SafeArea(
-        child: ResponsiveContent(
-          child: Column(
-            children: [
-              Padding(
-                padding: EdgeInsets.symmetric(
-                  vertical: context.responsiveValue(20),
-                ),
-                child: SizedBox(
-                  height: heroHeight,
-                  child: FittedBox(
-                    fit: BoxFit.contain,
-                    child: Image.asset(
-                      'assets/images/coachpic.png',
-                      width: context.isTabletWidth ? 520 : 320,
-                      height: context.isTabletWidth ? 360 : 240,
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Scaffold(
+          backgroundColor: companyTheme.backgroundColor,
+          appBar: AppBar(
+            backgroundColor: companyTheme.surfaceColor,
+            foregroundColor: companyTheme.inkColor,
+            surfaceTintColor: Colors.transparent,
+            title: Text(
+              'Our Coaches',
+              style: TextStyle(color: companyTheme.inkColor),
+            ),
+          ),
+          body: SafeArea(
+            child: ResponsiveContent(
+              child: DefaultTabController(
+                length: 2,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        vertical: context.responsiveValue(20),
+                      ),
+                      child: SizedBox(
+                        height: heroHeight,
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: Image.asset(
+                            'assets/images/coachpic.png',
+                            width: context.isTabletWidth ? 520 : 320,
+                            height: context.isTabletWidth ? 360 : 240,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.all(context.responsiveValue(16)),
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (value) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Search',
-                    filled: true,
-                    fillColor: Colors.grey.shade200,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                    prefixIcon: const Icon(Icons.search),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: StreamBuilder<List<Coach>>(
-                  stream: getCoachesStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return const Center(
-                        child: Text('No coach assigned to your account yet.'),
-                      );
-                    }
-
-                    final query = _searchController.text.trim().toLowerCase();
-                    final coaches = snapshot.data!.where((coach) {
-                      if (query.isEmpty) return true;
-                      return coach.name.toLowerCase().contains(query) ||
-                          coach.bio.toLowerCase().contains(query) ||
-                          coach.phone.toLowerCase().contains(query);
-                    }).toList();
-
-                    if (coaches.isEmpty) {
-                      return const Center(
-                        child: Text('No coaches match your search.'),
-                      );
-                    }
-
-                    return ListView.builder(
+                    Padding(
                       padding: EdgeInsets.all(context.responsiveValue(16)),
-                      itemCount: coaches.length,
-                      itemBuilder: (context, index) {
-                        final coach = coaches[index];
-                        return Container(
-                          margin: EdgeInsets.only(
-                            bottom: context.responsiveValue(8),
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (value) => setState(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'Search coaches',
+                          filled: true,
+                          fillColor: companyTheme.isDark
+                              ? companyTheme.surfaceColor
+                              : Colors.white,
+                          hintStyle:
+                              TextStyle(color: companyTheme.mutedInkColor),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: companyTheme.isDark
+                                ? BorderSide(
+                                    color: companyTheme.primaryColor
+                                        .withValues(alpha: 0.2),
+                                  )
+                                : const BorderSide(color: Color(0xFFE3EAE8)),
                           ),
-                          decoration: BoxDecoration(
-                            color: coach.backgroundColor,
-                            borderRadius: BorderRadius.circular(8),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: companyTheme.isDark
+                                ? BorderSide(
+                                    color: companyTheme.primaryColor
+                                        .withValues(alpha: 0.2),
+                                  )
+                                : const BorderSide(color: Color(0xFFE3EAE8)),
                           ),
-                          child: ListTile(
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: context.responsiveValue(16),
-                              vertical: context.responsiveValue(6),
-                            ),
-                            leading: CircleAvatar(
-                              backgroundColor: Colors.white,
-                              backgroundImage: coach.profilePic.isNotEmpty
-                                  ? NetworkImage(coach.profilePic)
-                                  : null,
-                              child: coach.profilePic.isEmpty
-                                  ? const Icon(Icons.person, color: Colors.grey)
-                                  : null,
-                            ),
-                            title: Text(
-                              coach.name,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                                fontSize: context.responsiveFont(16),
-                              ),
-                            ),
-                            subtitle: Text(
-                              coach.bio,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: context.responsiveFont(13),
-                              ),
-                            ),
-                            onTap: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) =>
-                                    CoachProfileDialog(coach: coach),
+                          prefixIcon: Icon(
+                            CupertinoIcons.search,
+                            color: companyTheme.isDark
+                                ? companyTheme.primaryColor
+                                : null,
+                          ),
+                        ),
+                        style: TextStyle(color: companyTheme.inkColor),
+                      ),
+                    ),
+                    Container(
+                      margin: EdgeInsets.symmetric(
+                        horizontal: context.responsiveValue(16),
+                      ),
+                      decoration: BoxDecoration(
+                        color: companyTheme.isDark
+                            ? companyTheme.surfaceColor
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: companyTheme.mutedInkColor.withValues(
+                            alpha: companyTheme.isDark ? 0.22 : 0.16,
+                          ),
+                        ),
+                      ),
+                      child: TabBar(
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        dividerColor: Colors.transparent,
+                        labelColor:
+                            companyTheme.iconColor.computeLuminance() > 0.48
+                                ? Colors.black
+                                : Colors.white,
+                        unselectedLabelColor: companyTheme.inkColor,
+                        indicator: BoxDecoration(
+                          color: companyTheme.iconColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        tabs: const [
+                          Tab(text: 'All Coaches'),
+                          Tab(text: 'Same Company'),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: FutureBuilder<Map<String, CoachApplication>>(
+                        future: _applicationsFuture,
+                        builder: (context, applicationsSnapshot) {
+                          final applications = applicationsSnapshot.data ??
+                              const <String, CoachApplication>{};
+                          return FutureBuilder<List<Coach>>(
+                            future: _coachesFuture,
+                            builder: (context, coachesSnapshot) {
+                              if (coachesSnapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              }
+                              if (!coachesSnapshot.hasData ||
+                                  coachesSnapshot.data!.isEmpty) {
+                                return Center(
+                                  child: Text(
+                                    'No coaches are available yet.',
+                                    style: TextStyle(
+                                      color: companyTheme.mutedInkColor,
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              final allCoaches = _filterCoaches(
+                                coachesSnapshot.data!,
+                                sameCompanyOnly: false,
+                              );
+                              final sameCompanyCoaches = _filterCoaches(
+                                coachesSnapshot.data!,
+                                sameCompanyOnly: true,
+                              );
+
+                              return TabBarView(
+                                children: [
+                                  _buildCoachList(
+                                    context: context,
+                                    coaches: allCoaches,
+                                    applications: applications,
+                                    companyTheme: companyTheme,
+                                    emptyMessage:
+                                        'No coaches match your search.',
+                                  ),
+                                  _buildCoachList(
+                                    context: context,
+                                    coaches: sameCompanyCoaches,
+                                    applications: applications,
+                                    companyTheme: companyTheme,
+                                    emptyMessage: _currentCompanyId.isEmpty &&
+                                            _currentCompanyName.isEmpty &&
+                                            _currentCompanyCode.isEmpty
+                                        ? 'Join a company to see company coaches.'
+                                        : 'No coaches from your company match your search.',
+                                  ),
+                                ],
                               );
                             },
-                          ),
-                        );
-                      },
-                    );
-                  },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

@@ -96,12 +96,16 @@ class OllamaNutritionService {
     final uri = Uri.parse('$baseUrl/api/generate');
     final prompt = '''
 You are a nutrition assistant.
-Analyze this food image and estimate a single realistic serving that best matches what is visible.
+Analyze this food image and identify the most likely food or meal.
+Estimate a single realistic serving that best matches what is visible.
 Return ONLY valid compact JSON with these keys:
 meal_name, calories, protein, carbs, fat, confidence
 
 Rules:
-- meal_name must be short and human readable
+- meal_name must be a short, searchable food name in plain English
+- prefer specific common names that could match a nutrition database
+- if the food is packaged or branded, use the product name when obvious
+- if multiple foods are visible, choose the main item in the portion
 - calories, protein, carbs, fat must be numbers
 - confidence must be a number from 0 to 1
 - no markdown

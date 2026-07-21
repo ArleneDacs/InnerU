@@ -1,14 +1,16 @@
+// ignore_for_file: unused_element
+
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
@@ -17,7 +19,14 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
+import 'package:selfcare_projects/src/services/chat_api_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
+import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
 
@@ -31,7 +40,8 @@ class CoachDashboardScreen extends StatefulWidget {
 class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     with TickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final ChatApiService _chatApi = ChatApiService.instance;
+  final DashboardApiService _dashboardApi = DashboardApiService.instance;
 
   bool _isSavingProfile = false;
   String? selectedEmotion;
@@ -42,13 +52,15 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   final Set<String> _pressedTiles = <String>{};
   final EmotionService _emotionService = EmotionService();
   final GlobalKey _dashboardStackKey = GlobalKey();
+  late CompanyThemeData _companyTheme;
   late final AnimationController _tileTransitionController;
   StreamSubscription<String?>? _todayEmotionSubscription;
   _CoachDashboardTileTransition? _activeTileTransition;
   bool _isEmotionLoading = true;
   bool _isSavingEmotion = false;
 
-  String get _userId => _auth.currentUser!.uid;
+  String get _userId =>
+      AuthService.instance.currentSession?.id.toString() ?? '';
   String get _todayDate => EmotionService.todayKey();
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> get _userStream =>
@@ -59,16 +71,33 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
   Stream<QuerySnapshot<Map<String, dynamic>>> get _menteesStream => _firestore
       .collection('users')
-      .where('coachId', isEqualTo: _userId)
+      .where('coachIds', arrayContains: _userId)
       .snapshots();
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _pendingRequestsStream =>
+      _firestore
+          .collection('coach_requests')
+          .where('coachId', isEqualTo: _userId)
+          .snapshots();
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _coachGroupsStream =>
+      _firestore
+          .collection('coach_groups')
+          .where('coachId', isEqualTo: _userId)
+          .snapshots();
 
   @override
   void initState() {
     super.initState();
+    _companyTheme = CompanyThemeService.cachedThemeForUser(
+          AuthService.instance.currentSession?.id.toString() ?? '',
+        ) ??
+        CompanyThemeData.standard;
     _tileTransitionController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     );
+    _loadCompanyTheme();
     _restoreTodayEmotionFromCache();
     _listenToTodayEmotion();
     _fetchQuote();
@@ -99,6 +128,23 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         ..clear()
         ..addAll(overrides);
     });
+  }
+
+  Future<void> _loadCompanyTheme() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    try {
+      final companyTheme = await CompanyThemeService.resolveForUser(
+        session.id.toString(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _companyTheme = companyTheme;
+      });
+    } catch (e) {
+      debugPrint('Error fetching coach company theme: $e');
+    }
   }
 
   Future<void> _fetchQuote() async {
@@ -139,8 +185,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Future<void> _restoreTodayEmotionFromCache() async {
-    final user = _auth.currentUser;
-    if (user == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       if (!mounted) return;
       setState(() {
         _isEmotionLoading = false;
@@ -149,8 +195,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final savedEmotion = prefs.getString('selected_emotion_${user.uid}');
-    final savedDate = prefs.getString('emotion_date_${user.uid}');
+    final userId = session.id.toString();
+    final savedEmotion = prefs.getString('selected_emotion_$userId');
+    final savedDate = prefs.getString('emotion_date_$userId');
 
     if (!mounted) return;
     if (savedDate == _todayDate &&
@@ -164,19 +211,65 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Future<String> _getUsername() async {
-    final user = _auth.currentUser;
-    if (user == null) return 'Coach';
+    final session = AuthService.instance.currentSession;
+    if (session == null) return 'Coach';
 
-    final userDoc = await _firestore.collection('users').doc(user.uid).get();
-    if (userDoc.exists && userDoc['username'] != null) {
-      return userDoc['username'] as String;
+    try {
+      final userData = await UserService.getUserData();
+      final username = (userData['username'] as String?)?.trim();
+      if (username != null && username.isNotEmpty) {
+        return username;
+      }
+    } catch (_) {}
+
+    if (session.email.split('@').first.isNotEmpty) {
+      return session.email.split('@').first;
     }
-    return user.email?.split('@').first ?? 'Coach';
+    return 'Coach';
+  }
+
+  Future<Coach?> _loadAssignedCoach(String coachId) async {
+    final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
+    for (final coach in coaches) {
+      if (coach.id != coachId) continue;
+      return Coach(
+        id: coach.id,
+        name: coach.name.isNotEmpty ? coach.name : 'My Coach',
+        email: coach.email,
+        phone: coach.number ?? '',
+        bio: 'Your support coach',
+        profilePic: coach.profilePic ?? '',
+        backgroundColor: const Color(0xFFDCE5D4),
+      );
+    }
+    return null;
+  }
+
+  Future<void> _openAssignedCoachChat({
+    required BuildContext context,
+    required Coach coach,
+  }) async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    final username = await _getUsername();
+    if (!context.mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatRoomScreen(
+          coach: coach,
+          userId: session.id.toString(),
+          userName: username,
+        ),
+      ),
+    );
   }
 
   Future<void> _listenToTodayEmotion() async {
-    final user = _auth.currentUser;
-    if (user == null) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
       if (!mounted) return;
       setState(() {
         _isEmotionLoading = false;
@@ -186,7 +279,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
     await _todayEmotionSubscription?.cancel();
     _todayEmotionSubscription =
-        _emotionService.watchTodayEmotion(user.uid).listen(
+        _emotionService.watchTodayEmotion(
+          session.id.toString(),
+        ).listen(
       (emotion) async {
         if (!mounted) return;
         setState(() {
@@ -206,8 +301,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Future<void> _selectEmotion(String emotion) async {
-    final user = _auth.currentUser;
-    if (user == null || _isEmotionLoading || _isSavingEmotion) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null || _isEmotionLoading || _isSavingEmotion) return;
 
     final username = await _getUsername();
     if (!mounted) return;
@@ -218,36 +313,18 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
     try {
       final result = await _emotionService.saveTodayEmotion(
-        user: user,
+        userId: session.id.toString(),
         emotion: emotion,
         username: username,
       );
 
       if (!mounted) return;
 
-      if (result.created) {
-        setState(() {
-          selectedEmotion = emotion;
-          _currentUserEmotion = emotion;
-        });
-        await _cacheTodayEmotion(emotion);
-        return;
-      }
-
       setState(() {
-        _currentUserEmotion = result.emotion;
+        selectedEmotion = emotion;
+        _currentUserEmotion = result.emotion ?? emotion;
       });
-      await _cacheTodayEmotion(result.emotion);
-      if (!mounted) return;
-
-      final savedEmotion = result.emotion;
-      final message = savedEmotion == null
-          ? 'You can only select one emotion per day!'
-          : 'Today\'s mood is already logged as $savedEmotion.';
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      await _cacheTodayEmotion(result.emotion ?? emotion);
     } catch (e) {
       debugPrint('Error saving emotion: $e');
       if (!mounted) return;
@@ -266,12 +343,13 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Future<void> _cacheTodayEmotion(String? emotion) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final emotionKey = 'selected_emotion_${user.uid}';
-    final dateKey = 'emotion_date_${user.uid}';
+    final userId = session.id.toString();
+    final emotionKey = 'selected_emotion_$userId';
+    final dateKey = 'emotion_date_$userId';
 
     if (emotion == null || emotion.isEmpty) {
       await prefs.remove(emotionKey);
@@ -364,51 +442,14 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                           setDialogState(() {});
 
                           final teamName = fullNameController.text.trim();
-
-                          await _firestore
-                              .collection('coaches')
-                              .doc(_userId)
-                              .set({
-                            'userId': _userId,
-                            'username': userData?['username'] ?? '',
-                            'email': userData?['email'] ??
-                                _auth.currentUser?.email ??
-                                '',
-                            'fullName': teamName,
-                            'bio': bioController.text.trim(),
-                            'phonenumber': phoneController.text.trim(),
-                            'profilePic': userData?['profilePic'] ?? '',
-                            'backgroundColor':
-                                coachData?['backgroundColor'] ?? 'blue',
-                            'createdAt': coachData?['createdAt'] ??
-                                FieldValue.serverTimestamp(),
-                            'updatedAt': FieldValue.serverTimestamp(),
-                          }, SetOptions(merge: true));
-
-                          await _firestore
-                              .collection('users')
-                              .doc(_userId)
-                              .set({
-                            'role': 'coach',
-                            'isCoach': true,
-                            'team': teamName,
-                          }, SetOptions(merge: true));
-
-                          final menteesSnapshot = await _firestore
-                              .collection('users')
-                              .where('coachId', isEqualTo: _userId)
-                              .get();
-
-                          for (final mentee in menteesSnapshot.docs) {
-                            await mentee.reference.set({
-                              'coachName': teamName,
-                              'team': teamName,
-                            }, SetOptions(merge: true));
-                          }
+                          await UserService.updateUserData(
+                            name: teamName,
+                            number: phoneController.text.trim(),
+                          );
 
                           if (!mounted) return;
                           setState(() => _isSavingProfile = false);
-                          Navigator.pop(dialogContext);
+                          Navigator.of(context).pop();
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('Coach profile saved successfully'),
@@ -432,41 +473,62 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   Future<void> _assignMentee({
     required String menteeId,
     required String teamName,
+    String? groupId,
+    String? groupName,
   }) async {
-    final coachDoc = await _firestore.collection('coaches').doc(_userId).get();
-    final coachName = (coachDoc.data()?['fullName'] as String?) ??
-        (coachDoc.data()?['username'] as String?) ??
-        'Coach';
-
-    await _firestore.collection('users').doc(menteeId).set({
-      'coachId': _userId,
-      'coachName': coachName,
-      'team': teamName,
-    }, SetOptions(merge: true));
+    await CoachApiService.instance.assignMentee(
+      menteeId: menteeId,
+      teamName: teamName,
+      groupId: groupId,
+      groupName: groupName,
+    );
   }
 
   Future<void> _removeMentee(String menteeId) async {
-    await _firestore.collection('users').doc(menteeId).update({
-      'coachId': FieldValue.delete(),
-      'coachName': FieldValue.delete(),
-      'team': FieldValue.delete(),
-    });
+    await CoachApiService.instance.removeMentee(menteeId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Mentee removed from your team')),
     );
   }
 
-  Future<Map<String, dynamic>?> _latestTrackerForUser(String userId) async {
-    final snapshot = await _firestore
-        .collection('dailytracker')
-        .where('userId', isEqualTo: userId)
-        .orderBy('date', descending: true)
-        .limit(1)
-        .get();
+  Future<void> _acceptCoachRequest({
+    required String requestId,
+    required String menteeId,
+    required String teamName,
+    String? groupId,
+    String? groupName,
+  }) async {
+    await CoachApiService.instance.acceptRequest(
+      requestId: requestId,
+      teamName: teamName,
+      groupId: groupId,
+      groupName: groupName,
+    );
+  }
 
-    if (snapshot.docs.isEmpty) return null;
-    return snapshot.docs.first.data();
+  Future<void> _createCoachGroup(String name) async {
+    final groupName = name.trim();
+    if (groupName.isEmpty) {
+      throw ArgumentError('Group name is required');
+    }
+    await CoachApiService.instance.createGroup(name: groupName);
+  }
+
+  Future<void> _deleteCoachGroup({
+    required String groupId,
+    required String groupName,
+    required List<String> memberIds,
+  }) async {
+    await CoachApiService.instance.deleteGroup(groupId);
+  }
+
+  Future<void> _declineCoachRequest(String requestId) async {
+    await CoachApiService.instance.declineRequest(requestId);
+  }
+
+  Future<Map<String, dynamic>?> _latestTrackerForUser(String userId) async {
+    return CoachApiService.instance.fetchLatestTracker(userId);
   }
 
   String _formatTrackerDate(Map<String, dynamic>? tracker) {
@@ -532,28 +594,245 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     );
   }
 
+  List<String> _assignedCoachIds(Map<String, dynamic> userData) {
+    final coachIds = List<String>.from(
+      userData['coachIds'] as List? ?? const <String>[],
+    ).where((id) => id.trim().isNotEmpty && id != _userId).toList();
+    final legacyCoachId = (userData['coachId'] as String?)?.trim() ?? '';
+
+    return <String>[
+      ...coachIds,
+      if (legacyCoachId.isNotEmpty &&
+          legacyCoachId != _userId &&
+          !coachIds.contains(legacyCoachId))
+        legacyCoachId,
+    ];
+  }
+
+  Future<List<Coach>> _loadAssignedCoaches(List<String> coachIds) async {
+    final coaches = <Coach>[];
+    for (final coachId in coachIds) {
+      final coach = await _loadAssignedCoach(coachId);
+      if (coach != null) {
+        coaches.add(coach);
+      }
+    }
+    return coaches;
+  }
+
+  Widget _buildMyCoachSection(
+    BuildContext context,
+    Map<String, dynamic> userData,
+  ) {
+    final activeCoachIds = _assignedCoachIds(userData);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          'My Coach',
+          subtitle: 'You can coach others and still receive support.',
+        ),
+        const SizedBox(height: 14),
+        if (activeCoachIds.isEmpty)
+          _buildNoAssignedCoachCard(context)
+        else
+          FutureBuilder<List<Coach>>(
+            future: _loadAssignedCoaches(activeCoachIds),
+            builder: (context, coachSnapshot) {
+              if (coachSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final coaches = coachSnapshot.data ?? const <Coach>[];
+              if (coaches.isEmpty) {
+                return _buildNoAssignedCoachCard(
+                  context,
+                  title: 'Coach details unavailable',
+                  message:
+                      'Your assigned coaches could not be loaded yet. You can still browse coaches.',
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final coach in coaches) ...[
+                    _buildAssignedCoachCard(context, coach: coach),
+                    if (coach != coaches.last) const SizedBox(height: 12),
+                  ],
+                ],
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildNoAssignedCoachCard(
+    BuildContext context, {
+    String title = 'No coach yet',
+    String message =
+        'Apply to another coach when you want support as a mentee.',
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.pushNamed(context, '/coachesScreen'),
+      child: _buildGlassSectionCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE9EEE4),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Icon(
+                CupertinoIcons.person_crop_circle_badge_plus,
+                color: Color(0xFF6C7E62),
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Icon(
+              CupertinoIcons.chevron_right,
+              color: Colors.black45,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssignedCoachCard(
+    BuildContext context, {
+    required Coach coach,
+  }) {
+    return _buildGlassSectionCard(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 32,
+                backgroundColor: const Color(0xFFDCE5D4),
+                backgroundImage: coach.profilePic.isNotEmpty
+                    ? NetworkImage(coach.profilePic)
+                    : null,
+                child: coach.profilePic.isEmpty
+                    ? const Icon(Icons.person, color: Colors.white, size: 30)
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      coach.name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      coach.bio.isEmpty ? 'Your support coach' : coach.bio,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.35,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => CoachProfileDialog(coach: coach),
+                    );
+                  },
+                  child: const Text('View profile'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _openAssignedCoachChat(
+                    context: context,
+                    coach: coach,
+                  ),
+                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                  label: const Text('Message'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInboxAction() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _firestore
-          .collection('chatRooms')
-          .where('participants', arrayContains: _userId)
-          .snapshots(),
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _chatApi.watchRooms(_userId),
       builder: (context, snapshot) {
         var unreadCount = 0;
-        for (final doc in snapshot.data?.docs ??
-            <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
-          final chatData = doc.data();
-          final localReadTime = _localChatReadOverrides[doc.id];
+        for (final chatData in snapshot.data ?? <Map<String, dynamic>>[]) {
+          final roomId = (chatData['chatRoomId'] as String?)?.trim() ?? '';
+          final localReadTime = _localChatReadOverrides[roomId];
           final lastMessageTimeRaw = chatData['lastMessageTime'];
-          final lastMessageTime = lastMessageTimeRaw is Timestamp
-              ? lastMessageTimeRaw.toDate()
-              : DateTime.fromMillisecondsSinceEpoch(0);
+          final lastMessageTime = lastMessageTimeRaw is String
+              ? DateTime.tryParse(lastMessageTimeRaw) ??
+                  DateTime.fromMillisecondsSinceEpoch(0)
+              : lastMessageTimeRaw is DateTime
+                  ? lastMessageTimeRaw
+                  : DateTime.fromMillisecondsSinceEpoch(0);
           final lastReadAt = Map<String, dynamic>.from(
             chatData['lastReadAt'] as Map? ?? <String, dynamic>{},
           );
           final lastReadAtRaw = lastReadAt[_userId];
-          final readTime =
-              lastReadAtRaw is Timestamp ? lastReadAtRaw.toDate() : null;
+          final readTime = lastReadAtRaw is String
+              ? DateTime.tryParse(lastReadAtRaw)
+              : lastReadAtRaw is DateTime
+                  ? lastReadAtRaw
+                  : null;
           final effectiveReadTime = [
             if (readTime != null) readTime,
             if (localReadTime != null) localReadTime,
@@ -594,15 +873,16 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           clipBehavior: Clip.none,
           children: [
             IconButton(
-              icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
-              onPressed: () async {
-                final coachDoc =
-                    await _firestore.collection('coaches').doc(_userId).get();
-                final coachData = coachDoc.data();
+              color: _companyTheme.iconColor,
+            icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
+            onPressed: () async {
+                final dashboard = await _dashboardApi.fetchDashboard();
+                final userData = dashboard['user'] is Map
+                    ? Map<String, dynamic>.from(dashboard['user'] as Map)
+                    : <String, dynamic>{};
                 final userName =
-                    (coachData?['fullName'] as String?)?.trim().isNotEmpty ==
-                            true
-                        ? (coachData!['fullName'] as String).trim()
+                    (userData['name'] as String?)?.trim().isNotEmpty == true
+                        ? (userData['name'] as String).trim()
                         : await _getUsername();
                 if (!context.mounted) return;
                 await Navigator.push(
@@ -612,7 +892,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                       userId: _userId,
                       userName: userName,
                       allowGroupChat: true,
-                      groupName: (coachData?['fullName'] as String?)?.trim(),
+                      groupName: (userData['name'] as String?)?.trim(),
                     ),
                   ),
                 );
@@ -649,10 +929,134 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     );
   }
 
+  num _scoreFromUserPointData(Map<String, dynamic>? data) {
+    final rawPoints = data?['totalPoints'];
+    final rawDailyTrackerScore = data?['dailyTrackerScore'];
+    final rawTodoListScore = data?['todoListScore'];
+    final rawTodoListContribution = data?['todoListScoreDailyContribution'];
+    final includeTodoListScore = data?['todoListIncludedInTotal'] == true;
+
+    if (rawDailyTrackerScore is num && rawTodoListScore is num) {
+      final dailyScore = rawDailyTrackerScore.clamp(0, 100);
+      final todoScore = rawTodoListContribution is num
+          ? rawTodoListContribution.clamp(0, 100)
+          : rawTodoListScore.clamp(0, 100);
+      return includeTodoListScore
+          ? ((dailyScore + todoScore) / 2).clamp(0, 100)
+          : dailyScore;
+    }
+
+    return rawPoints is num ? rawPoints.clamp(0, 100) : 0;
+  }
+
+  String _scoreLabel(num score) {
+    return score == score.roundToDouble()
+        ? score.toStringAsFixed(0)
+        : score.toStringAsFixed(1);
+  }
+
+  Widget _buildCoachProfileAndPoints(
+    BuildContext context, {
+    required String? profilePic,
+  }) {
+    final theme = _companyTheme;
+
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _dashboardApi.fetchDashboard(),
+      builder: (context, snapshot) {
+        final summary = snapshot.data?['summary'] is Map
+            ? Map<String, dynamic>.from(snapshot.data!['summary'] as Map)
+            : <String, dynamic>{};
+        final totalPoints = _scoreFromUserPointData(summary);
+        final totalPointsLabel = _scoreLabel(totalPoints);
+        final imageUrl = profilePic?.trim() ?? '';
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () => Navigator.pushNamed(context, '/profile'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+            decoration: BoxDecoration(
+              color: theme.surfaceColor.withValues(alpha: 0.86),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: theme.isDark
+                    ? theme.primaryColor.withValues(alpha: 0.2)
+                    : theme.primaryColor.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (imageUrl.isEmpty)
+                  Image.asset(
+                    'assets/images/avatar.png',
+                    width: 22,
+                    height: 22,
+                  )
+                else
+                  ClipOval(
+                    child: Image.network(
+                      imageUrl,
+                      width: 22,
+                      height: 22,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Image.asset(
+                          'assets/images/avatar.png',
+                          width: 22,
+                          height: 22,
+                        );
+                      },
+                    ),
+                  ),
+                const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.isDark
+                        ? theme.primaryColor.withValues(alpha: 0.12)
+                        : theme.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        CupertinoIcons.star_fill,
+                        size: 10,
+                        color: theme.isDark
+                            ? theme.primaryColor
+                            : const Color(0xFFCE8F5A),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        totalPointsLabel,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: theme.inkColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final horizontalPadding = screenWidth > 600 ? 28.0 : 20.0;
+    final companyTheme = _companyTheme;
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _userStream,
@@ -673,38 +1077,36 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             final profilePic = (userData['profilePic'] as String?)?.trim();
 
             return Scaffold(
-              backgroundColor: const Color(0xFFF5F7F2),
+              backgroundColor: companyTheme.backgroundColor,
               appBar: AppBar(
                 elevation: 0,
                 backgroundColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
-                leading: IconButton(
-                  icon: (profilePic == null || profilePic.isEmpty)
-                      ? Image.asset(
-                          'assets/images/avatar.png',
-                          width: screenWidth * 0.08,
-                          height: screenWidth * 0.08,
-                        )
-                      : ClipOval(
-                          child: Image.network(
-                            profilePic,
-                            width: screenWidth * 0.08,
-                            height: screenWidth * 0.08,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Icon(Icons.person,
-                                  size: screenWidth * 0.08);
-                            },
-                          ),
-                        ),
-                  onPressed: () => Navigator.pushNamed(context, '/profile'),
+                foregroundColor: companyTheme.iconColor,
+                automaticallyImplyLeading: false,
+                leadingWidth: 104,
+                leading: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildCoachProfileAndPoints(
+                      context,
+                      profilePic: profilePic,
+                    ),
+                  ),
                 ),
                 actions: [
                   _buildInboxAction(),
-                  IconButton(
-                    icon:
-                        const Icon(CupertinoIcons.line_horizontal_3, size: 28),
-                    onPressed: () => BottomSheetWidget.show(context),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: IconButton(
+                      icon: const Icon(
+                        CupertinoIcons.line_horizontal_3,
+                        size: 28,
+                      ),
+                      color: companyTheme.iconColor,
+                      onPressed: () => BottomSheetWidget.show(context),
+                    ),
                   ),
                 ],
               ),
@@ -737,6 +1139,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             ),
                             const SizedBox(height: 22),
                             _buildScrollableFeatureRail(context),
+                            const SizedBox(height: 28),
+                            _buildMyCoachSection(context, userData),
                             const SizedBox(height: 28),
                             _buildSectionTitle('Coach tools'),
                             const SizedBox(height: 12),
@@ -779,25 +1183,56 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     required String quote,
     required String author,
   }) {
-    final theme = Theme.of(context);
+    final materialTheme = Theme.of(context);
+    final companyTheme = _companyTheme;
     final bio = (coachData['bio'] as String?)?.trim();
     final phone = (coachData['phonenumber'] as String?)?.trim();
+    final companyLabel = companyTheme.isCompanyTheme
+        ? '${companyTheme.companyName} Safespace Coach'
+        : 'Safespace Coach';
+    final heroColors = companyTheme.isDark
+        ? [
+            const Color(0xFF031019),
+            Color.alphaBlend(
+              companyTheme.primaryColor.withValues(alpha: 0.26),
+              const Color(0xFF071A24),
+            ),
+            Color.alphaBlend(
+              companyTheme.accentColor.withValues(alpha: 0.22),
+              const Color(0xFF031019),
+            ),
+          ]
+        : [
+            companyTheme.primaryColor,
+            companyTheme.accentColor,
+            const Color(0xFFF2E4D0),
+          ];
+    final badgeContentColor = companyTheme.isDark
+        ? Colors.white.withValues(alpha: 0.92)
+        : const Color(0xFF355033);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
+        border: Border.all(
+          color: companyTheme.isDark
+              ? companyTheme.primaryColor.withValues(alpha: 0.32)
+              : Colors.white.withValues(alpha: 0.38),
+        ),
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF90A17D), Color(0xFF6D849A)],
+          colors: heroColors,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF90A17D).withOpacity(0.22),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
+            color: companyTheme.primaryColor.withValues(
+              alpha: companyTheme.isDark ? 0.22 : 0.28,
+            ),
+            blurRadius: 40,
+            offset: const Offset(0, 18),
           ),
         ],
       ),
@@ -807,34 +1242,54 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
+              color: Colors.white.withValues(
+                alpha: companyTheme.isDark ? 0.1 : 0.28,
+              ),
               borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: companyTheme.isDark
+                    ? Colors.white.withValues(alpha: 0.22)
+                    : Colors.white.withValues(alpha: 0.3),
+              ),
             ),
-            child: const Text(
+            child: Text(
               'Coach hub',
               style: TextStyle(
-                color: Colors.white,
+                color: badgeContentColor,
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
           const SizedBox(height: 18),
           Text(
             'Hello, Coach $displayName',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: Colors.white,
+            style: materialTheme.textTheme.headlineSmall?.copyWith(
+              color: companyTheme.inkColor,
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.6,
+              letterSpacing: 0,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          Text(
+            companyLabel,
+            style: TextStyle(
+              color: companyTheme.isDark
+                  ? companyTheme.primaryColor
+                  : const Color(0xFF42563E),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
           Text(
             bio?.isNotEmpty == true
                 ? bio!
                 : 'Keep your team aligned, support your mentees, and track the day with intention.',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: Colors.white.withOpacity(0.88),
+            style: materialTheme.textTheme.bodyLarge?.copyWith(
+              color: companyTheme.isDark
+                  ? companyTheme.mutedInkColor
+                  : const Color(0xFF42563E),
               height: 1.45,
             ),
           ),
@@ -846,7 +1301,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               _buildHeroChip('Team', teamName),
               _buildHeroChip('Mentees', '$menteeCount'),
               _buildHeroChip(
-                  'Phone', phone?.isNotEmpty == true ? phone! : 'Not set'),
+                'Phone',
+                phone?.isNotEmpty == true ? phone! : 'Not set',
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -854,27 +1311,35 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
+              color: Colors.white.withValues(
+                alpha: companyTheme.isDark ? 0.08 : 0.34,
+              ),
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: Colors.white.withOpacity(0.16),
+                color: companyTheme.isDark
+                    ? companyTheme.primaryColor.withValues(alpha: 0.22)
+                    : Colors.white.withValues(alpha: 0.42),
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
                     Icon(
                       CupertinoIcons.quote_bubble_fill,
                       size: 18,
-                      color: Colors.white,
+                      color: companyTheme.isDark
+                          ? companyTheme.primaryColor
+                          : const Color(0xFF4F6047),
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
                       'Today\'s note',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: companyTheme.isDark
+                            ? companyTheme.primaryColor
+                            : const Color(0xFF4F6047),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -883,8 +1348,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 const SizedBox(height: 12),
                 Text(
                   quote,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: companyTheme.inkColor,
                     fontSize: 15,
                     height: 1.45,
                     fontWeight: FontWeight.w600,
@@ -894,7 +1359,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 Text(
                   author,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.82),
+                    color: companyTheme.isDark
+                        ? companyTheme.mutedInkColor
+                        : const Color(0xFF61715B),
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
@@ -909,8 +1376,18 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               coachData: coachData,
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: BorderSide(color: Colors.white.withOpacity(0.5)),
+              backgroundColor: companyTheme.surfaceColor.withValues(
+                alpha: companyTheme.isDark ? 0.12 : 0.92,
+              ),
+              foregroundColor: companyTheme.isDark
+                  ? companyTheme.primaryColor
+                  : companyTheme.inkColor,
+              side: BorderSide(
+                color: companyTheme.isDark
+                    ? companyTheme.primaryColor.withValues(alpha: 0.34)
+                    : companyTheme.primaryColor.withValues(alpha: 0.24),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
             icon: const Icon(Icons.edit_outlined),
             label: Text(
@@ -923,24 +1400,38 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Widget _buildHeroChip(String label, String value) {
+    final companyTheme = _companyTheme;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
+        color: Colors.white.withValues(
+          alpha: companyTheme.isDark ? 0.08 : 0.26,
+        ),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: companyTheme.isDark
+              ? companyTheme.primaryColor.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.28),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            style: TextStyle(
+              color: companyTheme.isDark
+                  ? companyTheme.mutedInkColor
+                  : const Color(0xFF5E6E57),
+              fontSize: 11,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: companyTheme.inkColor,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1023,6 +1514,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Widget _buildScrollableFeatureRail(BuildContext context) {
+    final companyTheme = _companyTheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1031,7 +1523,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
         Text(
           'Lead by example and keep your habits visible.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.black54,
+                color: companyTheme.mutedInkColor,
               ),
         ),
         const SizedBox(height: 16),
@@ -1112,25 +1604,54 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     bool isPressed = false,
     String? backgroundImage,
   }) {
+    final companyTheme = _companyTheme;
+    final tileBase = companyTheme.isDark
+        ? Color.alphaBlend(
+            color.withValues(alpha: 0.12),
+            companyTheme.surfaceColor,
+          )
+        : Color.alphaBlend(
+            color.withValues(alpha: 0.42),
+            companyTheme.surfaceColor,
+          );
+    final borderColor = companyTheme.primaryColor.withValues(
+      alpha: companyTheme.isDark ? 0.28 : 0.18,
+    );
+    final softOverlay = companyTheme.isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.white.withValues(alpha: 0.58);
+    final iconPanelColor = companyTheme.isDark
+        ? companyTheme.primaryColor.withValues(alpha: 0.16)
+        : companyTheme.surfaceColor.withValues(alpha: 0.68);
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       height: 184,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: Colors.white.withOpacity(0.72)),
+        border: Border.all(color: borderColor),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withOpacity(0.82),
-            Color.alphaBlend(const Color(0x1FFFFFFF), color),
-            Color.alphaBlend(const Color(0x40FFFFFF), color),
+            companyTheme.surfaceColor.withValues(
+              alpha: companyTheme.isDark ? 0.96 : 0.84,
+            ),
+            tileBase,
+            Color.alphaBlend(
+              companyTheme.primaryColor.withValues(
+                alpha: companyTheme.isDark ? 0.10 : 0.16,
+              ),
+              tileBase,
+            ),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB9C7B6).withOpacity(isPressed ? 0.14 : 0.24),
+            color: companyTheme.primaryColor.withValues(
+              alpha: isPressed ? 0.10 : 0.18,
+            ),
             blurRadius: isPressed ? 16 : 26,
             offset: Offset(0, isPressed ? 8 : 14),
           ),
@@ -1161,8 +1682,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               decoration: BoxDecoration(
                 gradient: RadialGradient(
                   colors: [
-                    Colors.white.withOpacity(0.36),
-                    Colors.white.withOpacity(0.02),
+                    softOverlay,
+                    softOverlay.withValues(alpha: 0.02),
                   ],
                 ),
                 shape: BoxShape.circle,
@@ -1183,8 +1704,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      Colors.white.withOpacity(0.3),
-                      Colors.white.withOpacity(0.06),
+                      softOverlay.withValues(alpha: 0.34),
+                      softOverlay.withValues(alpha: 0.08),
                     ],
                   ),
                 ),
@@ -1198,7 +1719,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               width: 18,
               height: 18,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.3),
+                color: softOverlay.withValues(alpha: 0.34),
                 shape: BoxShape.circle,
               ),
             ),
@@ -1211,9 +1732,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(0.1),
+                    Colors.white.withOpacity(companyTheme.isDark ? 0.04 : 0.1),
                     Colors.transparent,
-                    Colors.black.withOpacity(0.06),
+                    Colors.black.withOpacity(companyTheme.isDark ? 0.18 : 0.06),
                   ],
                 ),
               ),
@@ -1226,13 +1747,13 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.62),
+                color: iconPanelColor,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withOpacity(0.6)),
+                border: Border.all(color: borderColor),
               ),
               child: Icon(
                 icon,
-                color: const Color(0xFF53654C),
+                color: companyTheme.iconColor,
                 size: 27,
               ),
             ),
@@ -1246,46 +1767,48 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.38),
+                    color: companyTheme.primaryColor.withValues(
+                      alpha: companyTheme.isDark ? 0.16 : 0.12,
+                    ),
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Coach practice',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
-                      color: Color(0xFF697960),
+                      letterSpacing: 0,
+                      color: companyTheme.iconColor,
                     ),
                   ),
                 ),
                 const Spacer(),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF1F2A1A),
-                    letterSpacing: -0.3,
+                    color: companyTheme.inkColor,
+                    letterSpacing: 0,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     height: 1.45,
-                    color: Color(0xFF43523D),
+                    color: companyTheme.mutedInkColor,
                     fontWeight: FontWeight.w400,
                   ),
                 ),
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    const Text(
+                    Text(
                       'Open',
                       style: TextStyle(
-                        color: Color(0xFF506149),
+                        color: companyTheme.iconColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1294,13 +1817,15 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.56),
+                        color: companyTheme.primaryColor.withValues(
+                          alpha: companyTheme.isDark ? 0.18 : 0.14,
+                        ),
                         borderRadius: BorderRadius.circular(999),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.arrow_forward_rounded,
                         size: 15,
-                        color: Color(0xFF506149),
+                        color: companyTheme.iconColor,
                       ),
                     ),
                   ],
@@ -1568,13 +2093,13 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(0.84),
+                    Colors.white.withValues(alpha: 0.84),
                     Color.alphaBlend(const Color(0x33FFFFFF), color),
                   ],
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: color.withOpacity(0.14),
+                    color: color.withValues(alpha: 0.14),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -1614,10 +2139,41 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                       'Coach',
                   teamName: teamName,
                   menteesStream: _menteesStream,
+                  pendingRequestsStream: _pendingRequestsStream,
+                  groupsStream: _coachGroupsStream,
                   onAssignMentee: _assignMentee,
                   onRemoveMentee: _removeMentee,
+                  onAcceptRequest: _acceptCoachRequest,
+                  onDeclineRequest: _declineCoachRequest,
+                  onCreateGroup: _createCoachGroup,
+                  onDeleteGroup: _deleteCoachGroup,
                   latestTrackerForUser: _latestTrackerForUser,
                   formatTrackerDate: _formatTrackerDate,
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildNavigationCard(
+          title: 'Manage groups',
+          subtitle: 'Create groups, assign mentees, and compare group scores.',
+          icon: CupertinoIcons.rectangle_grid_2x2_fill,
+          color: const Color(0xFFF4E6C8),
+          actionLabel: 'Organize',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CoachGroupCustomizationPage(
+                  firestore: _firestore,
+                  currentUserId: _userId,
+                  teamName: teamName,
+                  menteesStream: _menteesStream,
+                  groupsStream: _coachGroupsStream,
+                  onCreateGroup: _createCoachGroup,
+                  onDeleteGroup: _deleteCoachGroup,
+                  onAssignMentee: _assignMentee,
                 ),
               ),
             );
@@ -1655,22 +2211,43 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     required String actionLabel,
     required VoidCallback onTap,
   }) {
+    final companyTheme = _companyTheme;
+    final cardColor = companyTheme.isDark
+        ? Color.alphaBlend(
+            color.withValues(alpha: 0.10),
+            companyTheme.surfaceColor,
+          )
+        : Color.alphaBlend(
+            color.withValues(alpha: 0.42),
+            companyTheme.surfaceColor,
+          );
+    final onPrimary = companyTheme.primaryColor.computeLuminance() > 0.48
+        ? Colors.black
+        : Colors.white;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: color,
+        color: cardColor,
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: companyTheme.primaryColor.withValues(
+            alpha: companyTheme.isDark ? 0.24 : 0.14,
+          ),
+        ),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.8),
+              color: companyTheme.primaryColor.withValues(
+                alpha: companyTheme.isDark ? 0.18 : 0.12,
+              ),
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(icon, color: const Color(0xFF2D3A25)),
+            child: Icon(icon, color: companyTheme.iconColor),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1679,15 +2256,19 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w800,
+                    color: companyTheme.inkColor,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: const TextStyle(color: Colors.black54, height: 1.4),
+                  style: TextStyle(
+                    color: companyTheme.mutedInkColor,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),
@@ -1695,6 +2276,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           const SizedBox(width: 10),
           ElevatedButton(
             onPressed: onTap,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: companyTheme.primaryColor,
+              foregroundColor: onPrimary,
+            ),
             child: Text(actionLabel),
           ),
         ],
@@ -2206,84 +2791,1363 @@ class CoachTeamOverviewPage extends StatelessWidget {
     final hasProfile = coachData.isNotEmpty;
     final username = (userData['username'] as String?) ?? 'Coach';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Team overview')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Container(
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Scaffold(
+          backgroundColor: companyTheme.backgroundColor,
+          appBar: AppBar(
+            title: Text(
+              'Team overview',
+              style: TextStyle(color: companyTheme.inkColor),
+            ),
+            backgroundColor: Colors.transparent,
+            foregroundColor: companyTheme.iconColor,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+          ),
+          body: ListView(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 18,
-                  offset: const Offset(0, 10),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: companyTheme.surfaceColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: companyTheme.isDark
+                        ? companyTheme.primaryColor.withValues(alpha: 0.18)
+                        : companyTheme.primaryColor.withValues(alpha: 0.12),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: companyTheme.primaryColor.withValues(alpha: 0.08),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
                 ),
-              ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      hasProfile
+                          ? (coachData['fullName'] as String? ?? teamName)
+                          : username,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: companyTheme.inkColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasProfile
+                          ? (coachData['bio'] as String? ??
+                              'Coach profile ready')
+                          : 'Create your coach profile so users can connect with you and your team stays organized.',
+                      style: TextStyle(
+                        height: 1.45,
+                        color: companyTheme.mutedInkColor,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _OverviewChip('Team name', teamName),
+                        _OverviewChip('Assigned mentees', '$menteeCount'),
+                        _OverviewChip(
+                          'Phone',
+                          (coachData['phonenumber'] as String?)?.isNotEmpty ==
+                                  true
+                              ? coachData['phonenumber'] as String
+                              : 'Not set',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: onEditProfile,
+                          icon: const Icon(Icons.edit_outlined),
+                          label: Text(
+                              hasProfile ? 'Edit profile' : 'Create profile'),
+                          style: ElevatedButton.styleFrom(
+                            elevation: 0,
+                            backgroundColor: companyTheme.primaryColor,
+                            foregroundColor: companyTheme.isDark
+                                ? companyTheme.backgroundColor
+                                : Colors.white,
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onOpenInbox,
+                          icon: const Icon(CupertinoIcons.chat_bubble_2_fill),
+                          label: const Text('Open inbox'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: companyTheme.isDark
+                                ? companyTheme.primaryColor
+                                : companyTheme.inkColor,
+                            side: BorderSide(
+                              color: companyTheme.primaryColor.withValues(
+                                alpha: companyTheme.isDark ? 0.34 : 0.26,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class CoachGroupCustomizationPage extends StatelessWidget {
+  const CoachGroupCustomizationPage({
+    super.key,
+    required this.firestore,
+    required this.currentUserId,
+    required this.teamName,
+    required this.menteesStream,
+    required this.groupsStream,
+    required this.onCreateGroup,
+    required this.onDeleteGroup,
+    required this.onAssignMentee,
+  });
+
+  final FirebaseFirestore firestore;
+  final String currentUserId;
+  final String teamName;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> menteesStream;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> groupsStream;
+  final Future<void> Function(String name) onCreateGroup;
+  final Future<void> Function({
+    required String groupId,
+    required String groupName,
+    required List<String> memberIds,
+  }) onDeleteGroup;
+  final Future<void> Function({
+    required String menteeId,
+    required String teamName,
+    String? groupId,
+    String? groupName,
+  }) onAssignMentee;
+
+  String _normalizeName(String value) => value.trim().toLowerCase();
+
+  int _extractIntValue(Map<String, dynamic> source, List<String> keys) {
+    for (final key in keys) {
+      final value = source[key];
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? 0;
+    }
+    return 0;
+  }
+
+  int _calculateLeaderboardScore(Map<String, dynamic> data) {
+    final taskPoints = Map<String, dynamic>.from(
+      data['taskPoints'] as Map? ?? <String, dynamic>{},
+    );
+    final callIntent = _extractIntValue(
+      taskPoints,
+      ['Call Points', 'call_points', 'callPoints'],
+    );
+    final meditationMinutes = _extractIntValue(
+      taskPoints,
+      ['Meditation Points', 'meditation_points', 'meditationPoints'],
+    );
+    final stepsTaken = _extractIntValue(
+          taskPoints,
+          ['Steps Points', 'steps_points', 'stepsPoints'],
+        ) *
+        200;
+    final valueEntries = _extractIntValue(
+      taskPoints,
+      ['Add Value Points', 'value_points', 'addValuePoints'],
+    );
+    final learningEntries = _extractIntValue(
+      taskPoints,
+      ['Learning Points', 'learning_points', 'learningPoints'],
+    );
+    final todoListPoints = _extractIntValue(
+      taskPoints,
+      ['Todo List Points', 'todo_list_points', 'todoListPoints'],
+    );
+
+    return callIntent +
+        meditationMinutes +
+        (stepsTaken / 200).floor() +
+        valueEntries +
+        learningEntries +
+        todoListPoints;
+  }
+
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _sortedGroups(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+  ) {
+    return groups.toList()
+      ..sort((a, b) {
+        final aName = (a.data()['name'] as String?)?.trim() ?? '';
+        final bName = (b.data()['name'] as String?)?.trim() ?? '';
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      });
+  }
+
+  Map<String, int> _scoreByMenteeId(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> pointDocs,
+  ) {
+    final menteeIdsByName = <String, String>{};
+    for (final mentee in mentees) {
+      final username = (mentee.data()['username'] as String?)?.trim() ?? '';
+      if (username.isNotEmpty) {
+        menteeIdsByName[_normalizeName(username)] = mentee.id;
+      }
+    }
+
+    final scores = <String, int>{};
+    for (final doc in pointDocs) {
+      final data = doc.data();
+      final username = (data['username'] as String?)?.trim() ?? '';
+      final menteeId = menteeIdsByName[_normalizeName(username)];
+      if (menteeId == null) continue;
+      final score = _calculateLeaderboardScore(data);
+      final currentScore = scores[menteeId] ?? 0;
+      if (score > currentScore) {
+        scores[menteeId] = score;
+      }
+    }
+    return scores;
+  }
+
+  String _displayName(QueryDocumentSnapshot<Map<String, dynamic>> mentee) {
+    final data = mentee.data();
+    final username = (data['username'] as String?)?.trim() ?? '';
+    if (username.isNotEmpty) return username;
+    final email = (data['email'] as String?)?.trim() ?? '';
+    if (email.isNotEmpty) return email.split('@').first;
+    return 'Mentee';
+  }
+
+  String _currentGroupName(QueryDocumentSnapshot<Map<String, dynamic>> mentee) {
+    final groups =
+        Map<String, dynamic>.from(mentee.data()['coachGroups'] as Map? ?? {});
+    final current =
+        Map<String, dynamic>.from(groups[currentUserId] as Map? ?? {});
+    final groupName = (current['groupName'] as String?)?.trim() ?? '';
+    return groupName.isNotEmpty ? groupName : teamName;
+  }
+
+  List<_CoachGroupMenteeScore> _rankGroupMembers({
+    required QueryDocumentSnapshot<Map<String, dynamic>> group,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+  }) {
+    final memberIds = List<String>.from(
+      group.data()['memberIds'] as List? ?? const <String>[],
+    ).toSet();
+    final members = mentees.where((mentee) => memberIds.contains(mentee.id));
+    final ranked = members.map((mentee) {
+      return _CoachGroupMenteeScore(
+        mentee: mentee,
+        score: scores[mentee.id] ?? 0,
+      );
+    }).toList()
+      ..sort((a, b) {
+        if (a.score != b.score) return b.score.compareTo(a.score);
+        return _displayName(a.mentee).compareTo(_displayName(b.mentee));
+      });
+    return ranked;
+  }
+
+  Future<void> _showCreateGroupDialog(BuildContext context) async {
+    final groupName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return const _CoachGroupNameDialog(
+          hintText: 'Example: Evening group',
+        );
+      },
+    );
+
+    if (groupName == null || groupName.isEmpty) return;
+    await onCreateGroup(groupName);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$groupName created.')),
+    );
+  }
+
+  Future<void> _confirmDeleteGroup({
+    required BuildContext context,
+    required String groupId,
+    required String groupName,
+    required List<String> memberIds,
+  }) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text('Delete group?'),
+          content: Text(
+            memberIds.isEmpty
+                ? 'This will permanently delete $groupName.'
+                : 'This will permanently delete $groupName and remove it from ${memberIds.length} mentees.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE56B6F),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+    await onDeleteGroup(
+      groupId: groupId,
+      groupName: groupName,
+      memberIds: memberIds,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$groupName deleted.')),
+    );
+  }
+
+  Future<void> _showEditMembersSheet({
+    required BuildContext context,
+    required QueryDocumentSnapshot<Map<String, dynamic>> group,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+  }) async {
+    final groupName = (group.data()['name'] as String?)?.trim() ?? 'Group';
+    final originalMembers = List<String>.from(
+      group.data()['memberIds'] as List? ?? const <String>[],
+    ).toSet();
+    final selectedMembers = originalMembers.toSet();
+    var isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  18,
+                  8,
+                  18,
+                  MediaQuery.of(sheetContext).viewInsets.bottom + 18,
+                ),
+                child: SizedBox(
+                  height: MediaQuery.of(sheetContext).size.height * 0.72,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Select mentees for $groupName',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: mentees.length,
+                          itemBuilder: (context, index) {
+                            final mentee = mentees[index];
+                            final name = _displayName(mentee);
+                            final currentGroup = _currentGroupName(mentee);
+                            final selected =
+                                selectedMembers.contains(mentee.id);
+                            return CheckboxListTile(
+                              value: selected,
+                              onChanged: isSaving
+                                  ? null
+                                  : (value) {
+                                      setSheetState(() {
+                                        if (value == true) {
+                                          selectedMembers.add(mentee.id);
+                                        } else {
+                                          selectedMembers.remove(mentee.id);
+                                        }
+                                      });
+                                    },
+                              title: Text(name),
+                              subtitle: Text(
+                                '${scores[mentee.id] ?? 0} pts • $currentGroup',
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isSaving
+                                  ? null
+                                  : () => Navigator.pop(sheetContext),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      setSheetState(() => isSaving = true);
+                                      for (final mentee in mentees) {
+                                        final wasSelected =
+                                            originalMembers.contains(mentee.id);
+                                        final isSelected =
+                                            selectedMembers.contains(mentee.id);
+                                        if (isSelected && !wasSelected) {
+                                          await onAssignMentee(
+                                            menteeId: mentee.id,
+                                            teamName: teamName,
+                                            groupId: group.id,
+                                            groupName: groupName,
+                                          );
+                                        } else if (!isSelected && wasSelected) {
+                                          await onAssignMentee(
+                                            menteeId: mentee.id,
+                                            teamName: teamName,
+                                          );
+                                        }
+                                      }
+                                      if (!sheetContext.mounted) return;
+                                      Navigator.pop(sheetContext);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text('$groupName updated.'),
+                                        ),
+                                      );
+                                    },
+                              child: Text(isSaving ? 'Saving...' : 'Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showGroupLeaderboardSheet({
+    required BuildContext context,
+    required String groupName,
+    required List<_CoachGroupMenteeScore> members,
+    required int totalScore,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.68,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    groupName,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Total score: $totalScore pts',
+                    style: const TextStyle(
+                      color: Color(0xFF6B7165),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: members.isEmpty
+                        ? const Center(child: Text('No mentees in this group.'))
+                        : ListView.builder(
+                            itemCount: members.length,
+                            itemBuilder: (context, index) {
+                              final member = members[index];
+                              return _buildRankedMenteeTile(
+                                member: member,
+                                rank: index + 1,
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRankedMenteeTile({
+    required _CoachGroupMenteeScore member,
+    required int rank,
+  }) {
+    final data = member.mentee.data();
+    final profilePic = (data['profilePic'] as String?)?.trim() ?? '';
+    final name = _displayName(member.mentee);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(
+        backgroundColor: const Color(0xFFE9EEE4),
+        backgroundImage:
+            profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
+        child: profilePic.isEmpty ? Text('$rank') : null,
+      ),
+      title: Text(name),
+      subtitle: Text('Rank #$rank'),
+      trailing: Text(
+        '${member.score} pts',
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+    );
+  }
+
+  Widget _buildGroupCard({
+    required BuildContext context,
+    required QueryDocumentSnapshot<Map<String, dynamic>> group,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final data = group.data();
+    final groupName = (data['name'] as String?)?.trim() ?? 'Group';
+    final members = _rankGroupMembers(
+      group: group,
+      mentees: mentees,
+      scores: scores,
+    );
+    final totalScore = members.fold<int>(
+      0,
+      (runningTotal, member) => runningTotal + member.score,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.primary.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  CupertinoIcons.rectangle_grid_2x2_fill,
+                  color: colors.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      groupName,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: colors.onSurface,
+                      ),
+                    ),
+                    Text(
+                      '${members.length} mentees • $totalScore pts total',
+                      style: TextStyle(
+                        color: colors.onSurface.withValues(alpha: 0.68),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Delete group',
+                onPressed: () => _confirmDeleteGroup(
+                  context: context,
+                  groupId: group.id,
+                  groupName: groupName,
+                  memberIds: List<String>.from(
+                    data['memberIds'] as List? ?? const <String>[],
+                  ),
+                ),
+                icon: const Icon(CupertinoIcons.trash),
+                color: const Color(0xFFE56B6F),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (members.isEmpty)
+            Text(
+              'No mentees selected yet.',
+              style: TextStyle(
+                color: colors.onSurface.withValues(alpha: 0.68),
+              ),
+            )
+          else
+            ...members.take(3).toList().asMap().entries.map((entry) {
+              return _buildRankedMenteeTile(
+                member: entry.value,
+                rank: entry.key + 1,
+              );
+            }),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showEditMembersSheet(
+                    context: context,
+                    group: group,
+                    mentees: mentees,
+                    scores: scores,
+                  ),
+                  icon: const Icon(CupertinoIcons.person_2),
+                  label: const Text('Select mentees'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showGroupLeaderboardSheet(
+                    context: context,
+                    groupName: groupName,
+                    members: members,
+                    totalScore: totalScore,
+                  ),
+                  icon: const Icon(CupertinoIcons.star_fill),
+                  label: const Text('Leaderboard'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<_CoachGroupLeaderboardSummary> _buildGroupSummaries({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+  }) {
+    final summaries = groups.map((group) {
+      final groupName = (group.data()['name'] as String?)?.trim() ?? 'Group';
+      final members = _rankGroupMembers(
+        group: group,
+        mentees: mentees,
+        scores: scores,
+      );
+      final totalScore = members.fold<int>(
+        0,
+        (runningTotal, member) => runningTotal + member.score,
+      );
+
+      return _CoachGroupLeaderboardSummary(
+        groupName: groupName,
+        members: members,
+        totalScore: totalScore,
+      );
+    }).toList()
+      ..sort((a, b) {
+        if (a.totalScore != b.totalScore) {
+          return b.totalScore.compareTo(a.totalScore);
+        }
+        return a.groupName.toLowerCase().compareTo(
+              b.groupName.toLowerCase(),
+            );
+      });
+
+    return summaries;
+  }
+
+  Widget _buildSummaryCard({
+    required BuildContext context,
+    required int groupCount,
+    required int menteeCount,
+    required int totalMenteeScore,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            CupertinoIcons.chart_bar_alt_fill,
+            color: colors.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '$groupCount groups | $menteeCount mentees | $totalMenteeScore pts',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: colors.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<_CoachApiGroupSummary> _apiGroupSummaries(
+    Map<String, dynamic> payload,
+    List<Map<String, dynamic>> groups,
+  ) {
+    final groupsById = <String, Map<String, dynamic>>{
+      for (final group in groups) (group['id']?.toString() ?? ''): group,
+    };
+
+    final rawSummaries = payload['groupLeaderboards'];
+    if (rawSummaries is! List) {
+      return const <_CoachApiGroupSummary>[];
+    }
+
+    final summaries = rawSummaries.whereType<Map>().map((rawSummary) {
+      final summary = Map<String, dynamic>.from(rawSummary);
+      final groupId = summary['groupId']?.toString() ?? '';
+      final groupMeta = groupsById[groupId] ?? <String, dynamic>{};
+      final entries = (summary['entries'] as List? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      final memberIds = List<String>.from(
+        groupMeta['memberIds'] as List? ?? const <String>[],
+      );
+
+      return _CoachApiGroupSummary(
+        groupId: groupId,
+        groupName: (summary['groupName'] as String?)?.trim() ?? 'Group',
+        totalScore: (summary['totalScore'] as num?)?.toInt() ?? 0,
+        entries: entries,
+        memberCount:
+            (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
+        memberIds: memberIds,
+      );
+    }).toList();
+
+    summaries.sort((a, b) {
+      if (a.totalScore != b.totalScore) {
+        return b.totalScore.compareTo(a.totalScore);
+      }
+      return a.groupName.toLowerCase().compareTo(b.groupName.toLowerCase());
+    });
+    return summaries;
+  }
+
+  Widget _buildEmptyGroupsCard(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            CupertinoIcons.rectangle_grid_2x2_fill,
+            size: 42,
+            color: colors.primary,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Create your first group',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: colors.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Groups help you organize mentees and compare scores by program, schedule, or focus.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: colors.onSurface.withValues(alpha: 0.68),
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton.icon(
+            onPressed: () => _showCreateGroupDialog(context),
+            icon: const Icon(CupertinoIcons.plus),
+            label: const Text('Create group'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupPodiumItem({
+    required _CoachGroupLeaderboardSummary summary,
+    required int rank,
+    required double height,
+    required Color color,
+  }) {
+    return SizedBox(
+      width: 96,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          CircleAvatar(
+            radius: rank == 1 ? 26 : 22,
+            backgroundColor: color.withValues(alpha: 0.18),
+            child: Text(
+              '#$rank',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: height,
+            width: 82,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  color.withValues(alpha: 0.85),
+                  color,
+                ],
+              ),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(18),
+              ),
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  hasProfile
-                      ? (coachData['fullName'] as String? ?? teamName)
-                      : username,
+                  summary.groupName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 22,
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  '${summary.totalScore} pts',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
                     fontWeight: FontWeight.w800,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  hasProfile
-                      ? (coachData['bio'] as String? ?? 'Coach profile ready')
-                      : 'Create your coach profile so users can connect with you and your team stays organized.',
-                  style: const TextStyle(
-                    height: 1.45,
-                    color: Colors.black54,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _OverviewChip('Team name', teamName),
-                    _OverviewChip('Assigned mentees', '$menteeCount'),
-                    _OverviewChip(
-                      'Phone',
-                      (coachData['phonenumber'] as String?)?.isNotEmpty == true
-                          ? coachData['phonenumber'] as String
-                          : 'Not set',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: onEditProfile,
-                      icon: const Icon(Icons.edit_outlined),
-                      label:
-                          Text(hasProfile ? 'Edit profile' : 'Create profile'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: onOpenInbox,
-                      icon: const Icon(CupertinoIcons.chat_bubble_2_fill),
-                      label: const Text('Open inbox'),
-                    ),
-                  ],
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildGroupStandingsPodium(
+    BuildContext context,
+    List<_CoachGroupLeaderboardSummary> summaries,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    if (summaries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    if (summaries.length < 3) {
+      return Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Group standings',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: colors.onSurface,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...summaries.asMap().entries.map((entry) {
+              return _buildGroupStandingTile(
+                context: context,
+                summary: entry.value,
+                rank: entry.key + 1,
+              );
+            }),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Group podium',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: colors.onSurface,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _buildGroupPodiumItem(
+                summary: summaries[1],
+                rank: 2,
+                height: 108,
+                color: const Color(0xFF8B927E),
+              ),
+              _buildGroupPodiumItem(
+                summary: summaries[0],
+                rank: 1,
+                height: 132,
+                color: const Color(0xFFE0A94F),
+              ),
+              _buildGroupPodiumItem(
+                summary: summaries[2],
+                rank: 3,
+                height: 92,
+                color: const Color(0xFF9B7B60),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupStandingTile({
+    required BuildContext context,
+    required _CoachGroupLeaderboardSummary summary,
+    required int rank,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final topMember = summary.members.isNotEmpty
+        ? '${_displayName(summary.members.first.mentee)} leads with ${summary.members.first.score} pts'
+        : 'No mentees selected yet';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: colors.primary.withValues(alpha: 0.14),
+            child: Text(
+              '#$rank',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: colors.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  summary.groupName,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: colors.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${summary.members.length} mentees | $topMember',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.onSurface.withValues(alpha: 0.68),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '${summary.totalScore} pts',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: colors.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupsTab({
+    required BuildContext context,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+    required int totalMenteeScore,
+  }) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+      children: [
+        _buildSummaryCard(
+          context: context,
+          groupCount: groups.length,
+          menteeCount: mentees.length,
+          totalMenteeScore: totalMenteeScore,
+        ),
+        const SizedBox(height: 16),
+        if (groups.isEmpty)
+          _buildEmptyGroupsCard(context)
+        else
+          ...groups.map((group) {
+            return _buildGroupCard(
+              context: context,
+              group: group,
+              mentees: mentees,
+              scores: scores,
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildLeaderboardTab({
+    required BuildContext context,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> mentees,
+    required Map<String, int> scores,
+    required int totalMenteeScore,
+  }) {
+    final summaries = _buildGroupSummaries(
+      groups: groups,
+      mentees: mentees,
+      scores: scores,
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+      children: [
+        _buildSummaryCard(
+          context: context,
+          groupCount: groups.length,
+          menteeCount: mentees.length,
+          totalMenteeScore: totalMenteeScore,
+        ),
+        const SizedBox(height: 16),
+        if (groups.isEmpty) ...[
+          _buildEmptyGroupsCard(context),
+        ] else ...[
+          _buildGroupStandingsPodium(context, summaries),
+          const SizedBox(height: 16),
+          const Text(
+            'Leaderboards',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...summaries.asMap().entries.map((entry) {
+            final summary = entry.value;
+            return Column(
+              children: [
+                _buildGroupStandingTile(
+                  context: context,
+                  summary: summary,
+                  rank: entry.key + 1,
+                ),
+                if (summary.members.isNotEmpty)
+                  Builder(builder: (context) {
+                    final colors = Theme.of(context).colorScheme;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: colors.primary.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Column(
+                        children: summary.members
+                            .take(5)
+                            .toList()
+                            .asMap()
+                            .entries
+                            .map(
+                          (memberEntry) {
+                            return _buildRankedMenteeTile(
+                              member: memberEntry.value,
+                              rank: memberEntry.key + 1,
+                            );
+                          },
+                        ).toList(),
+                      ),
+                    );
+                  }),
+              ],
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        final apiFuture = Future.wait<dynamic>([
+          CoachApiService.instance.fetchGroups(),
+          CoachApiService.instance.fetchLeaderboard(),
+        ]);
+
+        return DefaultTabController(
+          length: 2,
+          child: Theme(
+            data: AppTheme.company(companyTheme),
+            child: Scaffold(
+              backgroundColor: companyTheme.backgroundColor,
+              appBar: AppBar(
+                backgroundColor: companyTheme.surfaceColor,
+                foregroundColor: companyTheme.inkColor,
+                surfaceTintColor: Colors.transparent,
+                title: Text(
+                  'Group customization',
+                  style: TextStyle(color: companyTheme.inkColor),
+                ),
+                actions: [
+                  IconButton(
+                    onPressed: () => _showCreateGroupDialog(context),
+                    icon: const Icon(CupertinoIcons.plus),
+                  ),
+                ],
+                bottom: TabBar(
+                  indicatorColor: companyTheme.primaryColor,
+                  labelColor: companyTheme.primaryColor,
+                  unselectedLabelColor: companyTheme.mutedInkColor,
+                  tabs: const [
+                    Tab(
+                      icon: Icon(CupertinoIcons.rectangle_grid_2x2_fill),
+                      text: 'Groups',
+                    ),
+                    Tab(
+                      icon: Icon(CupertinoIcons.star_fill),
+                      text: 'Leaderboard',
+                    ),
+                  ],
+                ),
+              ),
+              body: FutureBuilder<List<dynamic>>(
+                future: apiFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Could not load group data.',
+                        style: TextStyle(color: companyTheme.mutedInkColor),
+                      ),
+                    );
+                  }
+
+                  final groups = (snapshot.data?[0] as List?)
+                          ?.whereType<Map>()
+                          .map((item) => Map<String, dynamic>.from(item))
+                          .toList() ??
+                      const <Map<String, dynamic>>[];
+                  final leaderboardPayload =
+                      Map<String, dynamic>.from(snapshot.data?[1] as Map? ?? {});
+                  final summaries = _apiGroupSummaries(
+                    leaderboardPayload,
+                    groups,
+                  );
+                  final sortedByName = summaries.toList()
+                    ..sort((a, b) => a.groupName.toLowerCase().compareTo(
+                          b.groupName.toLowerCase(),
+                        ));
+                  final totalMenteeScore = summaries.fold<int>(
+                    0,
+                    (runningTotal, summary) =>
+                        runningTotal + summary.totalScore,
+                  );
+                  final totalMentees = summaries.fold<int>(
+                    0,
+                    (runningTotal, summary) =>
+                        runningTotal + summary.memberCount,
+                  );
+
+                  return TabBarView(
+                    children: [
+                      ListView(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+                        children: [
+                          _buildSummaryCard(
+                            context: context,
+                            groupCount: groups.length,
+                            menteeCount: totalMentees,
+                            totalMenteeScore: totalMenteeScore,
+                          ),
+                          const SizedBox(height: 16),
+                          if (sortedByName.isEmpty)
+                            _buildEmptyGroupsCard(context)
+                          else
+                            ...sortedByName.map(
+                              (summary) => _CoachApiGroupCard(
+                                summary: summary,
+                                onDelete: () => _confirmDeleteGroup(
+                                  context: context,
+                                  groupId: summary.groupId,
+                                  groupName: summary.groupName,
+                                  memberIds: summary.memberIds,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      ListView(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+                        children: [
+                          _buildSummaryCard(
+                            context: context,
+                            groupCount: groups.length,
+                            menteeCount: totalMentees,
+                            totalMenteeScore: totalMenteeScore,
+                          ),
+                          const SizedBox(height: 16),
+                          if (summaries.isEmpty)
+                            _buildEmptyGroupsCard(context)
+                          else
+                            ...summaries.map(
+                              (summary) => _CoachApiGroupCard(
+                                summary: summary,
+                                onDelete: () => _confirmDeleteGroup(
+                                  context: context,
+                                  groupId: summary.groupId,
+                                  groupName: summary.groupName,
+                                  memberIds: summary.memberIds,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -2296,8 +4160,14 @@ class CoachManageMenteesPage extends StatelessWidget {
     required this.currentUserName,
     required this.teamName,
     required this.menteesStream,
+    required this.pendingRequestsStream,
+    required this.groupsStream,
     required this.onAssignMentee,
     required this.onRemoveMentee,
+    required this.onAcceptRequest,
+    required this.onDeclineRequest,
+    required this.onCreateGroup,
+    required this.onDeleteGroup,
     required this.latestTrackerForUser,
     required this.formatTrackerDate,
   });
@@ -2307,16 +4177,43 @@ class CoachManageMenteesPage extends StatelessWidget {
   final String currentUserName;
   final String teamName;
   final Stream<QuerySnapshot<Map<String, dynamic>>> menteesStream;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> pendingRequestsStream;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> groupsStream;
   final Future<void> Function({
     required String menteeId,
     required String teamName,
+    String? groupId,
+    String? groupName,
   }) onAssignMentee;
   final Future<void> Function(String menteeId) onRemoveMentee;
+  final Future<void> Function({
+    required String requestId,
+    required String menteeId,
+    required String teamName,
+    String? groupId,
+    String? groupName,
+  }) onAcceptRequest;
+  final Future<void> Function(String requestId) onDeclineRequest;
+  final Future<void> Function(String name) onCreateGroup;
+  final Future<void> Function({
+    required String groupId,
+    required String groupName,
+    required List<String> memberIds,
+  }) onDeleteGroup;
   final Future<Map<String, dynamic>?> Function(String userId)
       latestTrackerForUser;
   final String Function(Map<String, dynamic>? tracker) formatTrackerDate;
 
   String _normalizeName(String value) => value.trim().toLowerCase();
+
+  String _displayName(QueryDocumentSnapshot<Map<String, dynamic>> userDoc) {
+    final data = userDoc.data();
+    final username = (data['username'] as String?)?.trim() ?? '';
+    if (username.isNotEmpty) return username;
+    final email = (data['email'] as String?)?.trim() ?? '';
+    if (email.isNotEmpty) return email.split('@').first;
+    return 'User';
+  }
 
   int _extractIntValue(Map<String, dynamic> source, List<String> keys) {
     for (final key in keys) {
@@ -2353,12 +4250,17 @@ class CoachManageMenteesPage extends StatelessWidget {
       taskPoints,
       ['Learning Points', 'learning_points', 'learningPoints'],
     );
+    final todoListPoints = _extractIntValue(
+      taskPoints,
+      ['Todo List Points', 'todo_list_points', 'todoListPoints'],
+    );
 
     return callIntent +
         meditationMinutes +
         (stepsTaken / 200).floor() +
         valueEntries +
-        learningEntries;
+        learningEntries +
+        todoListPoints;
   }
 
   Map<String, _MenteeLeaderboardData> _buildLeaderboardData(
@@ -2432,157 +4334,743 @@ class CoachManageMenteesPage extends StatelessWidget {
     }
   }
 
-  Future<void> _showAddMenteeSheet(BuildContext context) async {
-    final searchController = TextEditingController();
-    await showModalBottomSheet<void>(
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _sortedGroups(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+  ) {
+    return groups.toList()
+      ..sort((a, b) {
+        final aName = (a.data()['name'] as String?)?.trim() ?? '';
+        final bName = (b.data()['name'] as String?)?.trim() ?? '';
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      });
+  }
+
+  String _groupNameForMentee(Map<String, dynamic> menteeData) {
+    final coachGroups =
+        Map<String, dynamic>.from(menteeData['coachGroups'] as Map? ?? {});
+    final currentCoachGroup =
+        Map<String, dynamic>.from(coachGroups[currentUserId] as Map? ?? {});
+    final groupName = (currentCoachGroup['groupName'] as String?)?.trim() ?? '';
+    return groupName.isNotEmpty ? groupName : teamName;
+  }
+
+  Future<void> _showCreateGroupDialog(
+    BuildContext context,
+  ) async {
+    final groupName = await showDialog<String>(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+      builder: (dialogContext) {
+        return const _CoachGroupNameDialog(
+          hintText: 'Example: Morning group',
+        );
+      },
+    );
+
+    if (groupName == null || groupName.isEmpty) return;
+    await onCreateGroup(groupName);
+  }
+
+  Future<void> _confirmDeleteGroup({
+    required BuildContext context,
+    required QueryDocumentSnapshot<Map<String, dynamic>> group,
+  }) async {
+    final groupData = group.data();
+    final groupName = (groupData['name'] as String?)?.trim() ?? 'Group';
+    final memberIds = List<String>.from(
+      groupData['memberIds'] as List? ?? const <String>[],
+    );
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text('Delete group?'),
+          content: Text(
+            memberIds.isEmpty
+                ? 'This will permanently delete $groupName.'
+                : 'This will permanently delete $groupName and remove it from ${memberIds.length} mentees.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE56B6F),
+                foregroundColor: Colors.white,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+    await onDeleteGroup(
+      groupId: group.id,
+      groupName: groupName,
+      memberIds: memberIds,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$groupName deleted.')),
+    );
+  }
+
+  Widget _buildGroupsPanel() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: groupsStream,
+      builder: (context, snapshot) {
+        final theme = Theme.of(context);
+        final colors = theme.colorScheme;
+        final groups = _sortedGroups(snapshot.data?.docs ?? []);
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: colors.primary.withValues(alpha: 0.18),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  const Text(
-                    'Add Mentees',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: searchController,
-                    onChanged: (_) => setSheetState(() {}),
-                    decoration: const InputDecoration(
-                      hintText: 'Search by username or email',
-                      prefixIcon: Icon(Icons.search),
+                  Expanded(
+                    child: Text(
+                      'Groups',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: colors.onSurface,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 360,
-                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: firestore.collection('users').snapshots(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return const Center(
-                              child: CircularProgressIndicator());
-                        }
-
-                        final query =
-                            searchController.text.trim().toLowerCase();
-                        final users = snapshot.data!.docs.where((doc) {
-                          final data = doc.data();
-                          final isCoach = data['isCoach'] == true ||
-                              ((data['role'] as String?)?.toLowerCase() ==
-                                  'coach');
-                          final username =
-                              (data['username'] as String? ?? '').toLowerCase();
-                          final email =
-                              (data['email'] as String? ?? '').toLowerCase();
-                          return doc.id != currentUserId &&
-                              !isCoach &&
-                              (query.isEmpty ||
-                                  username.contains(query) ||
-                                  email.contains(query));
-                        }).toList();
-
-                        if (users.isEmpty) {
-                          return const Center(child: Text('No users found.'));
-                        }
-
-                        return ListView.builder(
-                          itemCount: users.length,
-                          itemBuilder: (context, index) {
-                            final userDoc = users[index];
-                            final data = userDoc.data();
-                            final assignedCoachId = data['coachId'] as String?;
-                            final assignedToMe =
-                                assignedCoachId == currentUserId;
-                            final assignedElsewhere = assignedCoachId != null &&
-                                assignedCoachId.isNotEmpty &&
-                                !assignedToMe;
-
-                            return ListTile(
-                              leading: CircleAvatar(
-                                child: Text(
-                                  ((data['username'] as String?)?.isNotEmpty ??
-                                          false)
-                                      ? (data['username'] as String)[0]
-                                          .toUpperCase()
-                                      : '?',
-                                ),
-                              ),
-                              title: Text(data['username'] ?? 'Unknown User'),
-                              subtitle: Text(data['email'] ?? ''),
-                              trailing: assignedToMe
-                                  ? TextButton(
-                                      onPressed: () =>
-                                          onRemoveMentee(userDoc.id),
-                                      child: const Text('Remove'),
-                                    )
-                                  : ElevatedButton(
-                                      onPressed: assignedElsewhere
-                                          ? null
-                                          : () async {
-                                              await onAssignMentee(
-                                                menteeId: userDoc.id,
-                                                teamName: teamName,
-                                              );
-                                              if (!context.mounted) return;
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    '${data['username']} added to your team',
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                      child: Text(
-                                        assignedElsewhere ? 'Assigned' : 'Add',
-                                      ),
-                                    ),
-                            );
-                          },
-                        );
-                      },
-                    ),
+                  TextButton.icon(
+                    onPressed: () => _showCreateGroupDialog(context),
+                    icon: const Icon(CupertinoIcons.plus, size: 18),
+                    label: const Text('Add'),
                   ),
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 10),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Center(child: CircularProgressIndicator())
+              else if (groups.isEmpty)
+                Text(
+                  'Create groups to organize mentees by program, schedule, or focus.',
+                  style: TextStyle(
+                    color: colors.onSurface.withValues(alpha: 0.68),
+                    height: 1.4,
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: groups.map((group) {
+                    final data = group.data();
+                    final name = (data['name'] as String?)?.trim() ?? 'Group';
+                    final memberIds = List<String>.from(
+                      data['memberIds'] as List? ?? const <String>[],
+                    );
+                    return Chip(
+                      avatar: const Icon(
+                        CupertinoIcons.rectangle_grid_2x2_fill,
+                        size: 16,
+                      ),
+                      label: Text('$name (${memberIds.length})'),
+                      deleteIcon: const Icon(CupertinoIcons.trash, size: 16),
+                      onDeleted: () => _confirmDeleteGroup(
+                        context: context,
+                        group: group,
+                      ),
+                      backgroundColor: colors.primary.withValues(alpha: 0.10),
+                      side: BorderSide.none,
+                    );
+                  }).toList(),
+                ),
+            ],
+          ),
         );
       },
     );
   }
 
-  void _openChatWithMentee(
+  Widget _buildPendingRequests() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: pendingRequestsStream,
+      builder: (context, snapshot) {
+        final requests = (snapshot.data?.docs ?? []).where((doc) {
+          return (doc.data()['status'] as String?) == 'pending';
+        }).toList();
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (requests.isEmpty) {
+          final theme = Theme.of(context);
+          final colors = theme.colorScheme;
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: colors.primary.withValues(alpha: 0.16),
+              ),
+            ),
+            child: Text(
+              'No pending coach applications right now.',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: colors.onSurface,
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 18, 16, 8),
+              child: Text(
+                'Pending applications',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ),
+            ...requests.map((request) {
+              final data = request.data();
+              final userName =
+                  (data['userName'] as String?)?.trim().isNotEmpty == true
+                      ? (data['userName'] as String).trim()
+                      : 'User';
+              final userEmail = (data['userEmail'] as String?)?.trim() ?? '';
+              final userId = (data['userId'] as String?)?.trim() ?? '';
+              final applicantRole =
+                  (data['applicantRole'] as String?)?.trim().toLowerCase() ??
+                      '';
+              final applicantIsCoach =
+                  data['applicantIsCoach'] == true || applicantRole == 'coach';
+              final applyingAs =
+                  (data['applyingAs'] as String?)?.trim().toLowerCase() ?? '';
+              final applicantContext = applicantIsCoach
+                  ? 'Coach applying as mentee'
+                  : applyingAs == 'mentee'
+                      ? 'Mentee application'
+                      : '';
+
+              return Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: const Color(0xFFE7E9E2)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: const Color(0xFFDDE7D5),
+                          child: Text(
+                            userName.isNotEmpty
+                                ? userName[0].toUpperCase()
+                                : '?',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                userName,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if (userEmail.isNotEmpty)
+                                Text(
+                                  userEmail,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xFF6B7165),
+                                  ),
+                                ),
+                              if (applicantContext.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: applicantIsCoach
+                                          ? const Color(0xFFE7EDF4)
+                                          : const Color(0xFFF4F6F1),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: applicantIsCoach
+                                            ? const Color(0xFFC8D6E2)
+                                            : const Color(0xFFE0E5D9),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      applicantContext,
+                                      style: const TextStyle(
+                                        color: Color(0xFF4F5F68),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              await onDeclineRequest(request.id);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('$userName declined.'),
+                                ),
+                              );
+                            },
+                            child: const Text('Decline'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: userId.isEmpty
+                                ? null
+                                : () async {
+                                    try {
+                                      await onAcceptRequest(
+                                        requestId: request.id,
+                                        menteeId: userId,
+                                        teamName: teamName,
+                                      );
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '$userName is now in $teamName.',
+                                          ),
+                                        ),
+                                      );
+                                    } catch (error) {
+                                      debugPrint(
+                                        'Failed to accept coach request '
+                                        '${request.id}: $error',
+                                      );
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Could not accept this application. Please try again.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                            child: const Text('Accept'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showAddMenteeSheet(BuildContext context) async {
+    final searchController = TextEditingController();
+    Map<String, dynamic>? selectedUser;
+    String selectedUserName = '';
+    bool isAssigning = false;
+
+    Future<void> assignSelectedMentee(
+      BuildContext activeContext,
+      StateSetter setSheetState,
+      _CoachGroupChoice groupChoice,
+    ) async {
+      final userData = selectedUser;
+      if (userData == null || isAssigning) return;
+      final userId = (userData['id'] as String?)?.trim() ?? '';
+      if (userId.isEmpty) return;
+
+      setSheetState(() => isAssigning = true);
+      await onAssignMentee(
+        menteeId: userId,
+        teamName: teamName,
+        groupId: groupChoice.groupId,
+        groupName: groupChoice.groupName,
+      );
+      if (!activeContext.mounted) return;
+      setSheetState(() {
+        selectedUser = null;
+        selectedUserName = '';
+        isAssigning = false;
+      });
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${selectedUserName.isNotEmpty ? selectedUserName : 'Mentee'} added to ${groupChoice.groupName}',
+          ),
+        ),
+      );
+    }
+
+    Future<List<List<Map<String, dynamic>>>> loadSheetData() async {
+      final results = await Future.wait<List<Map<String, dynamic>>>([
+        CoachApiService.instance.fetchUsers(),
+        CoachApiService.instance.fetchGroups(),
+      ]);
+      return results;
+    }
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (sheetContext, setSheetState) {
+              if (selectedUser != null) {
+                return Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    16,
+                    16,
+                    MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Choose group for $selectedUserName',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: isAssigning
+                                ? null
+                                : () {
+                                    setSheetState(() {
+                                      selectedUser = null;
+                                      selectedUserName = '';
+                                    });
+                                  },
+                            child: const Text('Cancel'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 360,
+                        child: FutureBuilder<List<List<Map<String, dynamic>>>>(
+                          future: loadSheetData(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            final data = snapshot.data ?? const <List<Map<String, dynamic>>>[];
+                            final users = data.isNotEmpty ? data.first : <Map<String, dynamic>>[];
+                            final groups = data.length > 1 ? data[1] : <Map<String, dynamic>>[];
+
+                            final query =
+                                searchController.text.trim().toLowerCase();
+                            final filteredUsers = users.where((user) {
+                              final userId =
+                                  (user['id'] as String?)?.trim() ?? '';
+                              final username =
+                                  (user['name'] as String?)?.toLowerCase() ??
+                                      '';
+                              final email =
+                                  (user['email'] as String?)?.toLowerCase() ??
+                                      '';
+                              return userId != currentUserId &&
+                                  (query.isEmpty ||
+                                      username.contains(query) ||
+                                      email.contains(query));
+                            }).toList();
+
+                            final sortedGroups = List<Map<String, dynamic>>.from(
+                              groups,
+                            )..sort((a, b) {
+                                final aName =
+                                    (a['name'] as String?)?.trim() ?? '';
+                                final bName =
+                                    (b['name'] as String?)?.trim() ?? '';
+                                return aName.toLowerCase().compareTo(
+                                      bName.toLowerCase(),
+                                    );
+                              });
+
+                            return ListView(
+                              children: [
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const CircleAvatar(
+                                    backgroundColor: Color(0xFFE9EEE4),
+                                    child: Icon(CupertinoIcons.person_2_fill),
+                                  ),
+                                  title: Text(teamName),
+                                  subtitle: const Text('Main coach team'),
+                                  enabled: !isAssigning,
+                                  onTap: isAssigning
+                                      ? null
+                                      : () => assignSelectedMentee(
+                                            sheetContext,
+                                            setSheetState,
+                                            _CoachGroupChoice(
+                                              groupName: teamName,
+                                            ),
+                                          ),
+                                ),
+                                ...sortedGroups.map((group) {
+                                  final name =
+                                      (group['name'] as String?)?.trim() ??
+                                          'Group';
+                                  final memberCount =
+                                      (group['memberCount'] as num?)?.toInt() ??
+                                          ((group['memberIds'] as List?)?.length ??
+                                              0);
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: const CircleAvatar(
+                                      backgroundColor: Color(0xFFDDE7D5),
+                                      child: Icon(
+                                        CupertinoIcons.rectangle_grid_2x2_fill,
+                                      ),
+                                    ),
+                                    title: Text(name),
+                                    subtitle: Text(
+                                      '$memberCount mentees',
+                                    ),
+                                    enabled: !isAssigning,
+                                    onTap: isAssigning
+                                        ? null
+                                        : () => assignSelectedMentee(
+                                              sheetContext,
+                                              setSheetState,
+                                              _CoachGroupChoice(
+                                                groupId: group['id']?.toString(),
+                                                groupName: name,
+                                              ),
+                                            ),
+                                  );
+                                }),
+                                if (filteredUsers.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16),
+                                    child: Center(
+                                      child: Text('No users found.'),
+                                    ),
+                                  ),
+                                ...filteredUsers.map((user) {
+                                  final userName =
+                                      (user['name'] as String?)?.trim().isNotEmpty ==
+                                              true
+                                          ? (user['name'] as String).trim()
+                                          : ((user['email'] as String?)?.trim()
+                                                      .isNotEmpty ==
+                                                  true
+                                              ? (user['email'] as String)
+                                                  .trim()
+                                                  .split('@')
+                                                  .first
+                                              : 'Unknown User');
+                                  final isCoach = user['isCoach'] == true ||
+                                      ((user['role'] as String?)?.toLowerCase() ==
+                                          'coach');
+                                  final assignedToMe = user['assignedToMe'] == true;
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: CircleAvatar(
+                                      backgroundImage:
+                                          (user['profilePic'] as String?)
+                                                      ?.trim()
+                                                      .isNotEmpty ==
+                                                  true
+                                              ? NetworkImage(
+                                                  user['profilePic'] as String,
+                                                )
+                                              : null,
+                                      child: ((user['profilePic'] as String?)
+                                                  ?.trim()
+                                                  .isEmpty ??
+                                              true)
+                                          ? Text(
+                                              userName.isNotEmpty
+                                                  ? userName[0].toUpperCase()
+                                                  : '?',
+                                            )
+                                          : null,
+                                    ),
+                                    title: Text(userName),
+                                    subtitle: Text(
+                                      [
+                                        (user['email'] as String?) ?? '',
+                                        if (isCoach) 'Coach account',
+                                      ].where((value) {
+                                        return value.toString().trim().isNotEmpty;
+                                      }).join(' · '),
+                                    ),
+                                    trailing: assignedToMe
+                                        ? TextButton(
+                                            onPressed: () async {
+                                              await onRemoveMentee(
+                                                user['id']?.toString() ?? '',
+                                              );
+                                            },
+                                            child: const Text('Remove'),
+                                          )
+                                        : ElevatedButton(
+                                            onPressed: () {
+                                              setSheetState(() {
+                                                selectedUser = user;
+                                                selectedUserName = userName;
+                                              });
+                                            },
+                                            child: const Text('Add'),
+                                          ),
+                                  );
+                                }),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  16,
+                  16,
+                  MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Add Mentees',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: searchController,
+                      onChanged: (_) => setSheetState(() {}),
+                      decoration: const InputDecoration(
+                        hintText: 'Search by username or email',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 360,
+                      child: const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      searchController.dispose();
+    }
+  }
+
+  void _openChatWithMenteeApi(
     BuildContext context,
-    QueryDocumentSnapshot<Map<String, dynamic>> mentee,
+    Map<String, dynamic> mentee,
   ) {
-    final data = mentee.data();
-    final menteeName = (data['username'] as String?)?.trim();
+    final menteeName = (mentee['name'] as String?)?.trim().isNotEmpty == true
+        ? (mentee['name'] as String).trim()
+        : ((mentee['email'] as String?)?.trim().isNotEmpty == true
+            ? (mentee['email'] as String).trim().split('@').first
+            : 'Mentee');
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ChatRoomScreen(
           coach: Coach(
-            id: mentee.id,
-            name: menteeName?.isNotEmpty == true ? menteeName! : 'Mentee',
+            id: (mentee['userId'] as String?)?.trim() ?? '',
+            name: menteeName,
             phone: '',
-            bio: data['email'] as String? ?? '',
-            profilePic: data['profilePic'] as String? ?? '',
+            bio: (mentee['email'] as String?) ?? '',
+            profilePic: (mentee['profilePic'] as String?) ?? '',
             backgroundColor: const Color(0xFF90A17D),
           ),
           userId: currentUserId,
@@ -2592,297 +5080,552 @@ class CoachManageMenteesPage extends StatelessWidget {
     );
   }
 
+  List<_CoachApiGroupSummary> _apiGroupSummaries(
+    Map<String, dynamic> payload,
+    List<Map<String, dynamic>> groups,
+  ) {
+    final groupsById = <String, Map<String, dynamic>>{
+      for (final group in groups) (group['id']?.toString() ?? ''): group,
+    };
+
+    final rawSummaries = payload['groupLeaderboards'];
+    if (rawSummaries is! List) {
+      return const <_CoachApiGroupSummary>[];
+    }
+
+    final summaries = rawSummaries.whereType<Map>().map((rawSummary) {
+      final summary = Map<String, dynamic>.from(rawSummary);
+      final groupId = summary['groupId']?.toString() ?? '';
+      final groupMeta = groupsById[groupId] ?? <String, dynamic>{};
+      final entries = (summary['entries'] as List? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      final memberIds = List<String>.from(
+        groupMeta['memberIds'] as List? ?? const <String>[],
+      );
+
+      return _CoachApiGroupSummary(
+        groupId: groupId,
+        groupName: (summary['groupName'] as String?)?.trim() ?? 'Group',
+        totalScore: (summary['totalScore'] as num?)?.toInt() ?? 0,
+        entries: entries,
+        memberCount:
+            (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
+        memberIds: memberIds,
+      );
+    }).toList();
+
+    summaries.sort((a, b) {
+      if (a.totalScore != b.totalScore) {
+        return b.totalScore.compareTo(a.totalScore);
+      }
+      return a.groupName.toLowerCase().compareTo(b.groupName.toLowerCase());
+    });
+    return summaries;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Manage mentees'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_alt_1),
-            onPressed: () => _showAddMenteeSheet(context),
-          ),
-        ],
-      ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: menteesStream,
-        builder: (context, snapshot) {
-          final mentees = snapshot.data?.docs ?? [];
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              surfaceTintColor: Colors.transparent,
+              title: Text(
+                'Manage mentees',
+                style: TextStyle(color: companyTheme.inkColor),
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.person_add_alt_1),
+                  onPressed: () => _showAddMenteeSheet(context),
+                ),
+              ],
+            ),
+            body: FutureBuilder<List<dynamic>>(
+              future: Future.wait<dynamic>([
+                CoachApiService.instance.fetchRequests(),
+                CoachApiService.instance.fetchGroups(),
+                CoachApiService.instance.fetchLeaderboard(),
+              ]),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          if (mentees.isEmpty) {
-            return const Center(child: Text('No mentees added yet.'));
-          }
-
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: firestore.collection('userpoints').snapshots(),
-            builder: (context, pointsSnapshot) {
-              final pointDocs = pointsSnapshot.data?.docs ?? [];
-              final leaderboard = _buildLeaderboardData(mentees, pointDocs);
-              final sortedMentees = mentees.toList()
-                ..sort((a, b) {
-                  final aRank = leaderboard[a.id]?.rank ?? 9999;
-                  final bRank = leaderboard[b.id]?.rank ?? 9999;
-                  return aRank.compareTo(bRank);
-                });
-
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                itemCount: sortedMentees.length,
-                itemBuilder: (context, index) {
-                  final mentee = sortedMentees[index];
-                  final data = mentee.data();
-                  final leaderboardData = leaderboard[mentee.id] ??
-                      _MenteeLeaderboardData(
-                        rank: index + 1,
-                        score: 0,
-                      );
-                  final badgeColor = _badgeColorForRank(leaderboardData.rank);
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white,
-                          badgeColor.withOpacity(0.10),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(26),
-                      border: Border.all(
-                        color: badgeColor.withOpacity(0.18),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: badgeColor.withOpacity(0.10),
-                          blurRadius: 20,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Could not load mentee data.',
+                      style: TextStyle(color: companyTheme.mutedInkColor),
                     ),
-                    child: Column(
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: badgeColor.withOpacity(0.45),
-                                      width: 2,
+                  );
+                }
+
+                final requests = (snapshot.data?[0] as List?)
+                        ?.whereType<Map>()
+                        .map((item) => Map<String, dynamic>.from(item))
+                        .toList() ??
+                    const <Map<String, dynamic>>[];
+                final groups = (snapshot.data?[1] as List?)
+                        ?.whereType<Map>()
+                        .map((item) => Map<String, dynamic>.from(item))
+                        .toList() ??
+                    const <Map<String, dynamic>>[];
+                final leaderboardPayload =
+                    Map<String, dynamic>.from(snapshot.data?[2] as Map? ?? {});
+                final mentees = (leaderboardPayload['menteeEntries'] as List?)
+                        ?.whereType<Map>()
+                        .map((item) => Map<String, dynamic>.from(item))
+                        .toList() ??
+                    const <Map<String, dynamic>>[];
+
+                final acceptedTitle = mentees.isEmpty
+                    ? 'No accepted mentees yet.'
+                    : 'Accepted mentees';
+
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    if (requests.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(0, 4, 0, 10),
+                        child: Text(
+                          'Pending applications',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      ...requests.map((request) {
+                        final userName =
+                            (request['menteeName'] as String?)?.trim().isNotEmpty ==
+                                    true
+                                ? (request['menteeName'] as String).trim()
+                                : 'User';
+                        final userEmail =
+                            (request['menteeEmail'] as String?)?.trim() ?? '';
+                        final userId =
+                            (request['menteeId'] as String?)?.trim() ?? '';
+                        final applicantRole =
+                            (request['applicantRole'] as String?)?.trim().toLowerCase() ??
+                                '';
+                        final applicantIsCoach =
+                            request['applicantIsCoach'] == true ||
+                                applicantRole == 'coach';
+                        final applyingAs =
+                            (request['applyingAs'] as String?)?.trim().toLowerCase() ??
+                                '';
+                        final applicantContext = applicantIsCoach
+                            ? 'Coach applying as mentee'
+                            : applyingAs == 'mentee'
+                                ? 'Mentee application'
+                                : '';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(color: const Color(0xFFE7E9E2)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: const Color(0xFFDDE7D5),
+                                    child: Text(
+                                      userName.isNotEmpty ? userName[0] : '?',
                                     ),
                                   ),
-                                  child: CircleAvatar(
-                                    radius: 28,
-                                    backgroundColor:
-                                        badgeColor.withOpacity(0.16),
-                                    backgroundImage:
-                                        (data['profilePic'] as String?)
-                                                    ?.trim()
-                                                    .isNotEmpty ==
-                                                true
-                                            ? NetworkImage(
-                                                data['profilePic'] as String)
-                                            : null,
-                                    child: ((data['profilePic'] as String?)
-                                                ?.trim()
-                                                .isEmpty ??
-                                            true)
-                                        ? Text(
-                                            ((data['username'] as String?)
-                                                        ?.isNotEmpty ??
-                                                    false)
-                                                ? (data['username']
-                                                        as String)[0]
-                                                    .toUpperCase()
-                                                : '?',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          )
-                                        : null,
-                                  ),
-                                ),
-                                Positioned(
-                                  right: -4,
-                                  bottom: -4,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 5,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: badgeColor,
-                                      borderRadius: BorderRadius.circular(999),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: badgeColor.withOpacity(0.35),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 4),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          userName,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w800,
+                                          ),
                                         ),
+                                        if (userEmail.isNotEmpty)
+                                          Text(
+                                            userEmail,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF6B7165),
+                                            ),
+                                          ),
+                                        if (applicantContext.isNotEmpty) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            applicantContext,
+                                            style: const TextStyle(
+                                              color: Color(0xFF4F5F68),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
-                                    child: Text(
-                                      '#${leaderboardData.rank}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () async {
+                                        final requestId =
+                                            request['id']?.toString() ?? '';
+                                        await onDeclineRequest(requestId);
+                                      },
+                                      child: const Text('Decline'),
                                     ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: userId.isEmpty
+                                          ? null
+                                          : () async {
+                                              final requestId =
+                                                  request['id']?.toString() ??
+                                                      '';
+                                              await onAcceptRequest(
+                                                requestId: requestId,
+                                                menteeId: userId,
+                                                teamName: teamName,
+                                              );
+                                            },
+                                      child: const Text('Accept'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                    const SizedBox(height: 12),
+                    if (groups.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(0, 4, 0, 10),
+                        child: Text(
+                          'Groups',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: groups.map((group) {
+                          final groupName =
+                              (group['name'] as String?)?.trim() ?? 'Group';
+                          final memberCount =
+                              (group['memberCount'] as num?)?.toInt() ??
+                                  ((group['memberIds'] as List?)?.length ?? 0);
+                          return Chip(label: Text('$groupName ($memberCount)'));
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
+                      child: Text(
+                        acceptedTitle,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: companyTheme.inkColor,
+                        ),
+                      ),
+                    ),
+                    ...mentees.map((mentee) {
+                      final name = (mentee['name'] as String?)?.trim().isNotEmpty ==
+                              true
+                          ? (mentee['name'] as String).trim()
+                          : 'Mentee';
+                      final profilePic =
+                          (mentee['profilePic'] as String?)?.trim() ?? '';
+                      final score = (mentee['score'] as num?)?.toInt() ?? 0;
+                      final rank = (mentee['rank'] as num?)?.toInt() ?? 0;
+                      final groupName =
+                          (mentee['teamName'] as String?)?.trim().isNotEmpty ==
+                                  true
+                              ? (mentee['teamName'] as String).trim()
+                              : teamName;
+                      final email = (mentee['email'] as String?)?.trim() ?? '';
+                      final userId = (mentee['userId'] as String?)?.trim() ?? '';
+                      final badgeColor = _badgeColorForRank(rank);
+                      final onPrimary = companyTheme.primaryColor.computeLuminance() >
+                              0.48
+                          ? Colors.black
+                          : Colors.white;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 14),
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              companyTheme.surfaceColor,
+                              Color.alphaBlend(
+                                badgeColor.withValues(
+                                  alpha: companyTheme.isDark ? 0.12 : 0.10,
+                                ),
+                                companyTheme.surfaceColor,
+                              ),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(
+                            color: badgeColor.withValues(
+                              alpha: companyTheme.isDark ? 0.28 : 0.18,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 28,
+                                  backgroundImage: profilePic.isNotEmpty
+                                      ? NetworkImage(profilePic)
+                                      : null,
+                                  child: profilePic.isEmpty
+                                      ? Text(name.isNotEmpty ? name[0] : '?')
+                                      : null,
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Wrap(
+                                        spacing: 8,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: [
+                                          Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.w800,
+                                              color: companyTheme.inkColor,
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: badgeColor.withValues(
+                                                alpha: 0.14,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              _badgeLabelForRank(rank),
+                                              style: TextStyle(
+                                                color: badgeColor,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        email,
+                                        style: TextStyle(
+                                          color: companyTheme.mutedInkColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: companyTheme.primaryColor
+                                                  .withValues(
+                                                alpha:
+                                                    companyTheme.isDark ? 0.16 : 0.10,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                            ),
+                                            child: Text(
+                                              '$score pts',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                                color: companyTheme.inkColor,
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: companyTheme.iconColor
+                                                  .withValues(
+                                                alpha:
+                                                    companyTheme.isDark ? 0.16 : 0.10,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                            ),
+                                            child: Text(
+                                              groupName,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                                color: companyTheme.inkColor,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      Text(
-                                        data['username'] ?? 'Unknown',
-                                        style: const TextStyle(
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -0.2,
-                                        ),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _openChatWithMenteeApi(context, mentee),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: companyTheme.primaryColor,
+                                      foregroundColor: onPrimary,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
                                       ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: badgeColor.withOpacity(0.14),
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                        ),
-                                        child: Text(
-                                          _badgeLabelForRank(
-                                              leaderboardData.rank),
-                                          style: TextStyle(
-                                            color: badgeColor,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
                                       ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    data['email'] ?? '',
-                                    style: const TextStyle(
-                                      color: Colors.black54,
-                                      height: 1.35,
+                                      elevation: 0,
                                     ),
+                                    icon: const Icon(
+                                      CupertinoIcons.chat_bubble_2_fill,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Message'),
                                   ),
-                                  const SizedBox(height: 12),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF6F2EA),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                        ),
-                                        child: Text(
-                                          '${leaderboardData.score} pts',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            color: Color(0xFF2D3A25),
-                                          ),
-                                        ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: userId.isEmpty
+                                        ? null
+                                        : () => onRemoveMentee(userId),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFB55D5D),
+                                      side: BorderSide(
+                                        color: const Color(0xFFB55D5D)
+                                            .withValues(alpha: 0.28),
                                       ),
-                                    ],
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      CupertinoIcons
+                                          .person_crop_circle_badge_xmark,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Remove'),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: () => _openChatWithMentee(
-                                  context,
-                                  mentee,
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF90A17D),
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  elevation: 0,
-                                ),
-                                icon: const Icon(
-                                  CupertinoIcons.chat_bubble_2_fill,
-                                  size: 18,
-                                ),
-                                label: const Text('Message'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () => onRemoveMentee(mentee.id),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFFB55D5D),
-                                  side: BorderSide(
-                                    color: const Color(0xFFB55D5D)
-                                        .withOpacity(0.28),
-                                  ),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                icon: const Icon(
-                                  CupertinoIcons.person_crop_circle_badge_xmark,
-                                  size: 18,
-                                ),
-                                label: const Text('Remove'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
-          );
-        },
-      ),
+                      );
+                    }),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
+
+}
+
+class _CoachGroupChoice {
+  const _CoachGroupChoice({
+    this.groupId,
+    required this.groupName,
+  });
+
+  final String? groupId;
+  final String groupName;
+}
+
+class _CoachGroupMenteeScore {
+  const _CoachGroupMenteeScore({
+    required this.mentee,
+    required this.score,
+  });
+
+  final QueryDocumentSnapshot<Map<String, dynamic>> mentee;
+  final int score;
+}
+
+class _CoachGroupLeaderboardSummary {
+  const _CoachGroupLeaderboardSummary({
+    required this.groupName,
+    required this.members,
+    required this.totalScore,
+  });
+
+  final String groupName;
+  final List<_CoachGroupMenteeScore> members;
+  final int totalScore;
 }
 
 class _MenteeLeaderboardData {
@@ -2893,6 +5636,24 @@ class _MenteeLeaderboardData {
 
   final int rank;
   final int score;
+}
+
+class _CoachApiGroupSummary {
+  const _CoachApiGroupSummary({
+    required this.groupId,
+    required this.groupName,
+    required this.totalScore,
+    required this.entries,
+    required this.memberCount,
+    required this.memberIds,
+  });
+
+  final String groupId;
+  final String groupName;
+  final int totalScore;
+  final List<Map<String, dynamic>> entries;
+  final int memberCount;
+  final List<String> memberIds;
 }
 
 class CoachMenteeActivityCalendarPage extends StatefulWidget {
@@ -2946,6 +5707,7 @@ class _CoachMenteeActivityCalendarPageState
   }
 
   Widget _buildActivityLegend() {
+    final colors = Theme.of(context).colorScheme;
     const items = <MapEntry<Color, String>>[
       MapEntry(Color(0xFFF5E3C8), '1-2 tasks'),
       MapEntry(Color(0xFFCFE1D0), '3-4 tasks'),
@@ -2971,7 +5733,10 @@ class _CoachMenteeActivityCalendarPageState
                 const SizedBox(width: 6),
                 Text(
                   item.value,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurface.withValues(alpha: 0.68),
+                  ),
                 ),
               ],
             ),
@@ -2988,18 +5753,19 @@ class _CoachMenteeActivityCalendarPageState
   }
 
   Widget _buildActivityDetails(Map<String, dynamic>? tracker) {
+    final colors = Theme.of(context).colorScheme;
     final tasks = tracker == null ? <String, bool>{} : _activityMap(tracker);
     if (tracker == null) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF7F4EE),
+          color: colors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
         ),
-        child: const Text(
+        child: Text(
           'No logged activity for this day.',
-          style: TextStyle(color: Colors.black54),
+          style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
         ),
       );
     }
@@ -3008,7 +5774,7 @@ class _CoachMenteeActivityCalendarPageState
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F4EE),
+        color: colors.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Wrap(
@@ -3019,13 +5785,17 @@ class _CoachMenteeActivityCalendarPageState
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: entry.value
-                  ? const Color(0xFFDDE7D5)
-                  : const Color(0xFFF0E5D3),
+                  ? colors.primary.withValues(alpha: 0.18)
+                  : colors.surfaceContainerHighest.withValues(alpha: 0.36),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
               '${entry.key}: ${entry.value ? 'Done' : 'Not yet'}',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colors.onSurface,
+              ),
             ),
           );
         }).toList(),
@@ -3034,11 +5804,11 @@ class _CoachMenteeActivityCalendarPageState
   }
 
   Widget _buildMenteeCalendarCard(
-    QueryDocumentSnapshot<Map<String, dynamic>> mentee,
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> trackerDocs,
+    Map<String, dynamic> mentee,
+    List<Map<String, dynamic>> trackerDocs,
   ) {
     return _CoachMenteeCalendarCard(
-      key: ValueKey(mentee.id),
+      key: ValueKey(mentee['menteeId']?.toString() ?? ''),
       mentee: mentee,
       trackerDocs: trackerDocs,
     );
@@ -3046,47 +5816,76 @@ class _CoachMenteeActivityCalendarPageState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Recent mentee activity')),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: widget.menteesStream,
-        builder: (context, menteeSnapshot) {
-          if (menteeSnapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        final menteesFuture = CoachApiService.instance.fetchMentees();
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              surfaceTintColor: Colors.transparent,
+              title: Text(
+                'Recent mentee activity',
+                style: TextStyle(color: companyTheme.inkColor),
+              ),
+            ),
+            body: FutureBuilder<List<Map<String, dynamic>>>(
+              future: menteesFuture,
+              builder: (context, menteeSnapshot) {
+                if (menteeSnapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          final mentees = menteeSnapshot.data?.docs ?? [];
-          if (mentees.isEmpty) {
-            return const Center(
-              child: Text('No mentees added yet.'),
-            );
-          }
+                final mentees = menteeSnapshot.data ?? const <Map<String, dynamic>>[];
+                if (mentees.isEmpty) {
+                  return Center(
+                    child: Text(
+                      'No mentees added yet.',
+                      style: TextStyle(color: companyTheme.mutedInkColor),
+                    ),
+                  );
+                }
 
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: widget.firestore.collection('dailytracker').snapshots(),
-            builder: (context, trackerSnapshot) {
-              if (trackerSnapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
+                return FutureBuilder<List<List<Map<String, dynamic>>>>(
+                  future: Future.wait(
+                    mentees.map((mentee) {
+                      return CoachApiService.instance.fetchMenteeTrackers(
+                        (mentee['menteeId'] as String?)?.trim() ?? '',
+                      );
+                    }),
+                  ),
+                  builder: (context, trackerSnapshot) {
+                    if (trackerSnapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
 
-              final trackerDocs = trackerSnapshot.data?.docs ?? [];
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: mentees.length,
-                itemBuilder: (context, index) {
-                  final mentee = mentees[index];
-                  final menteeTrackers = trackerDocs
-                      .where(
-                        (doc) => (doc.data()['userId'] as String?) == mentee.id,
-                      )
-                      .toList();
-                  return _buildMenteeCalendarCard(mentee, menteeTrackers);
-                },
-              );
-            },
-          );
-        },
-      ),
+                    final trackerLists =
+                        trackerSnapshot.data ?? const <List<Map<String, dynamic>>>[];
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: mentees.length,
+                      itemBuilder: (context, index) {
+                        final mentee = mentees[index];
+                        final menteeTrackers = index < trackerLists.length
+                            ? trackerLists[index]
+                            : const <Map<String, dynamic>>[];
+                        return _buildMenteeCalendarCard(
+                          mentee,
+                          menteeTrackers,
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3098,8 +5897,8 @@ class _CoachMenteeCalendarCard extends StatefulWidget {
     required this.trackerDocs,
   });
 
-  final QueryDocumentSnapshot<Map<String, dynamic>> mentee;
-  final List<QueryDocumentSnapshot<Map<String, dynamic>>> trackerDocs;
+  final Map<String, dynamic> mentee;
+  final List<Map<String, dynamic>> trackerDocs;
 
   @override
   State<_CoachMenteeCalendarCard> createState() =>
@@ -3137,8 +5936,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
 
   Map<DateTime, Map<String, dynamic>> _buildTrackerMap() {
     final trackers = <DateTime, Map<String, dynamic>>{};
-    for (final doc in widget.trackerDocs) {
-      final data = doc.data();
+    for (final data in widget.trackerDocs) {
       final rawDate =
           (data['lastUpdated'] as String?) ?? (data['date'] as String?) ?? '';
       if (rawDate.trim().isEmpty) continue;
@@ -3237,11 +6035,56 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     );
   }
 
+  List<_CoachApiGroupSummary> _apiGroupSummaries(
+    Map<String, dynamic> payload,
+    List<Map<String, dynamic>> groups,
+  ) {
+    final groupsById = <String, Map<String, dynamic>>{
+      for (final group in groups) (group['id']?.toString() ?? ''): group,
+    };
+
+    final rawSummaries = payload['groupLeaderboards'];
+    if (rawSummaries is! List) {
+      return const <_CoachApiGroupSummary>[];
+    }
+
+    final summaries = rawSummaries.whereType<Map>().map((rawSummary) {
+      final summary = Map<String, dynamic>.from(rawSummary);
+      final groupId = summary['groupId']?.toString() ?? '';
+      final groupMeta = groupsById[groupId] ?? <String, dynamic>{};
+      final entries = (summary['entries'] as List? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      final memberIds = List<String>.from(
+        groupMeta['memberIds'] as List? ?? const <String>[],
+      );
+
+      return _CoachApiGroupSummary(
+        groupId: groupId,
+        groupName: (summary['groupName'] as String?)?.trim() ?? 'Group',
+        totalScore: (summary['totalScore'] as num?)?.toInt() ?? 0,
+        entries: entries,
+        memberCount:
+            (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
+        memberIds: memberIds,
+      );
+    }).toList();
+
+    summaries.sort((a, b) {
+      if (a.totalScore != b.totalScore) {
+        return b.totalScore.compareTo(a.totalScore);
+      }
+      return a.groupName.toLowerCase().compareTo(b.groupName.toLowerCase());
+    });
+    return summaries;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final data = widget.mentee.data();
-    final menteeName = (data['username'] as String?)?.trim();
-    final profilePic = (data['profilePic'] as String?)?.trim() ?? '';
+    final colors = Theme.of(context).colorScheme;
+    final data = widget.mentee;
+    final menteeName = (data['menteeName'] as String?)?.trim();
     final trackerMap = _buildTrackerMap();
     final selectedTracker = trackerMap[_normalizeDate(_selectedDay)];
     final latestEntry = trackerMap.entries.isEmpty
@@ -3253,11 +6096,12 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: colors.primary.withValues(alpha: 0.08),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -3270,15 +6114,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundImage:
-                    profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
-                child: profilePic.isEmpty
-                    ? Text(
-                        menteeName?.isNotEmpty == true
-                            ? menteeName![0].toUpperCase()
-                            : '?',
-                      )
-                    : null,
+                backgroundColor: const Color(0xFFE9EEE4),
+                child: Text(
+                  menteeName?.isNotEmpty == true ? menteeName![0].toUpperCase() : '?',
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3287,9 +6126,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                   children: [
                     Text(
                       menteeName?.isNotEmpty == true ? menteeName! : 'Mentee',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w800,
+                        color: colors.onSurface,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -3297,7 +6137,9 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                       latestEntry == null
                           ? 'No recent activity yet'
                           : 'Latest activity: ${DateFormat.yMMMd().format(latestEntry.key)}',
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(
+                        color: colors.onSurface.withValues(alpha: 0.68),
+                      ),
                     ),
                   ],
                 ),
@@ -3336,11 +6178,11 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
             calendarStyle: CalendarStyle(
               outsideDaysVisible: false,
               todayDecoration: BoxDecoration(
-                color: const Color(0xFFCE8F5A).withOpacity(0.25),
+                color: colors.primary.withValues(alpha: 0.24),
                 shape: BoxShape.circle,
               ),
-              selectedDecoration: const BoxDecoration(
-                color: Color(0xFF6D849A),
+              selectedDecoration: BoxDecoration(
+                color: colors.primary,
                 shape: BoxShape.circle,
               ),
               markerDecoration: const BoxDecoration(
@@ -3363,7 +6205,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                   child: Text(
                     '${day.day}',
                     style: TextStyle(
-                      color: count >= 5 ? Colors.white : Colors.black87,
+                      color: count >= 5 ? Colors.white : colors.onSurface,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -3381,7 +6223,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                       vertical: 1,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -3389,6 +6231,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                       style: const TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
+                        color: Colors.black87,
                       ),
                     ),
                   ),
@@ -3399,9 +6242,9 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
           const SizedBox(height: 14),
           Text(
             'Selected day: ${DateFormat.yMMMMd().format(_selectedDay)}',
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w700,
-              color: Colors.black87,
+              color: colors.onSurface,
             ),
           ),
           const SizedBox(height: 10),
@@ -3456,6 +6299,212 @@ class _OverviewChip extends StatelessWidget {
             value,
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoachGroupNameDialog extends StatefulWidget {
+  const _CoachGroupNameDialog({required this.hintText});
+
+  final String hintText;
+
+  @override
+  State<_CoachGroupNameDialog> createState() => _CoachGroupNameDialogState();
+}
+
+class _CoachGroupNameDialogState extends State<_CoachGroupNameDialog> {
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) {
+      setState(() => _errorText = 'Group name is required.');
+      return;
+    }
+    Navigator.pop(context, name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+      ),
+      title: const Text('Create group'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: InputDecoration(
+          labelText: 'Group name',
+          hintText: widget.hintText,
+          errorText: _errorText,
+        ),
+        onChanged: (_) {
+          if (_errorText == null) return;
+          setState(() => _errorText = null);
+        },
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _submit,
+          child: const Text('Create'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CoachApiGroupCard extends StatefulWidget {
+  const _CoachApiGroupCard({
+    required this.summary,
+    required this.onDelete,
+  });
+
+  final _CoachApiGroupSummary summary;
+  final VoidCallback onDelete;
+
+  @override
+  State<_CoachApiGroupCard> createState() => _CoachApiGroupCardState();
+}
+
+class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final summary = widget.summary;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.primary.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            onTap: () => setState(() => _expanded = !_expanded),
+            contentPadding: const EdgeInsets.fromLTRB(18, 10, 12, 10),
+            leading: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: colors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                CupertinoIcons.rectangle_grid_2x2_fill,
+                color: colors.primary,
+              ),
+            ),
+            title: Text(
+              summary.groupName,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: colors.onSurface,
+              ),
+            ),
+            subtitle: Text(
+              '${summary.memberCount} mentees • ${summary.totalScore} pts total',
+              style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Delete group',
+                  onPressed: widget.onDelete,
+                  icon: const Icon(CupertinoIcons.trash),
+                  color: const Color(0xFFE56B6F),
+                ),
+                Icon(
+                  _expanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  color: colors.onSurface.withValues(alpha: 0.7),
+                ),
+              ],
+            ),
+          ),
+          if (_expanded) ...[
+            const Divider(height: 1),
+            if (summary.entries.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(18),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'No mentees selected yet.',
+                    style: TextStyle(
+                      color: colors.onSurface.withValues(alpha: 0.68),
+                    ),
+                  ),
+                ),
+              )
+            else
+              ...summary.entries.asMap().entries.map((entry) {
+                final data = entry.value;
+                final name = (data['name'] as String?)?.trim().isNotEmpty == true
+                    ? (data['name'] as String).trim()
+                    : 'Mentee';
+                final profilePic = (data['profilePic'] as String?)?.trim() ?? '';
+                final score = (data['score'] as num?)?.toInt() ?? 0;
+
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 2,
+                  ),
+                  leading: CircleAvatar(
+                    backgroundImage:
+                        profilePic.isNotEmpty ? NetworkImage(profilePic) : null,
+                    child: profilePic.isEmpty
+                        ? Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                          )
+                        : null,
+                  ),
+                  title: Text(name),
+                  subtitle: Text('Rank #${entry.key + 1}'),
+                  trailing: Text(
+                    '$score pts',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                );
+              }),
+            const SizedBox(height: 6),
+          ],
         ],
       ),
     );

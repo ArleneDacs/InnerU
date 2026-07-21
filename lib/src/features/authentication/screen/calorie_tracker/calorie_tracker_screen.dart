@@ -2,16 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/barcode_scanner_screen.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 import 'package:selfcare_projects/src/services/ollama_nutrition_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class CalorieTrackerScreen extends StatefulWidget {
   const CalorieTrackerScreen({super.key});
@@ -159,8 +161,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     'serving': 'srv',
   };
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final CalorieTrackerApiService _calorieApi =
+      CalorieTrackerApiService.instance;
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _mealController = TextEditingController();
   final TextEditingController _quantityController = TextEditingController();
@@ -168,11 +170,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   final TextEditingController _proteinController = TextEditingController();
   final TextEditingController _carbController = TextEditingController();
   final TextEditingController _fatController = TextEditingController();
+  final FocusNode _mealFocusNode = FocusNode();
 
   Timer? _searchDebounce;
   Timer? _goalHintTimer;
   int _dailyGoal = 2000;
   final int _dailyWaterGoal = 8;
+  Map<String, dynamic>? _todayDayData;
+  List<Map<String, dynamic>> _historyDays = [];
+  List<Map<String, dynamic>> _todayEntries = [];
+  bool _isLoadingCalorieData = true;
   bool _isSavingGoal = false;
   bool _isLookingUpFood = false;
   bool _isSearchingSuggestions = false;
@@ -191,24 +198,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       'Saved foods are reused first. AI is only used for new foods.';
   List<_NutritionLookupResult> _onlineSuggestions = [];
 
-  String get _userId => _auth.currentUser!.uid;
   String get _todayKey => DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-  DocumentReference<Map<String, dynamic>> get _dayRef => _firestore
-      .collection('users')
-      .doc(_userId)
-      .collection('calorie_logs')
-      .doc(_todayKey);
-
-  CollectionReference<Map<String, dynamic>> get _foodMemoryRef =>
-      _firestore.collection('users').doc(_userId).collection('food_memory');
+  String get _sessionUserId =>
+      AuthService.instance.currentUserId ?? AuthService.instance.currentSession?.id.toString() ?? '';
 
   @override
   void initState() {
     super.initState();
     _selectedHistoryDateKey = _todayKey;
     _historyWeekStart = _startOfWeekSunday(DateTime.now());
-    _loadGoal();
+    _loadCalorieData();
     _showGoalHint();
     _refreshOllamaStatus();
   }
@@ -237,11 +236,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final theme = Theme.of(context);
         return Container(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -252,20 +252,26 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   width: 44,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD6DDCF),
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
               ),
               const SizedBox(height: 18),
-              const Text(
+              Text(
                 'Quick Scan',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Choose how you want to add food faster.',
-                style: TextStyle(color: Colors.black54),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+                ),
               ),
               const SizedBox(height: 18),
               _buildScanOptionTile(
@@ -294,17 +300,56 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
-  Future<void> _loadGoal() async {
+  Future<void> _loadCalorieData() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingCalorieData = true;
+    });
+
     try {
-      final snapshot = await _dayRef.get();
-      final data = snapshot.data();
-      final goal = (data?['dailyGoal'] as num?)?.toInt();
-      if (goal != null && mounted) {
+      final results = await Future.wait([
+        _calorieApi.fetchDay(date: _todayKey),
+        _calorieApi.fetchHistory(limit: 90),
+      ]);
+
+      if (!mounted) return;
+
+      final dayResponse = results[0] as Map<String, dynamic>;
+      final historyResponse = results[1] as List<Map<String, dynamic>>;
+      final dayData = dayResponse['day'];
+      final entries = dayResponse['entries'];
+      final goal = (dayData is Map
+              ? (dayData['dailyGoal'] as num?)?.toInt()
+              : null) ??
+          _dailyGoal;
+
+      setState(() {
+        _todayDayData = dayData is Map
+            ? dayData.cast<String, dynamic>()
+            : <String, dynamic>{};
+        _todayEntries = entries is List
+            ? entries
+                .whereType<Map>()
+                .map((item) => item.cast<String, dynamic>())
+                .toList()
+            : <Map<String, dynamic>>[];
+        _historyDays = historyResponse;
         setState(() {
           _dailyGoal = goal;
         });
+      });
+    } catch (_) {
+      if (mounted) {
+        _showSnackBar('Could not load calorie data.');
       }
-    } catch (_) {}
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingCalorieData = false;
+        });
+      }
+    }
   }
 
   Future<void> _refreshOllamaStatus() async {
@@ -348,15 +393,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     });
 
     try {
-      await _dayRef.set({
-        'dailyGoal': goal,
-        'date': _todayKey,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final response = await _calorieApi.updateDay(
+        date: _todayKey,
+        dailyGoal: goal,
+      );
+      final day = response['day'];
 
       if (!mounted) return;
       setState(() {
         _dailyGoal = goal;
+        if (day is Map) {
+          _todayDayData = day.cast<String, dynamic>();
+        }
       });
     } catch (_) {
       _showSnackBar('Failed to save calorie goal.');
@@ -635,7 +683,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       final autoDetected = await _analyzeCapturedMealPhoto(image.path);
       if (!mounted || autoDetected) return;
       if (!autoDetected) {
-        await _promptCameraMealLabel();
+        _showSnackBar(
+          'Could not identify the food clearly. You can still edit the meal name manually.',
+        );
       }
     } catch (_) {
       _showSnackBar('Could not open the camera.');
@@ -646,42 +696,6 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         });
       }
     }
-  }
-
-  Future<void> _promptCameraMealLabel() async {
-    var mealNameText = _mealController.text.trim();
-    final mealName = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('What food is this?'),
-          content: TextFormField(
-            initialValue: mealNameText,
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            onChanged: (value) => mealNameText = value,
-            decoration: const InputDecoration(
-              hintText: 'Ex. Chicken burger, fries, milk tea',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Later'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, mealNameText.trim()),
-              child: const Text('Use This'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || mealName == null || mealName.isEmpty) return;
-    _mealController.text = mealName;
-    _handleMealNameChanged(mealName);
-    await _ensureNutritionForMeal(mealName);
   }
 
   Future<bool> _analyzeCapturedMealPhoto(String imagePath) async {
@@ -793,10 +807,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
     final ollamaEstimate = await _estimateMealWithOllama(_mealPhotoPath);
     if (ollamaEstimate != null) {
-      final result = _nutritionResultFromOllamaEstimate(ollamaEstimate);
+      final result = await _nutritionResultFromDetectedMealName(
+        ollamaEstimate.mealName,
+        fallback: _nutritionResultFromOllamaEstimate(ollamaEstimate),
+      );
       _applyOnlineSuggestion(result);
       await _saveFoodMemory(
-        ollamaEstimate.mealName,
+        result.displayName,
         result,
         source: 'ollama_image_estimate',
       );
@@ -811,7 +828,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final ollamaEstimate = await _estimateMealWithOllama(imagePath);
     if (!mounted || ollamaEstimate == null) return false;
 
-    final result = _nutritionResultFromOllamaEstimate(ollamaEstimate);
+    final result = await _nutritionResultFromDetectedMealName(
+      ollamaEstimate.mealName,
+      fallback: _nutritionResultFromOllamaEstimate(ollamaEstimate),
+    );
     _mealController.text = result.displayName;
     _handleMealNameChanged(result.displayName);
     _applyOnlineSuggestion(result);
@@ -841,6 +861,15 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
+  Future<_NutritionLookupResult> _nutritionResultFromDetectedMealName(
+    String mealName, {
+    required _NutritionLookupResult fallback,
+  }) async {
+    final lookup = await _lookupNutritionForMealName(mealName);
+    if (lookup != null) return lookup;
+    return fallback;
+  }
+
   Future<OllamaNutritionEstimate?> _estimateMealWithOllama(
     String? imagePath,
   ) async {
@@ -857,7 +886,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   Future<String?> _uploadMealPhotoIfNeeded() async {
-    final photoPath = _mealPhotoPath;
+      final photoPath = _mealPhotoPath;
     if (photoPath == null || photoPath.isEmpty) return null;
     if (!ImageStorageService.isConfigured) return null;
 
@@ -866,7 +895,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       return await ImageStorageService.uploadImageBytes(
         bytes,
         fileName:
-            'meal_${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+            'meal_${_sessionUserId}_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
     } catch (_) {
       return null;
@@ -907,8 +936,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     if (key.isEmpty) return null;
 
     try {
-      final snapshot = await _foodMemoryRef.doc(key).get();
-      final data = snapshot.data();
+      final data = await _calorieApi.lookupFoodMemory(key);
       if (data == null) return null;
 
       final calories = (data['calories'] as num?)?.toInt();
@@ -930,6 +958,36 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
   }
 
+  Future<_NutritionLookupResult?> _lookupNutritionForMealName(
+    String mealName,
+  ) async {
+    final cached = await _lookupFoodMemory(mealName);
+    if (cached != null) return cached;
+
+    final preset = _findPresetFood(mealName);
+    if (preset != null) {
+      return _NutritionLookupResult(
+        displayName: preset.name,
+        calories: preset.calories,
+        protein: preset.protein,
+        carbs: preset.carbs,
+        fat: preset.fat,
+        subtitle: 'Matched from your saved food presets',
+      );
+    }
+
+    try {
+      final suggestions = await _fetchOnlineSuggestions(mealName, limit: 1);
+      if (suggestions.isNotEmpty) {
+        return suggestions.first;
+      }
+    } catch (error) {
+      debugPrint('Meal nutrition lookup failed: $error');
+    }
+
+    return null;
+  }
+
   Future<void> _saveFoodMemory(
     String mealName,
     _NutritionLookupResult nutrition, {
@@ -939,17 +997,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     if (key.isEmpty) return;
 
     try {
-      await _foodMemoryRef.doc(key).set({
-        'key': key,
-        'displayName': nutrition.displayName,
-        'lookupName': mealName.trim(),
-        'calories': nutrition.calories,
-        'protein': nutrition.protein,
-        'carbs': nutrition.carbs,
-        'fat': nutrition.fat,
-        'source': source,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await _calorieApi.upsertFoodMemory(
+        key: key,
+        displayName: nutrition.displayName,
+        lookupName: mealName.trim(),
+        calories: nutrition.calories,
+        protein: nutrition.protein,
+        carbs: nutrition.carbs,
+        fat: nutrition.fat,
+        source: source,
+      );
     } catch (error) {
       debugPrint('Failed to save food memory: $error');
     }
@@ -997,27 +1054,34 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       final photoUrl = await _uploadMealPhotoIfNeeded();
       if (!mounted) return;
 
-      await _dayRef.set({
-        'dailyGoal': _dailyGoal,
-        'date': _todayKey,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      await _dayRef.collection('entries').add({
-        'meal': mealName,
-        'mealType': _selectedMealType,
-        'calories': calories,
-        'protein': protein,
-        'carbs': carbs,
-        'fat': fat,
-        'quantity': quantity,
-        'measurementUnit': _selectedMeasurementUnit,
-        'photoUrl': photoUrl,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      await _refreshDailyTotals();
+      final response = await _calorieApi.addEntry(
+        date: _todayKey,
+        meal: mealName,
+        mealType: _selectedMealType,
+        calories: calories,
+        protein: protein,
+        carbs: carbs,
+        fat: fat,
+        quantity: quantity,
+        measurementUnit: _selectedMeasurementUnit,
+        photoUrl: photoUrl,
+      );
       if (!mounted) return;
+
+      final day = response['day'];
+      final entries = response['entries'];
+      setState(() {
+        if (day is Map) {
+          _todayDayData = day.cast<String, dynamic>();
+          _dailyGoal = (day['dailyGoal'] as num?)?.toInt() ?? _dailyGoal;
+        }
+        _todayEntries = entries is List
+            ? entries
+                .whereType<Map>()
+                .map((item) => item.cast<String, dynamic>())
+                .toList()
+            : _todayEntries;
+      });
 
       _clearMealComposer();
       FocusManager.instance.primaryFocus?.unfocus();
@@ -1026,44 +1090,22 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
   }
 
-  Future<void> _refreshDailyTotals() async {
-    final snapshot = await _dayRef.collection('entries').get();
-    int totalCalories = 0;
-    int totalProtein = 0;
-    int totalCarbs = 0;
-    int totalFat = 0;
-
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
-      totalCalories += (data['calories'] as num?)?.toInt() ?? 0;
-      totalProtein += (data['protein'] as num?)?.toInt() ?? 0;
-      totalCarbs += (data['carbs'] as num?)?.toInt() ?? 0;
-      totalFat += (data['fat'] as num?)?.toInt() ?? 0;
-    }
-
-    await _dayRef.set({
-      'date': _todayKey,
-      'dailyGoal': _dailyGoal,
-      'totalCalories': totalCalories,
-      'totalProtein': totalProtein,
-      'totalCarbs': totalCarbs,
-      'totalFat': totalFat,
-      'mealCount': snapshot.docs.length,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
-
   Future<void> _setWaterGlasses(int glasses) async {
-    final clamped = glasses.clamp(0, 20);
+    final clamped = glasses.clamp(0, _dailyWaterGoal);
 
     try {
-      await _dayRef.set({
-        'date': _todayKey,
-        'dailyGoal': _dailyGoal,
-        'waterGlasses': clamped,
-        'waterGoal': _dailyWaterGoal,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final response = await _calorieApi.updateDay(
+        date: _todayKey,
+        dailyGoal: _dailyGoal,
+        waterGlasses: clamped,
+        waterGoal: _dailyWaterGoal,
+      );
+      final day = response['day'];
+      if (day is Map && mounted) {
+        setState(() {
+          _todayDayData = day.cast<String, dynamic>();
+        });
+      }
     } catch (_) {
       _showSnackBar('Failed to update water tracker.');
     }
@@ -1121,8 +1163,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       return 'liter';
     }
     if (normalized == 'cups') return 'cup';
-    if (normalized == 'tablespoons' || normalized == 'tablespoon')
+    if (normalized == 'tablespoons' || normalized == 'tablespoon') {
       return 'tbsp';
+    }
     if (normalized == 'teaspoons' || normalized == 'teaspoon') return 'tsp';
     if (normalized == 'slices') return 'slice';
     if (normalized == 'pieces' || normalized == 'pcs' || normalized == 'pc') {
@@ -1467,24 +1510,46 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final nutriments = product['nutriments'];
     if (nutriments is! Map<String, dynamic>) return null;
 
-    final servingCalories =
-        (nutriments['energy-kcal_serving'] as num?)?.toDouble();
-    final servingProtein = (nutriments['proteins_serving'] as num?)?.toDouble();
-    final servingCarbs =
-        (nutriments['carbohydrates_serving'] as num?)?.toDouble();
-    final servingFat = (nutriments['fat_serving'] as num?)?.toDouble();
-    final hundredCalories =
-        (nutriments['energy-kcal_100g'] as num?)?.toDouble();
-    final hundredProtein = (nutriments['proteins_100g'] as num?)?.toDouble();
-    final hundredCarbs = (nutriments['carbohydrates_100g'] as num?)?.toDouble();
-    final hundredFat = (nutriments['fat_100g'] as num?)?.toDouble();
+    final servingCalories = _readDouble(nutriments['energy-kcal_serving']);
+    final servingProtein = _readDouble(nutriments['proteins_serving']);
+    final servingCarbs = _readDouble(nutriments['carbohydrates_serving']);
+    final servingFat = _readDouble(nutriments['fat_serving']);
+    final hundredCalories = _readDouble(nutriments['energy-kcal_100g']);
+    final hundredProtein = _readDouble(nutriments['proteins_100g']);
+    final hundredCarbs = _readDouble(nutriments['carbohydrates_100g']);
+    final hundredFat = _readDouble(nutriments['fat_100g']);
+    final fallbackCalories = _readDouble(nutriments['energy-kcal']);
+    final servingGrams = _servingSizeInGrams(product['serving_size']);
+    final servingMultiplier = servingGrams == null ? null : servingGrams / 100;
 
-    final calories = servingCalories ?? hundredCalories;
+    final calculatedServingCalories =
+        servingMultiplier == null || hundredCalories == null
+            ? null
+            : hundredCalories * servingMultiplier;
+    final calculatedServingProtein =
+        servingMultiplier == null || hundredProtein == null
+            ? null
+            : hundredProtein * servingMultiplier;
+    final calculatedServingCarbs =
+        servingMultiplier == null || hundredCarbs == null
+            ? null
+            : hundredCarbs * servingMultiplier;
+    final calculatedServingFat = servingMultiplier == null || hundredFat == null
+        ? null
+        : hundredFat * servingMultiplier;
+
+    final calories = servingCalories ??
+        calculatedServingCalories ??
+        hundredCalories ??
+        fallbackCalories;
     if (calories == null || calories <= 0) return null;
 
     final productName = (product['product_name'] as String?)?.trim();
     final brands = (product['brands'] as String?)?.trim();
-    final amountSuffix = servingCalories != null ? 'serving' : '100g';
+    final amountSuffix =
+        servingCalories != null || calculatedServingCalories != null
+            ? 'serving'
+            : '100g';
     final displayName = productName == null || productName.isEmpty
         ? 'Food ($amountSuffix)'
         : '$productName ($amountSuffix)';
@@ -1492,11 +1557,30 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     return _NutritionLookupResult(
       displayName: displayName,
       calories: calories.round(),
-      protein: (servingProtein ?? hundredProtein ?? 0).round(),
-      carbs: (servingCarbs ?? hundredCarbs ?? 0).round(),
-      fat: (servingFat ?? hundredFat ?? 0).round(),
+      protein:
+          (servingProtein ?? calculatedServingProtein ?? hundredProtein ?? 0)
+              .round(),
+      carbs:
+          (servingCarbs ?? calculatedServingCarbs ?? hundredCarbs ?? 0).round(),
+      fat: (servingFat ?? calculatedServingFat ?? hundredFat ?? 0).round(),
       subtitle: brands == null || brands.isEmpty ? null : brands,
     );
+  }
+
+  double? _readDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(value.trim().replaceAll(',', '.'));
+    }
+    return null;
+  }
+
+  double? _servingSizeInGrams(dynamic servingSize) {
+    if (servingSize is! String) return null;
+    final match = RegExp(r'(\d+(?:[\.,]\d+)?)\s*(g|gram|grams|ml|mL)')
+        .firstMatch(servingSize);
+    if (match == null) return null;
+    return double.tryParse(match.group(1)!.replaceAll(',', '.'));
   }
 
   void _queueSuggestionSearch(String query) {
@@ -1564,30 +1648,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     });
 
     try {
-      final uri = Uri.https(
-        'world.openfoodfacts.org',
-        '/api/v2/product/$barcode',
-        {
-          'fields': 'product_name,brands,nutriments',
-        },
-      );
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'User-Agent': 'InnerU-SelfcareApp/1.0 (barcode food lookup)',
-        },
-      ).timeout(const Duration(seconds: 8));
-
-      if (response.statusCode != 200) {
+      final product = await _fetchBarcodeProduct(barcode);
+      if (product == null) {
         _showSnackBar('Could not fetch barcode nutrition info.');
-        return;
-      }
-
-      final payload = json.decode(response.body) as Map<String, dynamic>;
-      final product = payload['product'];
-      if (product is! Map<String, dynamic>) {
-        _showSnackBar('No nutrition data found for that barcode.');
         return;
       }
 
@@ -1612,11 +1675,60 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     }
   }
 
-  int _weeklyTotal(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, String key) {
+  Future<Map<String, dynamic>?> _fetchBarcodeProduct(String rawBarcode) async {
+    for (final barcode in _barcodeLookupCandidates(rawBarcode)) {
+      final uri = Uri.https(
+        'world.openfoodfacts.org',
+        '/api/v2/product/$barcode',
+        {
+          'fields': 'product_name,brands,serving_size,nutriments',
+        },
+      );
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'User-Agent': 'InnerU-SelfcareApp/1.0 (barcode food lookup)',
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode != 200) continue;
+
+      final payload = json.decode(response.body);
+      if (payload is! Map<String, dynamic>) continue;
+      final product = payload['product'];
+      if (product is Map<String, dynamic>) return product;
+    }
+
+    return null;
+  }
+
+  List<String> _barcodeLookupCandidates(String rawBarcode) {
+    final digits = rawBarcode.replaceAll(RegExp(r'[^0-9]'), '');
+    final candidates = <String>[];
+
+    void add(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty && !candidates.contains(trimmed)) {
+        candidates.add(trimmed);
+      }
+    }
+
+    add(rawBarcode);
+    add(digits);
+    if (digits.length == 12) add('0$digits');
+    if (digits.length == 13 && digits.startsWith('0')) {
+      add(digits.substring(1));
+    }
+
+    return candidates;
+  }
+
+  int _weeklyTotal(List<Map<String, dynamic>> docs, String key) {
     return docs.fold<int>(
       0,
-      (sum, doc) => sum + ((doc.data()[key] as num?)?.toInt() ?? 0),
+      (total, doc) => total + ((doc[key] as num?)?.toInt() ?? 0),
     );
   }
 
@@ -1652,6 +1764,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     _searchDebounce?.cancel();
     _goalHintTimer?.cancel();
     _mealController.dispose();
+    _mealFocusNode.dispose();
     _quantityController.dispose();
     _calorieController.dispose();
     _proteinController.dispose();
@@ -1661,11 +1774,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   Widget _macroTile(String label, int grams, Color color) {
+    final theme = Theme.of(context);
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.84),
+          color: theme.colorScheme.surface.withValues(alpha: 0.84),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
@@ -1686,7 +1800,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+              ),
             ),
           ],
         ),
@@ -1705,23 +1822,25 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }) {
     final goalLabel = currentGoal <= 0 ? '--' : currentGoal.toString();
     final progressPercent = (progress * 100).round().clamp(0, 100);
+    final theme = Theme.of(context);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(30),
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFD9EFD6),
-            Color(0xFFB7D9B2),
+            theme.colorScheme.primary.withValues(alpha: 0.24),
+            theme.colorScheme.secondary.withValues(alpha: 0.28),
+            theme.colorScheme.surface,
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF90A17D).withOpacity(0.18),
+            color: theme.colorScheme.primary.withValues(alpha: 0.18),
             blurRadius: 24,
             offset: const Offset(0, 14),
           ),
@@ -1732,9 +1851,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'Daily Progress',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
               const Spacer(),
               InkWell(
@@ -1747,17 +1870,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: RichText(
                     text: TextSpan(
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
-                        color: Colors.black87,
+                        color: theme.colorScheme.onSurface,
                         fontWeight: FontWeight.w700,
                       ),
                       children: [
                         TextSpan(text: totalCalories.toString()),
                         TextSpan(
                           text: '/$goalLabel Kcal',
-                          style: const TextStyle(
-                            color: Colors.black45,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.58),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1777,7 +1901,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4D6A45),
+                  color: theme.colorScheme.primary,
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
@@ -1954,7 +2078,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     Text(
                       title,
                       style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w700),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2E2A28),
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1972,15 +2099,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     );
   }
 
-  Widget _buildHistoryCalendarStrip(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> dayDocs,
-  ) {
+  Widget _buildHistoryCalendarStrip(List<Map<String, dynamic>> dayDocs) {
     final now = DateTime.now();
     final currentWeekStart = _startOfWeekSunday(now);
     final weekStart = _historyWeekStart;
     final canGoNext = weekStart.isBefore(currentWeekStart);
     final logsByDate = {
-      for (final doc in dayDocs) doc.id: doc.data(),
+      for (final day in dayDocs) (day['date']?.toString() ?? ''): day,
     };
 
     return Container(
@@ -2525,7 +2650,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => _setWaterGlasses(waterGlasses + 1),
+                  onPressed: waterGlasses >= waterGoal
+                      ? null
+                      : () => _setWaterGlasses(waterGlasses + 1),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF69A9D5),
                     shape: RoundedRectangleBorder(
@@ -2595,526 +2722,628 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final weekStart =
         DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
     final weekStartKey = DateFormat('yyyy-MM-dd').format(weekStart);
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 4,
-        title: const Text(
-          'Food Calories',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
-            color: Colors.black87,
-          ),
-        ),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        actions: [
-          IconButton(
-            onPressed: _isLookingUpFood || _isCapturingMealPhoto
-                ? null
-                : _openScanOptions,
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF4D6A45),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-            icon: const Icon(Icons.center_focus_weak_rounded),
-            tooltip: 'Quick scan',
-          ),
-          const SizedBox(width: 4),
-          TextButton(
-            onPressed: () => Navigator.pushNamed(context, '/todayIntake'),
-            child: const Text(
-              'Today',
-              style: TextStyle(
-                color: Color(0xFF90A17D),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: _dayRef.snapshots(),
-        builder: (context, daySnapshot) {
-          final dayData = daySnapshot.data?.data() ?? {};
-          final currentGoal =
-              (dayData['dailyGoal'] as num?)?.toInt() ?? _dailyGoal;
-          final totalCalories =
-              (dayData['totalCalories'] as num?)?.toInt() ?? 0;
-          final totalProtein = (dayData['totalProtein'] as num?)?.toInt() ?? 0;
-          final totalCarbs = (dayData['totalCarbs'] as num?)?.toInt() ?? 0;
-          final totalFat = (dayData['totalFat'] as num?)?.toInt() ?? 0;
-          final mealCount = (dayData['mealCount'] as num?)?.toInt() ?? 0;
-          final waterGlasses = (dayData['waterGlasses'] as num?)?.toInt() ?? 0;
-          final waterGoal =
-              (dayData['waterGoal'] as num?)?.toInt() ?? _dailyWaterGoal;
-          final progress = currentGoal <= 0
-              ? 0.0
-              : (totalCalories / currentGoal).clamp(0, 1).toDouble();
-
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: _firestore
-                .collection('users')
-                .doc(_userId)
-                .collection('calorie_logs')
-                .orderBy(FieldPath.documentId, descending: true)
-                .limit(90)
-                .snapshots(),
-            builder: (context, historySnapshot) {
-              final dayDocs = historySnapshot.data?.docs ?? [];
-              final weekDocs = dayDocs
-                  .where((doc) => doc.id.compareTo(weekStartKey) >= 0)
-                  .toList();
-              Map<String, dynamic>? selectedHistoryData;
-              for (final doc in dayDocs) {
-                if (doc.id == _selectedHistoryDateKey) {
-                  selectedHistoryData = doc.data();
-                  break;
-                }
-              }
-              final weeklyCalories = _weeklyTotal(weekDocs, 'totalCalories');
-              final weeklyProtein = _weeklyTotal(weekDocs, 'totalProtein');
-              final weeklyCarbs = _weeklyTotal(weekDocs, 'totalCarbs');
-              final weeklyFat = _weeklyTotal(weekDocs, 'totalFat');
-
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHistoryCalendarStrip(dayDocs),
-                    const SizedBox(height: 18),
-                    _buildDailyProgressCard(
-                      totalCalories: totalCalories,
-                      currentGoal: currentGoal,
-                      totalCarbs: totalCarbs,
-                      totalProtein: totalProtein,
-                      totalFat: totalFat,
-                      mealCount: mealCount,
-                      progress: progress,
+              return Scaffold(
+                backgroundColor: theme.scaffoldBackgroundColor,
+                appBar: AppBar(
+                  backgroundColor: companyTheme.surfaceColor,
+                  foregroundColor: companyTheme.inkColor,
+                  iconTheme: IconThemeData(color: companyTheme.inkColor),
+                  titleSpacing: 4,
+                  title: Text(
+                    'Food Calories',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                      color: companyTheme.inkColor,
                     ),
-                    const SizedBox(height: 18),
-                    _buildWaterTracker(
-                      waterGlasses: waterGlasses,
-                      waterGoal: waterGoal,
-                    ),
-                    const SizedBox(height: 18),
-                    _buildSoftSection(
-                      title: 'Selected Day',
-                      child: _buildSelectedDayHistoryCard(selectedHistoryData),
-                    ),
-                    const SizedBox(height: 18),
-                    _buildSoftSection(
-                      title: 'Preset Foods',
-                      trailing: TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _showPresetFoods = !_showPresetFoods;
-                          });
-                        },
-                        child: Text(_showPresetFoods ? 'Hide' : 'Show'),
+                  ),
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  actions: [
+                    IconButton(
+                      onPressed: _isLookingUpFood || _isCapturingMealPhoto
+                          ? null
+                          : _openScanOptions,
+                      style: IconButton.styleFrom(
+                        backgroundColor: theme.colorScheme.surface,
+                        foregroundColor: theme.iconTheme.color,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
                       ),
-                      child: _showPresetFoods
-                          ? Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: _presetFoods.map((preset) {
-                                return ActionChip(
-                                  label: Text(preset.name),
-                                  onPressed: () => _applyPresetFood(preset),
-                                );
-                              }).toList(),
-                            )
-                          : const Text(
-                              'Show quick picks for common foods and portion ideas.',
-                              style: TextStyle(color: Colors.black54),
-                            ),
+                      icon: const Icon(Icons.center_focus_weak_rounded),
+                      tooltip: 'Quick scan',
                     ),
-                    const SizedBox(height: 18),
-                    _buildSoftSection(
-                      title: 'Add Meal',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildMealTypeSelector(),
-                          const SizedBox(height: 12),
-                          _buildCapturedMealFieldsHint(),
-                          Autocomplete<_PresetFood>(
-                            optionsBuilder: (textEditingValue) {
-                              final query =
-                                  textEditingValue.text.trim().toLowerCase();
-                              if (query.isEmpty) {
-                                return const Iterable<_PresetFood>.empty();
-                              }
-                              return _presetFoods.where(
-                                (preset) =>
-                                    preset.name.toLowerCase().contains(query),
-                              );
-                            },
-                            displayStringForOption: (option) => option.name,
-                            onSelected: _applyPresetFood,
-                            fieldViewBuilder: (
-                              context,
-                              textEditingController,
-                              focusNode,
-                              onFieldSubmitted,
-                            ) {
-                              return TextField(
-                                controller: textEditingController,
-                                focusNode: focusNode,
-                                onChanged: (value) {
-                                  _mealController.value =
-                                      textEditingController.value;
-                                  _handleMealNameChanged(value);
-                                },
-                                decoration: InputDecoration(
-                                  labelText: _mealPhotoPath == null
-                                      ? 'Food Name'
-                                      : 'Food Name',
-                                  hintText: _mealPhotoPath == null
-                                      ? 'Meal or snack'
-                                      : 'Detected food name',
-                                  helperText: _mealPhotoPath == null
-                                      ? 'Use food name plus quantity/unit below for better accuracy.'
-                                      : 'Review the detected food name before saving.',
-                                  filled: true,
-                                  fillColor: const Color(0xFFF8FAF5),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
+                    const SizedBox(width: 4),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.pushNamed(context, '/todayIntake'),
+                      child: Text(
+                        'Today',
+                        style: TextStyle(
+                          color: companyTheme.iconColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                body: _isLoadingCalorieData
+                    ? const Center(child: CircularProgressIndicator())
+                    : Builder(
+                        builder: (context) {
+                          final dayData = _todayDayData ?? {};
+                          final currentGoal = (dayData['dailyGoal'] as num?)
+                                  ?.toInt() ??
+                              _dailyGoal;
+                          final totalCalories =
+                              (dayData['totalCalories'] as num?)?.toInt() ?? 0;
+                          final totalProtein =
+                              (dayData['totalProtein'] as num?)?.toInt() ?? 0;
+                          final totalCarbs =
+                              (dayData['totalCarbs'] as num?)?.toInt() ?? 0;
+                          final totalFat =
+                              (dayData['totalFat'] as num?)?.toInt() ?? 0;
+                          final mealCount =
+                              (dayData['mealCount'] as num?)?.toInt() ?? 0;
+                          final waterGlasses =
+                              (dayData['waterGlasses'] as num?)?.toInt() ?? 0;
+                          final waterGoal =
+                              (dayData['waterGoal'] as num?)?.toInt() ??
+                                  _dailyWaterGoal;
+                          final progress = currentGoal <= 0
+                              ? 0.0
+                              : (totalCalories / currentGoal)
+                                  .clamp(0, 1)
+                                  .toDouble();
+
+                          final dayDocs = _historyDays;
+                          final weekDocs = dayDocs
+                              .where((doc) =>
+                                  (doc['date']?.toString() ?? '')
+                                      .compareTo(weekStartKey) >= 0)
+                              .toList();
+                          Map<String, dynamic>? selectedHistoryData;
+                          for (final day in dayDocs) {
+                            if (day['date']?.toString() ==
+                                _selectedHistoryDateKey) {
+                              selectedHistoryData = day;
+                              break;
+                            }
+                          }
+                          if (_selectedHistoryDateKey == _todayKey) {
+                            selectedHistoryData = dayData;
+                          }
+                          final weeklyCalories =
+                              _weeklyTotal(weekDocs, 'totalCalories');
+                          final weeklyProtein =
+                              _weeklyTotal(weekDocs, 'totalProtein');
+                          final weeklyCarbs =
+                              _weeklyTotal(weekDocs, 'totalCarbs');
+                          final weeklyFat = _weeklyTotal(weekDocs, 'totalFat');
+
+                          return SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _quantityController,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                                  onChanged: (_) {
-                                    _handleMealNameChanged(
-                                        _mealController.text.trim());
-                                  },
-                                  decoration: InputDecoration(
-                                    labelText: _mealPhotoPath == null
-                                        ? 'Quantity'
-                                        : 'Quantity',
-                                    hintText: _mealPhotoPath == null
-                                        ? 'Enter amount'
-                                        : 'Enter amount',
-                                    filled: true,
-                                    fillColor: const Color(0xFFF8FAF5),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                  ),
-                                ),
+                              _buildHistoryCalendarStrip(dayDocs),
+                              const SizedBox(height: 18),
+                              _buildDailyProgressCard(
+                                totalCalories: totalCalories,
+                                currentGoal: currentGoal,
+                                totalCarbs: totalCarbs,
+                                totalProtein: totalProtein,
+                                totalFat: totalFat,
+                                mealCount: mealCount,
+                                progress: progress,
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: _selectedMeasurementUnit,
-                                  decoration: InputDecoration(
-                                    labelText: _mealPhotoPath == null
-                                        ? 'Measurement'
-                                        : 'Unit',
-                                    filled: true,
-                                    fillColor: const Color(0xFFF8FAF5),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                  ),
-                                  items: _measurementUnits.map((unit) {
-                                    return DropdownMenuItem<String>(
-                                      value: unit,
-                                      child: Text(
-                                        _measurementUnitLabels[unit] ?? unit,
-                                      ),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    if (value == null) return;
+                              const SizedBox(height: 18),
+                              _buildWaterTracker(
+                                waterGlasses: waterGlasses,
+                                waterGoal: waterGoal,
+                              ),
+                              const SizedBox(height: 18),
+                              _buildSoftSection(
+                                title: 'Selected Day',
+                                child: _buildSelectedDayHistoryCard(
+                                    selectedHistoryData),
+                              ),
+                              const SizedBox(height: 18),
+                              _buildSoftSection(
+                                title: 'Preset Foods',
+                                trailing: TextButton(
+                                  onPressed: () {
                                     setState(() {
-                                      _selectedMeasurementUnit = value;
+                                      _showPresetFoods = !_showPresetFoods;
                                     });
-                                    _handleMealNameChanged(
-                                        _mealController.text.trim());
                                   },
+                                  child:
+                                      Text(_showPresetFoods ? 'Hide' : 'Show'),
                                 ),
-                              ),
-                            ],
-                          ),
-                          if (_isSearchingSuggestions)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 8),
-                              child: LinearProgressIndicator(minHeight: 3),
-                            ),
-                          if (_onlineSuggestions.isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAF5),
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Suggestions',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  ..._onlineSuggestions.map((suggestion) {
-                                    return ListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(suggestion.displayName),
-                                      subtitle: Text(
-                                        suggestion.subtitle == null
-                                            ? '${suggestion.calories} kcal'
-                                            : '${suggestion.subtitle} - ${suggestion.calories} kcal',
+                                child: _showPresetFoods
+                                    ? Wrap(
+                                        spacing: 10,
+                                        runSpacing: 10,
+                                        children: _presetFoods.map((preset) {
+                                          return ActionChip(
+                                            label: Text(preset.name),
+                                            onPressed: () =>
+                                                _applyPresetFood(preset),
+                                          );
+                                        }).toList(),
+                                      )
+                                    : const Text(
+                                        'Show quick picks for common foods and portion ideas.',
+                                        style: TextStyle(color: Colors.black54),
                                       ),
-                                      trailing: const Icon(Icons.north_west),
-                                      onTap: () =>
-                                          _applyOnlineSuggestion(suggestion),
-                                    );
-                                  }),
-                                ],
                               ),
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          _buildOllamaStatusBanner(),
-                          const SizedBox(height: 12),
-                          Material(
-                            color: const Color(0xFFF4F7F0),
-                            borderRadius: BorderRadius.circular(22),
-                            child: InkWell(
-                              onTap: _isLookingUpFood || _isCapturingMealPhoto
-                                  ? null
-                                  : _openScanOptions,
-                              borderRadius: BorderRadius.circular(22),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 14,
-                                ),
-                                child: Row(
+                              const SizedBox(height: 18),
+                              _buildSoftSection(
+                                title: 'Add Meal',
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Container(
-                                      width: 46,
-                                      height: 46,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFE6F0DF),
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: const Icon(
-                                        Icons.center_focus_weak_rounded,
-                                        color: Color(0xFF4D6A45),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    const Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Quick Scan',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
+                                    _buildMealTypeSelector(),
+                                    const SizedBox(height: 12),
+                                    _buildCapturedMealFieldsHint(),
+                                    RawAutocomplete<_PresetFood>(
+                                      textEditingController: _mealController,
+                                      focusNode: _mealFocusNode,
+                                      optionsBuilder: (textEditingValue) {
+                                        final query = textEditingValue.text
+                                            .trim()
+                                            .toLowerCase();
+                                        if (query.isEmpty) {
+                                          return const Iterable<
+                                              _PresetFood>.empty();
+                                        }
+                                        return _presetFoods.where(
+                                          (preset) => preset.name
+                                              .toLowerCase()
+                                              .contains(query),
+                                        );
+                                      },
+                                      displayStringForOption: (option) =>
+                                          option.name,
+                                      onSelected: _applyPresetFood,
+                                      optionsViewBuilder:
+                                          (context, onSelected, options) {
+                                        return Align(
+                                          alignment: Alignment.topLeft,
+                                          child: Material(
+                                            elevation: 4,
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            child: ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxHeight: 220,
+                                                maxWidth: 360,
+                                              ),
+                                              child: ListView.builder(
+                                                padding: EdgeInsets.zero,
+                                                shrinkWrap: true,
+                                                itemCount: options.length,
+                                                itemBuilder: (context, index) {
+                                                  final option =
+                                                      options.elementAt(index);
+                                                  return ListTile(
+                                                    title: Text(option.name),
+                                                    subtitle: Text(
+                                                      '${option.calories} kcal',
+                                                    ),
+                                                    onTap: () =>
+                                                        onSelected(option),
+                                                  );
+                                                },
+                                              ),
                                             ),
                                           ),
-                                          SizedBox(height: 2),
-                                          Text(
-                                            'Open camera or barcode scanner',
-                                            style: TextStyle(
-                                                color: Colors.black54),
+                                        );
+                                      },
+                                      fieldViewBuilder: (
+                                        context,
+                                        textEditingController,
+                                        focusNode,
+                                        onFieldSubmitted,
+                                      ) {
+                                        return TextField(
+                                          controller: textEditingController,
+                                          focusNode: focusNode,
+                                          onChanged: (value) {
+                                            _handleMealNameChanged(value);
+                                          },
+                                          decoration: InputDecoration(
+                                            labelText: _mealPhotoPath == null
+                                                ? 'Food Name'
+                                                : 'Food Name',
+                                            hintText: _mealPhotoPath == null
+                                                ? 'Meal or snack'
+                                                : 'Detected food name',
+                                            helperText: _mealPhotoPath == null
+                                                ? 'Use food name plus quantity/unit below for better accuracy.'
+                                                : 'Review the detected food name before saving.',
+                                            filled: true,
+                                            fillColor: const Color(0xFFF8FAF5),
+                                            border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              borderSide: BorderSide.none,
+                                            ),
+                                            enabledBorder: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              borderSide: BorderSide.none,
+                                            ),
                                           ),
-                                        ],
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _quantityController,
+                                            keyboardType: const TextInputType
+                                                .numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                            onChanged: (_) {
+                                              _handleMealNameChanged(
+                                                  _mealController.text.trim());
+                                            },
+                                            decoration: InputDecoration(
+                                              labelText: _mealPhotoPath == null
+                                                  ? 'Quantity'
+                                                  : 'Quantity',
+                                              hintText: _mealPhotoPath == null
+                                                  ? 'Enter amount'
+                                                  : 'Enter amount',
+                                              filled: true,
+                                              fillColor:
+                                                  const Color(0xFFF8FAF5),
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child:
+                                              DropdownButtonFormField<String>(
+                                            initialValue:
+                                                _selectedMeasurementUnit,
+                                            decoration: InputDecoration(
+                                              labelText: _mealPhotoPath == null
+                                                  ? 'Measurement'
+                                                  : 'Unit',
+                                              filled: true,
+                                              fillColor:
+                                                  const Color(0xFFF8FAF5),
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                            ),
+                                            items:
+                                                _measurementUnits.map((unit) {
+                                              return DropdownMenuItem<String>(
+                                                value: unit,
+                                                child: Text(
+                                                  _measurementUnitLabels[
+                                                          unit] ??
+                                                      unit,
+                                                ),
+                                              );
+                                            }).toList(),
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setState(() {
+                                                _selectedMeasurementUnit =
+                                                    value;
+                                              });
+                                              _handleMealNameChanged(
+                                                  _mealController.text.trim());
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (_isSearchingSuggestions)
+                                      const Padding(
+                                        padding: EdgeInsets.only(top: 8),
+                                        child: LinearProgressIndicator(
+                                            minHeight: 3),
+                                      ),
+                                    if (_onlineSuggestions.isNotEmpty) ...[
+                                      const SizedBox(height: 10),
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF8FAF5),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'Suggestions',
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            ..._onlineSuggestions
+                                                .map((suggestion) {
+                                              return ListTile(
+                                                contentPadding: EdgeInsets.zero,
+                                                title: Text(
+                                                    suggestion.displayName),
+                                                subtitle: Text(
+                                                  suggestion.subtitle == null
+                                                      ? '${suggestion.calories} kcal'
+                                                      : '${suggestion.subtitle} - ${suggestion.calories} kcal',
+                                                ),
+                                                trailing: const Icon(
+                                                    Icons.north_west),
+                                                onTap: () =>
+                                                    _applyOnlineSuggestion(
+                                                        suggestion),
+                                              );
+                                            }),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 12),
+                                    _buildOllamaStatusBanner(),
+                                    const SizedBox(height: 12),
+                                    Material(
+                                      color: const Color(0xFFF4F7F0),
+                                      borderRadius: BorderRadius.circular(22),
+                                      child: InkWell(
+                                        onTap: _isLookingUpFood ||
+                                                _isCapturingMealPhoto
+                                            ? null
+                                            : _openScanOptions,
+                                        borderRadius: BorderRadius.circular(22),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 14,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width: 46,
+                                                height: 46,
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xFFE6F0DF),
+                                                  borderRadius:
+                                                      BorderRadius.circular(16),
+                                                ),
+                                                child: const Icon(
+                                                  Icons
+                                                      .center_focus_weak_rounded,
+                                                  color: Color(0xFF4D6A45),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 14),
+                                              const Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Quick Scan',
+                                                      style: TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                    SizedBox(height: 2),
+                                                    Text(
+                                                      'Open camera or barcode scanner',
+                                                      style: TextStyle(
+                                                          color:
+                                                              Colors.black54),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              Text(
+                                                _isCapturingMealPhoto
+                                                    ? 'Opening...'
+                                                    : _isLookingUpFood
+                                                        ? 'Loading...'
+                                                        : 'Open',
+                                                style: const TextStyle(
+                                                  color: Color(0xFF4D6A45),
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                    Text(
-                                      _isCapturingMealPhoto
-                                          ? 'Opening...'
-                                          : _isLookingUpFood
-                                              ? 'Loading...'
-                                              : 'Open',
-                                      style: const TextStyle(
-                                        color: Color(0xFF4D6A45),
-                                        fontWeight: FontWeight.w700,
+                                    _buildMealPhotoPreview(),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        _numberField(
+                                          _calorieController,
+                                          'Calories',
+                                          hint: '200',
+                                          suffix: 'cal',
+                                          previewSuffix: 'cal',
+                                        ),
+                                        const SizedBox(width: 10),
+                                        _numberField(
+                                          _proteinController,
+                                          'Protein',
+                                          hint: '20',
+                                          suffix: 'g',
+                                          previewSuffix: 'g protein',
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        _numberField(
+                                          _carbController,
+                                          'Carbs',
+                                          hint: '30',
+                                          suffix: 'g',
+                                          previewSuffix: 'g carbs',
+                                        ),
+                                        const SizedBox(width: 10),
+                                        _numberField(
+                                          _fatController,
+                                          'Fat',
+                                          hint: '10',
+                                          suffix: 'g',
+                                          previewSuffix: 'g fat',
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        onPressed:
+                                            _isLookingUpFood ? null : _addMeal,
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor:
+                                              const Color(0xFF90A17D),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 15),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _isLookingUpFood
+                                              ? 'Looking Up Food...'
+                                              : 'Add Entry',
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                            ),
-                          ),
-                          _buildMealPhotoPreview(),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              _numberField(
-                                _calorieController,
-                                'Calories',
-                                hint: '200',
-                                suffix: 'cal',
-                                previewSuffix: 'cal',
-                              ),
-                              const SizedBox(width: 10),
-                              _numberField(
-                                _proteinController,
-                                'Protein',
-                                hint: '20',
-                                suffix: 'g',
-                                previewSuffix: 'g protein',
+                              const SizedBox(height: 18),
+                              _buildSoftSection(
+                                title: 'History',
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAF5),
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'This Week: $weeklyCalories kcal',
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text('Protein: ${weeklyProtein}g'),
+                                          Text('Carbs: ${weeklyCarbs}g'),
+                                          Text('Fat: ${weeklyFat}g'),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    if (dayDocs.isEmpty)
+                                      const Padding(
+                                        padding:
+                                            EdgeInsets.symmetric(vertical: 8),
+                                        child: Text('No calorie history yet.'),
+                                      )
+                                    else
+                                      ...dayDocs.map((day) {
+                                        final dateKey =
+                                            day['date']?.toString() ?? '';
+                                        return Card(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 10),
+                                          elevation: 0,
+                                          color: const Color(0xFFF8FAF5),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                          ),
+                                          child: ListTile(
+                                            title: Text(dateKey),
+                                            subtitle: Text(
+                                              '${(day['totalCalories'] as num?)?.toInt() ?? 0} kcal - '
+                                              'P ${(day['totalProtein'] as num?)?.toInt() ?? 0}g - '
+                                              'C ${(day['totalCarbs'] as num?)?.toInt() ?? 0}g - '
+                                              'F ${(day['totalFat'] as num?)?.toInt() ?? 0}g',
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              _numberField(
-                                _carbController,
-                                'Carbs',
-                                hint: '30',
-                                suffix: 'g',
-                                previewSuffix: 'g carbs',
-                              ),
-                              const SizedBox(width: 10),
-                              _numberField(
-                                _fatController,
-                                'Fat',
-                                hint: '10',
-                                suffix: 'g',
-                                previewSuffix: 'g fat',
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _isLookingUpFood ? null : _addMeal,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF90A17D),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 15),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                              ),
-                              child: Text(
-                                _isLookingUpFood
-                                    ? 'Looking Up Food...'
-                                    : 'Add Entry',
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    _buildSoftSection(
-                      title: 'History',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF8FAF5),
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'This Week: $weeklyCalories kcal',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text('Protein: ${weeklyProtein}g'),
-                                Text('Carbs: ${weeklyCarbs}g'),
-                                Text('Fat: ${weeklyFat}g'),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (dayDocs.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Text('No calorie history yet.'),
-                            )
-                          else
-                            ...dayDocs.map((doc) {
-                              final data = doc.data();
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                elevation: 0,
-                                color: const Color(0xFFF8FAF5),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                                child: ListTile(
-                                  title: Text(doc.id),
-                                  subtitle: Text(
-                                    '${(data['totalCalories'] as num?)?.toInt() ?? 0} kcal - '
-                                    'P ${(data['totalProtein'] as num?)?.toInt() ?? 0}g - '
-                                    'C ${(data['totalCarbs'] as num?)?.toInt() ?? 0}g - '
-                                    'F ${(data['totalFat'] as num?)?.toInt() ?? 0}g',
-                                  ),
-                                ),
-                              );
-                            }),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
-      ),
-    );
+      );
   }
 }
 

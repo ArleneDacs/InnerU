@@ -102,7 +102,6 @@ void _compressGif(String inputPath, {Directory? outDirectory}) {
   final outputPath = outDirectory == null
       ? inputPath
       : '${outDirectory.path}${Platform.pathSeparator}$fileName';
-  final outputFile = File(outputPath);
 
   if (outDirectory == null && encodedBytes.length >= originalBytes.length) {
     stdout.writeln(

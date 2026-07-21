@@ -1,16 +1,20 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/manage_companies.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/viewalluser.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/admin_access.dart';
+import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/utils/phone_launcher.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(MyApp());
+void main() {
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -18,39 +22,68 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       title: 'Coaches App',
       home: AddCoachScreen(),
     );
   }
 }
 
-class Coach {
-  final String fullname;
-  final String phone;
-  final String bio;
-  final String profilePic; // New field for image URL
-  final Color backgroundColor;
-
-  Coach({
-    required this.fullname,
-    this.phone = '',
-    this.bio = '',
-    this.profilePic = '', // Default empty
-    required this.backgroundColor,
+class CoachDirectoryEntry {
+  const CoachDirectoryEntry({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.companyName,
+    required this.companyCode,
+    required this.profilePic,
+    required this.role,
   });
+
+  final String id;
+  final String name;
+  final String email;
+  final String phone;
+  final String companyName;
+  final String companyCode;
+  final String profilePic;
+  final String role;
+
+  factory CoachDirectoryEntry.fromApi(CoachDirectoryApiCoach coach) {
+    return CoachDirectoryEntry(
+      id: coach.id,
+      name: coach.name,
+      email: coach.email,
+      phone: coach.number?.trim() ?? '',
+      companyName: coach.companyName?.trim() ?? '',
+      companyCode: coach.companyCode?.trim() ?? '',
+      profilePic: coach.profilePic?.trim() ?? '',
+      role: coach.role,
+    );
+  }
 }
 
 class CoachProfileDialog extends StatelessWidget {
-  final Coach coach;
-
   const CoachProfileDialog({
     super.key,
     required this.coach,
   });
 
-  Future<void> _launchDialer(BuildContext context, String phoneNumber) async {
-    final normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  final CoachDirectoryEntry coach;
+
+  ui.Color _backgroundColor(BuildContext context) {
+    final palette = <ui.Color>[
+      const ui.Color(0xFF90A17D),
+      const ui.Color(0xFF6D849A),
+      const ui.Color(0xFF8A6D6D),
+      const ui.Color(0xFF7F8C5A),
+    ];
+    return palette[coach.name.hashCode.abs() % palette.length];
+  }
+
+  Future<void> _launchDialer(BuildContext context) async {
+    final normalizedPhoneNumber = normalizePhoneNumber(coach.phone);
     if (normalizedPhoneNumber.isEmpty) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(
@@ -60,86 +93,55 @@ class CoachProfileDialog extends StatelessWidget {
       return;
     }
 
-    // Get current date dynamically in the format 'yyyy-MM-dd'
-    String formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    // Get the current logged-in user from FirebaseAuth
-    User? currentUser = FirebaseAuth.instance.currentUser;
+    try {
+      final userData = await UserService.getUserData();
+      final username = (userData['username'] ?? userData['name'])
+          ?.toString()
+          .trim();
 
-    if (currentUser != null) {
-      String userId = currentUser.uid; // Get the userId from the Firebase user
-
-      try {
-        // Fetch username from Firestore user document
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .get();
-        String? username = userDoc.get('username');
-
-        if (username != null) {
-          String documentId =
-              '$username-$formattedDate'; // Firestore document ID
-
-          bool launched = false;
-          try {
-            launched = await launchPhoneNumber(normalizedPhoneNumber);
-          } catch (e) {
-            debugPrint("Error launching dialer: $e");
-          }
-
-          if (launched) {
-            debugPrint("Dialer launched successfully");
-
-            // Update or create Firestore document for the current user and date
-            try {
-              await FirebaseFirestore.instance
-                  .collection('dailytracker')
-                  .doc(documentId)
-                  .set({
-                'username': username,
-                'date': formattedDate,
-                'call': true, // Set 'call' field to true
-              }, SetOptions(merge: true));
-
-              debugPrint(
-                  "Firestore updated successfully: 'call' field set to true");
-            } catch (e) {
-              debugPrint("Error updating Firestore: $e");
-            }
-          } else {
-            debugPrint("Could not launch dialer");
-            if (!context.mounted) {
-              return;
-            }
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(
-                content: Text(
-                  "Couldn't open the dialer on this device. If you're using the iPhone simulator, the Phone app isn't available there.",
-                ),
-              ),
-            );
-          }
-        } else {
-          debugPrint("Error: Username not found for userId: $userId");
+      final launched = await launchPhoneNumber(normalizedPhoneNumber);
+      if (!launched) {
+        if (!context.mounted) {
+          return;
         }
-      } catch (e) {
-        debugPrint("Error fetching user data: $e");
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Couldn't open the dialer on this device. If you're using the iPhone simulator, the Phone app isn't available there.",
+            ),
+          ),
+        );
+        return;
       }
-    } else {
-      debugPrint("No user logged in");
+
+      if (username != null && username.isNotEmpty) {
+        await DailyTrackerApiService.instance.upsert(
+          date: formattedDate,
+          username: username,
+          call: true,
+          callCount: 1,
+          companyId: userData['companyId']?.toString(),
+          companyCode: userData['companyCode']?.toString(),
+          companyName: userData['companyName']?.toString(),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to log coach call: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final backgroundColor = _backgroundColor(context);
     return Dialog(
-      backgroundColor: coach.backgroundColor,
+      backgroundColor: backgroundColor,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(24),
       ),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -155,83 +157,107 @@ class CoachProfileDialog extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(
-                    CupertinoIcons.chat_bubble_2_fill,
+                    CupertinoIcons.phone_fill,
                     size: 30,
                     color: Colors.white,
                   ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
+                  onPressed: () => _launchDialer(context),
                 ),
               ],
             ),
-            CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.white,
-              backgroundImage: coach.profilePic.isNotEmpty
-                  ? NetworkImage(coach.profilePic)
-                  : null,
-              child: coach.profilePic.isEmpty
-                  ? const Icon(
-                      Icons.person,
-                      size: 50,
-                      color: Colors.grey,
-                    )
-                  : null,
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  width: 2,
+                ),
+              ),
+              child: CircleAvatar(
+                radius: 48,
+                backgroundColor: Colors.white,
+                backgroundImage: coach.profilePic.isNotEmpty
+                    ? NetworkImage(coach.profilePic)
+                    : null,
+                child: coach.profilePic.isEmpty
+                    ? const Icon(
+                        Icons.person,
+                        size: 48,
+                        color: Colors.grey,
+                      )
+                    : null,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             Text(
-              coach.fullname,
+              coach.name,
               style: const TextStyle(
                 fontSize: 24,
-                fontWeight: FontWeight.bold,
+                fontWeight: ui.FontWeight.bold,
                 color: Colors.white,
               ),
-              textAlign: TextAlign.center,
+              textAlign: ui.TextAlign.center,
             ),
             GestureDetector(
-              onTap: () {
-                _launchDialer(
-                    context,
-                    coach
-                        .phone); // Call the launcher with the coach's phone number
-              },
+              onTap: () => _launchDialer(context),
               child: Text(
                 coach.phone.isNotEmpty ? coach.phone : 'No phone available',
                 style: const TextStyle(
                   fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: ui.FontWeight.bold,
                   color: Colors.white,
-                  decoration: TextDecoration.underline,
+                  decoration: ui.TextDecoration.underline,
                 ),
-                textAlign: TextAlign.center,
+                textAlign: ui.TextAlign.center,
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
             const Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Bio:',
+                'About',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: ui.FontWeight.w700,
+                  letterSpacing: 1,
+                  color: Colors.white70,
                 ),
               ),
             ),
             const SizedBox(height: 8),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(16),
               ),
-              child: Text(
-                coach.bio.isEmpty ? 'No bio available' : coach.bio,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    coach.companyName.isNotEmpty
+                        ? coach.companyName
+                        : 'No company assigned yet',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    coach.companyCode.isNotEmpty
+                        ? 'Company code: ${coach.companyCode}'
+                        : 'Company code not available',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -249,14 +275,12 @@ class AddCoachScreen extends StatefulWidget {
 }
 
 class _AddCoachScreenState extends State<AddCoachScreen> {
-  late TextEditingController _searchController;
-  final String allowedUserUID =
-      "hG1FxGW2xrVXtKZnnDWERJpPQof2"; // Replace with the actual UID
-  User? _currentUser;
+  late final TextEditingController _searchController;
+  Future<List<CoachDirectoryEntry>>? _coachesFuture;
+  bool _isLoading = true;
   bool _isAdmin = false;
   bool _isCoachUser = false;
   bool _isAuthorized = false;
-  bool _isLoading = true;
   bool _coachProfileExists = false;
 
   @override
@@ -266,188 +290,141 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
     _checkUserAccess();
   }
 
-  Stream<List<Coach>> getCoachesStream() {
-    return FirebaseFirestore.instance
-        .collection('coaches')
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return Coach(
-          fullname: data['fullName'] ?? '',
-          phone: data['phonenumber'] ?? '',
-          bio: data['bio'] ?? '',
-          profilePic: data['profilePic'] ?? '', // Get profile picture URL
-          backgroundColor: data['backgroundColor'] == 'green'
-              ? const Color(0xFF90A17D)
-              : const Color(0xFF6D849A),
-        );
-      }).toList();
-    });
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkUserAccess() async {
-    _currentUser = FirebaseAuth.instance.currentUser;
+    try {
+      final data = await UserService.getUserData();
+      final role = (data['role'] as String?)?.toLowerCase().trim() ?? '';
+      final isCoach = data['is_coach'] == true || role == 'coach';
+      final isAdmin = AdminAccess.hasAdminRole(data);
 
-    if (_currentUser != null) {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .get();
-      final data = userDoc.data() ?? {};
-      final role = (data['role'] as String?)?.toLowerCase();
-      final isCoach = data['isCoach'] == true || role == 'coach';
-
-      _isAdmin = _currentUser!.uid == allowedUserUID;
-      _isCoachUser = isCoach;
-      _isAuthorized = _isAdmin || _isCoachUser;
-
-      if (_isCoachUser) {
-        final coachDoc = await FirebaseFirestore.instance
-            .collection('coaches')
-            .doc(_currentUser!.uid)
-            .get();
-        _coachProfileExists = coachDoc.exists;
+      if (!mounted) {
+        return;
       }
-    }
 
+      setState(() {
+        _isAdmin = isAdmin;
+        _isCoachUser = isCoach;
+        _isAuthorized = isAdmin || isCoach;
+        _coachProfileExists =
+            (data['number']?.toString().trim().isNotEmpty == true);
+        _isLoading = false;
+      });
+
+      if (_isAuthorized) {
+        _refreshCoaches();
+      }
+    } catch (e) {
+      debugPrint('Failed to load access data: $e');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _refreshCoaches() async {
     setState(() {
-      _isLoading = false;
+      _coachesFuture = CoachDirectoryApiService.instance
+          .fetchCoaches()
+          .then(
+            (items) => items.map(CoachDirectoryEntry.fromApi).toList(),
+          );
     });
   }
 
   Future<void> _showCoachProfileDialog() async {
-    if (_currentUser == null) return;
-
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_currentUser!.uid)
-        .get();
-    final userData = userDoc.data() ?? {};
-    final existingCoachDoc = await FirebaseFirestore.instance
-        .collection('coaches')
-        .doc(_currentUser!.uid)
-        .get();
-    final coachData = existingCoachDoc.data() ?? {};
-
-    final fullNameController = TextEditingController(
-      text: (coachData['fullName'] as String?) ??
-          (userData['username'] as String?) ??
-          '',
-    );
-    final bioController = TextEditingController(
-      text: (coachData['bio'] as String?) ?? '',
+    final currentUser = await UserService.getUserData();
+    final nameController = TextEditingController(
+      text: (currentUser['username'] ?? currentUser['name'])?.toString() ?? '',
     );
     final phoneController = TextEditingController(
-      text: (coachData['phonenumber'] as String?) ??
-          (userData['number'] as String?) ??
-          '',
+      text: currentUser['number']?.toString() ?? '',
     );
+    final wasComplete = _coachProfileExists;
+
+    if (!mounted) {
+      return;
+    }
 
     await showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
+          title: Text(
+            _coachProfileExists
+                ? 'Update Coach Contact'
+                : 'Complete Coach Contact',
           ),
-          title: Text(_coachProfileExists
-              ? 'Edit Coach Profile'
-              : 'Create Coach Profile'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: fullNameController,
-                decoration: InputDecoration(
-                  labelText: 'Full Name',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Full Name'),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: bioController,
-                decoration: InputDecoration(
-                  labelText: 'Bio',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: phoneController,
-                decoration: InputDecoration(
-                  labelText: 'Phone Number',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone Number'),
               ),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () async {
-                if (fullNameController.text.trim().isEmpty ||
-                    bioController.text.trim().isEmpty ||
+                if (nameController.text.trim().isEmpty ||
                     phoneController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('All fields are required')),
+                  ScaffoldMessenger.maybeOf(dialogContext)?.showSnackBar(
+                    const SnackBar(
+                      content: Text('Name and phone number are required.'),
+                    ),
                   );
                   return;
                 }
 
-                await FirebaseFirestore.instance
-                    .collection('coaches')
-                    .doc(_currentUser!.uid)
-                    .set({
-                  'userId': _currentUser!.uid,
-                  'username': userData['username'] ?? '',
-                  'email': userData['email'] ?? _currentUser!.email ?? '',
-                  'fullName': fullNameController.text.trim(),
-                  'bio': bioController.text.trim(),
-                  'phonenumber': phoneController.text.trim(),
-                  'profilePic': userData['profilePic'] ?? '',
-                  'backgroundColor': coachData['backgroundColor'] ?? 'blue',
-                  'createdAt':
-                      coachData['createdAt'] ?? FieldValue.serverTimestamp(),
-                  'updatedAt': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true));
+                await UserService.updateUserData(
+                  name: nameController.text.trim(),
+                  number: phoneController.text.trim(),
+                );
 
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(_currentUser!.uid)
-                    .set({
-                  'role': 'coach',
-                  'isCoach': true,
-                }, SetOptions(merge: true));
+                if (!mounted) {
+                  return;
+                }
 
                 setState(() {
                   _coachProfileExists = true;
                 });
-
-                if (!mounted) return;
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                await _refreshCoaches();
+                if (!dialogContext.mounted) {
+                  return;
+                }
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.maybeOf(dialogContext)?.showSnackBar(
                   SnackBar(
                     content: Text(
-                      _coachProfileExists
-                          ? 'Coach profile updated successfully!'
-                          : 'Coach profile created successfully!',
+                      wasComplete
+                          ? 'Coach contact updated successfully!'
+                          : 'Coach contact created successfully!',
                     ),
                   ),
                 );
               },
-              child:
-                  Text(_coachProfileExists ? 'Save Changes' : 'Create Profile'),
+              child: Text(
+                _coachProfileExists ? 'Save Changes' : 'Create Contact',
+              ),
             ),
           ],
         );
@@ -456,13 +433,19 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
   }
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Builder(builder: (context) => _buildContent(context)),
+        );
+      },
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildContent(BuildContext context) {
+    final theme = Theme.of(context);
     if (_isLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -470,12 +453,41 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
     }
 
     if (!_isAuthorized) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
-          child: Text(
-            "Access Denied",
-            style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: const ui.Color(0xFFFDECEC),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  CupertinoIcons.lock_shield_fill,
+                  color: ui.Color(0xFFD95555),
+                  size: 30,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Access Denied',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: ui.FontWeight.w700,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Only coaches and admins can view this area.',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -492,18 +504,30 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
             ),
           if (_isAdmin)
             IconButton(
+              icon: const Icon(CupertinoIcons.building_2_fill),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageCompaniesScreen(),
+                  ),
+                );
+              },
+            ),
+          if (_isAdmin)
+            IconButton(
               icon: const Icon(CupertinoIcons.person_add),
               onPressed: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (context) => ManageCoachesScreen()),
+                    builder: (context) => const ManageCoachesScreen(),
+                  ),
                 );
               },
             ),
         ],
       ),
-      floatingActionButton: null,
       body: SafeArea(
         child: Column(
           children: [
@@ -513,36 +537,37 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE9F4EE),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF90A17D)),
+                  border: Border.all(color: theme.colorScheme.primary),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Complete your coach profile',
+                      'Complete your coach contact card',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: ui.FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Add your full name, bio, and phone number so users can find you as a coach.',
+                      'Add your name and phone number so users can reach you as a coach.',
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton(
                       onPressed: _showCoachProfileDialog,
-                      child: const Text('Create Coach Profile'),
+                      child: const Text('Create Contact'),
                     ),
                   ],
                 ),
               ),
+            if (_isAdmin) _buildCompanySection(theme),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20.0),
               child: SizedBox(
-                height: 280,
+                height: _isAdmin ? 180 : 280,
                 child: FittedBox(
                   fit: BoxFit.contain,
                   child: Image.asset(
@@ -558,43 +583,89 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
               child: TextField(
                 controller: _searchController,
                 onChanged: (value) => setState(() {}),
-                decoration: InputDecoration(
-                  hintText: 'Search',
-                  filled: true,
-                  fillColor: Colors.grey.shade200,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  prefixIcon: const Icon(Icons.search),
+                decoration: const InputDecoration(
+                  hintText: 'Search coaches',
+                  prefixIcon: Icon(CupertinoIcons.search),
                 ),
               ),
             ),
             Expanded(
-              child: StreamBuilder<List<Coach>>(
-                stream: getCoachesStream(),
+              child: FutureBuilder<List<CoachDirectoryEntry>>(
+                future: _coachesFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
+
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Could not load coaches right now.'),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _refreshCoaches,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  final coaches = snapshot.data ?? const <CoachDirectoryEntry>[];
+                  final query = _searchController.text.trim().toLowerCase();
+                  final filtered = query.isEmpty
+                      ? coaches
+                      : coaches.where((coach) {
+                          return coach.name.toLowerCase().contains(query) ||
+                              coach.phone.toLowerCase().contains(query) ||
+                              coach.companyName.toLowerCase().contains(query) ||
+                              coach.companyCode.toLowerCase().contains(query);
+                        }).toList();
+
+                  if (filtered.isEmpty) {
                     return const Center(child: Text('No coaches available.'));
                   }
 
-                  final coaches = snapshot.data!;
                   return ListView.builder(
                     padding: const EdgeInsets.all(16.0),
-                    itemCount: coaches.length,
+                    itemCount: filtered.length,
                     itemBuilder: (context, index) {
-                      final coach = coaches[index];
+                      final coach = filtered[index];
+                      final cardColor = <ui.Color>[
+                        const ui.Color(0xFF90A17D),
+                        const ui.Color(0xFF6D849A),
+                        const ui.Color(0xFF8A6D6D),
+                        const ui.Color(0xFF7F8C5A),
+                      ][index % 4];
+
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8.0),
+                        margin: const EdgeInsets.only(bottom: 10.0),
                         decoration: BoxDecoration(
-                          color: coach.backgroundColor,
-                          borderRadius: BorderRadius.circular(8),
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: cardColor.withValues(alpha: 0.35),
+                              blurRadius: 12,
+                              offset: const ui.Offset(0, 6),
+                            ),
+                          ],
                         ),
                         child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 6,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
                           leading: CircleAvatar(
+                            radius: 24,
                             backgroundColor: Colors.white,
                             backgroundImage: coach.profilePic.isNotEmpty
                                 ? NetworkImage(coach.profilePic)
@@ -604,17 +675,37 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
                                 : null,
                           ),
                           title: Text(
-                            coach.fullname,
-                            style: const TextStyle(color: Colors.white),
+                            coach.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: ui.FontWeight.w700,
+                              fontSize: 16,
+                            ),
                           ),
                           subtitle: Text(
-                            coach.bio,
-                            style: const TextStyle(color: Colors.white70),
+                            coach.phone.isNotEmpty
+                                ? coach.phone
+                                : coach.companyName.isNotEmpty
+                                    ? coach.companyName
+                                    : 'Coach',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.3,
+                            ),
+                          ),
+                          trailing: const Icon(
+                            CupertinoIcons.chevron_right,
+                            color: Colors.white70,
+                            size: 18,
                           ),
                           onTap: () => showDialog(
                             context: context,
-                            builder: (context) =>
-                                CoachProfileDialog(coach: coach),
+                            builder: (context) => CoachProfileDialog(coach: coach),
                           ),
                         ),
                       );
@@ -625,6 +716,74 @@ class _AddCoachScreenState extends State<AddCoachScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildCompanySection(ThemeData theme) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Companies',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: ui.FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ManageCompaniesScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(CupertinoIcons.building_2_fill, size: 18),
+                label: const Text('Manage'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Edit names, company codes, theme controls, logos, and loading media on the company management screen.',
+            style: TextStyle(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+              height: 1.35,
+              fontWeight: ui.FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageCompaniesScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(CupertinoIcons.arrow_right_circle_fill),
+              label: const Text('Open company manager'),
+            ),
+          ),
+        ],
       ),
     );
   }

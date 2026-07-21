@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/spotify_helper.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class MeditationSong extends StatefulWidget {
   const MeditationSong({super.key});
@@ -73,12 +76,20 @@ class _MeditationSongState extends State<MeditationSong>
   }
 
   Future<void> _loadSavedSong() async {
-    final username = await UserPreferences.loadUsername();
-    if (username == null) return;
+    final userId = AuthService.instance.currentSession?.id.toString();
+    if (userId == null || userId.isEmpty) return;
 
-    final savedSong = await UserPreferences.loadFavoriteSong(username);
-    final savedSource =
-        (await UserPreferences.loadFavoriteSongSource(username)) ?? 'default';
+    final legacyUsername = await UserPreferences.loadUsername();
+    final savedSong = await UserPreferences.loadFavoriteSong(userId) ??
+        (legacyUsername == null
+            ? null
+            : await UserPreferences.loadFavoriteSong(legacyUsername));
+    final savedSource = (await UserPreferences.loadFavoriteSongSource(
+            userId)) ??
+        (legacyUsername == null
+            ? null
+            : await UserPreferences.loadFavoriteSongSource(legacyUsername)) ??
+        'default';
     if (!mounted) return;
 
     final index = songs.indexWhere((song) => song["title"] == savedSong);
@@ -97,11 +108,11 @@ class _MeditationSongState extends State<MeditationSong>
     int index, {
     required String source,
   }) async {
-    final username = await UserPreferences.loadUsername();
-    if (username != null) {
-      await UserPreferences.saveFavoriteSong(username, songs[index]["title"]!);
-      await UserPreferences.saveFavoriteSongSource(username, source);
-      await UserPreferences.saveFavoriteSpotifyUrl(username, '');
+    final userId = AuthService.instance.currentSession?.id.toString();
+    if (userId != null && userId.isNotEmpty) {
+      await UserPreferences.saveFavoriteSong(userId, songs[index]["title"]!);
+      await UserPreferences.saveFavoriteSongSource(userId, source);
+      await UserPreferences.saveFavoriteSpotifyUrl(userId, '');
     }
 
     if (!mounted) return;
@@ -116,11 +127,11 @@ class _MeditationSongState extends State<MeditationSong>
   }
 
   Future<void> _selectSpotifyTrack(SpotifyTrack track) async {
-    final username = await UserPreferences.loadUsername();
-    if (username != null) {
-      await UserPreferences.saveFavoriteSong(username, track.title);
-      await UserPreferences.saveFavoriteSongSource(username, 'spotify');
-      await UserPreferences.saveFavoriteSpotifyUrl(username, track.spotifyUrl);
+    final userId = AuthService.instance.currentSession?.id.toString();
+    if (userId != null && userId.isNotEmpty) {
+      await UserPreferences.saveFavoriteSong(userId, track.title);
+      await UserPreferences.saveFavoriteSongSource(userId, 'spotify');
+      await UserPreferences.saveFavoriteSpotifyUrl(userId, track.spotifyUrl);
     }
 
     if (!mounted) return;
@@ -270,12 +281,13 @@ class _MeditationSongState extends State<MeditationSong>
                   ),
                 IconButton(
                   icon: Icon(
-                    isSelected ? Icons.check_circle : Icons.check_circle_outline,
+                    isSelected
+                        ? Icons.check_circle
+                        : Icons.check_circle_outline,
                     color: isSelected ? const Color(0xFF59BDB3) : null,
                   ),
-                  tooltip: spotifyMode
-                      ? 'Use Spotify music'
-                      : 'Use default music',
+                  tooltip:
+                      spotifyMode ? 'Use Spotify music' : 'Use default music',
                   onPressed: () => _selectSong(
                     originalIndex,
                     source: spotifyMode ? 'spotify' : 'default',
@@ -302,9 +314,24 @@ class _MeditationSongState extends State<MeditationSong>
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            'Could not load Spotify tracks right now.\n$_spotifyError',
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Could not load Spotify tracks right now.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _spotifyError!,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => _scheduleSpotifySearch(immediate: true),
+                child: const Text('Try Again'),
+              ),
+            ],
           ),
         ),
       );
@@ -382,82 +409,108 @@ class _MeditationSongState extends State<MeditationSong>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select Music'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Default Music'),
-            Tab(text: 'Spotify Music'),
-          ],
-        ),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              _tabController.index == 1
-                  ? 'Choose a real Spotify track to use when you start meditation.'
-                  : 'Choose a track to use the app music player during meditation.',
-              style: const TextStyle(fontSize: 14, color: Colors.black87),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: _tabController.index == 1
-                    ? 'Search Spotify songs'
-                    : 'Search default music',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.trim().isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _searchQuery = '';
-                            _spotifyTracks = const [];
-                            _spotifyError = null;
-                            _spotifyLoading = false;
-                          });
-                        },
-                      ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              iconTheme: IconThemeData(color: companyTheme.inkColor),
+              surfaceTintColor: Colors.transparent,
+              title: Text(
+                'Select Music',
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
-                if (_tabController.index == 1) {
-                  _scheduleSpotifySearch();
-                }
-              },
-              onSubmitted: (_) {
-                if (_tabController.index == 1) {
-                  _scheduleSpotifySearch(immediate: true);
-                }
-              },
+              bottom: TabBar(
+                controller: _tabController,
+                indicatorColor: companyTheme.primaryColor,
+                labelColor: companyTheme.isDark
+                    ? companyTheme.primaryColor
+                    : companyTheme.inkColor,
+                unselectedLabelColor: companyTheme.mutedInkColor,
+                tabs: const [
+                  Tab(text: 'Default Music'),
+                  Tab(text: 'Spotify Music'),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
+            body: Column(
               children: [
-                _buildSongList(spotifyMode: false),
-                _buildSpotifyTrackList(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text(
+                    _tabController.index == 1
+                        ? 'Choose a real Spotify track to use when you start meditation.'
+                        : 'Choose a track to use the app music player during meditation.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: companyTheme.mutedInkColor,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: _tabController.index == 1
+                          ? 'Search Spotify songs'
+                          : 'Search default music',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchQuery.trim().isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _searchQuery = '';
+                                  _spotifyTracks = const [];
+                                  _spotifyError = null;
+                                  _spotifyLoading = false;
+                                });
+                              },
+                            ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                      if (_tabController.index == 1) {
+                        _scheduleSpotifySearch();
+                      }
+                    },
+                    onSubmitted: (_) {
+                      if (_tabController.index == 1) {
+                        _scheduleSpotifySearch(immediate: true);
+                      }
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildSongList(spotifyMode: false),
+                      _buildSpotifyTrackList(),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

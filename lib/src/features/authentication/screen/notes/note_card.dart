@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/comments_api_service.dart';
 
 class NoteCard extends StatefulWidget {
   final Note note;
@@ -10,6 +10,7 @@ class NoteCard extends StatefulWidget {
 
   const NoteCard({super.key, required this.note, required this.onPressed});
 
+  // ignore: library_private_types_in_public_api
   @override
   _NoteCardState createState() => _NoteCardState();
 }
@@ -27,38 +28,42 @@ class _NoteCardState extends State<NoteCard> {
       ),
     );
   }
-void showImageDialog(String imageUrl) {
-  showDialog(
-    context: context,
-    builder: (context) {
-      return Dialog(
-        backgroundColor: Colors.black,
-        insetPadding: EdgeInsets.all(10),
-        child: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: InteractiveViewer(
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return const Center(child: CircularProgressIndicator());
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return const Center(child: Icon(Icons.broken_image, size: 100, color: Colors.red));
-              },
+
+  void showImageDialog(String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: EdgeInsets.all(10),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: InteractiveViewer(
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const Center(child: CircularProgressIndicator());
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                      child: Icon(Icons.broken_image,
+                          size: 100, color: Colors.red));
+                },
+              ),
             ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     DateTime displayTime = widget.note.createdAt;
-    String formattedDateTime = DateFormat('h:mma MMMM d, y').format(displayTime);
+    String formattedDateTime =
+        DateFormat('h:mma MMMM d, y').format(displayTime);
 
     List<String> imageUrls = widget.note.note
         .where((item) => item["type"] == "image")
@@ -97,13 +102,17 @@ void showImageDialog(String imageUrl) {
               ...widget.note.note.map((item) {
                 if (item["type"] == "text") {
                   String textContent = item["value"]!;
-                  bool isLongText = textContent.length > 150; // Define long text threshold
+                  bool isLongText =
+                      textContent.length > 150; // Define long text threshold
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isExpanded ? textContent : textContent.substring(0, isLongText ? 150 : textContent.length),
+                        isExpanded
+                            ? textContent
+                            : textContent.substring(
+                                0, isLongText ? 150 : textContent.length),
                         style: const TextStyle(
                           fontSize: 16,
                           color: Color.fromARGB(221, 19, 19, 19),
@@ -131,100 +140,111 @@ void showImageDialog(String imageUrl) {
                 }
                 return const SizedBox();
               }),
-  const SizedBox(height: 20),
-             if (imageUrls.isNotEmpty)
-  Column(
-    children: [
-      SizedBox(
-        height: 200,
-        child: Stack(
-          children: [
-         SizedBox(
-  height: 200,
-  child: PageView.builder(
-    itemCount: imageUrls.length,
-    onPageChanged: (int page) {
-      setState(() {
-        currentPage = page;
-      });
-    },
-    itemBuilder: (context, index) {
-      return GestureDetector(
-        onTap: () => showImageDialog(imageUrls[index]),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(15),
-          child: Image.network(
-            imageUrls[index],
-            width: double.infinity,
-            height: 200,
-            fit: BoxFit.cover,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
-              return const Center(child: CircularProgressIndicator());
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return const Icon(Icons.broken_image, size: 100, color: Colors.red);
-            },
-          ),
-        ),
-      );
-    },
-  ),
-),
+              const SizedBox(height: 20),
+              if (imageUrls.isNotEmpty)
+                Column(
+                  children: [
+                    SizedBox(
+                      height: 200,
+                      child: Stack(
+                        children: [
+                          SizedBox(
+                            height: 200,
+                            child: PageView.builder(
+                              itemCount: imageUrls.length,
+                              onPageChanged: (int page) {
+                                setState(() {
+                                  currentPage = page;
+                                });
+                              },
+                              itemBuilder: (context, index) {
+                                return GestureDetector(
+                                  onTap: () =>
+                                      showImageDialog(imageUrls[index]),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(15),
+                                    child: Image.network(
+                                      imageUrls[index],
+                                      width: double.infinity,
+                                      height: 200,
+                                      fit: BoxFit.cover,
+                                      loadingBuilder:
+                                          (context, child, loadingProgress) {
+                                        if (loadingProgress == null) {
+                                          return child;
+                                        }
+                                        return const Center(
+                                            child: CircularProgressIndicator());
+                                      },
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                        return const Icon(Icons.broken_image,
+                                            size: 100, color: Colors.red);
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
 
-
-            // Image Counter (Only if there are multiple images)
-            if (imageUrls.length > 1)
-              Positioned(
-                top: 10,
-                right: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${currentPage + 1}/${imageUrls.length}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+                          // Image Counter (Only if there are multiple images)
+                          if (imageUrls.length > 1)
+                            Positioned(
+                              top: 10,
+                              right: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${currentPage + 1}/${imageUrls.length}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
+
+                    // Page Indicator (Max 4 dots visible)
+                    if (imageUrls.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(
+                            imageUrls.length > 4
+                                ? 4
+                                : imageUrls.length, // Limit to 4
+                            (index) {
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 4),
+                                width: (currentPage % 4 == index)
+                                    ? 16
+                                    : 8, // Highlight current
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(4),
+                                  color: (currentPage % 4 == index)
+                                      ? Colors.black
+                                      : Colors.grey[400],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ),
-          ],
-        ),
-      ),
-
-      // Page Indicator (Max 4 dots visible)
-      if (imageUrls.length > 1)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-              imageUrls.length > 4 ? 4 : imageUrls.length, // Limit to 4
-              (index) {
-                int startIndex = (currentPage ~/ 4) * 4; // Dynamic start index
-
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: (currentPage % 4 == index) ? 16 : 8, // Highlight current
-                  height: 8,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    color: (currentPage % 4 == index) ? Colors.black : Colors.grey[400],
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-    ],
-  ),
-
 
               const SizedBox(height: 10),
 
@@ -240,13 +260,11 @@ void showImageDialog(String imageUrl) {
                     ),
                   ),
                   const Spacer(), // Pushes the next content to the right
-                  StreamBuilder(
-                    stream: FirebaseFirestore.instance
-                        .collection('notes')
-                        .doc(widget.note.id)
-                        .collection('comments')
-                        .snapshots(),
+                  FutureBuilder<List<CommunityComment>>(
+                    future: CommentsApiService.instance
+                        .fetchComments(widget.note.id),
                     builder: (context, snapshot) {
+                      final commentCount = snapshot.data?.length ?? 0;
                       if (!snapshot.hasData) {
                         return IconButton(
                           onPressed: () => openCommentSection(context),
@@ -254,7 +272,6 @@ void showImageDialog(String imageUrl) {
                           color: Colors.black54,
                         );
                       }
-                      int commentCount = snapshot.data!.docs.length;
 
                       return IconButton(
                         onPressed: () => openCommentSection(context),
