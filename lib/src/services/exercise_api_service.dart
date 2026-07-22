@@ -10,7 +10,11 @@ class ExerciseApiService {
   String? get _token => AuthService.instance.currentSession?.token;
 
   Future<List<Map<String, dynamic>>> fetchToday() async {
-    final response = await _api.getJson('/api/exercise', token: _token);
+    final today = DateTime.now().toIso8601String().split('T').first;
+    final response = await _api.getJson(
+      '/api/exercise?date=$today',
+      token: _token,
+    );
     final logs = response['logs'];
     if (logs is List) {
       return logs

@@ -1,0 +1,38 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table): void {
+            $table->string('apple_user_id')->nullable()->unique()->after('email');
+        });
+
+        Schema::table('pending_registrations', function (Blueprint $table): void {
+            $table->string('apple_user_id')->nullable()->unique()->after('email');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table): void {
+            $table->dropUnique(['apple_user_id']);
+            $table->dropColumn('apple_user_id');
+        });
+
+        Schema::table('pending_registrations', function (Blueprint $table): void {
+            $table->dropUnique(['apple_user_id']);
+            $table->dropColumn('apple_user_id');
+        });
+    }
+};

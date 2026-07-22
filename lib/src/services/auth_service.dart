@@ -1,6 +1,30 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
 import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/app_session_service.dart';
+import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
+
+class ActionCodeSettings {
+  const ActionCodeSettings({
+    required this.url,
+    required this.handleCodeInApp,
+    required this.androidPackageName,
+    required this.iOSBundleId,
+    required this.androidInstallApp,
+    required this.androidMinimumVersion,
+  });
+
+  final String url;
+  final bool handleCodeInApp;
+  final String androidPackageName;
+  final String iOSBundleId;
+  final bool androidInstallApp;
+  final String androidMinimumVersion;
+}
 
 class AuthService {
   AuthService._();
@@ -13,16 +37,63 @@ class AuthService {
   static const String userCancelledAppleFlow = "__apple_cancelled__";
   static const String missingAccountMessage =
       "User not found. Please create an account first.";
+  static const String emailNotVerifiedMessage =
+      "Please verify your email first.";
+  static const String _googleServerClientId =
+      '609604667702-2898tlqiuhgt69viubl09cq4ninu78g9.apps.googleusercontent.com';
+
+  static const ActionCodeSettings emailVerificationSettings =
+      ActionCodeSettings(
+    url: EmailLinkAuthService.continueUrl,
+    handleCodeInApp: false,
+    androidPackageName: 'com.valenin.inneru',
+    iOSBundleId: 'com.valenin.inneru',
+    androidInstallApp: false,
+    androidMinimumVersion: '21',
+  );
+
+  static const ActionCodeSettings passwordResetSettings =
+      ActionCodeSettings(
+    url: EmailLinkAuthService.passwordResetContinueUrl,
+    handleCodeInApp: true,
+    androidPackageName: 'com.valenin.inneru',
+    iOSBundleId: 'com.valenin.inneru',
+    androidInstallApp: false,
+    androidMinimumVersion: '21',
+  );
 
   final AppSessionService _sessionService = AppSessionService.instance;
   final ApiClient _apiClient = ApiClient.instance;
+  String? _pendingVerificationEmail;
+  late final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: const ['email'],
+    serverClientId: _googleServerClientId,
+  );
 
   Stream<AppSession?> get sessionStream => _sessionService.stream;
   AppSession? get currentSession => _sessionService.current;
   String? get currentUserId => _sessionService.currentUserId;
+  String? get pendingVerificationEmail => _pendingVerificationEmail;
 
-  static Future<void> sendVerificationEmail([Object? user]) async {
-    // Laravel auth does not use Firebase-style verification links in this app.
+  void clearPendingVerificationEmail() {
+    _pendingVerificationEmail = null;
+  }
+
+  static Future<String?> sendVerificationEmail({
+    required String email,
+  }) async {
+    try {
+      await ApiClient.instance.postJson(
+        '/api/auth/email/verification-notification',
+        {'email': email.trim()},
+      );
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      debugPrint('Verification email send failed: $e');
+      return 'Unable to send verification email. Please try again.';
+    }
   }
 
   Future<void> initialize() async {
@@ -69,6 +140,9 @@ class AuthService {
       if (e.statusCode == 401) {
         return "Login failed. Wrong Email or Password";
       }
+      if (e.statusCode == 403) {
+        return emailNotVerifiedMessage;
+      }
       return e.message;
     } catch (e) {
       debugPrint('Login failed: $e');
@@ -97,7 +171,7 @@ class AuthService {
 
       final companyCodeValue =
           continueWithoutCompany ? null : companyCode.trim().toUpperCase();
-      final response = await _apiClient.postJson(
+      await _apiClient.postJson(
         '/api/auth/register',
         {
           'name': username.trim(),
@@ -109,7 +183,6 @@ class AuthService {
           'company_name': companyCodeValue,
         },
       );
-      await _storeSessionFromAuthResponse(response);
       return null;
     } on ApiException catch (e) {
       if (e.statusCode == 422 && e.errors != null) {
@@ -129,7 +202,7 @@ class AuthService {
   }
 
   Future<String?> signInWithGoogle() async {
-    return "Google sign-in is not connected to Laravel yet. Please use email and password.";
+    return _authenticateWithGoogle(createAccount: false);
   }
 
   Future<String?> signUpWithGoogle({
@@ -138,11 +211,20 @@ class AuthService {
     required bool continueWithoutCompany,
     required bool termsAccepted,
   }) async {
-    return "Google sign-up is not connected to Laravel yet. Please use email and password.";
+    if (!termsAccepted) {
+      return "You must accept the Terms and Conditions to continue.";
+    }
+
+    return _authenticateWithGoogle(
+      createAccount: true,
+      role: role,
+      companyCode: companyCode,
+      continueWithoutCompany: continueWithoutCompany,
+    );
   }
 
   Future<String?> signInWithApple() async {
-    return "Apple sign-in is not connected to Laravel yet. Please use email and password.";
+    return _authenticateWithApple(createAccount: false);
   }
 
   Future<String?> signUpWithApple({
@@ -151,10 +233,21 @@ class AuthService {
     required bool continueWithoutCompany,
     required bool termsAccepted,
   }) async {
-    return "Apple sign-up is not connected to Laravel yet. Please use email and password.";
+    if (!termsAccepted) {
+      return "You must accept the Terms and Conditions to continue.";
+    }
+
+    return _authenticateWithApple(
+      createAccount: true,
+      role: role,
+      companyCode: companyCode,
+      continueWithoutCompany: continueWithoutCompany,
+    );
   }
 
   Future<void> signOutGoogle() async {
+    await _googleSignIn.signOut();
+    _pendingVerificationEmail = null;
     await _sessionService.clear();
   }
 
@@ -232,6 +325,155 @@ class AuthService {
           userJson['profile_pic']?.toString() ?? fallbackSession.profilePic,
     );
     await _sessionService.setSession(session);
+  }
+
+  Future<String?> _authenticateWithGoogle({
+    required bool createAccount,
+    String? role,
+    String? companyCode,
+    bool continueWithoutCompany = false,
+  }) async {
+    try {
+      _pendingVerificationEmail = null;
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        return userCancelledGoogleFlow;
+      }
+
+      final auth = await googleUser.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        await _googleSignIn.signOut();
+        return "Google sign-in could not retrieve a secure token. Please try again.";
+      }
+
+      final response = await _apiClient.postJson(
+        '/api/auth/google',
+        {
+          'id_token': idToken,
+          'create_account': createAccount,
+          if (role != null) 'role': role,
+          if (companyCode != null) 'company_code': companyCode,
+          if (companyCode != null) 'company_name': companyCode,
+          if (continueWithoutCompany) 'continue_without_company': true,
+        },
+      );
+
+      final verificationRequired = response['verification_required'] == true;
+      if (verificationRequired) {
+        _pendingVerificationEmail = response['email']?.toString() ?? googleUser.email;
+        return null;
+      }
+
+      await _storeSessionFromAuthResponse(response);
+      _pendingVerificationEmail = null;
+      return null;
+    } on ApiException catch (e) {
+      if (e.statusCode == 401 && e.message.isNotEmpty) {
+        return e.message;
+      }
+      return e.message;
+    } catch (e) {
+      debugPrint('Google sign-in failed: $e');
+      return "Google sign-in failed. Please try again.";
+    }
+  }
+
+  Future<String?> _authenticateWithApple({
+    required bool createAccount,
+    String? role,
+    String? companyCode,
+    bool continueWithoutCompany = false,
+  }) async {
+    try {
+      _pendingVerificationEmail = null;
+
+      final rawNonce = apple_sign_in.generateNonce();
+      final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+      final credential = await apple_sign_in.SignInWithApple.getAppleIDCredential(
+        scopes: const [
+          apple_sign_in.AppleIDAuthorizationScopes.email,
+          apple_sign_in.AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: hashedNonce,
+      );
+
+      final identityToken = credential.identityToken;
+      if (identityToken == null || identityToken.isEmpty) {
+        return "Apple sign-in could not retrieve a secure token. Please try again.";
+      }
+
+      final fullName = _appleDisplayName(
+        givenName: credential.givenName,
+        familyName: credential.familyName,
+        email: credential.email,
+      );
+
+      final response = await _apiClient.postJson(
+        '/api/auth/apple',
+        {
+          'identity_token': identityToken,
+          'raw_nonce': rawNonce,
+          'create_account': createAccount,
+          'apple_user_id': credential.userIdentifier,
+          'email': credential.email,
+          'given_name': credential.givenName,
+          'family_name': credential.familyName,
+          if (fullName != null) 'full_name': fullName,
+          if (role != null) 'role': role,
+          if (companyCode != null) 'company_code': companyCode,
+          if (companyCode != null) 'company_name': companyCode,
+          if (continueWithoutCompany) 'continue_without_company': true,
+        },
+      );
+
+      final verificationRequired = response['verification_required'] == true;
+      if (verificationRequired) {
+        _pendingVerificationEmail =
+            response['email']?.toString() ?? credential.email;
+        return null;
+      }
+
+      await _storeSessionFromAuthResponse(response);
+      _pendingVerificationEmail = null;
+      return null;
+    } on apple_sign_in.SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == apple_sign_in.AuthorizationErrorCode.canceled) {
+        return userCancelledAppleFlow;
+      }
+
+      return "Apple sign-in failed. Please try again.";
+    } on ApiException catch (e) {
+      if (e.statusCode == 401 && e.message.isNotEmpty) {
+        return e.message;
+      }
+      return e.message;
+    } catch (e) {
+      debugPrint('Apple sign-in failed: $e');
+      return "Apple sign-in failed. Please try again.";
+    }
+  }
+
+  String? _appleDisplayName({
+    String? givenName,
+    String? familyName,
+    String? email,
+  }) {
+    final parts = <String>[
+      if ((givenName ?? '').trim().isNotEmpty) givenName!.trim(),
+      if ((familyName ?? '').trim().isNotEmpty) familyName!.trim(),
+    ];
+
+    if (parts.isNotEmpty) {
+      return parts.join(' ').trim();
+    }
+
+    final trimmedEmail = email?.trim();
+    if (trimmedEmail != null && trimmedEmail.isNotEmpty) {
+      return trimmedEmail.split('@').first;
+    }
+
+    return null;
   }
 }
 

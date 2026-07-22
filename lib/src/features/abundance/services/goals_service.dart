@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
@@ -232,11 +233,638 @@ List<GoalCategory> requiredGoalGaps(List<GoalSummary> goals) {
 }
 
 class GoalsService {
-  GoalsService([Object? legacyFirestore]);
+  GoalsService([FirebaseFirestore? legacyFirestore])
+      : _legacyFirestore = legacyFirestore;
 
   final ApiClient _api = ApiClient.instance;
+  final FirebaseFirestore? _legacyFirestore;
 
   String? get _token => AuthService.instance.currentSession?.token;
+  bool get _usesLegacyFirestore => _legacyFirestore != null;
+  FirebaseFirestore get _firestore =>
+      _legacyFirestore ??
+      (throw StateError('Legacy Firestore store is not configured.'));
+
+  CollectionReference<Map<String, dynamic>> get _goals =>
+      _firestore.collection('goals');
+
+  DocumentReference<Map<String, dynamic>> _goalDoc(String goalId) =>
+      _goals.doc(goalId);
+
+  Future<String> _legacyUserCompanyId(String uid) async {
+    final snapshot = await _firestore.collection('users').doc(uid).get();
+    final data = snapshot.data();
+    if (data == null) return '';
+    final activeCompanyId = data['activeCompanyId']?.toString().trim();
+    if (activeCompanyId != null && activeCompanyId.isNotEmpty) {
+      return activeCompanyId;
+    }
+    final companyId = data['companyId']?.toString().trim();
+    if (companyId != null && companyId.isNotEmpty) {
+      return companyId;
+    }
+    return '';
+  }
+
+  Map<String, dynamic> _goalPayload({
+    required String id,
+    required String uid,
+    required String companyId,
+    required GoalCategory category,
+    required String title,
+    required String? description,
+    required String? notes,
+    required GoalStatus status,
+    required GoalType goalType,
+    required GoalDirection direction,
+    required double targetValue,
+    required double currentValue,
+    required String unit,
+    required TargetPeriod targetPeriod,
+    required DateTime targetDate,
+    required int progress,
+    required DateTime? completedAt,
+  }) {
+    return {
+      'id': id,
+      'userId': uid,
+      'companyId': companyId,
+      'title': title,
+      'description': description,
+      'notes': notes,
+      'status': status.code,
+      'progress': progress,
+      'category': category.code,
+      'goalType': goalType.code,
+      'targetPeriod': targetPeriod.code,
+      'direction': direction.code,
+      'targetValue': targetValue,
+      'currentValue': currentValue,
+      'unit': unit,
+      'startDate': DateTime.now().toIso8601String(),
+      'targetDate': isoDay(targetDate),
+      'completedAt': completedAt?.toIso8601String(),
+    };
+  }
+
+  int _calculateMeritProgress({
+    required GoalStatus status,
+    required double targetValue,
+    required double currentValue,
+    int fallback = 0,
+  }) {
+    if (status == GoalStatus.completed) {
+      return 100;
+    }
+    if (status == GoalStatus.abandoned) {
+      return fallback;
+    }
+    if (targetValue > 0) {
+      return ((currentValue / targetValue) * 100).clamp(0, 100).round();
+    }
+    return fallback;
+  }
+
+  Future<int> _calculateMilestoneProgress(String goalId) async {
+    final plansSnapshot = await _goalDoc(goalId)
+        .collection('tasks')
+        .orderBy('sortOrder')
+        .get();
+    final plans = plansSnapshot.docs
+        .map((doc) => ActionPlanStatus.fromCode(doc.data()['status']?.toString()))
+        .toList();
+    if (plans.isEmpty) {
+      return 0;
+    }
+    final total = plans.fold<int>(0, (acc, status) => acc + status.weight);
+    return (total / plans.length).round();
+  }
+
+  Future<void> _syncLegacyGoalProgress(String goalId) async {
+    final ref = _goalDoc(goalId);
+    final snapshot = await ref.get();
+    final data = snapshot.data();
+    if (data == null) return;
+
+    final status = GoalStatus.fromCode(data['status']?.toString());
+    final goalType = GoalType.fromCode(data['goalType']?.toString());
+    final targetValue = (data['targetValue'] as num?)?.toDouble() ?? 0;
+    final currentValue = (data['currentValue'] as num?)?.toDouble() ?? 0;
+    final storedProgress = (data['progress'] as num?)?.toInt() ?? 0;
+
+    var progress = storedProgress;
+    if (goalType == GoalType.merit) {
+      progress = _calculateMeritProgress(
+        status: status,
+        targetValue: targetValue,
+        currentValue: currentValue,
+        fallback: storedProgress,
+      );
+    } else {
+      progress = await _calculateMilestoneProgress(goalId);
+    }
+
+    DateTime? completedAt;
+    if (status == GoalStatus.completed) {
+      completedAt = DateTime.tryParse(data['completedAt']?.toString() ?? '') ??
+          DateTime.now();
+      progress = 100;
+    }
+
+    await ref.update({
+      'progress': progress,
+      'completedAt': completedAt?.toIso8601String(),
+    });
+  }
+
+  Stream<List<GoalSummary>> _legacyWatchGoals(String uid) {
+    return _goals.where('userId', isEqualTo: uid).snapshots().map((snapshot) {
+      final goals = snapshot.docs
+          .map((doc) => GoalSummary.fromJson({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList()
+        ..sort((a, b) => a.targetDate.compareTo(b.targetDate));
+      return goals;
+    });
+  }
+
+  Stream<GoalSummary?> _legacyWatchGoal(String goalId) {
+    return _goalDoc(goalId).snapshots().map((snapshot) {
+      final data = snapshot.data();
+      if (data == null) return null;
+      return GoalSummary.fromJson({
+        ...data,
+        'id': snapshot.id,
+      });
+    });
+  }
+
+  Stream<List<ActionPlanItem>> _legacyWatchPlans(String goalId) {
+    return _goalDoc(goalId).collection('tasks').snapshots().map((snapshot) {
+      final plans = snapshot.docs
+          .map((doc) => ActionPlanItem.fromJson({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      return plans;
+    });
+  }
+
+  Stream<List<GoalUpdateEntry>> _legacyWatchUpdates(String goalId) {
+    return _goalDoc(goalId).collection('updates').snapshots().map((snapshot) {
+      final updates = snapshot.docs
+          .map((doc) => GoalUpdateEntry.fromJson({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList()
+        ..sort((a, b) =>
+            (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+                .compareTo(b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+      return updates;
+    });
+  }
+
+  Stream<List<GoalCommentItem>> _legacyWatchComments(String goalId) {
+    return _goalDoc(goalId).collection('comments').snapshots().map((snapshot) {
+      final comments = snapshot.docs
+          .map((doc) => GoalCommentItem.fromJson({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList();
+      return comments;
+    });
+  }
+
+  Stream<List<MeritLogItem>> _legacyWatchMerits(String goalId) {
+    return _goalDoc(goalId).collection('merits').snapshots().map((snapshot) {
+      final merits = snapshot.docs
+          .map((doc) => MeritLogItem.fromJson({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList();
+      return merits;
+    });
+  }
+
+  Future<void> _legacyDeleteCollection(
+    CollectionReference<Map<String, dynamic>> collection,
+  ) async {
+    final snapshot = await collection.get();
+    for (final doc in snapshot.docs) {
+      await doc.reference.delete();
+    }
+  }
+
+  Future<void> _legacyRecordUpdate({
+    required String goalId,
+    required String actorId,
+    required int progressFrom,
+    required int progressTo,
+    required GoalStatus statusFrom,
+    required GoalStatus statusTo,
+    String? note,
+  }) async {
+    await _goalDoc(goalId).collection('updates').add({
+      'authorId': actorId,
+      'progressFrom': progressFrom,
+      'progressTo': progressTo,
+      'statusFrom': statusFrom.code,
+      'statusTo': statusTo.code,
+      'note': note,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  String _legacyPeriodBucket(
+    DateTime startDate,
+    TargetPeriod period,
+    DateTime now,
+  ) {
+    if (period.days <= 0) return '';
+    final anchor = DateTime(startDate.year, startDate.month, startDate.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final daysSinceStart = today.difference(anchor).inDays;
+    final bucket = daysSinceStart ~/ period.days;
+    return '${isoDay(anchor)}:$bucket:${period.days}';
+  }
+
+  Future<String> _legacyCreateGoal({
+    required String uid,
+    required GoalCategory category,
+    required String title,
+    String? description,
+    String? notes,
+    required DateTime targetDate,
+    GoalType goalType = GoalType.merit,
+    GoalDirection direction = GoalDirection.gain,
+    double targetValue = 0,
+    double currentValue = 0,
+    String unit = '',
+    TargetPeriod targetPeriod = TargetPeriod.none,
+    List<String> planTitles = const [],
+  }) async {
+    final goalRef = _goalDoc(_goals.doc().id);
+    final id = goalRef.id;
+    final companyId = await _legacyUserCompanyId(uid);
+    final isMilestone = goalType == GoalType.milestone;
+    final effectiveTargetPeriod =
+        isMilestone ? TargetPeriod.none : targetPeriod;
+    final effectiveTargetValue = isMilestone ? 0.0 : targetValue;
+    final effectiveCurrentValue = isMilestone ? 0.0 : currentValue;
+    final status = GoalStatus.notStarted;
+
+    final progress = isMilestone
+        ? 0
+        : _calculateMeritProgress(
+            status: status,
+            targetValue: effectiveTargetValue,
+            currentValue: effectiveCurrentValue,
+          );
+
+    await goalRef.set(
+      _goalPayload(
+        id: id,
+        uid: uid,
+        companyId: companyId,
+        category: category,
+        title: title.trim(),
+        description: description?.trim().isEmpty == true
+            ? null
+            : description?.trim(),
+        notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
+        status: status,
+        goalType: goalType,
+        direction: direction,
+        targetValue: effectiveTargetValue,
+        currentValue: effectiveCurrentValue,
+        unit: unit.trim(),
+        targetPeriod: effectiveTargetPeriod,
+        targetDate: targetDate,
+        progress: progress,
+        completedAt: null,
+      ),
+    );
+
+    if (isMilestone) {
+      var sortOrder = 0;
+      for (final rawTitle in planTitles) {
+        final cleaned = rawTitle.trim();
+        if (cleaned.isEmpty) continue;
+        await goalRef.collection('tasks').add({
+          'title': cleaned,
+          'status': ActionPlanStatus.notStarted.code,
+          'sortOrder': sortOrder,
+          'dueDate': null,
+          'completedAt': null,
+          'isComplete': false,
+        });
+        sortOrder += 1;
+      }
+      await _syncLegacyGoalProgress(id);
+    }
+
+    return id;
+  }
+
+  Future<void> _legacyUpdateGoal({
+    required String goalId,
+    required String actorId,
+    String? title,
+    String? description,
+    String? notes,
+    GoalStatus? status,
+    DateTime? targetDate,
+    GoalDirection? direction,
+    double? targetValue,
+    double? currentValue,
+    String? unit,
+    GoalType? goalType,
+    TargetPeriod? targetPeriod,
+  }) async {
+    final ref = _goalDoc(goalId);
+    final snapshot = await ref.get();
+    final data = snapshot.data();
+    if (data == null) {
+      throw ApiException(404, 'Goal not found.');
+    }
+
+    final before = Map<String, dynamic>.from(data);
+    final updated = Map<String, dynamic>.from(before);
+
+    if (title != null) updated['title'] = title.trim();
+    if (description != null) {
+      updated['description'] = description.trim();
+    }
+    if (notes != null) {
+      updated['notes'] = notes.trim();
+    }
+    if (status != null) updated['status'] = status.code;
+    if (targetDate != null) updated['targetDate'] = isoDay(targetDate);
+    if (direction != null) updated['direction'] = direction.code;
+    if (targetValue != null) updated['targetValue'] = targetValue;
+    if (currentValue != null) updated['currentValue'] = currentValue;
+    if (unit != null) updated['unit'] = unit.trim();
+    if (goalType != null) updated['goalType'] = goalType.code;
+    if (targetPeriod != null) updated['targetPeriod'] = targetPeriod.code;
+
+    final previousProgress = (before['progress'] as num?)?.toInt() ?? 0;
+    final previousStatus = GoalStatus.fromCode(before['status']?.toString());
+
+    final effectiveGoalType =
+        GoalType.fromCode(updated['goalType']?.toString());
+    final effectiveStatus =
+        GoalStatus.fromCode(updated['status']?.toString());
+    final effectiveTargetValue =
+        (updated['targetValue'] as num?)?.toDouble() ?? 0;
+    final effectiveCurrentValue =
+        (updated['currentValue'] as num?)?.toDouble() ?? 0;
+
+    var progress = previousProgress;
+    if (effectiveGoalType == GoalType.milestone) {
+      progress = await _calculateMilestoneProgress(goalId);
+      updated['targetPeriod'] = TargetPeriod.none.code;
+      updated['targetValue'] = 0.0;
+      updated['currentValue'] = 0.0;
+    } else {
+      progress = _calculateMeritProgress(
+        status: effectiveStatus,
+        targetValue: effectiveTargetValue,
+        currentValue: effectiveCurrentValue,
+        fallback: previousProgress,
+      );
+    }
+
+    if (effectiveStatus == GoalStatus.completed) {
+      updated['completedAt'] =
+          (before['completedAt']?.toString().isNotEmpty == true)
+              ? before['completedAt']
+              : DateTime.now().toIso8601String();
+      progress = 100;
+    } else {
+      updated['completedAt'] = null;
+    }
+
+    updated['progress'] = progress;
+    await ref.set(updated);
+
+    if (progress != previousProgress || effectiveStatus != previousStatus) {
+      await _legacyRecordUpdate(
+        goalId: goalId,
+        actorId: actorId,
+        progressFrom: previousProgress,
+        progressTo: progress,
+        statusFrom: previousStatus,
+        statusTo: effectiveStatus,
+      );
+    }
+  }
+
+  Future<void> _legacySetGoalMeasure({
+    required String goalId,
+    required String actorId,
+    required double currentValue,
+  }) async {
+    final snapshot = await _goalDoc(goalId).get();
+    final data = snapshot.data();
+    if (data == null) {
+      throw ApiException(404, 'Goal not found.');
+    }
+
+    if (GoalType.fromCode(data['goalType']?.toString()) == GoalType.milestone) {
+      throw StateError('Milestone goals do not use a numeric measure.');
+    }
+
+    await _legacyUpdateGoal(
+      goalId: goalId,
+      actorId: actorId,
+      currentValue: currentValue,
+    );
+  }
+
+  Future<String> _legacyAddActionPlan({
+    required String goalId,
+    required String title,
+    required String actorId,
+  }) async {
+    final ref = _goalDoc(goalId).collection('tasks');
+    final snapshot = await ref.get();
+    final sortOrder = snapshot.docs.isEmpty
+        ? 0
+        : snapshot.docs
+                .map((doc) => (doc.data()['sortOrder'] as num?)?.toInt() ?? 0)
+                .reduce((a, b) => a > b ? a : b) +
+            1;
+    final doc = ref.doc();
+    await doc.set({
+      'title': title.trim(),
+      'status': ActionPlanStatus.notStarted.code,
+      'sortOrder': sortOrder,
+      'dueDate': null,
+      'completedAt': null,
+      'isComplete': false,
+    });
+    await _syncLegacyGoalProgress(goalId);
+    return doc.id;
+  }
+
+  Future<void> _legacySetActionPlanStatus({
+    required String goalId,
+    required String planId,
+    required ActionPlanStatus status,
+    required String actorId,
+  }) async {
+    final ref = _goalDoc(goalId).collection('tasks').doc(planId);
+    final snapshot = await ref.get();
+    if (!snapshot.exists) {
+      throw ApiException(404, 'Task not found.');
+    }
+    await ref.set({
+      ...snapshot.data()!,
+      'status': status.code,
+      'isComplete': status == ActionPlanStatus.done,
+      'completedAt': status == ActionPlanStatus.done
+          ? DateTime.now().toIso8601String()
+          : null,
+    });
+    await _syncLegacyGoalProgress(goalId);
+  }
+
+  Future<void> _legacyDeleteActionPlan({
+    required String goalId,
+    required String planId,
+    required String actorId,
+  }) async {
+    await _goalDoc(goalId).collection('tasks').doc(planId).delete();
+    await _syncLegacyGoalProgress(goalId);
+  }
+
+  Future<void> _legacyAddComment({
+    required String goalId,
+    required String authorId,
+    required String body,
+    required bool isPrivate,
+  }) async {
+    await _goalDoc(goalId).collection('comments').add({
+      'authorId': authorId,
+      'body': body.trim(),
+      'isPrivate': isPrivate,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<void> _legacyLogMeritTarget({
+    required String goalId,
+    required String actorId,
+  }) async {
+    final ref = _goalDoc(goalId);
+    final snapshot = await ref.get();
+    final data = snapshot.data();
+    if (data == null) {
+      throw ApiException(404, 'Goal not found.');
+    }
+
+    final goalType = GoalType.fromCode(data['goalType']?.toString());
+    if (goalType != GoalType.merit) {
+      throw StateError('Target logs are only available for merit goals.');
+    }
+    final targetPeriod = TargetPeriod.fromCode(data['targetPeriod']?.toString());
+    if (targetPeriod == TargetPeriod.none) {
+      throw StateError('This goal does not have a recurring target.');
+    }
+
+    final targetDate =
+        DateTime.tryParse(data['targetDate']?.toString() ?? '') ?? DateTime.now();
+    final currentProgress = (data['progress'] as num?)?.toInt() ?? 0;
+    final currentValue = (data['currentValue'] as num?)?.toDouble() ?? 0;
+    final targetValue = (data['targetValue'] as num?)?.toDouble() ?? 0;
+    final bucket = _legacyPeriodBucket(
+      DateTime.tryParse(data['startDate']?.toString() ?? '') ?? DateTime.now(),
+      targetPeriod,
+      DateTime.now(),
+    );
+    final lastBucket = data['lastTargetLogBucket']?.toString();
+    if (bucket == lastBucket) {
+      return;
+    }
+
+    final amount = perPeriodTarget(
+      targetValue,
+      currentValue,
+      daysUntil(targetDate),
+      targetPeriod.days,
+    );
+
+    final nextValue = currentValue + amount;
+    final nextProgress = _calculateMeritProgress(
+      status: GoalStatus.fromCode(data['status']?.toString()),
+      targetValue: targetValue,
+      currentValue: nextValue,
+      fallback: currentProgress,
+    );
+
+    await ref.set({
+      ...data,
+      'currentValue': nextValue,
+      'progress': nextProgress,
+      'lastTargetLogBucket': bucket,
+      'lastTargetLogAt': DateTime.now().toIso8601String(),
+    });
+    await ref.collection('merits').add({
+      'date': isoDay(DateTime.now()),
+      'amount': amount,
+    });
+  }
+
+  Future<void> _legacyGoExtraMile({
+    required String goalId,
+    required String actorId,
+    required double amount,
+  }) async {
+    if (amount <= 0) return;
+    final snapshot = await _goalDoc(goalId).get();
+    final data = snapshot.data();
+    if (data == null) {
+      throw ApiException(404, 'Goal not found.');
+    }
+    final goalType = GoalType.fromCode(data['goalType']?.toString());
+    final currentValue = (data['currentValue'] as num?)?.toDouble() ?? 0;
+    final targetValue = (data['targetValue'] as num?)?.toDouble() ?? 0;
+    final nextValue = currentValue + amount;
+    final nextProgress = goalType == GoalType.merit
+        ? _calculateMeritProgress(
+            status: GoalStatus.fromCode(data['status']?.toString()),
+            targetValue: targetValue,
+            currentValue: nextValue,
+            fallback: (data['progress'] as num?)?.toInt() ?? 0,
+          )
+        : (data['progress'] as num?)?.toInt() ?? 0;
+    await _goalDoc(goalId).set({
+      ...data,
+      'currentValue': nextValue,
+      'progress': nextProgress,
+    });
+    await _goalDoc(goalId).collection('merits').add({
+      'date': isoDay(DateTime.now()),
+      'amount': amount,
+      'kind': 'extra',
+    });
+  }
+
+  Future<void> _legacyDeleteGoal(String goalId) async {
+    final ref = _goalDoc(goalId);
+    await _legacyDeleteCollection(ref.collection('tasks'));
+    await _legacyDeleteCollection(ref.collection('updates'));
+    await _legacyDeleteCollection(ref.collection('comments'));
+    await _legacyDeleteCollection(ref.collection('merits'));
+    await ref.delete();
+  }
 
   Stream<T> _poll<T>(
     Future<T> Function() fetch, {
@@ -321,22 +949,34 @@ class GoalsService {
   }
 
   Stream<List<GoalSummary>> watchGoals(String uid) =>
-      _poll(() => _fetchGoals(uid), fallback: const <GoalSummary>[]);
+      _usesLegacyFirestore
+          ? _legacyWatchGoals(uid)
+          : _poll(() => _fetchGoals(uid), fallback: const <GoalSummary>[]);
 
   Stream<GoalSummary?> watchGoal(String goalId) =>
-      _poll(() => _fetchGoal(goalId), fallback: null);
+      _usesLegacyFirestore
+          ? _legacyWatchGoal(goalId)
+          : _poll(() => _fetchGoal(goalId), fallback: null);
 
   Stream<List<ActionPlanItem>> watchPlans(String goalId) =>
-      _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
+      _usesLegacyFirestore
+          ? _legacyWatchPlans(goalId)
+          : _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
 
   Stream<List<GoalUpdateEntry>> watchUpdates(String goalId) =>
-      _poll(() => _fetchUpdates(goalId), fallback: const <GoalUpdateEntry>[]);
+      _usesLegacyFirestore
+          ? _legacyWatchUpdates(goalId)
+          : _poll(() => _fetchUpdates(goalId), fallback: const <GoalUpdateEntry>[]);
 
   Stream<List<GoalCommentItem>> watchComments(String goalId) =>
-      _poll(() => _fetchComments(goalId), fallback: const <GoalCommentItem>[]);
+      _usesLegacyFirestore
+          ? _legacyWatchComments(goalId)
+          : _poll(() => _fetchComments(goalId), fallback: const <GoalCommentItem>[]);
 
   Stream<List<MeritLogItem>> watchMerits(String goalId) =>
-      _poll(() => _fetchMerits(goalId), fallback: const <MeritLogItem>[]);
+      _usesLegacyFirestore
+          ? _legacyWatchMerits(goalId)
+          : _poll(() => _fetchMerits(goalId), fallback: const <MeritLogItem>[]);
 
   Future<String> createGoal({
     required String uid,
@@ -353,6 +993,24 @@ class GoalsService {
     TargetPeriod targetPeriod = TargetPeriod.none,
     List<String> planTitles = const [],
   }) async {
+    if (_usesLegacyFirestore) {
+      return _legacyCreateGoal(
+        uid: uid,
+        category: category,
+        title: title,
+        description: description,
+        notes: notes,
+        targetDate: targetDate,
+        goalType: goalType,
+        direction: direction,
+        targetValue: targetValue,
+        currentValue: currentValue,
+        unit: unit,
+        targetPeriod: targetPeriod,
+        planTitles: planTitles,
+      );
+    }
+
     final response = await _api.postJson(
       '/api/goals',
       {
@@ -394,6 +1052,25 @@ class GoalsService {
     GoalType? goalType,
     TargetPeriod? targetPeriod,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacyUpdateGoal(
+        goalId: goalId,
+        actorId: actorId,
+        title: title,
+        description: description,
+        notes: notes,
+        status: status,
+        targetDate: targetDate,
+        direction: direction,
+        targetValue: targetValue,
+        currentValue: currentValue,
+        unit: unit,
+        goalType: goalType,
+        targetPeriod: targetPeriod,
+      );
+      return;
+    }
+
     final payload = <String, dynamic>{
       if (title != null) 'title': title.trim(),
       if (description != null || notes != null) 'description': description,
@@ -420,6 +1097,15 @@ class GoalsService {
     required String actorId,
     required double currentValue,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacySetGoalMeasure(
+        goalId: goalId,
+        actorId: actorId,
+        currentValue: currentValue,
+      );
+      return;
+    }
+
     await _api.postJson(
       '/api/goals/$goalId/measure',
       {'current_value': currentValue},
@@ -432,6 +1118,14 @@ class GoalsService {
     required String title,
     required String actorId,
   }) async {
+    if (_usesLegacyFirestore) {
+      return _legacyAddActionPlan(
+        goalId: goalId,
+        title: title,
+        actorId: actorId,
+      );
+    }
+
     final response = await _api.postJson(
       '/api/goals/$goalId/tasks',
       {'title': title},
@@ -450,6 +1144,16 @@ class GoalsService {
     required ActionPlanStatus status,
     required String actorId,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacySetActionPlanStatus(
+        goalId: goalId,
+        planId: planId,
+        status: status,
+        actorId: actorId,
+      );
+      return;
+    }
+
     await _api.patchJson(
       '/api/goals/$goalId/tasks/$planId',
       {'status': status.code},
@@ -462,6 +1166,15 @@ class GoalsService {
     required String planId,
     required String actorId,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacyDeleteActionPlan(
+        goalId: goalId,
+        planId: planId,
+        actorId: actorId,
+      );
+      return;
+    }
+
     await _api.deleteJson(
       '/api/goals/$goalId/tasks/$planId',
       token: _token,
@@ -474,6 +1187,16 @@ class GoalsService {
     required String body,
     bool isPrivate = false,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacyAddComment(
+        goalId: goalId,
+        authorId: authorId,
+        body: body,
+        isPrivate: isPrivate,
+      );
+      return;
+    }
+
     await _api.postJson(
       '/api/goals/$goalId/comments',
       {
@@ -488,6 +1211,11 @@ class GoalsService {
     required String goalId,
     required String actorId,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacyLogMeritTarget(goalId: goalId, actorId: actorId);
+      return;
+    }
+
     await _api.postJson(
       '/api/goals/$goalId/merits/target',
       const <String, dynamic>{},
@@ -500,6 +1228,15 @@ class GoalsService {
     required String actorId,
     required double amount,
   }) async {
+    if (_usesLegacyFirestore) {
+      await _legacyGoExtraMile(
+        goalId: goalId,
+        actorId: actorId,
+        amount: amount,
+      );
+      return;
+    }
+
     await _api.postJson(
       '/api/goals/$goalId/merits/extra',
       {'amount': amount},
@@ -508,6 +1245,11 @@ class GoalsService {
   }
 
   Future<void> deleteGoal(String goalId) async {
+    if (_usesLegacyFirestore) {
+      await _legacyDeleteGoal(goalId);
+      return;
+    }
+
     await _api.deleteJson(
       '/api/goals/$goalId',
       token: _token,

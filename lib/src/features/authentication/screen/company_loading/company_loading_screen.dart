@@ -349,18 +349,35 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
 
       final data = await UserService.getUserData();
       final role = (data['role'] as String?)?.trim().toLowerCase() ?? '';
-      final companyName =
-          (data['companyName'] as String?)?.trim().toLowerCase() ?? '';
-      final companyCode =
-          (data['companyCode'] as String?)?.trim().toUpperCase() ?? '';
-      final companyId = (data['companyId'] as String?)?.trim() ?? '';
+      final membershipData = CompanyMembershipService.fromUserData(data);
+      final activeMembership = membershipData.activeMembership;
+      final companyName = ((data['activeCompanyName'] as String?)?.trim() ??
+              (data['companyName'] as String?)?.trim() ??
+              activeMembership?.name ??
+              '')
+          .toLowerCase();
+      final companyCode = ((data['activeCompanyCode'] as String?)?.trim() ??
+              (data['companyCode'] as String?)?.trim() ??
+              activeMembership?.code ??
+              '')
+          .toUpperCase();
+      final companyId = ((data['activeCompanyId'] as String?)?.trim() ??
+              (data['companyId'] as String?)?.trim() ??
+              activeMembership?.id ??
+              '')
+          .trim();
       final loadingConfig = await _resolveCompanyLoadingConfig(
         companyName: companyName,
         companyCode: companyCode,
         companyId: companyId,
+        lookupKeys: CompanyMembershipService.lookupKeysFromUserData(data),
       );
 
       if (!mounted) return;
+      CompanyThemeService.cacheThemeForUser(
+        widget.uid,
+        loadingConfig.initialTheme,
+      );
       if (loadingConfig.showLoading && role != 'admin') {
         _loadingImageUrl = loadingConfig.imageUrl;
         _loadingVideoUrl = loadingConfig.videoUrl;
@@ -537,6 +554,8 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
                     imageUrl: _loadingImageUrl,
                     videoController: _videoController,
                     fallbackAsset: _loadingBrand.assetPath,
+                    videoScale: _loadingVideoScale,
+                    videoFit: _loadingVideoFit,
                   ),
                 ),
               ),
@@ -693,14 +712,17 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
     required String companyName,
     required String companyCode,
     required String companyId,
+    required List<String> lookupKeys,
   }) async {
     final profileBrand = _brandForCompany(companyName, companyCode);
-    final lookupKeys = <String>[
-      if (companyId.isNotEmpty) companyId,
-      if (companyCode.isNotEmpty) companyCode,
-    ];
+    final searchKeys = lookupKeys.isNotEmpty
+        ? lookupKeys
+        : <String>[
+            if (companyId.isNotEmpty) companyId,
+            if (companyCode.isNotEmpty) companyCode,
+          ];
 
-    for (final lookupKey in lookupKeys) {
+    for (final lookupKey in searchKeys) {
       final company = await CompanyApiService.instance.findByCode(lookupKey);
       if (company == null) continue;
 
@@ -711,6 +733,11 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
       final loadingVideoUrl = company.loadingVideoUrl?.trim() ?? '';
       final brand = _brandForCompany(docName, docCode);
       final themeBrand = _brandFromCompanyData(
+        companyData,
+        fallbackName: docName,
+        fallbackCode: docCode,
+      );
+      final initialTheme = CompanyThemeService.fromCompanyData(
         companyData,
         fallbackName: docName,
         fallbackCode: docCode,
@@ -727,6 +754,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
               _CompanyLoadingBrand.gencys,
           imageUrl: loadingImageUrl,
           videoUrl: loadingVideoUrl,
+          initialTheme: initialTheme,
         );
       }
     }
@@ -734,6 +762,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
     return _CompanyLoadingConfig(
       showLoading: profileBrand != null,
       brand: profileBrand ?? _CompanyLoadingBrand.gencys,
+      initialTheme: CompanyThemeData.standard,
     );
   }
 
@@ -801,6 +830,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
       'themeMutedInkColor': company.themeMutedInkColor,
       'themeIconColor': company.themeIconColor,
       'themeMode': company.themeMode,
+      'themeSource': company.themeSource,
       'logoUrl': company.logoUrl,
       'tagline': company.tagline,
       'loadingImageUrl': company.loadingImageUrl,
@@ -848,12 +878,14 @@ class _CompanyLoadingConfig {
   const _CompanyLoadingConfig({
     required this.showLoading,
     required this.brand,
+    required this.initialTheme,
     this.imageUrl = '',
     this.videoUrl = '',
   });
 
   final bool showLoading;
   final _CompanyLoadingBrand brand;
+  final CompanyThemeData initialTheme;
   final String imageUrl;
   final String videoUrl;
 }
@@ -959,14 +991,18 @@ class _CompanyLoadingMedia extends StatelessWidget {
     }
 
     if (imageUrl.isNotEmpty) {
-      return Image.network(
-        imageUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _fallbackImage(),
+      return SizedBox.expand(
+        child: Image.network(
+          imageUrl,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) => _fallbackImage(),
+        ),
       );
     }
 
-    return _fallbackImage();
+    return SizedBox.expand(child: _fallbackImage());
   }
 
   Widget _fallbackImage() {

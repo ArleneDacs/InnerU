@@ -806,8 +806,10 @@ class _ProfilePageState extends State<ProfilePage> {
               title: Text(widget.title),
               actions: [
                 IconButton(
-                    onPressed: () => CommunityBottomSheet.show(context),
-                    icon: Icon(Icons.edit))
+                  onPressed: () =>
+                      CommunityBottomSheet.show(context, companyTheme: companyTheme),
+                  icon: Icon(Icons.edit),
+                )
               ],
             ),
             body: SingleChildScrollView(

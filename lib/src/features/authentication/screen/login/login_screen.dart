@@ -20,6 +20,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   static const _missingAccountMessage = AuthService.missingAccountMessage;
+  static const _emailNotVerifiedMessage = AuthService.emailNotVerifiedMessage;
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   String? _loginError;
@@ -31,19 +32,30 @@ class _LoginScreenState extends State<LoginScreen> {
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   void _showLoginError(String message) {
-    if (message == _missingAccountMessage) {
+    if (message == _missingAccountMessage ||
+        message == _emailNotVerifiedMessage) {
       setState(() {
         _loginError = null;
       });
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(
+              message == _missingAccountMessage
+                  ? 'Account required'
+                  : 'Verify your email',
+            ),
             content: Text(message),
-            backgroundColor: AppColors.danger,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
       return;
     }
 
@@ -240,7 +252,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _loginError = null;
     });
 
-    final error = await AuthService().signInWithApple();
+    final error = await AuthService.instance.signInWithApple();
 
     if (!mounted) return;
 

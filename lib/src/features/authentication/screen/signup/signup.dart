@@ -1,6 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/login/check_email_screen.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
@@ -108,7 +108,7 @@ class _SignupScreenState extends State<SignupScreen> {
     });
 
     if (error == null) {
-      _showAccountCreatedDialog();
+      _showVerificationEmailScreen();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error), backgroundColor: Colors.red),
@@ -116,89 +116,14 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
-  void _showAccountCreatedDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-          contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-          title: Column(
-            children: [
-              Container(
-                width: 68,
-                height: 68,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFEAF4DE),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  CupertinoIcons.mail_solid,
-                  color: Color(0xFF4C6B43),
-                  size: 34,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                "Account created",
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "Your account is ready.",
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "Continue to the app to start using your ${widget.selectedRole} account.",
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.black54,
-                  height: 1.45,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const AuthRoleHome(),
-                    ),
-                  );
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF4C6B43),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                child: const Text("Continue"),
-              ),
-            ),
-          ],
-        );
-      },
+  void _showVerificationEmailScreen() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CheckEmailScreen(
+          email: _emailController.text.trim(),
+        ),
+      ),
     );
   }
 
@@ -260,7 +185,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       SizedBox(height: context.responsiveValue(4)),
                       Text(
-                        "A few details and you're in.",
+                        "A few details, then verify your email.",
                         style: TextStyle(
                           fontSize: context.responsiveFont(14),
                           color: Colors.black54,

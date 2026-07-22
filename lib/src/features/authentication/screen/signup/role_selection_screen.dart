@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart' as apple_sign_in;
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/login/check_email_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
@@ -39,6 +40,21 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     return false;
   }
 
+  void _openEmailSignup() {
+    if (!_validateCompanyChoice()) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SignupScreen(
+          selectedRole: _selectedRole,
+          initialCompanyCode: _continueWithoutCompany ? '' : _companyCode,
+          continueWithoutCompany: _continueWithoutCompany,
+        ),
+      ),
+    );
+  }
+
   Future<void> _handleGoogleSignup() async {
     if (!_acceptedTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -72,6 +88,18 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     }
 
     if (error == null) {
+      final pendingEmail = AuthService.instance.pendingVerificationEmail;
+      if (pendingEmail != null) {
+        AuthService.instance.clearPendingVerificationEmail();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CheckEmailScreen(email: pendingEmail),
+          ),
+        );
+        return;
+      }
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -109,7 +137,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       _isLoading = true;
     });
 
-    final error = await AuthService().signUpWithApple(
+    final error = await AuthService.instance.signUpWithApple(
       role: _selectedRole,
       companyCode: _continueWithoutCompany ? '' : _companyCode,
       continueWithoutCompany: _continueWithoutCompany,
@@ -126,6 +154,18 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     }
 
     if (error == null) {
+      final pendingEmail = AuthService.instance.pendingVerificationEmail;
+      if (pendingEmail != null) {
+        AuthService.instance.clearPendingVerificationEmail();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CheckEmailScreen(email: pendingEmail),
+          ),
+        );
+        return;
+      }
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -376,23 +416,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                           ),
                           onPressed: _isLoading
                               ? null
-                              : () {
-                                  if (!_validateCompanyChoice()) return;
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => SignupScreen(
-                                        selectedRole: _selectedRole,
-                                        initialCompanyCode:
-                                            _continueWithoutCompany
-                                                ? ''
-                                                : _companyCode,
-                                        continueWithoutCompany:
-                                            _continueWithoutCompany,
-                                      ),
-                                    ),
-                                  );
-                                },
+                              : _openEmailSignup,
                           child: const Text(
                             "Continue with email",
                             style: TextStyle(

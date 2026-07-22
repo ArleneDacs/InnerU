@@ -31,6 +31,9 @@ Route::get('/health', fn () => response()->json([
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/google', [AuthController::class, 'google']);
+    Route::post('/apple', [AuthController::class, 'apple']);
+    Route::post('/email/verification-notification', [AuthController::class, 'resendVerificationEmail']);
     Route::post('/password/forgot', [AuthController::class, 'sendPasswordResetLink']);
     Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 });

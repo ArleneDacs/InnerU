@@ -22,11 +22,19 @@ class ExerciseController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $date = now()->toDateString();
-        $logs = ExerciseLog::query()
+        $validated = $request->validate([
+            'date' => ['nullable', 'date'],
+        ]);
+
+        $query = ExerciseLog::query()
             ->where('user_id', $user->id)
-            ->whereDate('date', $date)
-            ->orderByDesc('created_at')
+            ->orderByDesc('created_at');
+
+        if (isset($validated['date'])) {
+            $query->whereDate('date', Carbon::parse($validated['date'])->toDateString());
+        }
+
+        $logs = $query
             ->get()
             ->map(fn (ExerciseLog $log) => $this->logPayload($log));
 

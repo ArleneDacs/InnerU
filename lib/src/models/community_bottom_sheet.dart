@@ -4,15 +4,14 @@ import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class CommunityBottomSheet {
-  static Future<void> show(BuildContext context) async {
-    final session = AuthService.instance.currentSession;
-    final companyTheme = session == null
-        ? CompanyThemeData.standard
-        : await CompanyThemeService.resolveForUser(session.id.toString());
-    if (!context.mounted) return;
+  static Future<void> show(
+    BuildContext context, {
+    CompanyThemeData? companyTheme,
+  }) async {
+    final theme = companyTheme ?? _cachedThemeOrStandard();
 
     showModalBottomSheet(
-      backgroundColor: companyTheme.surfaceColor,
+      backgroundColor: theme.surfaceColor,
       context: context,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
@@ -20,13 +19,13 @@ class CommunityBottomSheet {
       ),
       builder: (context) {
         return Theme(
-          data: AppTheme.company(companyTheme),
+          data: AppTheme.company(theme),
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 14),
               child: ListTileTheme(
-                iconColor: companyTheme.iconColor,
-                textColor: companyTheme.inkColor,
+                iconColor: theme.iconColor,
+                textColor: theme.inkColor,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -39,7 +38,7 @@ class CommunityBottomSheet {
                       },
                     ),
                     Divider(
-                      color: companyTheme.primaryColor.withValues(alpha: 0.24),
+                      color: theme.primaryColor.withValues(alpha: 0.24),
                     ),
                     ListTile(
                       leading: const Icon(Icons.list),
@@ -57,5 +56,12 @@ class CommunityBottomSheet {
         );
       },
     );
+  }
+
+  static CompanyThemeData _cachedThemeOrStandard() {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return CompanyThemeData.standard;
+    return CompanyThemeService.cachedThemeForUser(session.id.toString()) ??
+        CompanyThemeData.standard;
   }
 }

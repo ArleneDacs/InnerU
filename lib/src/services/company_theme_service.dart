@@ -7,6 +7,8 @@ import 'package:image/image.dart' as image_lib;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/company_api_service.dart';
+import 'package:selfcare_projects/src/services/company_membership_service.dart';
 
 class CompanyThemeData {
   const CompanyThemeData({
@@ -148,6 +150,11 @@ class CompanyThemeService {
     return _userThemeCache[uid];
   }
 
+  static void cacheThemeForUser(String uid, CompanyThemeData theme) {
+    _userThemeCache[uid] = theme;
+    themePreferenceVersion.value++;
+  }
+
   static void clearCachedThemeForUser(String uid) {
     _userThemeCache.remove(uid);
     themePreferenceVersion.value++;
@@ -167,9 +174,23 @@ class CompanyThemeService {
     try {
       final userData = await UserService.getUserData();
       if (userData.isNotEmpty) {
-        final companyName = (userData['companyName'] as String?)?.trim() ?? '';
-        final companyCode =
-            (userData['companyCode'] as String?)?.trim().toUpperCase() ?? '';
+        final companyData = await _companyDataForUser(userData);
+        if (companyData != null) {
+          return _resolveFromCompanyData(
+            companyData,
+            fallbackName: (companyData['name'] as String?)?.trim() ?? '',
+            fallbackCode: (companyData['code'] as String?)?.trim() ?? '',
+          );
+        }
+
+        final companyName = ((userData['activeCompanyName'] as String?)?.trim() ??
+                (userData['companyName'] as String?)?.trim() ??
+                '')
+            .trim();
+        final companyCode = ((userData['activeCompanyCode'] as String?)?.trim() ??
+                (userData['companyCode'] as String?)?.trim() ??
+                '')
+            .toUpperCase();
         if (companyName.isNotEmpty || companyCode.isNotEmpty) {
           return _resolveFromCompanyData(
             <String, dynamic>{
@@ -478,6 +499,44 @@ class CompanyThemeService {
     }
 
     return CompanyThemeData.standard;
+  }
+
+  static Future<Map<String, dynamic>?> _companyDataForUser(
+    Map<String, dynamic> userData,
+  ) async {
+    final lookupKeys = CompanyMembershipService.lookupKeysFromUserData(userData);
+    for (final lookupKey in lookupKeys) {
+      try {
+        final company = await CompanyApiService.instance.findByCode(lookupKey);
+        if (company == null || !company.isActive) {
+          continue;
+        }
+
+        return {
+          'name': company.name,
+          'code': company.code,
+          'themeEnabled': company.themeEnabled,
+          'themeSource': company.themeSource,
+          'tagline': company.tagline,
+          'themePrimaryColor': company.themePrimaryColor,
+          'themeAccentColor': company.themeAccentColor,
+          'themeBackgroundColor': company.themeBackgroundColor,
+          'themeSurfaceColor': company.themeSurfaceColor,
+          'themeInkColor': company.themeInkColor,
+          'themeMutedInkColor': company.themeMutedInkColor,
+          'themeIconColor': company.themeIconColor,
+          'themeMode': company.themeMode,
+          'themeIsDark': company.themeIsDark,
+          'logoUrl': company.logoUrl,
+          'loadingImageUrl': company.loadingImageUrl,
+          'loadingVideoUrl': company.loadingVideoUrl,
+        };
+      } catch (e) {
+        debugPrint('Failed to resolve company theme lookup [$lookupKey]: $e');
+      }
+    }
+
+    return null;
   }
 
   static Future<Uint8List?> _loadThemeImageBytes(

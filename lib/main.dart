@@ -184,6 +184,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
   Widget build(BuildContext context) {
     return StreamBuilder<AppSession?>(
       stream: AuthService.instance.sessionStream,
+      initialData: AuthService.instance.currentSession,
       builder: (context, snapshot) {
         final currentUserId = snapshot.data?.id.toString();
         final previousUserId = _lastSeenUserId;
@@ -200,9 +201,6 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
           }
         }
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
         if (snapshot.hasData && snapshot.data != null) {
           return const AuthRoleHome();
         }

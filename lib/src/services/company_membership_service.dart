@@ -131,6 +131,55 @@ class CompanyMembershipService {
     );
   }
 
+  static List<String> lookupKeysFromUserData(Map<String, dynamic>? userData) {
+    if (userData == null || userData.isEmpty) {
+      return const <String>[];
+    }
+
+    final keys = <String>[
+      (userData['activeCompanyId'] as String?)?.trim() ?? '',
+      (userData['activeCompanyCode'] as String?)?.trim() ?? '',
+      (userData['companyId'] as String?)?.trim() ?? '',
+      (userData['companyCode'] as String?)?.trim() ?? '',
+    ];
+
+    final memberships = _membershipsFromUserData(userData);
+    final activeMembership = _activeMembershipFromUserData(userData, memberships);
+    if (activeMembership != null) {
+      keys.addAll([
+        activeMembership.id,
+        activeMembership.code,
+      ]);
+    }
+
+    final companyIds = userData['companyIds'];
+    if (companyIds is List) {
+      keys.addAll(companyIds.whereType<String>().map((value) => value.trim()));
+    }
+
+    final companyCodes = userData['companyCodes'];
+    if (companyCodes is List) {
+      keys.addAll(companyCodes.whereType<String>().map((value) => value.trim()));
+    }
+
+    return keys
+        .where((value) => value.isNotEmpty)
+        .map((value) => value.trim())
+        .toSet()
+        .toList();
+  }
+
+  static CompanyMembership? activeMembershipFromUserDataPublic(
+    Map<String, dynamic>? userData,
+  ) {
+    if (userData == null || userData.isEmpty) {
+      return null;
+    }
+
+    final memberships = _membershipsFromUserData(userData);
+    return _activeMembershipFromUserData(userData, memberships);
+  }
+
   static CompanyMembershipData fromUserData(Map<String, dynamic>? userData) {
     if (userData == null) {
       return const CompanyMembershipData(
@@ -413,4 +462,11 @@ List<CompanyMembership> membershipsFromUserDataForTest(
   Map<String, dynamic> userData,
 ) {
   return CompanyMembershipService.fromUserData(userData).memberships;
+}
+
+@visibleForTesting
+List<String> lookupKeysFromUserDataForTest(
+  Map<String, dynamic> userData,
+) {
+  return CompanyMembershipService.lookupKeysFromUserData(userData);
 }

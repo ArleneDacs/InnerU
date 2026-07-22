@@ -170,14 +170,60 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (!mounted) return;
       setState(() {
         _profilePic = cleanedUrl.isEmpty ? null : cleanedUrl;
-        final summary = dashboard['summary'];
-        if (summary is Map<String, dynamic>) {
-          quote = summary['quote']?.toString() ?? quote;
-          author = summary['author']?.toString() ?? author;
-        }
       });
     } catch (e) {
       debugPrint("Error fetching profile picture: $e");
+    }
+  }
+
+  Future<void> fetchQuote() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedQuote = prefs.getString('quote');
+      final savedAuthor = prefs.getString('author');
+      final savedDate = prefs.getString('quote_date');
+      final today = DateTime.now().toString().split(' ')[0];
+
+      if (savedQuote != null && savedAuthor != null && savedDate == today) {
+        if (!mounted) return;
+        setState(() {
+          quote = savedQuote;
+          author = savedAuthor;
+        });
+        return;
+      }
+
+      final response =
+          await http.get(Uri.parse("https://zenquotes.io/api/random"));
+
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        final newQuote = data[0]['q'] ?? "No quote available.";
+        final newAuthor = data[0]['a'] ?? "Unknown";
+
+        if (!mounted) return;
+        setState(() {
+          quote = newQuote;
+          author = newAuthor;
+        });
+
+        await prefs.setString('quote', newQuote);
+        await prefs.setString('author', newAuthor);
+        await prefs.setString('quote_date', today);
+      } else {
+        if (!mounted) return;
+        setState(() {
+          quote = "Failed to load quote.";
+          author = "Unknown";
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching quote: $e");
+      if (!mounted) return;
+      setState(() {
+        quote = "Failed to load quote.";
+        author = "Unknown";
+      });
     }
   }
 
@@ -931,57 +977,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     return "User";
-  }
-
-  Future<void> fetchQuote() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedQuote = prefs.getString('quote');
-      final savedAuthor = prefs.getString('author');
-      final savedDate = prefs.getString('quote_date');
-      final today = DateTime.now().toString().split(' ')[0];
-
-      if (savedQuote != null && savedAuthor != null && savedDate == today) {
-        if (!mounted) return;
-        setState(() {
-          quote = savedQuote;
-          author = savedAuthor;
-        });
-        return;
-      }
-
-      final response =
-          await http.get(Uri.parse("https://zenquotes.io/api/random"));
-
-      if (response.statusCode == 200) {
-        final List data = json.decode(response.body);
-        final newQuote = data[0]['q'] ?? "No quote available.";
-        final newAuthor = data[0]['a'] ?? "Unknown";
-
-        if (!mounted) return;
-        setState(() {
-          quote = newQuote;
-          author = newAuthor;
-        });
-
-        await prefs.setString('quote', newQuote);
-        await prefs.setString('author', newAuthor);
-        await prefs.setString('quote_date', today);
-      } else {
-        if (!mounted) return;
-        setState(() {
-          quote = "Failed to load quote.";
-          author = "Unknown";
-        });
-      }
-    } catch (e) {
-      debugPrint("Error fetching quote: $e");
-      if (!mounted) return;
-      setState(() {
-        quote = "Failed to load quote.";
-        author = "Unknown";
-      });
-    }
   }
 
   Future<void> _openCoachChat({

@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Note {
   String id;
   String userId;
@@ -34,6 +36,8 @@ class Note {
     DateTime createdAt;
     if (rawCreatedAt is String) {
       createdAt = DateTime.tryParse(rawCreatedAt) ?? DateTime.now();
+    } else if (rawCreatedAt is Timestamp) {
+      createdAt = rawCreatedAt.toDate();
     } else if (rawCreatedAt is DateTime) {
       createdAt = rawCreatedAt;
     } else if (rawCreatedAt is int) {

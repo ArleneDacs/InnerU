@@ -35,4 +35,24 @@ return [
         ],
     ],
 
+    'google' => [
+        'web_client_id' => env(
+            'GOOGLE_WEB_CLIENT_ID',
+            '609604667702-2898tlqiuhgt69viubl09cq4ninu78g9.apps.googleusercontent.com'
+        ),
+        'ios_client_id' => env(
+            'GOOGLE_IOS_CLIENT_ID',
+            '609604667702-m3tcf9hqg5mro2d30jju1qmj0beti6mm.apps.googleusercontent.com'
+        ),
+        'android_client_id' => env(
+            'GOOGLE_ANDROID_CLIENT_ID',
+            '609604667702-at8ps5hqcibgnrskrbeebcjocatrss7g.apps.googleusercontent.com'
+        ),
+    ],
+
+    'apple' => [
+        'bundle_id' => env('APPLE_BUNDLE_ID', 'com.valenin.inneru'),
+        'service_id' => env('APPLE_SERVICE_ID', 'com.valenin.inneru'),
+    ],
+
 ];
