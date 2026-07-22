@@ -14,7 +14,7 @@ return new class extends Migration
             $table->string('username');
             $table->string('title');
             $table->json('note');
-            $table->unsignedInteger('color')->default(0xFFFFFFFF);
+            $table->unsignedBigInteger('color')->default(0xFFFFFFFF);
             $table->string('category');
             $table->boolean('saved')->default(false);
             $table->string('company_id')->nullable();
