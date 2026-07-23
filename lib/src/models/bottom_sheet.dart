@@ -29,6 +29,9 @@ class BottomSheetWidget {
             final foreground = companyTheme.isDark
                 ? companyTheme.inkColor
                 : _onSurfaceFor(companyTheme.primaryColor);
+            final splashColor = companyTheme.isDark
+                ? Colors.white.withValues(alpha: 0.14)
+                : Colors.black.withValues(alpha: 0.08);
 
             return Theme(
               data: AppTheme.company(companyTheme),
@@ -55,6 +58,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.person,
                               title: 'Profile',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.pushNamed(context, '/profile');
@@ -64,6 +69,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.receipt_long_rounded,
                               title: 'Activity Logs',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.pushNamed(context, '/activityLogs');
@@ -73,6 +80,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.settings,
                               title: 'Account Settings',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.push(
@@ -88,6 +97,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.face,
                               title: 'Mood Tracker',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.pushNamed(context, '/emotionScreen');
@@ -97,6 +108,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.star,
                               title: 'Leaderboard',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.pushNamed(context, '/leaderboard');
@@ -106,6 +119,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: CupertinoIcons.rosette,
                               title: 'Coaches',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 Navigator.pushNamed(context, '/coachesScreen');
@@ -117,6 +132,8 @@ class BottomSheetWidget {
                               _buildMenuTile(
                                 icon: Icons.supervisor_account,
                                 title: 'Add Coach',
+                                backgroundColor: background,
+                                splashColor: splashColor,
                                 onTap: () {
                                   Navigator.pop(sheetContext);
                                   Navigator.push(
@@ -132,6 +149,8 @@ class BottomSheetWidget {
                             _buildMenuTile(
                               icon: Icons.logout_rounded,
                               title: 'Log out',
+                              backgroundColor: background,
+                              splashColor: splashColor,
                               onTap: () {
                                 Navigator.pop(sheetContext);
                                 _showLogOutDialog(context);
@@ -176,12 +195,19 @@ class BottomSheetWidget {
   static Widget _buildMenuTile({
     required IconData icon,
     required String title,
+    required Color backgroundColor,
+    required Color splashColor,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      onTap: onTap,
+    return Material(
+      color: backgroundColor,
+      child: ListTile(
+        tileColor: backgroundColor,
+        splashColor: splashColor,
+        leading: Icon(icon),
+        title: Text(title),
+        onTap: onTap,
+      ),
     );
   }
 
