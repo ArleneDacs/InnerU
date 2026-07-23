@@ -255,7 +255,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   Future<void> _speakCompletionPraise() async {
     try {
       await _feedbackChannel.invokeMethod<void>('speak', {
-        'text': 'Meditation, great job.',
+        'text': 'Meditation done, great job.',
       });
     } catch (error) {
       debugPrint('Meditation completion speech failed: $error');
@@ -280,6 +280,24 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final backgroundColor =
+            isDark ? const Color(0xFF1B1622) : const Color(0xFFFFFBF7);
+        final borderColor =
+            isDark ? const Color(0xFF443857) : const Color(0xFFE9DED5);
+        final titleColor =
+            isDark ? const Color(0xFFF5EFE9) : const Color(0xFF2B2B2B);
+        final bodyColor =
+            isDark ? const Color(0xFFE1D8D2) : const Color(0xFF6E625B);
+        final mutedColor =
+            isDark ? const Color(0xFFB6ABA3) : const Color(0xFF8D7F75);
+        final iconCircleColor =
+            isDark ? const Color(0xFF3B5240) : const Color(0xFFF7DEAA);
+        final iconColor =
+            isDark ? const Color(0xFFE2EDD8) : const Color(0xFF4C6B43);
+        final primaryButtonColor =
+            isDark ? const Color(0xFF8A67CE) : const Color(0xFF7A5AB8);
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 26),
@@ -287,11 +305,9 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(24, 34, 24, 24),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFFBF7),
+              color: backgroundColor,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(
-                color: const Color(0xFFE9DED5),
-              ),
+              border: Border.all(color: borderColor),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x26000000),
@@ -306,22 +322,22 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                 Container(
                   height: 74,
                   width: 74,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF7DEAA),
+                  decoration: BoxDecoration(
+                    color: iconCircleColor,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.self_improvement,
-                    color: Color(0xFF4C6B43),
+                    color: iconColor,
                     size: 38,
                   ),
                 ),
                 const SizedBox(height: 18),
-                const Text(
+                Text(
                   'Meditation complete',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Color(0xFF2B2B2B),
+                    color: titleColor,
                     fontSize: 25,
                     fontWeight: FontWeight.w800,
                   ),
@@ -330,8 +346,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                 Text(
                   'You finished your session. If you want, take a photo and share this calm moment to the community page.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF6E625B),
+                  style: TextStyle(
+                    color: bodyColor,
                     fontSize: 16,
                     height: 1.45,
                     fontWeight: FontWeight.w600,
@@ -341,8 +357,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                 Text(
                   affirmation,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF8D7F75),
+                  style: TextStyle(
+                    color: mutedColor,
                     fontSize: 14,
                     height: 1.35,
                     fontWeight: FontWeight.w500,
@@ -356,8 +372,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                     icon: const Icon(Icons.add_photo_alternate_rounded),
                     label: const Text('Take photo & share'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF4C6B43),
-                      side: const BorderSide(color: Color(0xFFD8C7B9)),
+                      foregroundColor: iconColor,
+                      side: BorderSide(color: borderColor),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
@@ -371,7 +387,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                   child: ElevatedButton(
                     onPressed: () => Navigator.of(dialogContext).pop(),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF7A5AB8),
+                      backgroundColor: primaryButtonColor,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       shape: RoundedRectangleBorder(
@@ -507,37 +523,74 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   Future<ImageSource?> _showMemorySourceSheet() {
     return showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: const Color(0xFFFFFBF7),
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final backgroundColor =
+            isDark ? const Color(0xFF1B1622) : const Color(0xFFFFFBF7);
+        final borderColor =
+            isDark ? const Color(0xFF443857) : const Color(0xFFD8C7B9);
+        final titleColor =
+            isDark ? const Color(0xFFF5EFE9) : const Color(0xFF2B2B2B);
+        final iconColor =
+            isDark ? const Color(0xFFE1D8D2) : const Color(0xFF6E625B);
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD8C7B9),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.photo_camera_rounded),
-                  title: const Text('Take photo'),
-                  onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.photo_library_rounded),
-                  title: const Text('Upload image'),
-                  onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+          child: Container(
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border(
+                top: BorderSide(color: borderColor),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x24000000),
+                  blurRadius: 24,
+                  offset: Offset(0, -6),
                 ),
               ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: borderColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.photo_camera_rounded, color: iconColor),
+                    title: Text(
+                      'Take photo',
+                      style: TextStyle(color: titleColor),
+                    ),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, ImageSource.camera),
+                  ),
+                  ListTile(
+                    leading:
+                        Icon(Icons.photo_library_rounded, color: iconColor),
+                    title: Text(
+                      'Upload image',
+                      style: TextStyle(color: titleColor),
+                    ),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, ImageSource.gallery),
+                  ),
+                ],
+              ),
             ),
           ),
         );
