@@ -236,7 +236,7 @@ class AuthTest extends TestCase
 
         $this->assertNotNull($redirectUrl);
         $this->assertStringStartsWith(
-            rtrim((string) config('app.frontend_url'), '/').'/password-reset',
+            rtrim((string) config('app.frontend_url'), '/').'/',
             $redirectUrl
         );
 

@@ -24,7 +24,7 @@ class ApiResetPasswordNotification extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
-        $resetUrl = $frontendUrl.'/password-reset?mode=resetPassword&token='
+        $resetUrl = $frontendUrl.'/?mode=resetPassword&token='
             .urlencode($this->token).'&email='.urlencode($this->email);
 
         return (new MailMessage)

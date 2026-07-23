@@ -14,7 +14,7 @@ class EmailLinkAuthService {
   static const String continueUrl =
       'https://selfcare-1476e.firebaseapp.com/email-link-login';
   static const String passwordResetContinueUrl =
-      'https://selfcare-1476e.firebaseapp.com/password-reset';
+      'https://selfcare-1476e.firebaseapp.com/';
   static const String _pendingEmailKey = 'pending_email_link_email';
 
   final AppLinks _appLinks = AppLinks();
