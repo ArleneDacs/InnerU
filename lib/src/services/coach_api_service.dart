@@ -261,6 +261,22 @@ class CoachApiService {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> fetchMenteeGoals(String menteeId) async {
+    final response = await _api.getJson(
+      '/api/coach/mentees/$menteeId/goals',
+      token: _token,
+    );
+    final goals = response['goals'];
+    if (goals is! List) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    return goals
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> fetchLeaderboard() async {
     return _api.getJson(
       '/api/leaderboard',

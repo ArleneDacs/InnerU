@@ -7,7 +7,9 @@ use App\Models\DailyTracker;
 use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\CoachRequest;
+use App\Models\Goal;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,6 +19,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class CoachManagementController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function directory(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -265,13 +271,54 @@ class CoachManagementController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $mentees = CoachMentee::query()
+        $relations = CoachMentee::query()
             ->where('coach_id', (string) $user->id)
             ->orderByDesc('updated_at')
+            ->get();
+
+        $menteeUsers = User::query()
+            ->whereIn('id', $relations->pluck('mentee_id')->unique()->values())
             ->get()
-            ->map(fn (CoachMentee $relation) => $this->menteePayload($relation));
+            ->keyBy(fn (User $menteeUser) => (string) $menteeUser->id);
+        $scores = $this->userScoreService->resolveForUsers($menteeUsers);
+
+        $mentees = $relations->map(function (CoachMentee $relation) use ($scores) {
+            $payload = $this->menteePayload($relation);
+            $payload['score'] = (int) round($scores[(string) $relation->mentee_id] ?? 0);
+            return $payload;
+        });
 
         return response()->json(['mentees' => $mentees]);
+    }
+
+    public function menteeGoals(Request $request, string $menteeId): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $isRelatedMentee = CoachMentee::query()
+            ->where('coach_id', (string) $user->id)
+            ->where('mentee_id', $menteeId)
+            ->exists();
+        if (! $isRelatedMentee) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $goals = Goal::query()
+            ->where('user_id', $menteeId)
+            ->orderByDesc('updated_at')
+            ->get()
+            ->map(fn (Goal $goal) => [
+                'id' => (string) $goal->id,
+                'title' => $goal->title,
+                'status' => $goal->status,
+                'progress' => (int) $goal->progress,
+                'targetDate' => $goal->target_date?->toIso8601String(),
+            ]);
+
+        return response()->json(['goals' => $goals]);
     }
 
     public function assignMentee(Request $request): JsonResponse

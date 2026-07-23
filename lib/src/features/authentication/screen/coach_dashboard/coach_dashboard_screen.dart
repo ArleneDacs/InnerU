@@ -3278,10 +3278,12 @@ class CoachGroupCustomizationPage extends StatelessWidget {
       final userId = user['id']?.toString() ?? '';
       final isCoach = user['isCoach'] == true ||
           ((user['role'] as String?)?.toLowerCase() == 'coach');
+      final isMyAcceptedMentee = user['assignedToMe'] == true;
       return userId.isNotEmpty &&
           userId != currentUserId &&
           !summary.memberIds.contains(userId) &&
-          !isCoach;
+          !isCoach &&
+          isMyAcceptedMentee;
     }).toList();
 
     if (!context.mounted) return;
@@ -4355,171 +4357,226 @@ class CoachGroupCustomizationPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final autoRefresh = Stream<int>.periodic(
-      const Duration(seconds: 20),
-      (tick) => tick,
-    );
-    return StreamBuilder<int>(
-      stream: autoRefresh,
-      initialData: 0,
-      builder: (context, _) {
-        return CompanyThemeBuilder(
-          builder: (context, companyTheme) {
-        final apiFuture = Future.wait<dynamic>([
-          CoachApiService.instance.fetchGroups(),
-          CoachApiService.instance.fetchLeaderboard(),
-        ]);
-
-        return DefaultTabController(
-          length: 2,
-          child: Theme(
-            data: AppTheme.company(companyTheme),
-            child: Scaffold(
-              backgroundColor: companyTheme.backgroundColor,
-              appBar: AppBar(
-                backgroundColor: companyTheme.surfaceColor,
-                foregroundColor: companyTheme.inkColor,
-                surfaceTintColor: Colors.transparent,
-                title: Text(
-                  'Group customization',
-                  style: TextStyle(color: companyTheme.inkColor),
-                ),
-                actions: [
-                  IconButton(
-                    onPressed: () => _showCreateGroupDialog(context),
-                    icon: const Icon(CupertinoIcons.plus),
-                  ),
-                ],
-                bottom: TabBar(
-                  indicatorColor: companyTheme.primaryColor,
-                  labelColor: companyTheme.primaryColor,
-                  unselectedLabelColor: companyTheme.mutedInkColor,
-                  tabs: const [
-                    Tab(
-                      icon: Icon(CupertinoIcons.rectangle_grid_2x2_fill),
-                      text: 'Groups',
-                    ),
-                    Tab(
-                      icon: Icon(CupertinoIcons.star_fill),
-                      text: 'Leaderboard',
-                    ),
-                  ],
-                ),
-              ),
-              body: FutureBuilder<List<dynamic>>(
-                future: apiFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Could not load group data.',
-                        style: TextStyle(color: companyTheme.mutedInkColor),
-                      ),
-                    );
-                  }
-
-                  final groups = (snapshot.data?[0] as List?)
-                          ?.whereType<Map>()
-                          .map((item) => Map<String, dynamic>.from(item))
-                          .toList() ??
-                      const <Map<String, dynamic>>[];
-                  final leaderboardPayload = Map<String, dynamic>.from(
-                      snapshot.data?[1] as Map? ?? {});
-                  final summaries = _apiGroupSummaries(
-                    leaderboardPayload,
-                    groups,
-                  );
-                  final sortedByName = summaries.toList()
-                    ..sort((a, b) => a.groupName.toLowerCase().compareTo(
-                          b.groupName.toLowerCase(),
-                        ));
-                  final totalMenteeScore = summaries.fold<int>(
-                    0,
-                    (runningTotal, summary) =>
-                        runningTotal + summary.totalScore,
-                  );
-                  final totalMentees = summaries.fold<int>(
-                    0,
-                    (runningTotal, summary) =>
-                        runningTotal + summary.memberCount,
-                  );
-
-                  return TabBarView(
-                    children: [
-                      ListView(
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-                        children: [
-                          _buildSummaryCard(
-                            context: context,
-                            groupCount: groups.length,
-                            menteeCount: totalMentees,
-                            totalMenteeScore: totalMenteeScore,
-                          ),
-                          const SizedBox(height: 16),
-                          if (sortedByName.isEmpty)
-                            _buildEmptyGroupsCard(context)
-                          else
-                            ...sortedByName.map(
-                              (summary) => _CoachApiGroupCard(
-                                summary: summary,
-                                onAddCoach: () =>
-                                    _showAddCoachDialog(context, summary),
-                                onAddMentee: () =>
-                                    _showAddMenteeToGroupDialog(context, summary),
-                                onDelete: () => _confirmDeleteGroup(
-                                  context: context,
-                                  groupId: summary.groupId,
-                                  groupName: summary.groupName,
-                                  memberIds: summary.memberIds,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      ListView(
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-                        children: [
-                          _buildSummaryCard(
-                            context: context,
-                            groupCount: groups.length,
-                            menteeCount: totalMentees,
-                            totalMenteeScore: totalMenteeScore,
-                          ),
-                          const SizedBox(height: 16),
-                          if (summaries.isEmpty)
-                            _buildEmptyGroupsCard(context)
-                          else
-                            ...summaries.map(
-                              (summary) => _CoachApiGroupCard(
-                                summary: summary,
-                                onAddCoach: () =>
-                                    _showAddCoachDialog(context, summary),
-                                onAddMentee: () =>
-                                    _showAddMenteeToGroupDialog(context, summary),
-                                onDelete: () => _confirmDeleteGroup(
-                                  context: context,
-                                  groupId: summary.groupId,
-                                  groupName: summary.groupName,
-                                  memberIds: summary.memberIds,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-          },
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return _CoachGroupCustomizationBody(
+          page: this,
+          companyTheme: companyTheme,
         );
       },
+    );
+  }
+}
+
+class _CoachGroupCustomizationBody extends StatefulWidget {
+  const _CoachGroupCustomizationBody({
+    required this.page,
+    required this.companyTheme,
+  });
+
+  final CoachGroupCustomizationPage page;
+  final CompanyThemeData companyTheme;
+
+  @override
+  State<_CoachGroupCustomizationBody> createState() =>
+      _CoachGroupCustomizationBodyState();
+}
+
+class _CoachGroupCustomizationBodyState
+    extends State<_CoachGroupCustomizationBody> {
+  List<Map<String, dynamic>>? _groups;
+  Map<String, dynamic>? _leaderboardPayload;
+  bool _hasError = false;
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // Refreshes quietly in the background: only the very first load (when
+  // _groups is still null) shows a spinner. Later ticks swap in fresh data
+  // without ever blanking the screen the user is looking at.
+  Future<void> _refresh() async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final results = await Future.wait<dynamic>([
+        CoachApiService.instance.fetchGroups(),
+        CoachApiService.instance.fetchLeaderboard(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _groups = (results[0] as List?)
+                ?.whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList() ??
+            const <Map<String, dynamic>>[];
+        _leaderboardPayload =
+            Map<String, dynamic>.from(results[1] as Map? ?? {});
+        _hasError = false;
+      });
+    } catch (error) {
+      debugPrint('Failed to refresh group customization data: $error');
+      if (!mounted || _groups != null) return;
+      setState(() {
+        _hasError = true;
+      });
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final companyTheme = widget.companyTheme;
+    final page = widget.page;
+
+    Widget body;
+    if (_groups == null) {
+      body = _hasError
+          ? Center(
+              child: Text(
+                'Could not load group data.',
+                style: TextStyle(color: companyTheme.mutedInkColor),
+              ),
+            )
+          : const Center(child: CircularProgressIndicator());
+    } else {
+      final groups = _groups!;
+      final leaderboardPayload =
+          _leaderboardPayload ?? const <String, dynamic>{};
+      final summaries = page._apiGroupSummaries(leaderboardPayload, groups);
+      final sortedByName = summaries.toList()
+        ..sort((a, b) => a.groupName.toLowerCase().compareTo(
+              b.groupName.toLowerCase(),
+            ));
+      final totalMenteeScore = summaries.fold<int>(
+        0,
+        (runningTotal, summary) => runningTotal + summary.totalScore,
+      );
+      final totalMentees = summaries.fold<int>(
+        0,
+        (runningTotal, summary) => runningTotal + summary.memberCount,
+      );
+
+      body = TabBarView(
+        children: [
+          ListView(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+            children: [
+              page._buildSummaryCard(
+                context: context,
+                groupCount: groups.length,
+                menteeCount: totalMentees,
+                totalMenteeScore: totalMenteeScore,
+              ),
+              const SizedBox(height: 16),
+              if (sortedByName.isEmpty)
+                page._buildEmptyGroupsCard(context)
+              else
+                ...sortedByName.map(
+                  (summary) => _CoachApiGroupCard(
+                    summary: summary,
+                    onAddCoach: () =>
+                        page._showAddCoachDialog(context, summary),
+                    onAddMentee: () =>
+                        page._showAddMenteeToGroupDialog(context, summary),
+                    onDelete: () => page._confirmDeleteGroup(
+                      context: context,
+                      groupId: summary.groupId,
+                      groupName: summary.groupName,
+                      memberIds: summary.memberIds,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          ListView(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+            children: [
+              page._buildSummaryCard(
+                context: context,
+                groupCount: groups.length,
+                menteeCount: totalMentees,
+                totalMenteeScore: totalMenteeScore,
+              ),
+              const SizedBox(height: 16),
+              if (summaries.isEmpty)
+                page._buildEmptyGroupsCard(context)
+              else
+                ...summaries.map(
+                  (summary) => _CoachApiGroupCard(
+                    summary: summary,
+                    onAddCoach: () =>
+                        page._showAddCoachDialog(context, summary),
+                    onAddMentee: () =>
+                        page._showAddMenteeToGroupDialog(context, summary),
+                    onDelete: () => page._confirmDeleteGroup(
+                      context: context,
+                      groupId: summary.groupId,
+                      groupName: summary.groupName,
+                      memberIds: summary.memberIds,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return DefaultTabController(
+      length: 2,
+      child: Theme(
+        data: AppTheme.company(companyTheme),
+        child: Scaffold(
+          backgroundColor: companyTheme.backgroundColor,
+          appBar: AppBar(
+            backgroundColor: companyTheme.surfaceColor,
+            foregroundColor: companyTheme.inkColor,
+            surfaceTintColor: Colors.transparent,
+            title: Text(
+              'Group customization',
+              style: TextStyle(color: companyTheme.inkColor),
+            ),
+            actions: [
+              IconButton(
+                onPressed: () => page._showCreateGroupDialog(context),
+                icon: const Icon(CupertinoIcons.plus),
+              ),
+            ],
+            bottom: TabBar(
+              indicatorColor: companyTheme.primaryColor,
+              labelColor: companyTheme.primaryColor,
+              unselectedLabelColor: companyTheme.mutedInkColor,
+              tabs: const [
+                Tab(
+                  icon: Icon(CupertinoIcons.rectangle_grid_2x2_fill),
+                  text: 'Groups',
+                ),
+                Tab(
+                  icon: Icon(CupertinoIcons.star_fill),
+                  text: 'Leaderboard',
+                ),
+              ],
+            ),
+          ),
+          body: body,
+        ),
+      ),
     );
   }
 }
@@ -6310,7 +6367,10 @@ class _CoachPendingApplicationsSectionState
   Widget build(BuildContext context) {
     final visibleRequests = _requests.where((request) {
       final requestId = _requestIdForRequest(request);
-      return requestId.isNotEmpty && !_hiddenRequestIds.contains(requestId);
+      final status = (request['status'] as String?)?.trim().toLowerCase();
+      return requestId.isNotEmpty &&
+          !_hiddenRequestIds.contains(requestId) &&
+          (status == null || status == 'pending');
     }).toList();
 
     if (visibleRequests.isEmpty && _requests.isEmpty) {
@@ -6681,6 +6741,7 @@ class _CoachMenteeCalendarCard extends StatefulWidget {
 class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   late DateTime _focusedDay;
   late DateTime _selectedDay;
+  List<Map<String, dynamic>>? _goals;
 
   @override
   void initState() {
@@ -6688,6 +6749,21 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final today = _normalizeDate(DateTime.now());
     _focusedDay = today;
     _selectedDay = today;
+    _loadGoals();
+  }
+
+  Future<void> _loadGoals() async {
+    final menteeId = (widget.mentee['menteeId'] as String?)?.trim() ?? '';
+    if (menteeId.isEmpty) return;
+    try {
+      final goals = await CoachApiService.instance.fetchMenteeGoals(menteeId);
+      if (!mounted) return;
+      setState(() {
+        _goals = goals;
+      });
+    } catch (error) {
+      debugPrint('Failed to load mentee goals: $error');
+    }
   }
 
   DateTime _normalizeDate(DateTime value) =>
@@ -6705,6 +6781,30 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
 
   int _completedCount(Map<String, dynamic> tracker) {
     return _activityMap(tracker).values.where((value) => value).length;
+  }
+
+  // Real logged value for a completed task, e.g. "20 min" or "4,500 steps",
+  // instead of a bare "Done" that hides what the mentee actually recorded.
+  String _doneDetailLabel(Map<String, dynamic> tracker, String taskKey) {
+    switch (taskKey) {
+      case 'Call':
+        final count = (tracker['callCount'] as num?)?.toInt() ?? 0;
+        return count > 0 ? '$count ${count == 1 ? 'call' : 'calls'}' : 'Done';
+      case 'Steps':
+        final steps = (tracker['stepCount'] as num?)?.toInt() ?? 0;
+        return steps > 0 ? '${NumberFormat('#,###').format(steps)} steps' : 'Done';
+      case 'Meditation':
+        final minutes = (tracker['meditationMinutes'] as num?)?.toInt() ?? 0;
+        return minutes > 0 ? '$minutes min' : 'Done';
+      case 'Learning':
+        final count = (tracker['learningCount'] as num?)?.toInt() ?? 0;
+        return count > 0 ? '$count ${count == 1 ? 'entry' : 'entries'}' : 'Done';
+      case 'Add Value':
+        final count = (tracker['valueCount'] as num?)?.toInt() ?? 0;
+        return count > 0 ? '$count ${count == 1 ? 'entry' : 'entries'}' : 'Done';
+      default:
+        return 'Done';
+    }
   }
 
   Map<DateTime, Map<String, dynamic>> _buildTrackerMap() {
@@ -6728,6 +6828,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   }
 
   Widget _buildActivityLegend() {
+    final colors = Theme.of(context).colorScheme;
     const items = <MapEntry<Color, String>>[
       MapEntry(Color(0xFFF5E3C8), '1-2 tasks'),
       MapEntry(Color(0xFFCFE1D0), '3-4 tasks'),
@@ -6753,7 +6854,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                 const SizedBox(width: 6),
                 Text(
                   item.value,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurface.withValues(alpha: 0.68),
+                  ),
                 ),
               ],
             ),
@@ -6763,18 +6867,19 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   }
 
   Widget _buildActivityDetails(Map<String, dynamic>? tracker) {
+    final colors = Theme.of(context).colorScheme;
     final tasks = tracker == null ? <String, bool>{} : _activityMap(tracker);
     if (tracker == null) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF7F4EE),
+          color: colors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
         ),
-        child: const Text(
+        child: Text(
           'No logged activity for this day.',
-          style: TextStyle(color: Colors.black54),
+          style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
         ),
       );
     }
@@ -6783,24 +6888,30 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F4EE),
+        color: colors.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         children: tasks.entries.map((entry) {
+          final detail =
+              entry.value ? _doneDetailLabel(tracker, entry.key) : 'Not yet';
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: entry.value
-                  ? const Color(0xFFDDE7D5)
-                  : const Color(0xFFF0E5D3),
+                  ? colors.primary.withValues(alpha: 0.18)
+                  : colors.surfaceContainerHighest.withValues(alpha: 0.36),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
-              '${entry.key}: ${entry.value ? 'Done' : 'Not yet'}',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              '${entry.key}: $detail',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colors.onSurface,
+              ),
             ),
           );
         }).toList(),
@@ -6818,6 +6929,85 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     } catch (_) {
       return null;
     }
+  }
+
+  Widget _buildGoalsSection() {
+    final colors = Theme.of(context).colorScheme;
+    final goals = _goals ?? const <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Goals',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: colors.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...goals.map((goal) {
+          final title = (goal['title'] as String?)?.trim().isNotEmpty == true
+              ? (goal['title'] as String).trim()
+              : 'Goal';
+          final status = (goal['status'] as String?)?.trim().toLowerCase() ?? '';
+          final progress = ((goal['progress'] as num?)?.toInt() ?? 0)
+              .clamp(0, 100);
+          final isCompleted = status == 'completed' || progress >= 100;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest.withValues(alpha: 0.32),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: progress / 100,
+                          minHeight: 6,
+                          backgroundColor:
+                              colors.onSurface.withValues(alpha: 0.12),
+                          color: isCompleted
+                              ? colors.primary
+                              : colors.primary.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '$progress%',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: colors.onSurface.withValues(alpha: 0.72),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
   }
 
   Widget _buildRecentActivityLogs() {
@@ -6893,6 +7083,9 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                   runSpacing: 6,
                   children: tasks.entries.map((entry) {
                     final isDone = entry.value;
+                    final detail = isDone
+                        ? _doneDetailLabel(tracker, entry.key)
+                        : 'Pending';
                     return Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -6905,7 +7098,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        '${entry.key}: ${isDone ? 'Done' : 'Pending'}',
+                        '${entry.key}: $detail',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -7042,8 +7235,27 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                   ],
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${(data['score'] as num?)?.toInt() ?? 0} pts',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: colors.onSurface,
+                  ),
+                ),
+              ),
             ],
           ),
+          if (_goals != null && _goals!.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _buildGoalsSection(),
+          ],
           const SizedBox(height: 16),
           _buildActivityLegend(),
           const SizedBox(height: 14),
