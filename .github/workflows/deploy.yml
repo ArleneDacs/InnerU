@@ -24,10 +24,24 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Prepare SSH key
+        run: |
+          set -euo pipefail
+          umask 077
+
+          key_file="$RUNNER_TEMP/inneru_deploy_key"
+
+          if [ -n "${DEPLOY_SSH_KEY_BASE64:-}" ]; then
+            printf '%s' "$DEPLOY_SSH_KEY_BASE64" | base64 --decode > "$key_file"
+          else
+            printf '%s' "$DEPLOY_SSH_KEY" > "$key_file"
+          fi
+
+          chmod 600 "$key_file"
+          echo "SSH_KEY_FILE=$key_file" >> "$GITHUB_ENV"
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KEY_BASE64: ${{ secrets.DEPLOY_SSH_KEY_BASE64 }}
 
       - name: Trust deployment host
         run: |
@@ -45,7 +59,7 @@ jobs:
           REMOTE_SHA=$(printf '%q' "${DEPLOY_SHA:-}")
           REMOTE_RESTART=$(printf '%q' "${DEPLOY_RESTART_COMMAND:-}")
 
-          ssh -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+          ssh -i "$SSH_KEY_FILE" -o IdentitiesOnly=yes -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "DEPLOY_PATH=${REMOTE_PATH} DEPLOY_BRANCH=${REMOTE_BRANCH} DEPLOY_SHA=${REMOTE_SHA} DEPLOY_RESTART_COMMAND=${REMOTE_RESTART} bash -s" <<'EOF'
           set -euo pipefail
 
