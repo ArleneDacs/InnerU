@@ -10,11 +10,102 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AuthTest extends TestCase
 {
     use RefreshDatabase;
+
+    #[DataProvider('signupRoleProvider')]
+    public function test_register_stores_a_pending_registration_for_each_role(
+        string $role,
+        bool $isCoach,
+        ?string $companyCode,
+        ?string $companyName
+    ): void {
+        Notification::fake();
+
+        $response = $this->postJson('/api/auth/register', [
+            'name' => $role === 'coach' ? 'Coach Member' : 'User Member',
+            'email' => "{$role}.member.inneru@gmail.com",
+            'password' => 'Password123',
+            'number' => '09171234567',
+            'role' => $role,
+            'company_code' => $companyCode,
+            'company_name' => $companyName,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('verification_required', true)
+            ->assertJsonPath('email', "{$role}.member.inneru@gmail.com")
+            ->assertJsonPath('name', $role === 'coach' ? 'Coach Member' : 'User Member');
+
+        $pending = PendingRegistration::where('email', "{$role}.member.inneru@gmail.com")->firstOrFail();
+
+        Notification::assertSentTo($pending, PendingRegistrationVerificationNotification::class);
+
+        $this->assertDatabaseHas('pending_registrations', [
+            'email' => "{$role}.member.inneru@gmail.com",
+            'name' => $role === 'coach' ? 'Coach Member' : 'User Member',
+            'number' => '09171234567',
+            'role' => $role,
+            'is_coach' => $isCoach,
+            'company_code' => $companyCode,
+            'company_name' => $companyName,
+            'has_company' => $companyCode !== null,
+            'encrypted_password' => $pending->encrypted_password,
+        ]);
+
+        $this->assertTrue(Crypt::decryptString($pending->encrypted_password) === 'Password123');
+    }
+
+    #[DataProvider('loginRoleProvider')]
+    public function test_login_returns_a_token_for_verified_users_of_each_role(
+        string $role,
+        bool $isCoach
+    ): void {
+        $user = User::factory()->create([
+            'name' => $role === 'coach' ? 'Coach Login' : 'User Login',
+            'email' => "{$role}.login.inneru@gmail.com",
+            'role' => $role,
+            'is_coach' => $isCoach,
+            'has_company' => $isCoach,
+            'company_code' => $isCoach ? 'ACME' : null,
+            'company_name' => $isCoach ? 'ACME' : null,
+            'company_id' => $isCoach ? 'ACME' : null,
+            'active_company_id' => $isCoach ? 'ACME' : null,
+            'active_company_code' => $isCoach ? 'ACME' : null,
+            'active_company_name' => $isCoach ? 'ACME' : null,
+            'email_verified_at' => now(),
+            'password' => bcrypt('Password123'),
+        ]);
+
+        $response = $this->postJson('/api/auth/login', [
+            'email' => $user->email,
+            'password' => 'Password123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.email', $user->email)
+            ->assertJsonPath('user.role', $role)
+            ->assertJsonPath('user.is_coach', $isCoach)
+            ->assertJsonStructure([
+                'token_type',
+                'token',
+                'user' => [
+                    'id',
+                    'name',
+                    'email',
+                    'role',
+                    'is_coach',
+                ],
+            ]);
+
+        $this->assertDatabaseMissing('pending_registrations', [
+            'email' => $user->email,
+        ]);
+    }
 
     public function test_register_stores_a_pending_registration_and_sends_a_verification_email(): void
     {
@@ -443,5 +534,21 @@ class AuthTest extends TestCase
     private function base64UrlEncode(string $value): string
     {
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    public static function signupRoleProvider(): array
+    {
+        return [
+            'user' => ['user', false, null, null],
+            'coach' => ['coach', true, 'ACME', 'ACME'],
+        ];
+    }
+
+    public static function loginRoleProvider(): array
+    {
+        return [
+            'user' => ['user', false],
+            'coach' => ['coach', true],
+        ];
     }
 }

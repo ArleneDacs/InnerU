@@ -22,7 +22,7 @@ class ForgotPasswordOTP extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Use email reset instead so we can send a Laravel reset link.',
+                'Use email reset instead.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),

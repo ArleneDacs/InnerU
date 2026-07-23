@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Laravel'),
+    'name' => env('APP_NAME', 'InnerU'),
 
     /*
     |--------------------------------------------------------------------------
@@ -53,6 +53,18 @@ return [
     */
 
     'url' => env('APP_URL', 'http://localhost'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | This URL should point to the Flutter web app that handles password reset
+    | links and other user-facing screens.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'https://selfcare-1476e.firebaseapp.com'),
 
     /*
     |--------------------------------------------------------------------------

@@ -18,6 +18,11 @@ class UpdatePasswordOTP extends StatelessWidget {
                 'Phone password reset is not supported yet.',
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'Use email reset instead.',
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: () {

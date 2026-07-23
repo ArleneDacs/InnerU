@@ -23,13 +23,16 @@ class ApiResetPasswordNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
-        $resetUrl = rtrim((string) config('app.url'), '/').'/password-reset?mode=resetPassword&token='
+        $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+        $resetUrl = $frontendUrl.'/password-reset?mode=resetPassword&token='
             .urlencode($this->token).'&email='.urlencode($this->email);
 
         return (new MailMessage)
             ->subject('Reset your InnerU password')
-            ->line('We received a request to reset your password.')
-            ->action('Reset Password', $resetUrl)
-            ->line('If you did not request this, you can ignore this email.');
+            ->view('emails.inneru-password-reset', [
+                'email' => $this->email,
+                'actionUrl' => $resetUrl,
+                'logoPath' => base_path('../assets/images/icon.png'),
+            ]);
     }
 }

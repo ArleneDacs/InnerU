@@ -24,7 +24,7 @@ class OTPPage extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Use email reset so Laravel can send your password link.',
+                'Use email reset instead.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
