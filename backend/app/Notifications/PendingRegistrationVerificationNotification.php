@@ -5,10 +5,9 @@ namespace App\Notifications;
 use App\Models\PendingRegistration;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 
-class PendingRegistrationVerificationNotification extends Notification implements ShouldQueue
+class PendingRegistrationVerificationNotification extends Notification
 {
     use Queueable;
 

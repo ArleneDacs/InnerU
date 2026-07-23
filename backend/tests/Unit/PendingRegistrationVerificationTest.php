@@ -4,7 +4,6 @@ namespace Tests\Unit;
 
 use App\Models\PendingRegistration;
 use App\Notifications\PendingRegistrationVerificationNotification;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Mockery;
 use Tests\TestCase;
 
@@ -26,11 +25,11 @@ class PendingRegistrationVerificationTest extends TestCase
         $this->assertFalse($registration->sendVerificationEmail());
     }
 
-    public function test_pending_registration_verification_notification_is_queued(): void
+    public function test_pending_registration_verification_notification_is_not_queued(): void
     {
         $implements = class_implements(PendingRegistrationVerificationNotification::class);
 
-        $this->assertContains(ShouldQueue::class, $implements);
+        $this->assertNotContains(\Illuminate\Contracts\Queue\ShouldQueue::class, $implements);
     }
 
     protected function tearDown(): void

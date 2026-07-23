@@ -64,12 +64,6 @@ MAIL_TIMEOUT=10
 
 - Brevo recommends using your SMTP login email as the username and your SMTP key as the password.
 - Brevo supports ports `587`, `465`, and `2525`; `587` with `tls` is the default choice.
-- If you use queued mail notifications, run a queue worker in production:
-
-```bash
-php artisan queue:work --tries=1 --timeout=90
-```
-
 - Make sure the sender address in `MAIL_FROM_ADDRESS` is an authenticated Brevo sender or a verified domain.
 
 ## Next step
