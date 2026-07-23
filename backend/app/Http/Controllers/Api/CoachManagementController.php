@@ -157,7 +157,10 @@ class CoachManagementController extends Controller
         }
 
         $groups = CoachGroup::query()
-            ->where('coach_id', (string) $user->id)
+            ->where(function ($builder) use ($user): void {
+                $builder->where('coach_id', (string) $user->id)
+                    ->orWhereJsonContains('coach_ids', (string) $user->id);
+            })
             ->orderBy('name')
             ->get()
             ->map(fn (CoachGroup $group) => $this->groupPayload($group));
@@ -179,6 +182,7 @@ class CoachManagementController extends Controller
         $group = CoachGroup::create([
             'id' => (string) Str::uuid(),
             'coach_id' => (string) $user->id,
+            'coach_ids' => [(string) $user->id],
             'name' => trim($validated['name']),
             'member_ids' => [],
             'member_count' => 0,
@@ -191,16 +195,56 @@ class CoachManagementController extends Controller
         ], Response::HTTP_CREATED);
     }
 
+    public function updateGroupCoaches(Request $request, CoachGroup $group): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null || ! $this->userCanManageGroup($user, $group)) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $validated = $request->validate([
+            'coach_ids' => ['required', 'array', 'min:1', 'max:2'],
+            'coach_ids.*' => ['string', 'max:255'],
+        ]);
+
+        $coachIds = collect($validated['coach_ids'])
+            ->map(static fn ($coachId) => trim((string) $coachId))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $coachIds = array_values(array_unique(array_filter([
+            (string) $group->coach_id,
+            ...$coachIds,
+        ])));
+
+        if (count($coachIds) > 2) {
+            return response()->json([
+                'message' => 'A group can only have up to 2 coaches.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $group->coach_ids = $coachIds;
+        $group->save();
+
+        return response()->json([
+            'group' => $this->groupPayload($group->fresh()),
+        ]);
+    }
+
     public function destroyGroup(Request $request, CoachGroup $group): JsonResponse
     {
         $user = $request->user();
-        if ($user === null || (string) $group->coach_id !== (string) $user->id) {
+        if ($user === null || ! $this->userCanManageGroup($user, $group)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
         DB::transaction(function () use ($group): void {
+            $coachIds = $this->groupCoachIds($group);
+
             CoachMentee::query()
-                ->where('coach_id', $group->coach_id)
+                ->whereIn('coach_id', $coachIds)
                 ->where('group_id', $group->id)
                 ->update([
                     'group_id' => null,
@@ -251,7 +295,10 @@ class CoachManagementController extends Controller
         if ($groupId !== '') {
             $group = CoachGroup::query()
                 ->where('id', $groupId)
-                ->where('coach_id', (string) $user->id)
+                ->where(function ($builder) use ($user): void {
+                    $builder->where('coach_id', (string) $user->id)
+                        ->orWhereJsonContains('coach_ids', (string) $user->id);
+                })
                 ->firstOrFail();
             if ($groupName === '') {
                 $groupName = $group->name;
@@ -274,7 +321,7 @@ class CoachManagementController extends Controller
             $relation->group_name = $groupName !== '' ? $groupName : null;
             $relation->save();
 
-            $this->syncGroupCounters((string) $user->id, $previousGroupId, $nextGroupId);
+            $this->syncGroupCounters($previousGroupId, $nextGroupId);
 
             return $relation->fresh();
         });
@@ -468,7 +515,10 @@ class CoachManagementController extends Controller
         if ($groupId !== '') {
             $group = CoachGroup::query()
                 ->where('id', $groupId)
-                ->where('coach_id', (string) $user->id)
+                ->where(function ($builder) use ($user): void {
+                    $builder->where('coach_id', (string) $user->id)
+                        ->orWhereJsonContains('coach_ids', (string) $user->id);
+                })
                 ->firstOrFail();
             if ($groupName === '') {
                 $groupName = $group->name;
@@ -491,7 +541,7 @@ class CoachManagementController extends Controller
             $relation->group_name = $groupName !== '' ? $groupName : null;
             $relation->save();
 
-            $this->syncGroupCounters((string) $user->id, $previousGroupId, $nextGroupId);
+            $this->syncGroupCounters($previousGroupId, $nextGroupId);
 
             $coachRequest->status = 'accepted';
             $coachRequest->group_id = $groupId !== '' ? $groupId : null;
@@ -527,18 +577,16 @@ class CoachManagementController extends Controller
         ]);
     }
 
-    private function syncGroupCounters(string $coachId, string $previousGroupId, string $nextGroupId): void
+    private function syncGroupCounters(string $previousGroupId, string $nextGroupId): void
     {
         if ($previousGroupId !== '' && $previousGroupId !== $nextGroupId) {
             CoachGroup::query()
-                ->where('coach_id', $coachId)
                 ->where('id', $previousGroupId)
                 ->decrement('member_count');
         }
 
         if ($nextGroupId !== '' && $previousGroupId !== $nextGroupId) {
             CoachGroup::query()
-                ->where('coach_id', $coachId)
                 ->where('id', $nextGroupId)
                 ->increment('member_count');
         }
@@ -546,17 +594,29 @@ class CoachManagementController extends Controller
 
     private function groupPayload(CoachGroup $group): array
     {
+        $coachIds = $this->groupCoachIds($group);
         $memberIds = CoachMentee::query()
-            ->where('coach_id', $group->coach_id)
+            ->whereIn('coach_id', $coachIds)
             ->where('group_id', $group->id)
             ->pluck('mentee_id')
             ->map(static fn ($id) => (string) $id)
             ->values()
             ->all();
 
+        $coachNames = User::query()
+            ->whereIn('id', $coachIds)
+            ->orderBy('name')
+            ->pluck('name')
+            ->map(static fn ($name) => (string) $name)
+            ->values()
+            ->all();
+
         return [
             'id' => $group->id,
             'coachId' => (string) $group->coach_id,
+            'coachIds' => $coachIds,
+            'coachNames' => $coachNames,
+            'coachCount' => count($coachIds),
             'name' => $group->name,
             'memberIds' => $memberIds,
             'memberCount' => count($memberIds),
@@ -661,5 +721,24 @@ class CoachManagementController extends Controller
         }
 
         return trim((string) ($fallback ?? ''));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function groupCoachIds(CoachGroup $group): array
+    {
+        $coachIds = [(string) $group->coach_id];
+        foreach (is_array($group->coach_ids) ? $group->coach_ids : [] as $coachId) {
+            $coachIds[] = trim((string) $coachId);
+        }
+
+        return array_values(array_unique(array_filter($coachIds)));
+    }
+
+    private function userCanManageGroup(User $user, CoachGroup $group): bool
+    {
+        return (string) $group->coach_id === (string) $user->id
+            || in_array((string) $user->id, $this->groupCoachIds($group), true);
     }
 }

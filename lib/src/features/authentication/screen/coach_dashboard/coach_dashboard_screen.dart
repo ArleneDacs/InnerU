@@ -56,6 +56,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   final GlobalKey _dashboardStackKey = GlobalKey();
   late CompanyThemeData _companyTheme;
   late final AnimationController _tileTransitionController;
+  Timer? _refreshTimer;
   StreamSubscription<String?>? _todayEmotionSubscription;
   _CoachDashboardTileTransition? _activeTileTransition;
   bool _isEmotionLoading = true;
@@ -104,11 +105,16 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     _listenToTodayEmotion();
     _fetchQuote();
     _loadLocalChatReadOverrides();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _todayEmotionSubscription?.cancel();
+    _refreshTimer?.cancel();
     _tileTransitionController.dispose();
     super.dispose();
   }
@@ -556,6 +562,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Widget _buildSectionHeader(String title, {String? subtitle}) {
+    final colors = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -564,8 +571,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Colors.black54,
+            style: TextStyle(
+              color: colors.onSurface.withValues(alpha: 0.68),
               height: 1.4,
             ),
           ),
@@ -578,16 +585,23 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     required Widget child,
     EdgeInsetsGeometry padding = const EdgeInsets.all(20),
   }) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.92),
+        color: colors.surface.withValues(alpha: colors.brightness == Brightness.dark ? 0.96 : 0.94),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
+        border: Border.all(
+          color: colors.primary.withValues(
+            alpha: colors.brightness == Brightness.dark ? 0.20 : 0.10,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withValues(
+              alpha: colors.brightness == Brightness.dark ? 0.18 : 0.05,
+            ),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -678,6 +692,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     String message =
         'Apply to another coach when you want support as a mentee.',
   }) {
+    final colors = Theme.of(context).colorScheme;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => Navigator.pushNamed(context, '/coachesScreen'),
@@ -689,12 +704,12 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: const Color(0xFFE9EEE4),
+                color: colors.primary.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: const Icon(
+              child: Icon(
                 CupertinoIcons.person_crop_circle_badge_plus,
-                color: Color(0xFF6C7E62),
+                color: colors.primary,
                 size: 28,
               ),
             ),
@@ -705,16 +720,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
+                      color: colors.onSurface,
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     message,
-                    style: const TextStyle(
-                      color: Colors.black54,
+                    style: TextStyle(
+                      color: colors.onSurface.withValues(alpha: 0.70),
                       height: 1.45,
                     ),
                   ),
@@ -722,9 +738,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               ),
             ),
             const SizedBox(width: 10),
-            const Icon(
+            Icon(
               CupertinoIcons.chevron_right,
-              color: Colors.black45,
+              color: colors.onSurface.withValues(alpha: 0.60),
               size: 20,
             ),
           ],
@@ -737,6 +753,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     BuildContext context, {
     required Coach coach,
   }) {
+    final colors = Theme.of(context).colorScheme;
     return _buildGlassSectionCard(
       child: Column(
         children: [
@@ -744,12 +761,12 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             children: [
               CircleAvatar(
                 radius: 32,
-                backgroundColor: const Color(0xFFDCE5D4),
+                backgroundColor: colors.primary.withValues(alpha: 0.10),
                 backgroundImage: coach.profilePic.isNotEmpty
                     ? NetworkImage(coach.profilePic)
                     : null,
                 child: coach.profilePic.isEmpty
-                    ? const Icon(Icons.person, color: Colors.white, size: 30)
+                    ? Icon(Icons.person, color: colors.primary, size: 30)
                     : null,
               ),
               const SizedBox(width: 14),
@@ -759,9 +776,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   children: [
                     Text(
                       coach.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
+                        color: colors.onSurface,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -769,10 +787,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                       coach.bio.isEmpty ? 'Your support coach' : coach.bio,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         height: 1.35,
-                        color: Colors.black54,
+                        color: colors.onSurface.withValues(alpha: 0.70),
                       ),
                     ),
                   ],
@@ -2288,6 +2306,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Widget _buildMoodSection(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2297,8 +2316,11 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: colors.surface,
             borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: colors.primary.withValues(alpha: 0.10),
+            ),
           ),
           child: _currentUserEmotion == null
               ? Row(
@@ -2314,9 +2336,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   children: [
                     Text(
                       'Today I\'m feeling $_currentUserEmotion',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
+                        color: colors.onSurface,
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -2329,18 +2352,21 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                           ),
                         );
                       },
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             'Track Your Emotions',
-                            style: TextStyle(fontSize: 14, color: Colors.blue),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: colors.primary,
+                            ),
                           ),
                           SizedBox(width: 4),
                           Icon(
                             Icons.arrow_forward_ios,
                             size: 14,
-                            color: Colors.blue,
+                            color: colors.primary,
                           ),
                         ],
                       ),
@@ -2546,14 +2572,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     required Color color,
     required VoidCallback onTap,
   }) {
+    final colors = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.8),
+          color: colors.surface.withValues(alpha: 0.90),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.76)),
+          border: Border.all(
+            color: colors.primary.withValues(alpha: 0.10),
+          ),
         ),
         child: Column(
           children: [
@@ -2569,10 +2598,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             const SizedBox(height: 10),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF30402A),
+                color: colors.onSurface,
               ),
             ),
           ],
@@ -3089,6 +3118,138 @@ class CoachGroupCustomizationPage extends StatelessWidget {
     );
   }
 
+  Future<void> _showAddCoachDialog(
+    BuildContext context,
+    _CoachApiGroupSummary summary,
+  ) async {
+    if (summary.coachIds.length >= 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This group already has 2 coaches.')),
+      );
+      return;
+    }
+
+    final coaches = await CoachApiService.instance.fetchCoaches();
+    final availableCoaches = coaches.where((coach) {
+      final coachId = coach['id']?.toString() ?? '';
+      return coachId.isNotEmpty &&
+          coachId != currentUserId &&
+          !summary.coachIds.contains(coachId);
+    }).toList();
+
+    if (!context.mounted) return;
+    if (availableCoaches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other coaches are available to add.')),
+      );
+      return;
+    }
+
+    final selectedCoachId = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final colors = Theme.of(sheetContext).colorScheme;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add another coach to ${summary.groupName}',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: colors.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: availableCoaches.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final coach = availableCoaches[index];
+                      final coachId = coach['id']?.toString() ?? '';
+                      final coachName =
+                          (coach['name'] as String?)?.trim().isNotEmpty == true
+                              ? (coach['name'] as String).trim()
+                              : 'Coach';
+                      final coachEmail =
+                          (coach['email'] as String?)?.trim() ?? '';
+                      final profilePic =
+                          (coach['profilePic'] as String?)?.trim() ?? '';
+
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundImage: profilePic.isNotEmpty
+                              ? NetworkImage(profilePic)
+                              : null,
+                          backgroundColor: colors.primary.withValues(alpha: 0.10),
+                          child: profilePic.isEmpty
+                              ? Text(
+                                  coachName.isNotEmpty ? coachName[0] : '?',
+                                )
+                              : null,
+                        ),
+                        title: Text(
+                          coachName,
+                          style: TextStyle(color: colors.onSurface),
+                        ),
+                        subtitle: coachEmail.isEmpty
+                            ? null
+                            : Text(
+                                coachEmail,
+                                style: TextStyle(
+                                  color: colors.onSurface.withValues(alpha: 0.68),
+                                ),
+                              ),
+                        onTap: () => Navigator.pop(sheetContext, coachId),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedCoachId == null || selectedCoachId.isEmpty) return;
+    final updatedCoachIds = <String>{
+      ...summary.coachIds,
+      selectedCoachId,
+      currentUserId,
+    }.toList();
+    await CoachApiService.instance.updateGroupCoaches(
+      groupId: summary.groupId,
+      coachIds: updatedCoachIds,
+    );
+    if (!context.mounted) return;
+    final selectedCoach = availableCoaches.firstWhere(
+      (coach) => coach['id']?.toString() == selectedCoachId,
+      orElse: () => <String, dynamic>{},
+    );
+    final selectedCoachName =
+        (selectedCoach['name'] as String?)?.trim() ?? '';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          selectedCoachName.isEmpty
+              ? 'Coach added to ${summary.groupName}.'
+              : '$selectedCoachName added to ${summary.groupName}.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmDeleteGroup({
     required BuildContext context,
     required String groupId,
@@ -3590,6 +3751,12 @@ class CoachGroupCustomizationPage extends StatelessWidget {
       final memberIds = List<String>.from(
         groupMeta['memberIds'] as List? ?? const <String>[],
       );
+      final coachIds = List<String>.from(
+        groupMeta['coachIds'] as List? ?? const <String>[],
+      );
+      final coachNames = List<String>.from(
+        groupMeta['coachNames'] as List? ?? const <String>[],
+      );
 
       return _CoachApiGroupSummary(
         groupId: groupId,
@@ -3599,6 +3766,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
         memberCount:
             (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
         memberIds: memberIds,
+        coachIds: coachIds,
+        coachNames: coachNames,
       );
     }).toList();
 
@@ -4001,8 +4170,16 @@ class CoachGroupCustomizationPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CompanyThemeBuilder(
-      builder: (context, companyTheme) {
+    final autoRefresh = Stream<int>.periodic(
+      const Duration(seconds: 20),
+      (tick) => tick,
+    );
+    return StreamBuilder<int>(
+      stream: autoRefresh,
+      initialData: 0,
+      builder: (context, _) {
+        return CompanyThemeBuilder(
+          builder: (context, companyTheme) {
         final apiFuture = Future.wait<dynamic>([
           CoachApiService.instance.fetchGroups(),
           CoachApiService.instance.fetchLeaderboard(),
@@ -4104,6 +4281,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                             ...sortedByName.map(
                               (summary) => _CoachApiGroupCard(
                                 summary: summary,
+                                onAddCoach: () =>
+                                    _showAddCoachDialog(context, summary),
                                 onDelete: () => _confirmDeleteGroup(
                                   context: context,
                                   groupId: summary.groupId,
@@ -4130,6 +4309,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                             ...summaries.map(
                               (summary) => _CoachApiGroupCard(
                                 summary: summary,
+                                onAddCoach: () =>
+                                    _showAddCoachDialog(context, summary),
                                 onDelete: () => _confirmDeleteGroup(
                                   context: context,
                                   groupId: summary.groupId,
@@ -4146,6 +4327,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
               ),
             ),
           ),
+        );
+          },
         );
       },
     );
@@ -4352,6 +4535,26 @@ class CoachManageMenteesPage extends StatelessWidget {
         Map<String, dynamic>.from(coachGroups[currentUserId] as Map? ?? {});
     final groupName = (currentCoachGroup['groupName'] as String?)?.trim() ?? '';
     return groupName.isNotEmpty ? groupName : teamName;
+  }
+
+  String _requestIdForRequest(dynamic request) {
+    final requestData = request is QueryDocumentSnapshot<Map<String, dynamic>>
+        ? request.data()
+        : request is Map
+            ? Map<String, dynamic>.from(request)
+            : <String, dynamic>{};
+    final explicitId = request is QueryDocumentSnapshot<Map<String, dynamic>>
+        ? request.id.trim()
+        : (requestData['id'] as String?)?.trim() ?? '';
+    if (explicitId.isNotEmpty) return explicitId;
+
+    final menteeId = (requestData['menteeId'] as String?)?.trim() ?? '';
+    final coachId = (requestData['coachId'] as String?)?.trim() ?? currentUserId;
+    if (menteeId.isNotEmpty && coachId.isNotEmpty) {
+      return '${menteeId}_$coachId';
+    }
+
+    return '';
   }
 
   Future<void> _showCreateGroupDialog(
@@ -4669,7 +4872,18 @@ class CoachManageMenteesPage extends StatelessWidget {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () async {
-                              await onDeclineRequest(request.id);
+                              final requestId = _requestIdForRequest(request);
+                              if (requestId.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Could not identify this request.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              await onDeclineRequest(requestId);
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -4687,8 +4901,21 @@ class CoachManageMenteesPage extends StatelessWidget {
                                 ? null
                                 : () async {
                                     try {
+                                      final requestId =
+                                          _requestIdForRequest(request);
+                                      if (requestId.isEmpty) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Could not identify this request.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
                                       await onAcceptRequest(
-                                        requestId: request.id,
+                                        requestId: requestId,
                                         menteeId: userId,
                                         teamName: teamName,
                                       );
@@ -4701,14 +4928,14 @@ class CoachManageMenteesPage extends StatelessWidget {
                                           ),
                                         ),
                                       );
-                                    } catch (error) {
-                                      debugPrint(
-                                        'Failed to accept coach request '
-                                        '${request.id}: $error',
-                                      );
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
+                                      } catch (error) {
+                                        debugPrint(
+                                          'Failed to accept coach request '
+                                          '${_requestIdForRequest(request)}: $error',
+                                        );
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
                                         const SnackBar(
                                           content: Text(
                                             'Could not accept this application. Please try again.',
@@ -4995,24 +5222,17 @@ class CoachManageMenteesPage extends StatelessWidget {
                                             .isNotEmpty;
                                       }).join(' · '),
                                     ),
-                                    trailing: assignedToMe
-                                        ? TextButton(
-                                            onPressed: () async {
-                                              await onRemoveMentee(
-                                                user['id']?.toString() ?? '',
-                                              );
-                                            },
-                                            child: const Text('Remove'),
-                                          )
-                                        : ElevatedButton(
-                                            onPressed: () {
-                                              setSheetState(() {
-                                                selectedUser = user;
-                                                selectedUserName = userName;
-                                              });
-                                            },
-                                            child: const Text('Add'),
-                                          ),
+                                    trailing: ElevatedButton(
+                                      onPressed: () {
+                                        setSheetState(() {
+                                          selectedUser = user;
+                                          selectedUserName = userName;
+                                        });
+                                      },
+                                      child: Text(
+                                        assignedToMe ? 'Move' : 'Add',
+                                      ),
+                                    ),
                                   );
                                 }),
                               ],
@@ -5052,7 +5272,117 @@ class CoachManageMenteesPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 360,
-                      child: const SizedBox.shrink(),
+                      child: FutureBuilder<List<List<Map<String, dynamic>>>>(
+                        future: loadSheetData(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+
+                          final data = snapshot.data ??
+                              const <List<Map<String, dynamic>>>[];
+                          final users = data.isNotEmpty
+                              ? data.first
+                              : <Map<String, dynamic>>[];
+
+                          final query =
+                              searchController.text.trim().toLowerCase();
+                          final filteredUsers = users.where((user) {
+                            final userId =
+                                (user['id'] as String?)?.trim() ?? '';
+                            final username =
+                                (user['name'] as String?)?.toLowerCase() ??
+                                    '';
+                            final email =
+                                (user['email'] as String?)?.toLowerCase() ??
+                                    '';
+                            return userId != currentUserId &&
+                                (query.isEmpty ||
+                                    username.contains(query) ||
+                                    email.contains(query));
+                          }).toList();
+
+                          if (filteredUsers.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
+                                child: Text('No users found.'),
+                              ),
+                            );
+                          }
+
+                          return ListView(
+                            children: filteredUsers.map((user) {
+                              final userName =
+                                  (user['name'] as String?)?.trim().isNotEmpty ==
+                                          true
+                                      ? (user['name'] as String).trim()
+                                      : ((user['email'] as String?)
+                                                  ?.trim()
+                                                  .isNotEmpty ==
+                                              true
+                                          ? (user['email'] as String)
+                                              .trim()
+                                              .split('@')
+                                              .first
+                                          : 'Unknown User');
+                              final isCoach = user['isCoach'] == true ||
+                                  ((user['role'] as String?)
+                                          ?.toLowerCase() ==
+                                      'coach');
+                              final assignedToMe =
+                                  user['assignedToMe'] == true;
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: CircleAvatar(
+                                  backgroundImage:
+                                      (user['profilePic'] as String?)
+                                                  ?.trim()
+                                                  .isNotEmpty ==
+                                              true
+                                          ? NetworkImage(
+                                              user['profilePic'] as String,
+                                            )
+                                          : null,
+                                  child: ((user['profilePic'] as String?)
+                                              ?.trim()
+                                              .isEmpty ??
+                                          true)
+                                      ? Text(
+                                          userName.isNotEmpty
+                                              ? userName[0].toUpperCase()
+                                              : '?',
+                                        )
+                                      : null,
+                                ),
+                                title: Text(userName),
+                                subtitle: Text(
+                                  [
+                                    (user['email'] as String?) ?? '',
+                                    if (isCoach) 'Coach account',
+                                  ].where((value) {
+                                    return value.toString().trim().isNotEmpty;
+                                  }).join(' · '),
+                                ),
+                                    trailing: ElevatedButton(
+                                      onPressed: () {
+                                        setSheetState(() {
+                                          selectedUser = user;
+                                          selectedUserName = userName;
+                                        });
+                                      },
+                                      child: Text(
+                                        assignedToMe ? 'Move' : 'Add',
+                                      ),
+                                    ),
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -5119,6 +5449,12 @@ class CoachManageMenteesPage extends StatelessWidget {
       final memberIds = List<String>.from(
         groupMeta['memberIds'] as List? ?? const <String>[],
       );
+      final coachIds = List<String>.from(
+        groupMeta['coachIds'] as List? ?? const <String>[],
+      );
+      final coachNames = List<String>.from(
+        groupMeta['coachNames'] as List? ?? const <String>[],
+      );
 
       return _CoachApiGroupSummary(
         groupId: groupId,
@@ -5128,6 +5464,8 @@ class CoachManageMenteesPage extends StatelessWidget {
         memberCount:
             (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
         memberIds: memberIds,
+        coachIds: coachIds,
+        coachNames: coachNames,
       );
     }).toList();
 
@@ -5142,8 +5480,16 @@ class CoachManageMenteesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CompanyThemeBuilder(
-      builder: (context, companyTheme) {
+    final autoRefresh = Stream<int>.periodic(
+      const Duration(seconds: 20),
+      (tick) => tick,
+    );
+    return StreamBuilder<int>(
+      stream: autoRefresh,
+      initialData: 0,
+      builder: (context, _) {
+        return CompanyThemeBuilder(
+          builder: (context, companyTheme) {
         return Theme(
           data: AppTheme.company(companyTheme),
           child: Scaffold(
@@ -5312,7 +5658,18 @@ class CoachManageMenteesPage extends StatelessWidget {
                                     child: OutlinedButton(
                                       onPressed: () async {
                                         final requestId =
-                                            request['id']?.toString() ?? '';
+                                            _requestIdForRequest(request);
+                                        if (requestId.isEmpty) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Could not identify this request.',
+                                              ),
+                                            ),
+                                          );
+                                          return;
+                                        }
                                         await onDeclineRequest(requestId);
                                       },
                                       child: const Text('Decline'),
@@ -5325,13 +5682,48 @@ class CoachManageMenteesPage extends StatelessWidget {
                                           ? null
                                           : () async {
                                               final requestId =
-                                                  request['id']?.toString() ??
-                                                      '';
-                                              await onAcceptRequest(
-                                                requestId: requestId,
-                                                menteeId: userId,
-                                                teamName: teamName,
-                                              );
+                                                  _requestIdForRequest(request);
+                                              if (requestId.isEmpty) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Could not identify this request.',
+                                                    ),
+                                                  ),
+                                                );
+                                                return;
+                                              }
+                                              try {
+                                                await onAcceptRequest(
+                                                  requestId: requestId,
+                                                  menteeId: userId,
+                                                  teamName: teamName,
+                                                );
+                                                if (!context.mounted) return;
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      '$userName is now in $teamName.',
+                                                    ),
+                                                  ),
+                                                );
+                                              } catch (error) {
+                                                debugPrint(
+                                                  'Failed to accept coach request '
+                                                  '$requestId: $error',
+                                                );
+                                                if (!context.mounted) return;
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Could not accept this application. Please try again.',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
                                             },
                                       child: const Text('Accept'),
                                     ),
@@ -5613,6 +6005,8 @@ class CoachManageMenteesPage extends StatelessWidget {
             ),
           ),
         );
+          },
+        );
       },
     );
   }
@@ -5668,6 +6062,8 @@ class _CoachApiGroupSummary {
     required this.entries,
     required this.memberCount,
     required this.memberIds,
+    required this.coachIds,
+    required this.coachNames,
   });
 
   final String groupId;
@@ -5676,6 +6072,8 @@ class _CoachApiGroupSummary {
   final List<Map<String, dynamic>> entries;
   final int memberCount;
   final List<String> memberIds;
+  final List<String> coachIds;
+  final List<String> coachNames;
 }
 
 class CoachMenteeActivityCalendarPage extends StatefulWidget {
@@ -5695,6 +6093,8 @@ class CoachMenteeActivityCalendarPage extends StatefulWidget {
 
 class _CoachMenteeActivityCalendarPageState
     extends State<CoachMenteeActivityCalendarPage> {
+  Timer? _refreshTimer;
+
   DateTime _normalizeDate(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
@@ -5726,6 +6126,21 @@ class _CoachMenteeActivityCalendarPageState
       } catch (_) {}
     }
     return trackers;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Widget _buildActivityLegend() {
@@ -6058,6 +6473,121 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     );
   }
 
+  DateTime? _trackerDate(Map<String, dynamic> tracker) {
+    final rawDate = (tracker['lastUpdated'] as String?) ??
+        (tracker['date'] as String?) ??
+        '';
+    if (rawDate.trim().isEmpty) return null;
+    try {
+      return _normalizeDate(DateTime.parse(rawDate));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildRecentActivityLogs() {
+    final colors = Theme.of(context).colorScheme;
+    final recentTrackers = widget.trackerDocs.toList()
+      ..sort((left, right) {
+        final leftDate = _trackerDate(left) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final rightDate = _trackerDate(right) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return rightDate.compareTo(leftDate);
+      });
+
+    final visibleLogs = recentTrackers.take(5).toList();
+    if (visibleLogs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text(
+          'Recent activity logs',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: colors.onSurface,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...visibleLogs.map((tracker) {
+          final logDate = _trackerDate(tracker);
+          final completedCount = _completedCount(tracker);
+          final tasks = _activityMap(tracker);
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest.withValues(alpha: 0.38),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: colors.primary.withValues(alpha: 0.08),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        logDate == null
+                            ? 'Unknown date'
+                            : DateFormat.yMMMd().format(logDate),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$completedCount/5 done',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: colors.onSurface.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: tasks.entries.map((entry) {
+                    final isDone = entry.value;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDone
+                            ? colors.primary.withValues(alpha: 0.14)
+                            : colors.surface.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${entry.key}: ${isDone ? 'Done' : 'Pending'}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   List<_CoachApiGroupSummary> _apiGroupSummaries(
     Map<String, dynamic> payload,
     List<Map<String, dynamic>> groups,
@@ -6082,6 +6612,12 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       final memberIds = List<String>.from(
         groupMeta['memberIds'] as List? ?? const <String>[],
       );
+      final coachIds = List<String>.from(
+        groupMeta['coachIds'] as List? ?? const <String>[],
+      );
+      final coachNames = List<String>.from(
+        groupMeta['coachNames'] as List? ?? const <String>[],
+      );
 
       return _CoachApiGroupSummary(
         groupId: groupId,
@@ -6091,6 +6627,8 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
         memberCount:
             (groupMeta['memberCount'] as num?)?.toInt() ?? memberIds.length,
         memberIds: memberIds,
+        coachIds: coachIds,
+        coachNames: coachNames,
       );
     }).toList();
 
@@ -6274,6 +6812,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
           ),
           const SizedBox(height: 10),
           _buildActivityDetails(selectedTracker),
+          _buildRecentActivityLogs(),
         ],
       ),
     );
@@ -6306,10 +6845,11 @@ class _OverviewChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F2EB),
+        color: colors.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -6317,12 +6857,18 @@ class _OverviewChip extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 11, color: Colors.black54),
+            style: TextStyle(
+              fontSize: 11,
+              color: colors.onSurface.withValues(alpha: 0.65),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: colors.onSurface,
+            ),
           ),
         ],
       ),
@@ -6403,10 +6949,12 @@ class _CoachGroupNameDialogState extends State<_CoachGroupNameDialog> {
 class _CoachApiGroupCard extends StatefulWidget {
   const _CoachApiGroupCard({
     required this.summary,
+    required this.onAddCoach,
     required this.onDelete,
   });
 
   final _CoachApiGroupSummary summary;
+  final VoidCallback onAddCoach;
   final VoidCallback onDelete;
 
   @override
@@ -6461,12 +7009,23 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
               ),
             ),
             subtitle: Text(
-              '${summary.memberCount} mentees • ${summary.totalScore} pts total',
+              '${summary.memberCount} mentees • ${summary.coachIds.length} coaches • ${summary.totalScore} pts total',
               style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                IconButton(
+                  tooltip: summary.coachIds.length >= 2
+                      ? 'Coach limit reached'
+                      : 'Add coach',
+                  onPressed:
+                      summary.coachIds.length >= 2 ? null : widget.onAddCoach,
+                  icon: Icon(
+                    CupertinoIcons.person_badge_plus,
+                    color: colors.primary,
+                  ),
+                ),
                 IconButton(
                   tooltip: 'Delete group',
                   onPressed: widget.onDelete,

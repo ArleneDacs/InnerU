@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/note_card.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/community_api_service.dart';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
@@ -12,10 +12,32 @@ class CommunityScreen extends StatefulWidget {
 }
 
 class _CommunityScreenState extends State<CommunityScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   String selectedCategory = "Add Value";
   final TextEditingController _searchController = TextEditingController();
   String searchQuery = "";
+  Future<List<Note>>? _postsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _postsFuture = _loadPosts();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<List<Note>> _loadPosts() {
+    final category =
+        selectedCategory == "Add Value" || selectedCategory == "Learning"
+            ? selectedCategory
+            : selectedCategory;
+    return CommunityApiService.instance.fetchPosts(
+      category: category,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,24 +48,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
       return Scaffold(
         body: Center(child: Text("User not logged in.")),
       );
-    }
-
-    Query<Map<String, dynamic>> notesQuery =
-        FirebaseFirestore.instance.collection('notes');
-
-    if (selectedCategory == "Saved") {
-      notesQuery = notesQuery
-          .where("userId", isEqualTo: currentUserId)
-          .where("saved", isEqualTo: true);
-    } else if (selectedCategory == "My Post") {
-      // Fetch only notes where the userId matches the current user's ID
-      notesQuery = notesQuery
-          .where("userId", isEqualTo: currentUserId)
-          .where("saved", isEqualTo: false);
-    } else {
-      notesQuery = notesQuery
-          .where("category", isEqualTo: selectedCategory)
-          .where("saved", isEqualTo: false);
     }
 
     return Scaffold(
@@ -98,8 +102,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
           // Posts List
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: notesQuery.snapshots(),
+            child: FutureBuilder<List<Note>>(
+              future: _postsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return Center(
@@ -107,7 +111,29 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   );
                 }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Could not load community posts from InnerU.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                      ),
+                    ),
+                  );
+                }
+
+                final posts = (snapshot.data ?? const <Note>[])
+                    .where((note) {
+                      final username = note.username.toLowerCase();
+                      final title = note.title.toLowerCase();
+                      return username.contains(searchQuery) ||
+                          title.contains(searchQuery);
+                    })
+                    .toList();
+
+                if (posts.isEmpty) {
                   return Center(
                     child: Text(
                       "No posts yet...\nShare your light with the community.",
@@ -116,22 +142,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     ),
                   );
                 }
-
-                // Filtering posts based on search input
-                var posts = snapshot.data!.docs.map((doc) {
-                  Map<String, dynamic> noteData =
-                      doc.data() as Map<String, dynamic>;
-                  noteData['id'] = doc.id;
-                  if (noteData['note'] != null) {
-                    noteData['note'] = List<dynamic>.from(noteData['note']);
-                  }
-                  return Note.fromMap(noteData);
-                }).where((note) {
-                  String username = note.username.toLowerCase();
-                  String title = note.title.toLowerCase();
-                  return username.contains(searchQuery) ||
-                      title.contains(searchQuery);
-                }).toList();
 
                 return ListView.builder(
                   padding: EdgeInsets.all(20),
@@ -145,7 +155,12 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           NoteCard(
                             note: note,
                             onPressed: () {
-                              print("Tapped ${note.title}");
+                              debugPrint("Tapped ${note.title}");
+                            },
+                            onChanged: () {
+                              setState(() {
+                                _postsFuture = _loadPosts();
+                              });
                             },
                           ),
                           if (note.userId == currentUserId)
@@ -162,7 +177,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                                 },
                                 itemBuilder: (context) => [
                                   if (selectedCategory != "Saved")
-                                    PopupMenuItem(
+                                    const PopupMenuItem(
                                       value: 'save',
                                       child: Row(
                                         children: [
@@ -173,7 +188,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                                         ],
                                       ),
                                     ),
-                                  PopupMenuItem(
+                                  const PopupMenuItem(
                                     value: 'delete',
                                     child: Row(
                                       children: [
@@ -249,6 +264,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
       onTap: () {
         setState(() {
           selectedCategory = category;
+          _postsFuture = _loadPosts();
         });
       },
       child: AnimatedContainer(
@@ -276,11 +292,30 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
-  void _markAsSaved(String noteId) {
-    _firestore.collection('notes').doc(noteId).update({"saved": true});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Note saved successfully")),
-    );
+  Future<void> _refreshPosts() async {
+    if (!mounted) return;
+    setState(() {
+      _postsFuture = _loadPosts();
+    });
+  }
+
+  Future<void> _markAsSaved(String noteId) async {
+    try {
+      await CommunityApiService.instance.setSaved(
+        postId: noteId,
+        saved: true,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Note saved successfully")),
+      );
+      await _refreshPosts();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Could not save note: $error")),
+      );
+    }
   }
 
   void _confirmUpload(String noteId) {
@@ -295,12 +330,22 @@ class _CommunityScreenState extends State<CommunityScreen> {
             child: Text("Cancel"),
           ),
           TextButton(
-            onPressed: () {
-              _firestore
-                  .collection('notes')
-                  .doc(noteId)
-                  .update({"saved": false});
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(context);
+              try {
+                await CommunityApiService.instance.setSaved(
+                  postId: noteId,
+                  saved: false,
+                );
+                if (!mounted) return;
+                await _refreshPosts();
+              } catch (error) {
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(content: Text("Could not upload note: $error")),
+                );
+              }
             },
             child: Text("Upload", style: TextStyle(color: Colors.green)),
           ),
@@ -319,9 +364,19 @@ class _CommunityScreenState extends State<CommunityScreen> {
           TextButton(
               onPressed: () => Navigator.pop(context), child: Text("Cancel")),
           TextButton(
-            onPressed: () {
-              _firestore.collection('notes').doc(noteId).delete();
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(context);
+              try {
+                await CommunityApiService.instance.deletePost(noteId);
+                if (!mounted) return;
+                await _refreshPosts();
+              } catch (error) {
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(content: Text("Could not delete note: $error")),
+                );
+              }
             },
             child: Text("Delete", style: TextStyle(color: Colors.red)),
           ),

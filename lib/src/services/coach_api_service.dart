@@ -150,6 +150,22 @@ class CoachApiService {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> fetchCoaches() async {
+    final response = await _api.getJson(
+      '/api/coaches',
+      token: _token,
+    );
+    final coaches = response['coaches'];
+    if (coaches is! List) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    return coaches
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> fetchGroups() async {
     final response = await _api.getJson(
       '/api/coach/groups',
@@ -164,6 +180,19 @@ class CoachApiService {
         .whereType<Map>()
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
+  }
+
+  Future<void> updateGroupCoaches({
+    required String groupId,
+    required List<String> coachIds,
+  }) async {
+    await _api.patchJson(
+      '/api/coach/groups/$groupId/coaches',
+      {
+        'coach_ids': coachIds,
+      },
+      token: _token,
+    );
   }
 
   Future<List<Map<String, dynamic>>> fetchUsers() async {

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:selfcare_projects/src/services/app_session_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
@@ -17,13 +19,29 @@ class TimeProvider extends ChangeNotifier {
   DateTime? _endsAt;
   VoidCallback? _completionCallback;
   bool _keepAwakeEnabled = false;
+  String? _trackedUserId = AuthService.instance.currentSession?.id.toString();
+  late final StreamSubscription<AppSession?> _sessionSubscription;
 
   int get remainingTime => _remainingTime;
   int get initialTime => _initialTime;
   bool get isRunning => _isRunning;
 
+  TimeProvider() {
+    _sessionSubscription = AuthService.instance.sessionStream.listen(
+      (session) {
+        final nextUserId = session?.id.toString();
+        if (_trackedUserId == nextUserId) {
+          return;
+        }
+        _trackedUserId = nextUserId;
+        resetForAccountSwitch();
+      },
+    );
+  }
+
   @override
   void dispose() {
+    _sessionSubscription.cancel();
     _timer?.cancel();
     unawaited(_setKeepAwake(false));
     super.dispose();

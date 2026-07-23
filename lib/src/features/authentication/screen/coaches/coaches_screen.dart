@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -341,6 +343,7 @@ class CoachesScreen extends StatefulWidget {
 
 class _CoachesScreenState extends State<CoachesScreen> {
   late TextEditingController _searchController;
+  Timer? _refreshTimer;
   String _currentCompanyId = '';
   String _currentCompanyName = '';
   String _currentCompanyCode = '';
@@ -353,10 +356,15 @@ class _CoachesScreenState extends State<CoachesScreen> {
     super.initState();
     _searchController = TextEditingController();
     _bootstrap();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      _bootstrap();
+    });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }

@@ -15,6 +15,7 @@ class CoachGroup extends Model
     protected $fillable = [
         'id',
         'coach_id',
+        'coach_ids',
         'name',
         'member_ids',
         'member_count',
@@ -25,6 +26,7 @@ class CoachGroup extends Model
     protected function casts(): array
     {
         return [
+            'coach_ids' => 'array',
             'member_ids' => 'array',
             'member_count' => 'integer',
         ];

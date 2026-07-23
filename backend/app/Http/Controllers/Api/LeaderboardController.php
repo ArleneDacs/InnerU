@@ -83,19 +83,29 @@ class LeaderboardController extends Controller
             ->orderBy('name')
             ->get()
             ->filter(function (CoachGroup $group) use ($companyId, $companyCode, $companyName, $usersById): bool {
-                $coach = $usersById->get((string) $group->coach_id);
-                if ($coach === null) {
-                    return false;
-                }
+                $coachIds = $this->groupCoachIds($group);
+                $groupCoachIsInCompany = collect($coachIds)->contains(function (string $coachId) use ($usersById, $companyId, $companyCode, $companyName): bool {
+                    $coach = $usersById->get($coachId);
+                    if ($coach === null) {
+                        return false;
+                    }
+
+                    return $this->belongsToCompany($coach->company_id ?? null, $coach->company_code ?? '', $coach->company_name ?? '', $companyId, $companyCode, $companyName);
+                });
 
                 return $this->belongsToCompany($group->company_id ?? null, $group->company_code ?? '', $group->company_name ?? '', $companyId, $companyCode, $companyName)
-                    || $this->belongsToCompany($coach->company_id ?? null, $coach->company_code ?? '', $coach->company_name ?? '', $companyId, $companyCode, $companyName);
+                    || $groupCoachIsInCompany;
             })
             ->map(function (CoachGroup $group) use ($usersById, $companyScores) {
-                $coach = $usersById->get((string) $group->coach_id);
-                $coachName = $coach?->name ?? 'Coach';
+                $coachIds = $this->groupCoachIds($group);
+                $coachNames = collect($coachIds)
+                    ->map(fn (string $coachId) => $usersById->get($coachId)?->name)
+                    ->filter()
+                    ->values()
+                    ->all();
+                $coachName = $coachNames === [] ? 'Coach' : implode(', ', $coachNames);
                 $memberIds = CoachMentee::query()
-                    ->where('coach_id', (string) $group->coach_id)
+                    ->whereIn('coach_id', $coachIds)
                     ->where('group_id', $group->id)
                     ->pluck('mentee_id')
                     ->map(static fn ($id) => (string) $id)
@@ -152,6 +162,8 @@ class LeaderboardController extends Controller
                     'groupId' => $group->id,
                     'groupName' => $group->name,
                     'coachName' => $coachName,
+                    'coachIds' => $coachIds,
+                    'coachNames' => $coachNames,
                     'totalScore' => $totalScore,
                     'entries' => $entries,
                 ];
@@ -277,5 +289,18 @@ class LeaderboardController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function groupCoachIds(CoachGroup $group): array
+    {
+        $coachIds = [(string) $group->coach_id];
+        foreach (is_array($group->coach_ids) ? $group->coach_ids : [] as $coachId) {
+            $coachIds[] = trim((string) $coachId);
+        }
+
+        return array_values(array_unique(array_filter($coachIds)));
     }
 }
