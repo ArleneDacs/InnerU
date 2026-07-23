@@ -32,8 +32,7 @@ jobs:
           key_file="$RUNNER_TEMP/inneru_deploy_key"
 
           if [ -n "${DEPLOY_SSH_KEY:-}" ] && [ -n "${DEPLOY_SSH_KEY_BASE64:-}" ]; then
-            echo "::error::Set only one of DEPLOY_SSH_KEY or DEPLOY_SSH_KEY_BASE64. The workflow uses the base64 secret first, so keeping both can hide the real key you intended to use."
-            exit 1
+            echo "::warning::Both DEPLOY_SSH_KEY and DEPLOY_SSH_KEY_BASE64 are set. The workflow will use DEPLOY_SSH_KEY_BASE64 and ignore DEPLOY_SSH_KEY."
           fi
 
           if [ -n "${DEPLOY_SSH_KEY_BASE64:-}" ]; then
