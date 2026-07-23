@@ -579,12 +579,12 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withOpacity(0.7)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -1732,9 +1732,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(companyTheme.isDark ? 0.04 : 0.1),
+                    Colors.white.withValues(alpha: companyTheme.isDark ? 0.04 : 0.1),
                     Colors.transparent,
-                    Colors.black.withOpacity(companyTheme.isDark ? 0.18 : 0.06),
+                    Colors.black.withValues(alpha: companyTheme.isDark ? 0.18 : 0.06),
                   ],
                 ),
               ),
@@ -2551,9 +2551,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.8),
+          color: Colors.white.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.white.withOpacity(0.76)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.76)),
         ),
         child: Column(
           children: [
@@ -2636,7 +2636,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       children: [
         _buildMoodOverlay(emotion),
         Container(
-          color: Colors.black.withOpacity(0.24),
+          color: Colors.black.withValues(alpha: 0.24),
         ),
         Center(
           child: Padding(
@@ -2644,11 +2644,11 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             child: Container(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.98),
+                color: Colors.white.withValues(alpha: 0.98),
                 borderRadius: BorderRadius.circular(28),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.18),
+                    color: Colors.black.withValues(alpha: 0.18),
                     blurRadius: 28,
                     offset: const Offset(0, 12),
                   ),

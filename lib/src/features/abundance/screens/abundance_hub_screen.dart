@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/admin_dashboard.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/daily_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_dashboard_screen.dart';

@@ -13,7 +13,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/coaches/coa
 import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/today_intake_screen.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/dashboard/DailyTracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/dashboard/daily_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';

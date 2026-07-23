@@ -5,10 +5,10 @@ class SleepSettings extends StatefulWidget {
   const SleepSettings({super.key});
 
   @override
-  _SleepSettingsState createState() => _SleepSettingsState();
+  State<SleepSettings> createState() => SleepSettingsState();
 }
 
-class _SleepSettingsState extends State<SleepSettings> {
+class SleepSettingsState extends State<SleepSettings> {
   String? selectedMode = "Alarm";
   List<String> modeOptions = ["Alarm", "Vibrate"];
 

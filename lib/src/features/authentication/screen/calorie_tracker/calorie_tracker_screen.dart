@@ -1905,7 +1905,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
+                      color: Colors.black.withValues(alpha: 0.12),
                       blurRadius: 16,
                       offset: const Offset(0, 8),
                     ),
@@ -1950,7 +1950,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   child: CustomPaint(
                     painter: _ArcProgressPainter(
                       progress: progress,
-                      backgroundColor: Colors.white.withOpacity(0.7),
+                      backgroundColor: Colors.white.withValues(alpha: 0.7),
                       progressColor: const Color(0xFFFFFFFF),
                     ),
                   ),
@@ -2116,7 +2116,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2504,7 +2504,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               borderRadius: BorderRadius.circular(12),
             ),
             child: _isCheckingOllamaStatus
@@ -2599,7 +2599,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69A9D5).withOpacity(0.12),
+            color: const Color(0xFF69A9D5).withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2688,7 +2688,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         border: Border.all(color: const Color(0xFFE8EDE3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),

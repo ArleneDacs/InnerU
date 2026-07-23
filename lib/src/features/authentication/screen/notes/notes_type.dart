@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
-import 'package:selfcare_projects/src/models/customSnackbar.dart';
+import 'package:selfcare_projects/src/models/custom_snackbar.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/community_api_service.dart';

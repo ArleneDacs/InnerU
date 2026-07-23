@@ -10,12 +10,11 @@ class NoteCard extends StatefulWidget {
 
   const NoteCard({super.key, required this.note, required this.onPressed});
 
-  // ignore: library_private_types_in_public_api
   @override
-  _NoteCardState createState() => _NoteCardState();
+  State<NoteCard> createState() => NoteCardState();
 }
 
-class _NoteCardState extends State<NoteCard> {
+class NoteCardState extends State<NoteCard> {
   int currentPage = 0;
   bool isExpanded = false; // Track expansion state
 
