@@ -232,10 +232,18 @@ class AuthTest extends TestCase
     {
         $response = $this->get('/password-reset?mode=resetPassword&token=abc123&email=user%40example.com');
 
-        $response->assertRedirect(
-            rtrim((string) config('app.frontend_url'), '/')
-            .'/password-reset?mode=resetPassword&token=abc123&email=user%40example.com'
+        $redirectUrl = $response->headers->get('Location');
+
+        $this->assertNotNull($redirectUrl);
+        $this->assertStringStartsWith(
+            rtrim((string) config('app.frontend_url'), '/').'/password-reset',
+            $redirectUrl
         );
+
+        parse_str(parse_url($redirectUrl, PHP_URL_QUERY) ?? '', $query);
+        $this->assertSame('resetPassword', $query['mode'] ?? null);
+        $this->assertSame('abc123', $query['token'] ?? null);
+        $this->assertSame('user@example.com', $query['email'] ?? null);
     }
 
     public function test_login_rejects_unverified_email_password_accounts(): void
