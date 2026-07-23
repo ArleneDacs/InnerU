@@ -43,7 +43,7 @@ class UserActivity {
 String _formatLeaderboardScore(num score) {
   return score == score.roundToDouble()
       ? score.toStringAsFixed(0)
-      : score.toStringAsFixed(1);
+      : score.toString();
 }
 
 class LeaderboardEntry {
@@ -214,15 +214,17 @@ class _LeaderboardState extends State<Leaderboard>
   }
 
   A12LeaderboardEntry _toA12Entry(LeaderboardApiCompanyEntry entry) {
-    final score = entry.score.toDouble();
+    final score = entry.overallScore.toDouble();
+    final goalScore = entry.goalScore.toDouble();
+    final dailyTrackerScore = entry.coreTaskScore.toDouble();
     return A12LeaderboardEntry(
       userId: entry.userId,
       name: entry.name,
       score: UserScore(
         userId: entry.userId,
         categories: {for (final c in GoalCategory.values) c: 0.0},
-        goalScore: score,
-        coreTaskScore: 0,
+        goalScore: goalScore,
+        coreTaskScore: dailyTrackerScore,
         consistencyScore: 0,
         overallScore: score,
         currentStreak: 0,
@@ -264,7 +266,7 @@ class _LeaderboardState extends State<Leaderboard>
             (entry) => LeaderboardEntry(
               userId: entry.userId,
               name: entry.name,
-              score: entry.score,
+              score: entry.overallScore,
               rank: entry.rank,
               activity: const UserActivity(),
               profilePic: entry.profilePic,
@@ -292,14 +294,14 @@ class _LeaderboardState extends State<Leaderboard>
               totalScore: group.totalScore,
               entries: group.entries
                   .map(
-                    (member) => LeaderboardEntry(
-                      userId: member.userId,
-                      name: member.name,
-                      score: member.score,
-                      rank: member.rank,
-                      activity: const UserActivity(),
-                      profilePic: member.profilePic,
-                      teamName: member.teamName,
+                  (member) => LeaderboardEntry(
+                    userId: member.userId,
+                    name: member.name,
+                    score: member.overallScore,
+                    rank: member.rank,
+                    activity: const UserActivity(),
+                    profilePic: member.profilePic,
+                    teamName: member.teamName,
                     ),
                   )
                   .toList(),
@@ -311,7 +313,7 @@ class _LeaderboardState extends State<Leaderboard>
             (member) => LeaderboardEntry(
               userId: member.userId,
               name: member.name,
-              score: member.score,
+              score: member.overallScore,
               rank: member.rank,
               activity: const UserActivity(),
               profilePic: member.profilePic,
@@ -680,8 +682,8 @@ class _LeaderboardState extends State<Leaderboard>
             child: LeaderboardScoreBreakdownSheet(
               name: entry.name,
               teamName: entry.teamName,
-              goalScore: entry.score.goalScore.round(),
-              dailyTrackerScore: entry.score.coreTaskScore.round(),
+              goalScore: entry.score.goalScore,
+              dailyTrackerScore: entry.score.coreTaskScore,
               totalScore: entry.score.overallScore,
               accentColor: accentColor,
               theme: theme,
@@ -707,8 +709,8 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
 
   final String name;
   final String? teamName;
-  final int goalScore;
-  final int dailyTrackerScore;
+  final num goalScore;
+  final num dailyTrackerScore;
   final num totalScore;
   final Color accentColor;
   final CompanyThemeData theme;
@@ -729,7 +731,7 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Goal score and daily tracker only.',
+          'Combined goal and daily tracker score.',
           style: TextStyle(
             fontSize: 14,
             color: theme.mutedInkColor,
@@ -793,9 +795,9 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
 
 Widget _buildScoreBreakdownRow(
   String title,
-  int value,
+  num value,
   String rate,
-  int points,
+  num points,
   CompanyThemeData theme,
 ) {
   return Padding(
@@ -812,7 +814,7 @@ Widget _buildScoreBreakdownRow(
         Expanded(
           flex: 3,
           child: Text(
-            '$value',
+            _formatLeaderboardScore(value),
             style: TextStyle(fontSize: 16, color: theme.inkColor),
           ),
         ),
@@ -826,7 +828,7 @@ Widget _buildScoreBreakdownRow(
         Expanded(
           flex: 2,
           child: Text(
-            '$points pts',
+            '${_formatLeaderboardScore(points)} pts',
             style: TextStyle(
               fontSize: 16,
               color: theme.isDark ? theme.primaryColor : Colors.orange,
@@ -1787,7 +1789,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
     return LeaderboardEntry(
       userId: entry.userId,
       name: entry.name,
-      score: entry.score.goalScore,
+      score: entry.score.overallScore,
       rank: 0,
       activity: entry.activity,
       profilePic: entry.profilePic,
@@ -1855,7 +1857,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
   }
 
   Widget _buildHeaderCard(A12LeaderboardEntry? entry) {
-    final score = entry?.score.goalScore ?? 0;
+    final score = entry?.score.overallScore ?? 0;
     final rank = entry?.rank ?? rankForPercent(0);
     final scoreColor = showRankLabels ? _rankColor(rank) : theme.primaryColor;
 
@@ -1898,7 +1900,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    score.toStringAsFixed(0),
+                    _formatLeaderboardScore(score),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 26,
@@ -1933,7 +1935,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Goal score and daily tracker only.',
+                    'Combined goal and daily tracker score.',
                     style: TextStyle(
                       color: theme.mutedInkColor,
                       height: 1.35,
@@ -1982,17 +1984,17 @@ class _A12LeaderboardBoard extends StatelessWidget {
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  score.toStringAsFixed(0),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
+                children: [
+                  Text(
+                    _formatLeaderboardScore(score),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
                 const Text(
-                  'Goals',
+                  'Score',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 11,
@@ -2018,13 +2020,13 @@ class _A12LeaderboardBoard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  'Goal score and daily tracker only.',
-                  style: TextStyle(
-                    color: theme.mutedInkColor,
-                    height: 1.35,
+                  Text(
+                    'Combined goal and daily tracker score.',
+                    style: TextStyle(
+                      color: theme.mutedInkColor,
+                      height: 1.35,
+                    ),
                   ),
-                ),
                 const SizedBox(height: 12),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 360),
@@ -2112,8 +2114,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
     final isCurrentUser = entry.userId == currentUserId;
     final rankColor =
         showRankLabels ? _rankColor(entry.rank) : theme.primaryColor;
-    final progress = (entry.score.goalScore / 100).clamp(0.0, 1.0);
-    final scoreLabel = entry.score.goalScore.toStringAsFixed(0);
+    final progress = (entry.score.overallScore / 100).clamp(0.0, 1.0);
+    final scoreLabel = _formatLeaderboardScore(entry.score.overallScore);
 
     return GestureDetector(
       onTap: () => onEntryTap(entry),
@@ -2274,7 +2276,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Goal score',
+                  'Score',
                   textAlign: TextAlign.end,
                   style: TextStyle(
                     color: theme.mutedInkColor,
@@ -2316,11 +2318,11 @@ class _A12LeaderboardBoard extends StatelessWidget {
     }
 
     final sorted = [...entries]..sort((a, b) {
-        if (a.score.goalScore != b.score.goalScore) {
-          return b.score.goalScore.compareTo(a.score.goalScore);
-        }
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+      if (a.score.overallScore != b.score.overallScore) {
+        return b.score.overallScore.compareTo(a.score.overallScore);
+      }
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
     final currentUserEntry = _currentUserEntry;
     final remainingEntries = sorted.length > 3
         ? sorted.skip(3).toList()
@@ -2352,14 +2354,14 @@ class _A12LeaderboardBoard extends StatelessWidget {
               _buildA12MetricChip(
                 label: 'Goal score',
                 value:
-                    '${currentUserEntry?.score.goalScore.toStringAsFixed(0) ?? '0'}%',
+                    '${_formatLeaderboardScore(currentUserEntry?.score.goalScore ?? 0)}%',
                 color: scoreColor,
               ),
               const SizedBox(width: 10),
               _buildA12MetricChip(
                 label: 'Daily tracker',
                 value:
-                    '${currentUserEntry?.score.coreTaskScore.toStringAsFixed(0) ?? '0'}%',
+                    '${_formatLeaderboardScore(currentUserEntry?.score.coreTaskScore ?? 0)}%',
                 color: theme.primaryColor,
               ),
             ],

@@ -37,7 +37,7 @@ class _SetuppageState extends State<Setuppage> {
         CommunityScreen(),
       ];
 
-  final _titles = ["Meditation", "Step Tracker", "", "To Do List", "Community"];
+  final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];
 
   // Default (unselected) icons
   final List<Widget> _defaultIcons = [
@@ -162,7 +162,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
         CommunityScreen(),
       ];
 
-  final _titles = ["Meditation", "Step Tracker", "", "To Do List", "Community"];
+  final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];
 
   final List<Widget> _defaultIcons = [
     Icon(CupertinoIcons.suit_heart, size: 30),

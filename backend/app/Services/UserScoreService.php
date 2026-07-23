@@ -21,12 +21,21 @@ class UserScoreService
         'addValue',
     ];
 
-    public function resolveForUser(User $user): int
+    public function resolveForUser(User $user): float
     {
-        $latestTracker = DailyTracker::query()
+        return $this->resolveBreakdownForUser($user)['overallScore'];
+    }
+
+    /**
+     * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
+     */
+    public function resolveBreakdownForUser(User $user): array
+    {
+        $trackers = DailyTracker::query()
             ->where('user_id', $user->id)
+            ->orderBy('date')
             ->orderByDesc('updated_at')
-            ->first([
+            ->get([
                 'user_id',
                 'date',
                 'step_count',
@@ -55,14 +64,21 @@ class UserScoreService
                 'company_name',
                 'updated_at',
             ]);
-        if ($latestTracker !== null) {
-            return $this->scoreFromDailyTracker($user, $latestTracker);
+
+        if ($trackers->isNotEmpty()) {
+            return $this->summarizeBreakdowns(
+                $trackers
+                    ->map(fn (DailyTracker $tracker) => $this->scoreBreakdownFromDailyTracker($user, $tracker))
+                    ->all(),
+                $user
+            );
         }
 
-        $latestPoint = UserPoint::query()
+        $points = UserPoint::query()
             ->where('user_id', $user->id)
+            ->orderBy('date')
             ->orderByDesc('updated_at')
-            ->first([
+            ->get([
                 'total_points',
                 'activity_points',
                 'daily_tracker_score',
@@ -72,18 +88,43 @@ class UserScoreService
                 'user_total_score',
                 'updated_at',
             ]);
-        if ($latestPoint !== null) {
-            return $this->scoreFromUserPoint($latestPoint);
+
+        if ($points->isNotEmpty()) {
+            return $this->summarizeBreakdowns(
+                $points
+                    ->map(fn (UserPoint $point) => $this->scoreBreakdownFromUserPoint($point))
+                    ->all(),
+                $user
+            );
         }
 
-        return $this->normalizeScore($user->score);
+        $score = (float) ($user->score ?? 0);
+        return [
+            'goalScore' => $score,
+            'coreTaskScore' => 0.0,
+            'overallScore' => $score,
+        ];
     }
 
     /**
      * @param  Collection<int, User>  $users
-     * @return array<string, int>
+     * @return array<string, float>
      */
     public function resolveForUsers(Collection $users): array
+    {
+        $details = $this->resolveBreakdownForUsers($users);
+
+        return array_map(
+            static fn (array $item) => $item['overallScore'],
+            $details,
+        );
+    }
+
+    /**
+     * @param  Collection<int, User>  $users
+     * @return array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}>
+     */
+    public function resolveBreakdownForUsers(Collection $users): array
     {
         $userIds = $users
             ->pluck('id')
@@ -96,12 +137,13 @@ class UserScoreService
             return [];
         }
 
-        $trackerScores = $this->latestTrackersByUserId(
+        $trackerScores = $this->allTrackersByUserId(
             DailyTracker::query()
                 ->whereIn('user_id', $userIds)
                 ->orderBy('user_id')
+                ->orderBy('date')
                 ->orderByDesc('updated_at')
-                ->get([
+            ->get([
                     'user_id',
                     'date',
                     'step_count',
@@ -132,10 +174,11 @@ class UserScoreService
                 ])
         );
 
-        $pointScores = $this->latestPointsByUserId(
+        $pointScores = $this->allPointsByUserId(
             UserPoint::query()
                 ->whereIn('user_id', $userIds)
                 ->orderBy('user_id')
+                ->orderBy('date')
                 ->orderByDesc('updated_at')
                 ->get([
                     'user_id',
@@ -154,22 +197,37 @@ class UserScoreService
         foreach ($users as $user) {
             $userId = (string) $user->id;
             if (isset($trackerScores[$userId])) {
-                $scores[$userId] = $this->scoreFromDailyTracker($user, $trackerScores[$userId]);
+                $scores[$userId] = $this->summarizeBreakdowns(
+                    $trackerScores[$userId]
+                        ->map(fn (DailyTracker $tracker) => $this->scoreBreakdownFromDailyTracker($user, $tracker))
+                        ->all(),
+                    $user
+                );
                 continue;
             }
 
             if (isset($pointScores[$userId])) {
-                $scores[$userId] = $this->scoreFromUserPoint($pointScores[$userId]);
+                $scores[$userId] = $this->summarizeBreakdowns(
+                    $pointScores[$userId]
+                        ->map(fn (UserPoint $point) => $this->scoreBreakdownFromUserPoint($point))
+                        ->all(),
+                    $user
+                );
                 continue;
             }
 
-            $scores[$userId] = $this->normalizeScore($user->score);
+            $score = (float) ($user->score ?? 0);
+            $scores[$userId] = [
+                'goalScore' => $score,
+                'coreTaskScore' => 0.0,
+                'overallScore' => $score,
+            ];
         }
 
         return $scores;
     }
 
-    public function syncForUser(User $user, ?int $score = null): int
+    public function syncForUser(User $user, ?float $score = null): int
     {
         $resolvedScore = $this->normalizeScore($score ?? $this->resolveForUser($user));
 
@@ -187,19 +245,16 @@ class UserScoreService
 
     /**
      * @param  Collection<int, DailyTracker>  $records
-     * @return array<string, array{score:int, updated_at:int}>
+     * @return array<string, Collection<int, DailyTracker>>
      */
-    private function latestTrackersByUserId(Collection $records): array
+    private function allTrackersByUserId(Collection $records): array
     {
         $scores = [];
 
         foreach ($records as $record) {
             $userId = (string) $record->user_id;
-            if (isset($scores[$userId])) {
-                continue;
-            }
-
-            $scores[$userId] = $record;
+            $scores[$userId] ??= collect();
+            $scores[$userId]->push($record);
         }
 
         return $scores;
@@ -207,22 +262,53 @@ class UserScoreService
 
     /**
      * @param  Collection<int, UserPoint>  $records
-     * @return array<string, UserPoint>
+     * @return array<string, Collection<int, UserPoint>>
      */
-    private function latestPointsByUserId(Collection $records): array
+    private function allPointsByUserId(Collection $records): array
     {
         $scores = [];
 
         foreach ($records as $record) {
             $userId = (string) $record->user_id;
-            if (isset($scores[$userId])) {
-                continue;
-            }
-
-            $scores[$userId] = $record;
+            $scores[$userId] ??= collect();
+            $scores[$userId]->push($record);
         }
 
         return $scores;
+    }
+
+    /**
+     * @param  array<int, array{goalScore:float, coreTaskScore:float, overallScore:float}>  $breakdowns
+     * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
+     */
+    private function summarizeBreakdowns(array $breakdowns, User $user): array
+    {
+        if ($breakdowns === []) {
+            $score = (float) ($user->score ?? 0);
+            return [
+                'goalScore' => $score,
+                'coreTaskScore' => 0.0,
+                'overallScore' => $score,
+            ];
+        }
+
+        $count = count($breakdowns);
+        $latestBreakdown = $breakdowns[array_key_last($breakdowns)] ?? $breakdowns[0];
+        $goalScore = (float) ($latestBreakdown['goalScore'] ?? 0);
+        $coreTaskScore = 0.0;
+
+        foreach ($breakdowns as $breakdown) {
+            $coreTaskScore += $breakdown['coreTaskScore'];
+        }
+
+        $coreTaskAverage = $coreTaskScore / $count;
+        $overallScore = min(100.0, $goalScore + $coreTaskAverage);
+
+        return [
+            'goalScore' => $goalScore,
+            'coreTaskScore' => $coreTaskAverage,
+            'overallScore' => $overallScore,
+        ];
     }
 
     private function normalizeScore(mixed $score): int
@@ -234,7 +320,10 @@ class UserScoreService
         return max(0, min(100, (int) round((float) $score)));
     }
 
-    private function scoreFromDailyTracker(User $user, DailyTracker $tracker): int
+    /**
+     * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
+     */
+    private function scoreBreakdownFromDailyTracker(User $user, DailyTracker $tracker): array
     {
         $dailyTrackerIds = $this->dailyTrackerIdsForUser($user);
         $completedCount = 0;
@@ -246,59 +335,75 @@ class UserScoreService
         }
 
         $dailyTrackerScore = count($dailyTrackerIds) > 0
-            ? $this->normalizeScore(($completedCount / count($dailyTrackerIds)) * 100)
-            : $this->normalizeScore($tracker->user_total_score);
+            ? (($completedCount / count($dailyTrackerIds)) * 100)
+            : (float) ($tracker->user_total_score ?? 0);
 
-        $todoListScore = $this->normalizeScore(
-            $tracker->todo_list_score > 0
-                ? $tracker->todo_list_score
-                : $tracker->todo_list_score_daily_contribution
-        );
-        $effectiveTodoListScore = $todoListScore > 0
-            ? $todoListScore
-            : $this->normalizeScore($tracker->todo_list_score_daily_contribution);
+        $goalScore = $tracker->todo_list_score > 0
+            ? (float) $tracker->todo_list_score
+            : (float) $tracker->todo_list_score_daily_contribution;
+        $effectiveGoalScore = $goalScore > 0
+            ? $goalScore
+            : (float) $tracker->todo_list_score_daily_contribution;
         $includeTodoListScore = (bool) $tracker->todo_list_included_in_total
-            || $todoListScore > 0
+            || $goalScore > 0
             || $tracker->todo_list_score_daily_contribution > 0;
 
         $resolved = $includeTodoListScore
-            ? (($dailyTrackerScore + $effectiveTodoListScore) / 2)
+            ? (($dailyTrackerScore + $effectiveGoalScore) / 2)
             : $dailyTrackerScore;
 
         if ($resolved <= 0) {
-            $resolved = $this->normalizeScore($tracker->user_total_score);
+            $resolved = (float) ($tracker->user_total_score ?? 0);
         }
 
-        return $this->normalizeScore($resolved);
+        return [
+            'goalScore' => $goalScore,
+            'coreTaskScore' => $dailyTrackerScore,
+            'overallScore' => $resolved,
+        ];
     }
 
-    private function scoreFromUserPoint(UserPoint $point): int
+    /**
+     * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
+     */
+    private function scoreBreakdownFromUserPoint(UserPoint $point): array
     {
-        $dailyTrackerScore = $this->normalizeScore($point->daily_tracker_score);
-        $todoListScore = $this->normalizeScore(
-            $point->todo_list_score > 0
-                ? $point->todo_list_score
-                : $point->todo_list_score_daily_contribution
-        );
-        $effectiveTodoListScore = $todoListScore > 0
-            ? $todoListScore
-            : $this->normalizeScore($point->todo_list_score_daily_contribution);
+        $dailyTrackerScore = (float) $point->daily_tracker_score;
+        $goalScore = $point->todo_list_score > 0
+            ? (float) $point->todo_list_score
+            : (float) $point->todo_list_score_daily_contribution;
+        $effectiveGoalScore = $goalScore > 0
+            ? $goalScore
+            : (float) $point->todo_list_score_daily_contribution;
 
         if ((bool) $point->todo_list_included_in_total
-            || $todoListScore > 0
+            || $goalScore > 0
             || $point->todo_list_score_daily_contribution > 0
         ) {
-            $resolved = (($dailyTrackerScore + $effectiveTodoListScore) / 2);
+            $resolved = (($dailyTrackerScore + $effectiveGoalScore) / 2);
             if ($resolved > 0) {
-                return $this->normalizeScore($resolved);
+                return [
+                    'goalScore' => $goalScore,
+                    'coreTaskScore' => $dailyTrackerScore,
+                    'overallScore' => $resolved,
+                ];
             }
         }
 
         if ($dailyTrackerScore > 0) {
-            return $dailyTrackerScore;
+            return [
+                'goalScore' => $goalScore,
+                'coreTaskScore' => $dailyTrackerScore,
+                'overallScore' => $dailyTrackerScore,
+            ];
         }
 
-        return $this->normalizeScore($point->user_total_score ?: $point->total_points);
+        $resolved = (float) ($point->user_total_score ?: $point->total_points);
+        return [
+            'goalScore' => $goalScore,
+            'coreTaskScore' => $dailyTrackerScore,
+            'overallScore' => $resolved,
+        ];
     }
 
     /**

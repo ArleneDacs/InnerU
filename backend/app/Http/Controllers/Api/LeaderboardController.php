@@ -47,15 +47,18 @@ class LeaderboardController extends Controller
             ->orderBy('name')
             ->get();
 
-        $companyScores = $this->userScoreService->resolveForUsers($companyUsers);
+        $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers);
         $companyLeaderboard = $companyUsers
             ->map(function (User $candidate) use ($companyScores): array {
-                $score = $companyScores[(string) $candidate->id] ?? (int) $candidate->score;
+                $breakdown = $this->leaderboardBreakdownForUser($candidate, $companyScores);
 
                 return [
                     'userId' => (string) $candidate->id,
                     'name' => $candidate->name,
-                    'score' => $score,
+                    'score' => $breakdown['overallScore'],
+                    'goalScore' => $breakdown['goalScore'],
+                    'coreTaskScore' => $breakdown['coreTaskScore'],
+                    'overallScore' => $breakdown['overallScore'],
                     'profilePic' => $candidate->profile_pic,
                     'teamName' => $candidate->company_name,
                 ];
@@ -114,10 +117,15 @@ class LeaderboardController extends Controller
                             return null;
                         }
 
+                        $breakdown = $this->leaderboardBreakdownForUser($member, $companyScores);
+
                         return [
                             'userId' => (string) $member->id,
                             'name' => $member->name,
-                            'score' => $companyScores[(string) $member->id] ?? (int) $member->score,
+                            'score' => $breakdown['overallScore'],
+                            'goalScore' => $breakdown['goalScore'],
+                            'coreTaskScore' => $breakdown['coreTaskScore'],
+                            'overallScore' => $breakdown['overallScore'],
                             'profilePic' => $member->profile_pic,
                             'teamName' => $group->name,
                         ];
@@ -160,10 +168,15 @@ class LeaderboardController extends Controller
                     return null;
                 }
 
+                $breakdown = $this->leaderboardBreakdownForUser($mentee, $companyScores);
+
                 return [
                     'userId' => (string) $mentee->id,
                     'name' => $mentee->name,
-                    'score' => $companyScores[(string) $mentee->id] ?? (int) $mentee->score,
+                    'score' => $breakdown['overallScore'],
+                    'goalScore' => $breakdown['goalScore'],
+                    'coreTaskScore' => $breakdown['coreTaskScore'],
+                    'overallScore' => $breakdown['overallScore'],
                     'rank' => 0,
                     'profilePic' => $mentee->profile_pic,
                     'teamName' => $relation->group_name ?: $relation->team_name,
@@ -184,6 +197,8 @@ class LeaderboardController extends Controller
             })
             ->values();
 
+        $currentUserBreakdown = $this->leaderboardBreakdownForUser($user, $companyScores);
+
         return response()->json([
             'company' => [
                 'companyId' => $companyId,
@@ -198,10 +213,37 @@ class LeaderboardController extends Controller
             'currentUser' => [
                 'userId' => (string) $user->id,
                 'name' => $user->name,
-                'score' => $companyScores[(string) $user->id] ?? (int) $user->score,
+                'score' => $currentUserBreakdown['overallScore'],
+                'goalScore' => $currentUserBreakdown['goalScore'],
+                'coreTaskScore' => $currentUserBreakdown['coreTaskScore'],
+                'overallScore' => $currentUserBreakdown['overallScore'],
                 'isCoach' => $isCoach,
             ],
         ]);
+    }
+
+    /**
+     * @param array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}> $breakdowns
+     * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
+     */
+    private function leaderboardBreakdownForUser(User $user, array $breakdowns): array
+    {
+        $fallback = max(0, min(100, (float) ($user->score ?? 0)));
+        $breakdown = $breakdowns[(string) $user->id] ?? null;
+
+        if (! is_array($breakdown)) {
+            return [
+                'goalScore' => $fallback,
+                'coreTaskScore' => 0.0,
+                'overallScore' => $fallback,
+            ];
+        }
+
+        return [
+            'goalScore' => (float) ($breakdown['goalScore'] ?? $fallback),
+            'coreTaskScore' => (float) ($breakdown['coreTaskScore'] ?? 0.0),
+            'overallScore' => (float) ($breakdown['overallScore'] ?? $fallback),
+        ];
     }
 
     private function activeCompanyValue(?string $primary, ?string $fallback): string

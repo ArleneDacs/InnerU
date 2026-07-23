@@ -43,6 +43,7 @@ class TodoTaskController extends Controller
             'description' => ['nullable', 'string'],
             'due_date' => ['required', 'date'],
             'tag' => ['nullable', 'string', 'max:64'],
+            'tag_index' => ['nullable', 'integer', 'min:0', 'max:3'],
             'is_completed' => ['sometimes', 'boolean'],
             'completed_at' => ['nullable', 'date'],
             'sub_tasks' => ['nullable', 'array'],
@@ -57,7 +58,10 @@ class TodoTaskController extends Controller
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? '',
                 'due_date' => Carbon::parse($validated['due_date'])->toDateString(),
-                'tag' => $validated['tag'] ?? 'none',
+                'tag' => $this->normalizeTag(
+                    $validated['tag'] ?? null,
+                    $validated['tag_index'] ?? null,
+                ),
                 'is_completed' => $validated['is_completed'] ?? false,
                 'completed_at' => isset($validated['completed_at'])
                     ? Carbon::parse($validated['completed_at'])
@@ -81,6 +85,7 @@ class TodoTaskController extends Controller
             'description' => ['nullable', 'string'],
             'due_date' => ['sometimes', 'date'],
             'tag' => ['nullable', 'string', 'max:64'],
+            'tag_index' => ['nullable', 'integer', 'min:0', 'max:3'],
             'is_completed' => ['sometimes', 'boolean'],
             'completed_at' => ['nullable', 'date'],
             'sub_tasks' => ['nullable', 'array'],
@@ -96,7 +101,12 @@ class TodoTaskController extends Controller
             $todoTask->due_date = Carbon::parse($validated['due_date'])->toDateString();
         }
         if (array_key_exists('tag', $validated)) {
-            $todoTask->tag = $validated['tag'];
+            $todoTask->tag = $this->normalizeTag(
+                $validated['tag'] ?? null,
+                $validated['tag_index'] ?? null,
+            );
+        } elseif (array_key_exists('tag_index', $validated)) {
+            $todoTask->tag = $this->tagFromIndex((int) $validated['tag_index']);
         }
         if (array_key_exists('is_completed', $validated)) {
             $todoTask->is_completed = (bool) $validated['is_completed'];
@@ -142,10 +152,52 @@ class TodoTaskController extends Controller
             'isCompleted' => (bool) $task->is_completed,
             'dueDate' => $task->due_date?->toDateString(),
             'tag' => $task->tag,
+            'tagIndex' => $this->tagIndexFromValue($task->tag),
             'createdAt' => $task->created_at?->toIso8601String(),
             'updatedAt' => $task->updated_at?->toIso8601String(),
             'completedAt' => $task->completed_at?->toIso8601String(),
             'subTasks' => $task->sub_tasks ?? [],
         ];
+    }
+
+    private function normalizeTag(?string $tag, ?int $tagIndex): string
+    {
+        $normalizedTag = strtolower(trim((string) $tag));
+        if ($normalizedTag !== '') {
+            $index = $this->tagIndexFromValue($normalizedTag);
+            if ($index !== null) {
+                return $this->tagFromIndex($index);
+            }
+        }
+
+        if ($tagIndex !== null) {
+            return $this->tagFromIndex($tagIndex);
+        }
+
+        return 'none';
+    }
+
+    private function tagFromIndex(int $tagIndex): string
+    {
+        return match (max(0, min(3, $tagIndex))) {
+            0 => 'personal',
+            1 => 'professional',
+            2 => 'contribution',
+            default => 'none',
+        };
+    }
+
+    private function tagIndexFromValue(?string $tag): ?int
+    {
+        $normalized = strtolower(trim((string) $tag));
+        $normalized = preg_replace('/[\s_\-]+/', '', $normalized) ?? $normalized;
+
+        return match ($normalized) {
+            'personal', 'personalgoals' => 0,
+            'professional', 'professionalmilestones', 'professionalgoals' => 1,
+            'contribution', 'contributiongoals' => 2,
+            'none', 'notag', '' => 3,
+            default => null,
+        };
     }
 }

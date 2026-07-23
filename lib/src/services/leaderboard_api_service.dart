@@ -6,6 +6,9 @@ class LeaderboardApiCompanyEntry {
     required this.userId,
     required this.name,
     required this.score,
+    required this.goalScore,
+    required this.coreTaskScore,
+    required this.overallScore,
     required this.rank,
     this.profilePic,
     this.teamName,
@@ -14,17 +17,29 @@ class LeaderboardApiCompanyEntry {
   final String userId;
   final String name;
   final num score;
+  final num goalScore;
+  final num coreTaskScore;
+  final num overallScore;
   final int rank;
   final String? profilePic;
   final String? teamName;
 
   factory LeaderboardApiCompanyEntry.fromJson(Map<String, dynamic> json) {
+    final score = _parseApiNumber(json['score']);
+    final goalScore = _parseApiNumber(json['goalScore'], fallback: score);
+    final coreTaskScore = _parseApiNumber(json['coreTaskScore']);
+    final overallScore = _parseApiNumber(
+      json['overallScore'],
+      fallback: score,
+    );
+
     return LeaderboardApiCompanyEntry(
       userId: json['userId']?.toString() ?? '',
       name: json['name']?.toString() ?? 'User',
-      score: json['score'] is num
-          ? json['score'] as num
-          : num.tryParse(json['score']?.toString() ?? '') ?? 0,
+      score: score,
+      goalScore: goalScore,
+      coreTaskScore: coreTaskScore,
+      overallScore: overallScore,
       rank: json['rank'] is int
           ? json['rank'] as int
           : int.tryParse(json['rank']?.toString() ?? '') ?? 0,
@@ -39,6 +54,9 @@ class LeaderboardApiGroupMember {
     required this.userId,
     required this.name,
     required this.score,
+    required this.goalScore,
+    required this.coreTaskScore,
+    required this.overallScore,
     required this.rank,
     this.profilePic,
     this.teamName,
@@ -47,17 +65,29 @@ class LeaderboardApiGroupMember {
   final String userId;
   final String name;
   final num score;
+  final num goalScore;
+  final num coreTaskScore;
+  final num overallScore;
   final int rank;
   final String? profilePic;
   final String? teamName;
 
   factory LeaderboardApiGroupMember.fromJson(Map<String, dynamic> json) {
+    final score = _parseApiNumber(json['score']);
+    final goalScore = _parseApiNumber(json['goalScore'], fallback: score);
+    final coreTaskScore = _parseApiNumber(json['coreTaskScore']);
+    final overallScore = _parseApiNumber(
+      json['overallScore'],
+      fallback: score,
+    );
+
     return LeaderboardApiGroupMember(
       userId: json['userId']?.toString() ?? '',
       name: json['name']?.toString() ?? 'User',
-      score: json['score'] is num
-          ? json['score'] as num
-          : num.tryParse(json['score']?.toString() ?? '') ?? 0,
+      score: score,
+      goalScore: goalScore,
+      coreTaskScore: coreTaskScore,
+      overallScore: overallScore,
       rank: json['rank'] is int
           ? json['rank'] as int
           : int.tryParse(json['rank']?.toString() ?? '') ?? 0,
@@ -123,15 +153,23 @@ class LeaderboardApiSnapshot {
       ...(json['companyLeaderboard'] as List? ?? const <dynamic>[]),
       ...(json['entries'] as List? ?? const <dynamic>[]),
     ];
+    final seenUserIds = <String>{};
+    final dedupedEntries = <LeaderboardApiCompanyEntry>[];
+    for (final rawEntry in rawEntries) {
+      if (rawEntry is! Map) continue;
+      final entry = LeaderboardApiCompanyEntry.fromJson(
+        Map<String, dynamic>.from(rawEntry),
+      );
+      if (entry.userId.isEmpty || !seenUserIds.add(entry.userId)) {
+        continue;
+      }
+      dedupedEntries.add(entry);
+    }
 
     return LeaderboardApiSnapshot(
       companyCode: company['companyCode']?.toString() ?? '',
       companyName: company['companyName']?.toString() ?? '',
-      entries: rawEntries
-          .whereType<Map>()
-          .map((entry) => LeaderboardApiCompanyEntry.fromJson(
-              Map<String, dynamic>.from(entry)))
-          .toList(),
+      entries: dedupedEntries,
       groups: (json['groupLeaderboards'] as List?)
               ?.whereType<Map>()
               .map((group) =>
@@ -163,4 +201,13 @@ class LeaderboardApiService {
     );
     return LeaderboardApiSnapshot.fromJson(response);
   }
+}
+
+num _parseApiNumber(dynamic value, {num fallback = 0}) {
+  if (value is num) {
+    return value;
+  }
+
+  final parsed = num.tryParse(value?.toString() ?? '');
+  return parsed ?? fallback;
 }
