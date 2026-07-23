@@ -1,0 +1,76 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\User;
+use App\Services\UserScoreService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Mockery;
+use Tests\TestCase;
+
+class UserPointTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_user_can_save_user_points_even_if_score_sync_fails(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Point User',
+            'email' => 'point-user@example.com',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+        ]);
+
+        $scoreService = Mockery::mock(UserScoreService::class);
+        $scoreService->shouldReceive('resolveForUser')
+            ->once()
+            ->andThrow(new \RuntimeException('Score sync failed.'));
+        app()->instance(UserScoreService::class, $scoreService);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/user-points', [
+            'date' => '2026-07-21',
+            'username' => 'Point User',
+            'total_points' => 65,
+            'activity_points' => 30,
+            'daily_tracker_score' => 50,
+            'todo_list_score' => 10,
+            'todo_list_score_daily_contribution' => 5,
+            'todo_list_included_in_total' => true,
+            'user_total_score' => 65,
+            'task_points' => [
+                'Steps' => 10,
+            ],
+            'tasks' => [
+                'Steps' => true,
+            ],
+            'server' => 'Default',
+            'company_id' => 'ABC',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+            'activity_counts' => [
+                'stepCount' => 1432,
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('point.username', 'Point User')
+            ->assertJsonPath('point.totalPoints', 65)
+            ->assertJsonPath('point.dailyTrackerScore', 50);
+
+        $this->assertDatabaseHas('user_points', [
+            'user_id' => $user->id,
+            'date' => '2026-07-21',
+            'username' => 'Point User',
+            'company_id' => 'ABC',
+        ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
+}

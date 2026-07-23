@@ -243,11 +243,18 @@ class _ProfilePageState extends State<ProfilePage> {
     return 100 / _dailyTrackerTaskCount;
   }
 
-  int get _dailyTrackerScore {
+  double get _dailyTrackerScore {
     if (_dailyTrackerTaskCount == 0) return 0;
     return ((_dailyTrackerCompletedWeight / _dailyTrackerTaskCount) * 100)
-        .round()
-        .clamp(0, 100);
+        .clamp(0.0, 100.0)
+        .toDouble();
+  }
+
+  String _formatPercent(num value) {
+    final formatted = value.toStringAsFixed(1);
+    return formatted.endsWith('.0')
+        ? formatted.substring(0, formatted.length - 2)
+        : formatted;
   }
 
   String _dailyTrackerCacheKey(String date) {
@@ -1052,7 +1059,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final taskValue = _dailyTrackerTaskValue;
     final score = _dailyTrackerScore;
     final scoreLabel =
-        '$_dailyTrackerCompletedCount of $_dailyTrackerTaskCount complete • each task ${taskValue.toStringAsFixed(taskValue == taskValue.roundToDouble() ? 0 : 1)}%';
+        '$_dailyTrackerCompletedCount of $_dailyTrackerTaskCount complete • each task ${_formatPercent(taskValue)}%';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
@@ -1072,7 +1079,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               Text(
-                '$score%',
+                '${_formatPercent(score)}%',
                 style: TextStyle(
                   color: companyTheme.inkColor,
                   fontWeight: FontWeight.w900,
@@ -1086,7 +1093,7 @@ class _ProfilePageState extends State<ProfilePage> {
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               minHeight: 8,
-              value: (score / 100).clamp(0.0, 1.0),
+              value: (score / 100).clamp(0.0, 1.0).toDouble(),
               backgroundColor: companyTheme.mutedInkColor.withValues(
                 alpha: 0.16,
               ),

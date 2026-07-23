@@ -66,11 +66,15 @@ class UserPointController extends Controller
             ]
         );
 
-        $resolvedScore = $this->userScoreService->resolveForUser($user);
-        $point->forceFill([
-            'user_total_score' => $resolvedScore,
-        ])->save();
-        $this->userScoreService->syncForUser($user, $resolvedScore);
+        try {
+            $resolvedScore = $this->userScoreService->resolveForUser($user);
+            $point->forceFill([
+                'user_total_score' => $resolvedScore,
+            ])->save();
+            $this->userScoreService->syncForUser($user, $resolvedScore);
+        } catch (\Throwable $throwable) {
+            report($throwable);
+        }
 
         return response()->json([
             'point' => $this->pointPayload($point->refresh()),
