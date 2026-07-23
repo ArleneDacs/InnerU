@@ -297,8 +297,14 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     });
 
     try {
-      final startPhotoUrl = await _captureExercisePhoto();
-      if (startPhotoUrl == null) return;
+      // A cancelled/failed photo should not block starting the workout —
+      // the photo is a nice-to-have on the log, not a required field.
+      String? startPhotoUrl;
+      try {
+        startPhotoUrl = await _captureExercisePhoto();
+      } catch (error) {
+        debugPrint('Start photo capture failed: $error');
+      }
 
       final now = DateTime.now();
       setState(() {
@@ -312,10 +318,13 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       await _persistActiveSession();
       _startSessionTicker();
       final notificationsReady = await _syncExerciseNotification();
+      final startedMessage = notificationsReady
+          ? 'Exercise started. We will alert you when the ${formatExerciseDuration(_selectedGoalDuration)} goal is done.'
+          : 'Exercise started, but completion alerts are unavailable right now.';
       _showMessage(
-        notificationsReady
-            ? 'Exercise started. We will alert you when the ${formatExerciseDuration(_selectedGoalDuration)} goal is done.'
-            : 'Exercise started, but completion alerts are unavailable right now.',
+        startPhotoUrl == null
+            ? '$startedMessage (no start photo saved.)'
+            : startedMessage,
       );
     } catch (error) {
       if (mounted) {
@@ -346,8 +355,14 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       _isSaving = true;
     });
     try {
-      final endPhotoUrl = await _captureExercisePhoto();
-      if (endPhotoUrl == null) return;
+      // Same as the start photo: don't let a cancelled/failed camera
+      // capture throw away an already-completed workout's data.
+      String? endPhotoUrl;
+      try {
+        endPhotoUrl = await _captureExercisePhoto();
+      } catch (error) {
+        debugPrint('End photo capture failed: $error');
+      }
 
       final elapsed = _elapsedSessionTime();
       final actualSeconds = math.max(1, elapsed.inSeconds);

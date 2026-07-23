@@ -103,6 +103,41 @@ class DailyTrackerTest extends TestCase
         ]);
     }
 
+    public function test_score_reflects_todays_completion_not_diluted_by_history(): void
+    {
+        $user = User::factory()->create();
+
+        for ($i = 1; $i <= 20; $i++) {
+            DailyTracker::create([
+                'user_id' => (string) $user->id,
+                'username' => $user->name,
+                'date' => now()->subDays($i)->toDateString(),
+                'call' => false,
+                'steps' => false,
+                'exercise' => false,
+                'meditation' => false,
+                'learning' => false,
+                'add_value' => false,
+            ]);
+        }
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => now()->toDateString(),
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        $this->assertEquals(100.0, $breakdown['coreTaskScore']);
+    }
+
     protected function tearDown(): void
     {
         Mockery::close();

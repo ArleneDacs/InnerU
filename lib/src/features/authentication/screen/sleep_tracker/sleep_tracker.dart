@@ -824,7 +824,9 @@ class _SleepTrackerState extends State<SleepTracker>
                                       margin: const EdgeInsets.only(bottom: 10),
                                       padding: const EdgeInsets.all(16),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFF7F4EE),
+                                        color: theme.colorScheme
+                                            .surfaceContainerHighest
+                                            .withValues(alpha: 0.4),
                                         borderRadius: BorderRadius.circular(18),
                                       ),
                                       child: Row(
@@ -858,17 +860,20 @@ class _SleepTrackerState extends State<SleepTracker>
                                                 Text(
                                                   _formatDuration(
                                                       session.duration),
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     fontSize: 16,
                                                     fontWeight: FontWeight.w800,
-                                                    color: Color(0xFF2F3442),
+                                                    color: theme
+                                                        .colorScheme.onSurface,
                                                   ),
                                                 ),
                                                 const SizedBox(height: 3),
                                                 Text(
                                                   '${DateFormat('MMM d, h:mm a').format(session.start)} to ${DateFormat('h:mm a').format(session.end)}',
-                                                  style: const TextStyle(
-                                                    color: Colors.black54,
+                                                  style: TextStyle(
+                                                    color: theme
+                                                        .colorScheme.onSurface
+                                                        .withValues(alpha: 0.62),
                                                   ),
                                                 ),
                                               ],
@@ -962,10 +967,11 @@ class _SleepTrackerState extends State<SleepTracker>
     required String title,
     required Widget child,
   }) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F4EE),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
@@ -973,8 +979,8 @@ class _SleepTrackerState extends State<SleepTracker>
         children: [
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.black54,
+            style: TextStyle(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
               fontWeight: FontWeight.w600,
             ),
           ),

@@ -424,6 +424,7 @@ class _StepMapTrackingController extends ChangeNotifier {
         elapsed = DateTime.now().difference(startedAt!);
         _emit();
         _updateWalkTrackingNotification();
+        unawaited(_persistTrackingFlag());
       });
 
       _stepSubscription = Pedometer.stepCountStream.listen(
@@ -731,6 +732,10 @@ class _StepMapTrackingController extends ChangeNotifier {
 
   static String _trackingFlagKey(String uid) => 'walk_tracking_state_$uid';
 
+  // Snapshot of the in-progress walk, refreshed every second while tracking.
+  // This is the only copy of the route guaranteed to survive a process kill
+  // when the server sync never went through (no connectivity for the whole
+  // session) — reconcileStaleSession() recovers from this, not the server.
   Future<void> _persistTrackingFlag() async {
     final userId = currentUserId;
     final started = startedAt;
@@ -742,6 +747,11 @@ class _StepMapTrackingController extends ChangeNotifier {
         jsonEncode({
           'sessionId': activeSessionId,
           'startedAtMs': started.millisecondsSinceEpoch,
+          'username': currentUsername,
+          'routePoints': serializeRoutePoints(routePoints),
+          'stepCount': sessionSteps,
+          'distanceMeters': distanceMeters,
+          'elapsedSeconds': elapsedSeconds,
         }),
       );
     } catch (error) {
@@ -760,67 +770,120 @@ class _StepMapTrackingController extends ChangeNotifier {
     }
   }
 
+  List<LatLng> _parseStoredRoutePoints(dynamic rawRoutePoints) {
+    if (rawRoutePoints is! List) return const [];
+    final points = <LatLng>[];
+    for (final rawPoint in rawRoutePoints) {
+      if (rawPoint is! Map) continue;
+      final latitude = (rawPoint['latitude'] as num?)?.toDouble();
+      final longitude = (rawPoint['longitude'] as num?)?.toDouble();
+      if (latitude == null || longitude == null) continue;
+      if (!latitude.isFinite || !longitude.isFinite) continue;
+      points.add(LatLng(latitude, longitude));
+    }
+    return points;
+  }
+
   /// Finalizes a walk that was interrupted by a process kill: saves the
-  /// last synced state to walk history, marks the shared-session member
-  /// as no longer tracking, and clears the persisted flag.
+  /// walk to history and marks the shared-session member as no longer
+  /// tracking. Local data (captured every second while tracking, see
+  /// _persistTrackingFlag) is the primary source and always complete, even
+  /// if the walk had zero connectivity the whole time; the server copy is
+  /// only used if it happens to be more complete. The persisted flag is
+  /// cleared only once the recovery actually saves — if the app is still
+  /// offline right now, the flag stays and this retries on the next launch
+  /// instead of losing the walk permanently.
   Future<void> reconcileStaleSession() async {
     final userId = currentUserId;
     if (userId == null || isTracking) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_trackingFlagKey(userId));
+    if (raw == null) return;
+
+    Map<String, dynamic> flag;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_trackingFlagKey(userId));
-      if (raw == null) return;
+      flag = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
       await prefs.remove(_trackingFlagKey(userId));
+      return;
+    }
 
-      Map<String, dynamic> flag;
-      try {
-        flag = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      } catch (_) {
-        return;
-      }
-      final sessionId = flag['sessionId'] as String?;
-      final startedAtMs = flag['startedAtMs'] as int?;
-      if (sessionId == null || sessionId.isEmpty) return;
+    final sessionId = flag['sessionId'] as String?;
+    final startedAtMs = flag['startedAtMs'] as int?;
+    if (sessionId == null || sessionId.isEmpty || startedAtMs == null) {
+      await prefs.remove(_trackingFlagKey(userId));
+      return;
+    }
 
+    var recoveredRoutePoints = _parseStoredRoutePoints(flag['routePoints']);
+    var stepCount = (flag['stepCount'] as num?)?.toInt() ?? 0;
+    var distance = (flag['distanceMeters'] as num?)?.toDouble() ?? 0.0;
+    var elapsedSecondsValue = (flag['elapsedSeconds'] as num?)?.toInt() ?? 0;
+    final recoveredUsername = (flag['username'] as String?) ?? currentUsername;
+
+    try {
       final members = await _api.fetchMembers(sessionId);
       final data = members.firstWhere(
         (member) => member['userId']?.toString() == userId,
         orElse: () => <String, dynamic>{},
       );
-      if (data.isEmpty || data['isTracking'] != true) return;
-
-      final routePoints = data['routePoints'];
-      if (startedAtMs != null && routePoints is List && routePoints.length > 1) {
-        await _api.saveRecordedWalk({
-          'id': '$startedAtMs',
-          'username': data['username'] ?? currentUsername,
-          'started_at': DateTime.fromMillisecondsSinceEpoch(startedAtMs)
-              .toIso8601String(),
-          'ended_at': DateTime.now().toIso8601String(),
-          'step_count': data['stepCount'] ?? 0,
-          'distance_meters': data['distanceMeters'] ?? 0,
-          'elapsed_seconds': data['elapsedSeconds'] ?? 0,
-          'route_points': routePoints,
-          'interrupted': true,
-        });
+      if (data.isNotEmpty && data['isTracking'] == true) {
+        final serverRoutePoints = _parseStoredRoutePoints(data['routePoints']);
+        if (serverRoutePoints.length > recoveredRoutePoints.length) {
+          recoveredRoutePoints = serverRoutePoints;
+          stepCount = (data['stepCount'] as num?)?.toInt() ?? stepCount;
+          distance = (data['distanceMeters'] as num?)?.toDouble() ?? distance;
+          elapsedSecondsValue =
+              (data['elapsedSeconds'] as num?)?.toInt() ?? elapsedSecondsValue;
+        }
       }
+    } catch (error) {
+      debugPrint(
+        'Could not reach server during walk recovery, using local data: $error',
+      );
+    }
+
+    if (recoveredRoutePoints.length < 2) {
+      await prefs.remove(_trackingFlagKey(userId));
+      return;
+    }
+
+    try {
+      await _api.saveRecordedWalk({
+        'id': '$startedAtMs',
+        'username': recoveredUsername,
+        'started_at': DateTime.fromMillisecondsSinceEpoch(startedAtMs)
+            .toIso8601String(),
+        'ended_at': DateTime.now().toIso8601String(),
+        'step_count': stepCount,
+        'distance_meters': distance,
+        'elapsed_seconds': elapsedSecondsValue,
+        'route_points': serializeRoutePoints(recoveredRoutePoints),
+        'interrupted': true,
+      });
 
       await _api.saveMember(sessionId, {
         'user_id': userId,
-        'username': currentUsername,
+        'username': recoveredUsername,
         'status': 'accepted',
         'is_tracking': false,
-        'step_count': data['stepCount'] ?? 0,
-        'distance_meters': data['distanceMeters'] ?? 0,
-        'elapsed_seconds': data['elapsedSeconds'] ?? 0,
-        'route_points': routePoints,
+        'step_count': stepCount,
+        'distance_meters': distance,
+        'elapsed_seconds': elapsedSecondsValue,
+        'route_points': serializeRoutePoints(recoveredRoutePoints),
       });
 
+      // Only clear now that recovery actually saved — see method doc.
+      await prefs.remove(_trackingFlagKey(userId));
       statusText =
           'Your previous walk ended unexpectedly and was saved to history.';
       _emit();
     } catch (error) {
-      debugPrint('Stale walk session cleanup failed: $error');
+      debugPrint(
+        'Stale walk session recovery could not reach the server yet; '
+        'will retry next launch: $error',
+      );
     }
   }
 
@@ -2630,16 +2693,18 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         ? selectedMember
         : null;
 
+    final colors = Theme.of(context).colorScheme;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
+        color: colors.surface.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Colors.black12,
+            color: Colors.black.withValues(alpha: 0.12),
             blurRadius: 10,
-            offset: Offset(0, 3),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -2648,21 +2713,22 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         children: [
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Walkers in this session',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
+                    color: colors.onSurface,
                   ),
                 ),
               ),
               Text(
                 '${visibleMembers.length}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFF7B6A52),
+                  color: colors.onSurface.withValues(alpha: 0.68),
                 ),
               ),
               const SizedBox(width: 8),
@@ -2718,13 +2784,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
               width: double.infinity,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFFF7EA), Color(0xFFF3E6D4)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: colors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE7D9BF)),
+                border: Border.all(color: colors.primary.withValues(alpha: 0.28)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2751,12 +2813,12 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               'Live walker preview',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF7B6A52),
+                                color: colors.onSurface.withValues(alpha: 0.68),
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -2764,9 +2826,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                               focusMember.username.isEmpty
                                   ? 'Walker'
                                   : focusMember.username,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
+                                color: colors.onSurface,
                               ),
                             ),
                             const SizedBox(height: 6),
@@ -2788,18 +2851,18 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                     focusMember.routePoints.length > 1
                         ? 'Route distance: ${_formatDistance(focusMember.distanceMeters)}'
                         : 'Route distance: not available yet',
-                    style: const TextStyle(fontSize: 13),
+                    style: TextStyle(fontSize: 13, color: colors.onSurface),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Steps: ${focusMember.stepCount}',
-                    style: const TextStyle(fontSize: 13),
+                    style: TextStyle(fontSize: 13, color: colors.onSurface),
                   ),
                   const SizedBox(height: 4),
                   if (_memberFocusPoint(focusMember) == null)
-                    const Text(
+                    Text(
                       'Location: Waiting for live location',
-                      style: TextStyle(fontSize: 13),
+                      style: TextStyle(fontSize: 13, color: colors.onSurface),
                     )
                   else
                     FutureBuilder<String>(
@@ -2813,7 +2876,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                                 : 'Locating live area...';
                         return Text(
                           'Location: $placeName',
-                          style: const TextStyle(fontSize: 13),
+                          style: TextStyle(fontSize: 13, color: colors.onSurface),
                         );
                       },
                     ),
@@ -2864,13 +2927,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFFECE6D5)
-                        : const Color(0xFFFFF7EA),
+                        ? colors.primary.withValues(alpha: 0.22)
+                        : colors.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: isSelected
                           ? const Color(0xFFB96D40)
-                          : const Color(0xFFE7D9BF),
+                          : colors.primary.withValues(alpha: 0.24),
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
@@ -2899,9 +2962,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                             child: Text(
                               displayName,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
+                                color: colors.onSurface,
                               ),
                             ),
                           ),
@@ -2926,11 +2990,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   Widget _buildCollapsedWalkerSessionToggle() {
     final walkerCount =
         _sharedMembers.where((member) => member.userId.isNotEmpty).length;
+    final colors = Theme.of(context).colorScheme;
+    final labelColor = colors.onSurface.withValues(alpha: 0.72);
 
     return Align(
       alignment: Alignment.centerLeft,
       child: Material(
-        color: Colors.white.withValues(alpha: 0.94),
+        color: colors.surface.withValues(alpha: 0.96),
         elevation: 3,
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
@@ -2945,27 +3011,27 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.groups_rounded,
                   size: 18,
-                  color: Color(0xFF7B6A52),
+                  color: labelColor,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   walkerCount == 1
                       ? '1 walker hidden'
                       : '$walkerCount walkers hidden',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF7B6A52),
+                    color: labelColor,
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Icon(
+                Icon(
                   Icons.visibility_rounded,
                   size: 18,
-                  color: Color(0xFF7B6A52),
+                  color: labelColor,
                 ),
               ],
             ),
@@ -2997,17 +3063,18 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                     ? invite['fromUsername'] as String
                     : 'Another walker';
 
+            final colors = Theme.of(context).colorScheme;
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF7EA),
+                color: colors.surface.withValues(alpha: 0.96),
                 borderRadius: BorderRadius.circular(18),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
-                    color: Colors.black12,
+                    color: Colors.black.withValues(alpha: 0.12),
                     blurRadius: 10,
-                    offset: Offset(0, 3),
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
@@ -3016,9 +3083,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                 children: [
                   Text(
                     '$fromUsername invited you to a shared walk.',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
+                      color: colors.onSurface,
                     ),
                   ),
                   const SizedBox(height: 10),

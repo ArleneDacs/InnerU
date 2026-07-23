@@ -570,6 +570,11 @@ class FastingNotificationService {
       playSound: !isSilent && !isVibrate,
       enableVibration: !isSilent,
       category: AndroidNotificationCategory.alarm,
+      // Shows over the lock screen like a real alarm clock instead of a
+      // regular notification banner, so it's much harder to sleep through.
+      fullScreenIntent: !isSilent,
+      ongoing: !isSilent,
+      autoCancel: isSilent,
     );
     final iosDetails = DarwinNotificationDetails(
       presentAlert: true,

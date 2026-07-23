@@ -392,14 +392,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
     required Duration elapsed,
     required Duration remaining,
   }) {
-    final titleColor =
-        isActive ? const Color(0xFF2B2826) : const Color(0xFF514A45);
+    final colors = Theme.of(context).colorScheme;
+    final titleColor = colors.onSurface;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
@@ -653,8 +653,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
     required String subtitle,
     VoidCallback? onTap,
   }) {
+    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: Colors.white,
+      color: colors.surface,
       borderRadius: BorderRadius.circular(24),
       child: InkWell(
         onTap: onTap,
@@ -667,23 +668,26 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8F5F0),
+                  color: colors.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: Icon(icon, color: const Color(0xFF4B4340)),
+                child: Icon(icon, color: colors.onSurface),
               ),
               const SizedBox(height: 10),
               Text(
                 title,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: colors.onSurface,
+                ),
               ),
               const SizedBox(height: 3),
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: Colors.black54,
+                  color: colors.onSurface.withValues(alpha: 0.62),
                 ),
               ),
             ],
@@ -694,26 +698,31 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
   }
 
   Widget _buildPlanSection(bool isActive) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Fasting Plans',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: colors.onSurface,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             isActive
                 ? 'Plan stays locked while your current fast is running.'
                 : 'Pick the fasting window that fits your day.',
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colors.onSurface.withValues(alpha: 0.62)),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -748,11 +757,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
   }
 
   Widget _buildTimelineSection(bool isActive) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Column(
@@ -784,24 +794,29 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
   }
 
   Widget _buildAchievementSection() {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Achievement Medals',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: colors.onSurface,
+            ),
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Unlock medals as you complete more fasting goals.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: colors.onSurface.withValues(alpha: 0.62)),
           ),
           const SizedBox(height: 14),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -923,10 +938,11 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
     required IconData icon,
     required Color color,
   }) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9F8F6),
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(22),
       ),
       child: Column(
@@ -944,12 +960,16 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
           const SizedBox(height: 18),
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: colors.onSurface,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             label,
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colors.onSurface.withValues(alpha: 0.62)),
           ),
         ],
       ),
@@ -957,11 +977,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
   }
 
   Widget _buildHistoryPreview() {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Column(
@@ -969,9 +990,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'Recent Fasts',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: colors.onSurface,
+                ),
               ),
               const Spacer(),
               TextButton(
@@ -995,12 +1020,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                   width: double.infinity,
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8F5F0),
+                    color: colors.surfaceContainerHighest.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text(
+                  child: Text(
                     'No fasting history yet. Your completed fasts will show here.',
-                    style: TextStyle(color: Colors.black54),
+                    style: TextStyle(color: colors.onSurface.withValues(alpha: 0.62)),
                   ),
                 );
               }
@@ -1058,7 +1083,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                               const SizedBox(height: 3),
                               Text(
                                 '${_formatShortDateTime(finishedAt)} • Goal ${targetHours}h',
-                                style: const TextStyle(color: Colors.black54),
+                                style: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withValues(alpha: 0.62),
+                                ),
                               ),
                             ],
                           ),

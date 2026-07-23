@@ -150,6 +150,24 @@ class CoachApiService {
         .toList();
   }
 
+  // Mentee-side mirror of fetchRequests(): my own applications to coaches,
+  // as opposed to requests other people sent to me as a coach.
+  Future<List<Map<String, dynamic>>> fetchMyApplications() async {
+    final response = await _api.getJson(
+      '/api/coach/my-applications',
+      token: _token,
+    );
+    final requests = response['requests'];
+    if (requests is! List) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    return requests
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> fetchCoaches() async {
     final response = await _api.getJson(
       '/api/coaches',

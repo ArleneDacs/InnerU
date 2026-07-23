@@ -526,7 +526,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
 
   Future<Map<String, CoachApplication>> _loadApplications() async {
     try {
-      final requests = await CoachApiService.instance.fetchRequests();
+      final requests = await CoachApiService.instance.fetchMyApplications();
       final applications = <String, CoachApplication>{};
       for (final request in requests) {
         final application = CoachApplication.fromJson(request);
@@ -543,7 +543,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
   String _applicationLabel(CoachApplicationStatus status) {
     return switch (status) {
       CoachApplicationStatus.pending => 'Pending',
-      CoachApplicationStatus.accepted => 'Connected',
+      CoachApplicationStatus.accepted => 'My Coach',
       CoachApplicationStatus.rejected => 'Apply again',
       CoachApplicationStatus.none => 'Apply',
     };

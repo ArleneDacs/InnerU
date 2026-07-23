@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -392,6 +394,82 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
     return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
   }
 
+  // Full-screen celebration shown right here on the mood tracker page when
+  // the mood is changed from here — previously this feedback only existed
+  // on the dashboard's own mood section, so changing mood from this page
+  // gave no visual confirmation until the user navigated back to it.
+  Future<void> _showMoodCelebration(String emotion) async {
+    if (!mounted) return;
+    final color = _getColorForEmotion(emotion);
+    final label = _labelForEmotion(emotion);
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Mood updated',
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (dialogContext, _, __) {
+        final colors = Theme.of(dialogContext).colorScheme;
+        return SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 28,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: _buildEmotionIcon(emotion, color: color, size: 30),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        '$label mood logged',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap anywhere to continue.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: colors.onSurface.withValues(alpha: 0.65),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   String _formatClockTime(DateTime date) {
     final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
     final minute = date.minute.toString().padLeft(2, '0');
@@ -417,10 +495,10 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       );
       await _fetchEmotions();
       if (!mounted) return;
-      final label = _labelForEmotion(result.emotion ?? emotion);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Mood updated to $label.')),
-      );
+      // Show the celebration here, on the page where the mood was actually
+      // changed, instead of only on the dashboard the next time it happens
+      // to reload its own "today's emotion" listener.
+      unawaited(_showMoodCelebration(result.emotion ?? emotion));
     } catch (e) {
       debugPrint('Error saving emotion from tracker: $e');
       if (!mounted) return;

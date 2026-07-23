@@ -30,35 +30,17 @@ class CoachManagementController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $isAdmin = $this->isAdmin($user);
-        $companyId = $this->activeCompanyValue($user->active_company_id, $user->company_id);
-        $companyCode = $this->activeCompanyValue($user->active_company_code, $user->company_code);
-        $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
-
-        $query = User::query()
+        // Returns every coach on the platform. The mobile app's "All Coaches"
+        // vs "Same Company" tabs both read from this single response and do
+        // their own client-side filtering (see CoachesScreen._filterCoaches)
+        // — restricting the query here for non-admins made "All Coaches"
+        // silently identical to "Same Company" since the server never sent
+        // the rest of the platform's coaches to filter from.
+        $coaches = User::query()
             ->where(function ($builder): void {
                 $builder->where('role', 'coach')
                     ->orWhere('is_coach', true);
-            });
-
-        if (! $isAdmin) {
-            $query->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
-                if ($companyId !== '') {
-                    $builder->where('company_id', $companyId)
-                        ->orWhere('active_company_id', $companyId);
-                }
-                if ($companyCode !== '') {
-                    $builder->orWhere('company_code', $companyCode)
-                        ->orWhere('active_company_code', $companyCode);
-                }
-                if ($companyName !== '') {
-                    $builder->orWhere('company_name', $companyName)
-                        ->orWhere('active_company_name', $companyName);
-                }
-            });
-        }
-
-        $coaches = $query
+            })
             ->orderBy('name')
             ->get()
             ->map(fn (User $coach) => [
@@ -421,6 +403,26 @@ class CoachManagementController extends Controller
 
         $requests = CoachRequest::query()
             ->where('coach_id', (string) $user->id)
+            ->orderByDesc('updated_at')
+            ->get()
+            ->map(fn (CoachRequest $coachRequest) => $this->requestPayload($coachRequest));
+
+        return response()->json(['requests' => $requests]);
+    }
+
+    // The mentee-side mirror of requests(): "who have I applied to and what's
+    // the status", as opposed to requests() which is "who has applied to me
+    // as a coach". Both query the same coach_requests table from opposite
+    // sides of the relationship.
+    public function myApplications(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $requests = CoachRequest::query()
+            ->where('mentee_id', (string) $user->id)
             ->orderByDesc('updated_at')
             ->get()
             ->map(fn (CoachRequest $coachRequest) => $this->requestPayload($coachRequest));

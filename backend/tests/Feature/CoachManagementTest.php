@@ -137,6 +137,38 @@ class CoachManagementTest extends TestCase
             ->assertJsonPath('request.status', 'rejected');
     }
 
+    public function test_coach_directory_includes_coaches_from_other_companies(): void
+    {
+        $user = User::factory()->create([
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+        ]);
+        $sameCompanyCoach = User::factory()->create([
+            'name' => 'Same Company Coach',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $otherCompanyCoach = User::factory()->create([
+            'name' => 'Other Company Coach',
+            'company_code' => 'XYZ',
+            'company_name' => 'XYZ',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/coaches');
+
+        $response->assertOk();
+        $ids = collect($response->json('coaches'))->pluck('id');
+
+        $this->assertTrue($ids->contains((string) $sameCompanyCoach->id));
+        $this->assertTrue($ids->contains((string) $otherCompanyCoach->id));
+    }
+
     public function test_coach_can_list_company_users_to_add_as_mentees(): void
     {
         $coach = User::factory()->create([

@@ -136,6 +136,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/coach/mentees/assign', [CoachManagementController::class, 'assignMentee']);
     Route::delete('/coach/mentees/{menteeId}', [CoachManagementController::class, 'removeMentee']);
     Route::get('/coach/requests', [CoachManagementController::class, 'requests']);
+    Route::get('/coach/my-applications', [CoachManagementController::class, 'myApplications']);
     Route::post('/coach/requests', [CoachManagementController::class, 'storeRequest']);
     Route::patch('/coach/requests/{requestId}/accept', [CoachManagementController::class, 'acceptRequest']);
     Route::patch('/coach/requests/{requestId}/decline', [CoachManagementController::class, 'declineRequest']);

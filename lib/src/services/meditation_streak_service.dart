@@ -286,14 +286,27 @@ class ActivityStreakService {
       }
     }
 
+    // ProfileController::update() validates snake_case keys (matching every
+    // other field in that endpoint) — currentField/longestField/etc. above
+    // are the camelCase names userPayload() returns for reading, which is a
+    // different casing convention. Sending them as-is here means Laravel's
+    // validate() silently drops all four keys as unrecognized, so the
+    // streak update never actually persists. Convert on the way out.
     await UserService.updateUserFields({
-      currentField: currentStreak,
-      longestField: longestStreak,
-      lastDateField: todayKey,
-      rewardsField: rewards,
+      _backendFieldName(currentField): currentStreak,
+      _backendFieldName(longestField): longestStreak,
+      _backendFieldName(lastDateField): todayKey,
+      _backendFieldName(rewardsField): rewards,
     });
 
     return unlockedNow;
+  }
+
+  static String _backendFieldName(String camelCaseField) {
+    return camelCaseField.replaceAllMapped(
+      RegExp('[A-Z]'),
+      (match) => '_${match.group(0)!.toLowerCase()}',
+    );
   }
 
   static int readInt(Object? value) => _readInt(value);

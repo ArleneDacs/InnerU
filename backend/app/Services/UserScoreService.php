@@ -292,21 +292,19 @@ class UserScoreService
             ];
         }
 
-        $count = count($breakdowns);
+        // Use only the most recent day's breakdown. Averaging coreTaskScore
+        // across every historical tracker row buried a user's actual current
+        // standing under however many zero/partial days they had in the
+        // past, making the leaderboard and dashboard score meaningless for
+        // anyone with more than a few days of history.
         $latestBreakdown = $breakdowns[array_key_last($breakdowns)] ?? $breakdowns[0];
         $goalScore = (float) ($latestBreakdown['goalScore'] ?? 0);
-        $coreTaskScore = 0.0;
-
-        foreach ($breakdowns as $breakdown) {
-            $coreTaskScore += $breakdown['coreTaskScore'];
-        }
-
-        $coreTaskAverage = $coreTaskScore / $count;
-        $overallScore = ($goalScore + $coreTaskAverage) / 2;
+        $coreTaskScore = (float) ($latestBreakdown['coreTaskScore'] ?? 0);
+        $overallScore = ($goalScore + $coreTaskScore) / 2;
 
         return [
             'goalScore' => $goalScore,
-            'coreTaskScore' => $coreTaskAverage,
+            'coreTaskScore' => $coreTaskScore,
             'overallScore' => $overallScore,
         ];
     }

@@ -22,7 +22,15 @@ class OllamaNutritionService {
   static String get model => _modelFromDefine;
   static String get apiKey => _apiKeyFromDefine;
 
-  static bool get isConfigured => model.trim().isNotEmpty;
+  // The 127.0.0.1 fallback above only ever resolves on a simulator running
+  // on the same machine as a local Ollama server — on every real user's
+  // phone it's unreachable. Without this check, isConfigured was true by
+  // default (model has a non-empty default), so every unmatched food photo
+  // silently burned a ~45s timeout in production before falling through.
+  // Require an explicit OLLAMA_BASE_URL so that path is skipped entirely
+  // unless a real, reachable endpoint has actually been deployed.
+  static bool get isConfigured =>
+      _baseUrlFromDefine.isNotEmpty && model.trim().isNotEmpty;
 
   Map<String, String> _headers() {
     return {

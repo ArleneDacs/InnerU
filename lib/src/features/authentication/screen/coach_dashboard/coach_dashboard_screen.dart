@@ -61,6 +61,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   _CoachDashboardTileTransition? _activeTileTransition;
   bool _isEmotionLoading = true;
   bool _isSavingEmotion = false;
+  int? _realMenteeCount;
+  String? _primaryGroupName;
 
   String get _userId =>
       AuthService.instance.currentSession?.id.toString() ?? '';
@@ -105,10 +107,36 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     _listenToTodayEmotion();
     _fetchQuote();
     _loadLocalChatReadOverrides();
+    _loadCoachTeamStats();
     _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted) return;
       setState(() {});
+      _loadCoachTeamStats();
     });
+  }
+
+  // The hero card's Team/Mentees stats need the real coach-mentee
+  // relationships and groups from the API — the legacy _menteesStream
+  // Firestore query above is no longer written to since the move to
+  // Postgres, so it reads as empty regardless of actual mentee count.
+  Future<void> _loadCoachTeamStats() async {
+    try {
+      final results = await Future.wait([
+        CoachApiService.instance.fetchMentees(),
+        CoachApiService.instance.fetchGroups(),
+      ]);
+      if (!mounted) return;
+      final mentees = results[0];
+      final groups = results[1];
+      setState(() {
+        _realMenteeCount = mentees.length;
+        _primaryGroupName = groups.isNotEmpty
+            ? (groups.first['name'] as String?)?.trim()
+            : null;
+      });
+    } catch (error) {
+      debugPrint('Failed to load coach team stats: $error');
+    }
   }
 
   @override
@@ -1197,7 +1225,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     final materialTheme = Theme.of(context);
     final companyTheme = _companyTheme;
     final bio = (coachData['bio'] as String?)?.trim();
-    final phone = (coachData['phonenumber'] as String?)?.trim();
+    final phone = AuthService.instance.currentSession?.number?.trim();
     final companyLabel = companyTheme.isCompanyTheme
         ? '${companyTheme.companyName} Safespace Coach'
         : 'Safespace Coach';
@@ -1309,8 +1337,13 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             spacing: 12,
             runSpacing: 12,
             children: [
-              _buildHeroChip('Team', teamName),
-              _buildHeroChip('Mentees', '$menteeCount'),
+              _buildHeroChip(
+                'Team',
+                _primaryGroupName?.isNotEmpty == true
+                    ? _primaryGroupName!
+                    : 'No team yet',
+              ),
+              _buildHeroChip('Mentees', '${_realMenteeCount ?? 0}'),
               _buildHeroChip(
                 'Phone',
                 phone?.isNotEmpty == true ? phone! : 'Not set',
@@ -2886,20 +2919,42 @@ class CoachTeamOverviewPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        _OverviewChip('Team name', teamName),
-                        _OverviewChip('Assigned mentees', '$menteeCount'),
-                        _OverviewChip(
-                          'Phone',
-                          (coachData['phonenumber'] as String?)?.isNotEmpty ==
-                                  true
-                              ? coachData['phonenumber'] as String
-                              : 'Not set',
-                        ),
-                      ],
+                    FutureBuilder<List<dynamic>>(
+                      future: Future.wait([
+                        CoachApiService.instance.fetchMentees(),
+                        CoachApiService.instance.fetchGroups(),
+                      ]),
+                      builder: (context, snapshot) {
+                        final mentees =
+                            (snapshot.data?[0] as List?) ?? const [];
+                        final groups = (snapshot.data?[1] as List?) ?? const [];
+                        final primaryGroupName = groups.isNotEmpty
+                            ? (groups.first as Map)['name'] as String?
+                            : null;
+                        final phone =
+                            AuthService.instance.currentSession?.number?.trim();
+
+                        return Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _OverviewChip(
+                              'Team name',
+                              primaryGroupName?.isNotEmpty == true
+                                  ? primaryGroupName!
+                                  : 'No team yet',
+                            ),
+                            _OverviewChip(
+                              'Assigned mentees',
+                              '${mentees.length}',
+                            ),
+                            _OverviewChip(
+                              'Phone',
+                              phone?.isNotEmpty == true ? phone! : 'Not set',
+                            ),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 18),
                     Wrap(

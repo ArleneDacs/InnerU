@@ -3,7 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class MeditationStreakRewardsScreen extends StatefulWidget {
   const MeditationStreakRewardsScreen({
@@ -33,15 +35,29 @@ class _MeditationStreakRewardsScreenState
   Widget build(BuildContext context) {
     final milestones = ActivityStreakService.milestonesFor(widget.activityType);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF080B18),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF080B18),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: Text('${widget.activityType.label} Rewards'),
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) => Theme(
+        data: AppTheme.company(companyTheme),
+        child: Scaffold(
+          backgroundColor: companyTheme.backgroundColor,
+          appBar: AppBar(
+            backgroundColor: companyTheme.surfaceColor,
+            foregroundColor: companyTheme.inkColor,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            title: Text('${widget.activityType.label} Rewards'),
+          ),
+          body: _buildBody(context, milestones),
+        ),
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    List<ActivityStreakMilestone> milestones,
+  ) {
+    return FutureBuilder<Map<String, dynamic>>(
         future: UserService.getUserData(),
         builder: (context, snapshot) {
           final data = snapshot.data ?? <String, dynamic>{};
@@ -134,8 +150,7 @@ class _MeditationStreakRewardsScreenState
             ),
           );
         },
-      ),
-    );
+      );
   }
 
   ActivityStreakMilestone? _nextMilestone(
@@ -187,19 +202,21 @@ class _ProgressHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final remaining = totalCount - unlockedCount;
+    final colors = Theme.of(context).colorScheme;
+    final mutedText = colors.onSurface.withValues(alpha: 0.68);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF111734),
+        color: colors.surface,
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: const Color(0xFF1D2757)),
-        boxShadow: const [
+        border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x66000000),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 28,
-            offset: Offset(0, 18),
+            offset: const Offset(0, 18),
           ),
         ],
       ),
@@ -211,8 +228,8 @@ class _ProgressHeader extends StatelessWidget {
               Expanded(
                 child: Text(
                   '$unlockedCount of $totalCount unlocked',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
@@ -220,10 +237,7 @@ class _ProgressHeader extends StatelessWidget {
               ),
               Text(
                 remaining == 0 ? 'All earned' : '$remaining still to earn',
-                style: const TextStyle(
-                  color: Color(0xFFAEB7D5),
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(color: mutedText, fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -241,7 +255,7 @@ class _ProgressHeader extends StatelessWidget {
             child: LinearProgressIndicator(
               minHeight: 10,
               value: progress,
-              backgroundColor: const Color(0xFF060918),
+              backgroundColor: colors.onSurface.withValues(alpha: 0.12),
               valueColor: const AlwaysStoppedAnimation(Color(0xFFF7C344)),
             ),
           ),
@@ -250,10 +264,7 @@ class _ProgressHeader extends StatelessWidget {
             nextMilestone == null
                 ? 'Every meditation reward is unlocked.'
                 : '${math.max(nextMilestone!.days - currentStreak, 0)} days until ${nextMilestone!.title}',
-            style: const TextStyle(
-              color: Color(0xFFAEB7D5),
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(color: mutedText, fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -269,11 +280,12 @@ class _StreakStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFF080C21),
+          color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Column(
@@ -281,8 +293,8 @@ class _StreakStat extends StatelessWidget {
           children: [
             Text(
               label,
-              style: const TextStyle(
-                color: Color(0xFFAEB7D5),
+              style: TextStyle(
+                color: colors.onSurface.withValues(alpha: 0.68),
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -290,8 +302,8 @@ class _StreakStat extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               value,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.onSurface,
                 fontSize: 17,
                 fontWeight: FontWeight.w900,
               ),

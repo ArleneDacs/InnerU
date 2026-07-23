@@ -46,6 +46,7 @@ class _NotesTypeState extends State<NotesType> {
   late List<dynamic> noteString;
   late int color;
   bool _isSaving = false;
+  bool _isPickingFromGallery = false;
   late SnackBar alertContent;
 
   late TextEditingController titleController;
@@ -477,13 +478,24 @@ class _NotesTypeState extends State<NotesType> {
 
                     // Button for Adding Images
                     ElevatedButton(
-                      onPressed: pickImage,
+                      onPressed: _isPickingFromGallery ? null : pickImage,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: companyTheme.iconColor,
                         foregroundColor:
                             companyTheme.isDark ? Colors.black : Colors.white,
                       ),
-                      child: Icon(Icons.image_search, size: 30),
+                      child: _isPickingFromGallery
+                          ? SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: companyTheme.isDark
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
+                            )
+                          : Icon(Icons.image_search, size: 30),
                     ),
                   ],
                 ),
@@ -653,11 +665,28 @@ class _NotesTypeState extends State<NotesType> {
   }
 
   Future<void> pickImage() async {
-    final List<XFile> images = await _picker.pickMultiImage();
+    if (_isPickingFromGallery) return;
+    setState(() {
+      _isPickingFromGallery = true;
+    });
 
-    if (images.isNotEmpty) {
-      for (var image in images) {
-        await _addPickedImage(image);
+    try {
+      // pickMultiImage() can take several seconds to actually return here —
+      // e.g. an iCloud-only photo on iOS has to download before the picker
+      // hands it back — with no feedback of its own during that wait, so
+      // the button needs to show its own busy state for this whole call.
+      final List<XFile> images = await _picker.pickMultiImage();
+
+      if (images.isNotEmpty) {
+        for (var image in images) {
+          await _addPickedImage(image);
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingFromGallery = false;
+        });
       }
     }
   }
