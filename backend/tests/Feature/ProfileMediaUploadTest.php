@@ -18,6 +18,7 @@ class ProfileMediaUploadTest extends TestCase
     {
         Storage::fake('do');
         config()->set('filesystems.media_upload_disk', 'do');
+        config()->set('filesystems.media_upload_path', 'uploads');
 
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -40,6 +41,7 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
+        $this->assertStringStartsWith('uploads/', $path);
 
         Storage::disk('do')->assertExists($path);
 
@@ -53,6 +55,7 @@ class ProfileMediaUploadTest extends TestCase
     {
         Storage::fake('do');
         config()->set('filesystems.media_upload_disk', 'do');
+        config()->set('filesystems.media_upload_path', 'uploads');
 
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -75,6 +78,7 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
+        $this->assertStringStartsWith('uploads/', $path);
         Storage::disk('do')->assertExists($path);
 
         $this->assertDatabaseHas('users', [
@@ -88,6 +92,7 @@ class ProfileMediaUploadTest extends TestCase
         Storage::fake('s3');
         Storage::fake('public');
         config()->set('filesystems.media_upload_disk', 'public');
+        config()->set('filesystems.media_upload_path', 'uploads');
         config()->set('filesystems.disks.s3.bucket', 'inneru-test-bucket');
         config()->set('filesystems.disks.s3.url', 'https://inneru-test-bucket.s3.amazonaws.com');
         config()->set('filesystems.disks.s3.endpoint', null);
@@ -113,6 +118,7 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
+        $this->assertStringStartsWith('uploads/', $path);
         Storage::disk('s3')->assertExists($path);
         Storage::disk('public')->assertMissing($path);
         $this->assertDatabaseHas('users', [
@@ -125,6 +131,7 @@ class ProfileMediaUploadTest extends TestCase
     {
         Storage::fake('do');
         config()->set('filesystems.media_upload_disk', 'do');
+        config()->set('filesystems.media_upload_path', 'uploads');
         Schema::shouldReceive('hasColumn')
             ->once()
             ->with('users', 'profile_pic')
@@ -152,6 +159,7 @@ class ProfileMediaUploadTest extends TestCase
         $this->assertIsString($path);
         $this->assertIsString($url);
         $this->assertSame($url, $response->json('profile_pic'));
+        $this->assertStringStartsWith('uploads/', $path);
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
             'profile_pic' => null,
@@ -164,6 +172,7 @@ class ProfileMediaUploadTest extends TestCase
     {
         Storage::fake('public');
         config()->set('filesystems.media_upload_disk', 'missing-disk');
+        config()->set('filesystems.media_upload_path', 'uploads');
 
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -186,6 +195,7 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
+        $this->assertStringStartsWith('uploads/', $path);
         Storage::disk('public')->assertExists($path);
     }
 }

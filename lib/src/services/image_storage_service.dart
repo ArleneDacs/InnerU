@@ -11,6 +11,8 @@ class ImageStorageService {
       AuthService.instance.currentSession?.token.isNotEmpty ?? false;
   static String? lastError;
 
+  static Uri _normalizedApiBase() => Uri.parse(ApiConfig.baseUrl);
+
   static Future<String?> uploadImageBytes(
     Uint8List bytes, {
     String fileName = 'upload.jpg',
@@ -141,9 +143,13 @@ class ImageStorageService {
     if (parsed != null &&
         parsed.hasScheme &&
         (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+      final base = _normalizedApiBase();
       final host = parsed.host.toLowerCase();
-      if (host == 'localhost' || host == '127.0.0.1') {
-        final base = Uri.parse(ApiConfig.baseUrl);
+      final baseHost = base.host.toLowerCase();
+      final shouldRewrite = host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == baseHost;
+      if (shouldRewrite) {
         final normalized = base.replace(
           path: parsed.path,
           queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
@@ -177,9 +183,13 @@ class ImageStorageService {
     if (parsed != null &&
         parsed.hasScheme &&
         (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+      final base = _normalizedApiBase();
       final host = parsed.host.toLowerCase();
-      if (host == 'localhost' || host == '127.0.0.1') {
-        final base = Uri.parse(ApiConfig.baseUrl);
+      final baseHost = base.host.toLowerCase();
+      final shouldRewrite = host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == baseHost;
+      if (shouldRewrite) {
         final normalized = base.replace(
           path: parsed.path,
           queryParameters: parsed.hasQuery ? parsed.queryParameters : null,

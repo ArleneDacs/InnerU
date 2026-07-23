@@ -20,6 +20,8 @@ return [
         env('STORAGE_DRIVER', 'public')
     ),
 
+    'media_upload_path' => trim((string) env('STORAGE_PATH', ''), '/'),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks

@@ -17,6 +17,13 @@ void main() {
         ),
         'https://inneru-api.valenin.com/uploads/photo.jpg',
       );
+
+      expect(
+        ImageStorageService.normalizeMediaUrl(
+          'http://inneru-api.valenin.com/uploads/photo.jpg',
+        ),
+        'https://inneru-api.valenin.com/uploads/photo.jpg',
+      );
     });
 
     test('prefixes relative paths with the api base url', () {
@@ -57,6 +64,13 @@ void main() {
       expect(
         ImageStorageService.normalizeCommunityMediaUrl(
           'http://localhost:4000/storage/users/42/community-images/post.jpg',
+        ),
+        'https://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
+      );
+
+      expect(
+        ImageStorageService.normalizeCommunityMediaUrl(
+          'http://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
         ),
         'https://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
       );
