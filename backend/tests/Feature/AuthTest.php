@@ -228,6 +228,16 @@ class AuthTest extends TestCase
             ->assertJsonPath('message', 'Please verify your email first.');
     }
 
+    public function test_password_reset_web_route_redirects_to_the_flutter_app(): void
+    {
+        $response = $this->get('/password-reset?mode=resetPassword&token=abc123&email=user%40example.com');
+
+        $response->assertRedirect(
+            rtrim((string) config('app.frontend_url'), '/')
+            .'/password-reset?mode=resetPassword&token=abc123&email=user%40example.com'
+        );
+    }
+
     public function test_login_rejects_unverified_email_password_accounts(): void
     {
         $user = User::factory()->create([

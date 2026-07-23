@@ -11,6 +11,18 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/password-reset', function (Request $request) {
+    $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+    $query = $request->getQueryString();
+    $target = $frontendUrl.'/password-reset';
+
+    if (is_string($query) && $query !== '') {
+        $target .= '?'.$query;
+    }
+
+    return redirect()->away($target);
+});
+
 Route::get('/email/verify/{id}/{hash}', function (Request $request, string $id, string $hash) {
     $pending = PendingRegistration::find($id);
 

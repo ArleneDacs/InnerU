@@ -45,6 +45,33 @@ php artisan tinker
 
 Then you can run queries with Eloquent or the `DB` facade.
 
+## Mail delivery
+
+The signup flow sends a verification email after account creation.
+
+- For local development, keep `MAIL_MAILER=log` so signup never depends on SMTP.
+- For production SMTP with Brevo, set:
+
+```env
+MAIL_MAILER=smtp
+MAIL_SCHEME=tls
+MAIL_HOST=smtp-relay.brevo.com
+MAIL_PORT=587
+MAIL_USERNAME=your-brevo-smtp-login
+MAIL_PASSWORD=your-brevo-smtp-key
+MAIL_TIMEOUT=10
+```
+
+- Brevo recommends using your SMTP login email as the username and your SMTP key as the password.
+- Brevo supports ports `587`, `465`, and `2525`; `587` with `tls` is the default choice.
+- If you use queued mail notifications, run a queue worker in production:
+
+```bash
+php artisan queue:work --tries=1 --timeout=90
+```
+
+- Make sure the sender address in `MAIL_FROM_ADDRESS` is an authenticated Brevo sender or a verified domain.
+
 ## Next step
 
 The Flutter app still has many Firebase reads and writes. The backend is now ready, but the client-side migration needs to be done service by service so we do not break the app in one shot.
