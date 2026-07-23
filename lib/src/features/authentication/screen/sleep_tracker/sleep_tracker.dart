@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -36,6 +37,9 @@ class _SleepTrackerState extends State<SleepTracker> {
   bool _isLoading = true;
   bool _isSavingSettings = false;
   Timer? _ticker;
+  Timer? _goalReachedTimer;
+  Timer? _completionAlarmTimer;
+  bool _goalReachedAlertShown = false;
 
   String get _userId =>
       AuthService.instance.currentSession?.id.toString() ?? 'guest';
@@ -51,6 +55,8 @@ class _SleepTrackerState extends State<SleepTracker> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _goalReachedTimer?.cancel();
+    _completionAlarmTimer?.cancel();
     super.dispose();
   }
 
@@ -85,6 +91,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     if (_activeSleepStart != null) {
       _startTicker();
       await _syncActiveSleepNotifications();
+      _armGoalReachedAlarm();
     } else {
       await _syncInactiveSleepNotifications();
       await _scheduleBedtimeReminder();
@@ -116,6 +123,7 @@ class _SleepTrackerState extends State<SleepTracker> {
       await _scheduleBedtimeReminder();
     } else {
       await _syncActiveSleepNotifications();
+      _armGoalReachedAlarm();
     }
 
     if (!mounted) return;
@@ -132,11 +140,13 @@ class _SleepTrackerState extends State<SleepTracker> {
 
     setState(() {
       _activeSleepStart = start;
+      _goalReachedAlertShown = false;
     });
     _startTicker();
     await FastingNotificationService.instance.cancelDailySleepBedtimeReminder();
     await _showSleepOngoingNotification();
     await _scheduleWakeNotification();
+    _armGoalReachedAlarm();
     _showSnackBar('Sleep session started. Rest well.');
   }
 
@@ -160,6 +170,9 @@ class _SleepTrackerState extends State<SleepTracker> {
     );
 
     _ticker?.cancel();
+    _goalReachedTimer?.cancel();
+    _completionAlarmTimer?.cancel();
+    _goalReachedAlertShown = false;
     await FastingNotificationService.instance.cancelSleepWakeNotification();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
     await _scheduleBedtimeReminder();
@@ -180,8 +193,98 @@ class _SleepTrackerState extends State<SleepTracker> {
       if (mounted) {
         setState(() {});
         _showSleepOngoingNotification();
+        _checkForGoalCompletion();
       }
     });
+  }
+
+  void _armGoalReachedAlarm() {
+    _goalReachedTimer?.cancel();
+
+    final start = _activeSleepStart;
+    if (start == null) return;
+
+    final remaining =
+        Duration(hours: _selectedSleepGoal) - DateTime.now().difference(start);
+    if (remaining <= Duration.zero) {
+      _checkForGoalCompletion();
+      return;
+    }
+
+    _goalReachedTimer = Timer(remaining, () {
+      if (mounted) {
+        _checkForGoalCompletion();
+      }
+    });
+  }
+
+  void _checkForGoalCompletion() {
+    final start = _activeSleepStart;
+    if (start == null || _goalReachedAlertShown) return;
+
+    final elapsed = DateTime.now().difference(start);
+    if (elapsed < Duration(hours: _selectedSleepGoal)) return;
+
+    _goalReachedAlertShown = true;
+    _goalReachedTimer?.cancel();
+    _ticker?.cancel();
+    unawaited(
+        FastingNotificationService.instance.cancelSleepOngoingNotification());
+    _playCompletionAlarm();
+    unawaited(_showGoalReachedDialog());
+  }
+
+  void _playCompletionAlarm() {
+    _completionAlarmTimer?.cancel();
+
+    var rings = 0;
+    void ring() {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.mediumImpact();
+    }
+
+    ring();
+    _completionAlarmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      rings += 1;
+      if (rings >= 3) {
+        timer.cancel();
+        if (_completionAlarmTimer == timer) {
+          _completionAlarmTimer = null;
+        }
+        return;
+      }
+      ring();
+    });
+  }
+
+  Future<void> _showGoalReachedDialog() async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Wake up'),
+          content: Text(
+            'Your $_selectedSleepGoal-hour sleep goal is complete.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Later'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _endSleepSession();
+              },
+              child: const Text('End sleep'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _scheduleBedtimeReminder() async {

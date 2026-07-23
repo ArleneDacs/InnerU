@@ -14,6 +14,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/UsersData/u
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
@@ -278,10 +279,11 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     }
 
     await _todayEmotionSubscription?.cancel();
-    _todayEmotionSubscription =
-        _emotionService.watchTodayEmotion(
-          session.id.toString(),
-        ).listen(
+    _todayEmotionSubscription = _emotionService
+        .watchTodayEmotion(
+      session.id.toString(),
+    )
+        .listen(
       (emotion) async {
         if (!mounted) return;
         setState(() {
@@ -874,8 +876,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           children: [
             IconButton(
               color: _companyTheme.iconColor,
-            icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
-            onPressed: () async {
+              icon: const Icon(CupertinoIcons.chat_bubble_2, size: 24),
+              onPressed: () async {
                 final dashboard = await _dashboardApi.fetchDashboard();
                 final userData = dashboard['user'] is Map
                     ? Map<String, dynamic>.from(dashboard['user'] as Map)
@@ -1547,6 +1549,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               const SizedBox(width: 14),
               _buildClickableInfoCard(
                 context,
+                'exercise_tile',
+                'Exercise',
+                'Log pilates, gym, yoga, sports, or any custom workout.',
+                Icons.fitness_center,
+                const Color(0xFFE9E4F2),
+                const ExerciseTrackerScreen(),
+                backgroundImage: 'assets/images/exercise.gif',
+              ),
+              const SizedBox(width: 14),
+              _buildClickableInfoCard(
+                context,
                 'meditate_tile',
                 'Meditate',
                 'Reset your attention before guiding someone else.',
@@ -1732,9 +1745,11 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withValues(alpha: companyTheme.isDark ? 0.04 : 0.1),
+                    Colors.white
+                        .withValues(alpha: companyTheme.isDark ? 0.04 : 0.1),
                     Colors.transparent,
-                    Colors.black.withValues(alpha: companyTheme.isDark ? 0.18 : 0.06),
+                    Colors.black
+                        .withValues(alpha: companyTheme.isDark ? 0.18 : 0.06),
                   ],
                 ),
               ),
@@ -4065,8 +4080,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                           .map((item) => Map<String, dynamic>.from(item))
                           .toList() ??
                       const <Map<String, dynamic>>[];
-                  final leaderboardPayload =
-                      Map<String, dynamic>.from(snapshot.data?[1] as Map? ?? {});
+                  final leaderboardPayload = Map<String, dynamic>.from(
+                      snapshot.data?[1] as Map? ?? {});
                   final summaries = _apiGroupSummaries(
                     leaderboardPayload,
                     groups,
@@ -4837,9 +4852,14 @@ class CoachManageMenteesPage extends StatelessWidget {
                               );
                             }
 
-                            final data = snapshot.data ?? const <List<Map<String, dynamic>>>[];
-                            final users = data.isNotEmpty ? data.first : <Map<String, dynamic>>[];
-                            final groups = data.length > 1 ? data[1] : <Map<String, dynamic>>[];
+                            final data = snapshot.data ??
+                                const <List<Map<String, dynamic>>>[];
+                            final users = data.isNotEmpty
+                                ? data.first
+                                : <Map<String, dynamic>>[];
+                            final groups = data.length > 1
+                                ? data[1]
+                                : <Map<String, dynamic>>[];
 
                             final query =
                                 searchController.text.trim().toLowerCase();
@@ -4858,17 +4878,18 @@ class CoachManageMenteesPage extends StatelessWidget {
                                       email.contains(query));
                             }).toList();
 
-                            final sortedGroups = List<Map<String, dynamic>>.from(
+                            final sortedGroups =
+                                List<Map<String, dynamic>>.from(
                               groups,
                             )..sort((a, b) {
-                                final aName =
-                                    (a['name'] as String?)?.trim() ?? '';
-                                final bName =
-                                    (b['name'] as String?)?.trim() ?? '';
-                                return aName.toLowerCase().compareTo(
-                                      bName.toLowerCase(),
-                                    );
-                              });
+                                    final aName =
+                                        (a['name'] as String?)?.trim() ?? '';
+                                    final bName =
+                                        (b['name'] as String?)?.trim() ?? '';
+                                    return aName.toLowerCase().compareTo(
+                                          bName.toLowerCase(),
+                                        );
+                                  });
 
                             return ListView(
                               children: [
@@ -4897,7 +4918,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                           'Group';
                                   final memberCount =
                                       (group['memberCount'] as num?)?.toInt() ??
-                                          ((group['memberIds'] as List?)?.length ??
+                                          ((group['memberIds'] as List?)
+                                                  ?.length ??
                                               0);
                                   return ListTile(
                                     contentPadding: EdgeInsets.zero,
@@ -4918,7 +4940,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                               sheetContext,
                                               setSheetState,
                                               _CoachGroupChoice(
-                                                groupId: group['id']?.toString(),
+                                                groupId:
+                                                    group['id']?.toString(),
                                                 groupName: name,
                                               ),
                                             ),
@@ -4932,22 +4955,26 @@ class CoachManageMenteesPage extends StatelessWidget {
                                     ),
                                   ),
                                 ...filteredUsers.map((user) {
-                                  final userName =
-                                      (user['name'] as String?)?.trim().isNotEmpty ==
+                                  final userName = (user['name'] as String?)
+                                              ?.trim()
+                                              .isNotEmpty ==
+                                          true
+                                      ? (user['name'] as String).trim()
+                                      : ((user['email'] as String?)
+                                                  ?.trim()
+                                                  .isNotEmpty ==
                                               true
-                                          ? (user['name'] as String).trim()
-                                          : ((user['email'] as String?)?.trim()
-                                                      .isNotEmpty ==
-                                                  true
-                                              ? (user['email'] as String)
-                                                  .trim()
-                                                  .split('@')
-                                                  .first
-                                              : 'Unknown User');
+                                          ? (user['email'] as String)
+                                              .trim()
+                                              .split('@')
+                                              .first
+                                          : 'Unknown User');
                                   final isCoach = user['isCoach'] == true ||
-                                      ((user['role'] as String?)?.toLowerCase() ==
+                                      ((user['role'] as String?)
+                                              ?.toLowerCase() ==
                                           'coach');
-                                  final assignedToMe = user['assignedToMe'] == true;
+                                  final assignedToMe =
+                                      user['assignedToMe'] == true;
                                   return ListTile(
                                     contentPadding: EdgeInsets.zero,
                                     leading: CircleAvatar(
@@ -4977,7 +5004,10 @@ class CoachManageMenteesPage extends StatelessWidget {
                                         (user['email'] as String?) ?? '',
                                         if (isCoach) 'Coach account',
                                       ].where((value) {
-                                        return value.toString().trim().isNotEmpty;
+                                        return value
+                                            .toString()
+                                            .trim()
+                                            .isNotEmpty;
                                       }).join(' · '),
                                     ),
                                     trailing: assignedToMe
@@ -5205,24 +5235,28 @@ class CoachManageMenteesPage extends StatelessWidget {
                         ),
                       ),
                       ...requests.map((request) {
-                        final userName =
-                            (request['menteeName'] as String?)?.trim().isNotEmpty ==
-                                    true
-                                ? (request['menteeName'] as String).trim()
-                                : 'User';
+                        final userName = (request['menteeName'] as String?)
+                                    ?.trim()
+                                    .isNotEmpty ==
+                                true
+                            ? (request['menteeName'] as String).trim()
+                            : 'User';
                         final userEmail =
                             (request['menteeEmail'] as String?)?.trim() ?? '';
                         final userId =
                             (request['menteeId'] as String?)?.trim() ?? '';
                         final applicantRole =
-                            (request['applicantRole'] as String?)?.trim().toLowerCase() ??
+                            (request['applicantRole'] as String?)
+                                    ?.trim()
+                                    .toLowerCase() ??
                                 '';
                         final applicantIsCoach =
                             request['applicantIsCoach'] == true ||
                                 applicantRole == 'coach';
-                        final applyingAs =
-                            (request['applyingAs'] as String?)?.trim().toLowerCase() ??
-                                '';
+                        final applyingAs = (request['applyingAs'] as String?)
+                                ?.trim()
+                                .toLowerCase() ??
+                            '';
                         final applicantContext = applicantIsCoach
                             ? 'Coach applying as mentee'
                             : applyingAs == 'mentee'
@@ -5362,10 +5396,10 @@ class CoachManageMenteesPage extends StatelessWidget {
                       ),
                     ),
                     ...mentees.map((mentee) {
-                      final name = (mentee['name'] as String?)?.trim().isNotEmpty ==
-                              true
-                          ? (mentee['name'] as String).trim()
-                          : 'Mentee';
+                      final name =
+                          (mentee['name'] as String?)?.trim().isNotEmpty == true
+                              ? (mentee['name'] as String).trim()
+                              : 'Mentee';
                       final profilePic =
                           (mentee['profilePic'] as String?)?.trim() ?? '';
                       final score = (mentee['score'] as num?)?.toInt() ?? 0;
@@ -5376,12 +5410,13 @@ class CoachManageMenteesPage extends StatelessWidget {
                               ? (mentee['teamName'] as String).trim()
                               : teamName;
                       final email = (mentee['email'] as String?)?.trim() ?? '';
-                      final userId = (mentee['userId'] as String?)?.trim() ?? '';
+                      final userId =
+                          (mentee['userId'] as String?)?.trim() ?? '';
                       final badgeColor = _badgeColorForRank(rank);
-                      final onPrimary = companyTheme.primaryColor.computeLuminance() >
-                              0.48
-                          ? Colors.black
-                          : Colors.white;
+                      final onPrimary =
+                          companyTheme.primaryColor.computeLuminance() > 0.48
+                              ? Colors.black
+                              : Colors.white;
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 14),
@@ -5483,8 +5518,9 @@ class CoachManageMenteesPage extends StatelessWidget {
                                             decoration: BoxDecoration(
                                               color: companyTheme.primaryColor
                                                   .withValues(
-                                                alpha:
-                                                    companyTheme.isDark ? 0.16 : 0.10,
+                                                alpha: companyTheme.isDark
+                                                    ? 0.16
+                                                    : 0.10,
                                               ),
                                               borderRadius:
                                                   BorderRadius.circular(16),
@@ -5505,8 +5541,9 @@ class CoachManageMenteesPage extends StatelessWidget {
                                             decoration: BoxDecoration(
                                               color: companyTheme.iconColor
                                                   .withValues(
-                                                alpha:
-                                                    companyTheme.isDark ? 0.16 : 0.10,
+                                                alpha: companyTheme.isDark
+                                                    ? 0.16
+                                                    : 0.10,
                                               ),
                                               borderRadius:
                                                   BorderRadius.circular(16),
@@ -5534,7 +5571,8 @@ class CoachManageMenteesPage extends StatelessWidget {
                                     onPressed: () =>
                                         _openChatWithMenteeApi(context, mentee),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: companyTheme.primaryColor,
+                                      backgroundColor:
+                                          companyTheme.primaryColor,
                                       foregroundColor: onPrimary,
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 12,
@@ -5593,7 +5631,6 @@ class CoachManageMenteesPage extends StatelessWidget {
       },
     );
   }
-
 }
 
 class _CoachGroupChoice {
@@ -5839,7 +5876,8 @@ class _CoachMenteeActivityCalendarPageState
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final mentees = menteeSnapshot.data ?? const <Map<String, dynamic>>[];
+                final mentees =
+                    menteeSnapshot.data ?? const <Map<String, dynamic>>[];
                 if (mentees.isEmpty) {
                   return Center(
                     child: Text(
@@ -5863,8 +5901,8 @@ class _CoachMenteeActivityCalendarPageState
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final trackerLists =
-                        trackerSnapshot.data ?? const <List<Map<String, dynamic>>>[];
+                    final trackerLists = trackerSnapshot.data ??
+                        const <List<Map<String, dynamic>>>[];
                     return ListView.builder(
                       padding: const EdgeInsets.all(16),
                       itemCount: mentees.length,
@@ -6116,7 +6154,9 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                 radius: 24,
                 backgroundColor: const Color(0xFFE9EEE4),
                 child: Text(
-                  menteeName?.isNotEmpty == true ? menteeName![0].toUpperCase() : '?',
+                  menteeName?.isNotEmpty == true
+                      ? menteeName![0].toUpperCase()
+                      : '?',
                 ),
               ),
               const SizedBox(width: 12),
@@ -6475,10 +6515,12 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             else
               ...summary.entries.asMap().entries.map((entry) {
                 final data = entry.value;
-                final name = (data['name'] as String?)?.trim().isNotEmpty == true
-                    ? (data['name'] as String).trim()
-                    : 'Mentee';
-                final profilePic = (data['profilePic'] as String?)?.trim() ?? '';
+                final name =
+                    (data['name'] as String?)?.trim().isNotEmpty == true
+                        ? (data['name'] as String).trim()
+                        : 'Mentee';
+                final profilePic =
+                    (data['profilePic'] as String?)?.trim() ?? '';
                 final score = (data['score'] as num?)?.toInt() ?? 0;
 
                 return ListTile(
