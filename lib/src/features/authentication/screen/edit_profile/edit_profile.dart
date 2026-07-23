@@ -1,13 +1,14 @@
-import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
-import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
@@ -20,7 +21,7 @@ class EditProfile extends StatefulWidget {
 }
 
 class MyEditProfileState extends State<EditProfile> {
-  static const Duration _availabilityDebounce = Duration(milliseconds: 450);
+  String? _oldUsername;
   String? _selectedImage;
   String? _selectedImageTemp;
   final TextEditingController _dobController = TextEditingController();
@@ -34,14 +35,13 @@ class MyEditProfileState extends State<EditProfile> {
   bool _isEmailValid = true;
   bool _isButtonEnabled = false;
   Future<Map<String, dynamic>>? _userDataFuture;
-  Timer? _usernameCheckDebounce;
-  Timer? _emailCheckDebounce;
 
   @override
   void initState() {
     super.initState();
     _userDataFuture = UserService.getUserData().then((userData) {
       setState(() {
+        _oldUsername = userData["username"];
         _usernameController.text = userData["username"] ?? "";
         _emailController.text = userData["email"] ?? "";
         _phoneController.text = userData["number"] ?? "";
@@ -53,17 +53,6 @@ class MyEditProfileState extends State<EditProfile> {
       });
       return userData;
     });
-  }
-
-  @override
-  void dispose() {
-    _usernameCheckDebounce?.cancel();
-    _emailCheckDebounce?.cancel();
-    _dobController.dispose();
-    _usernameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    super.dispose();
   }
 
   Future<void> pickImage() async {
@@ -91,8 +80,8 @@ class MyEditProfileState extends State<EditProfile> {
 
   Future<String?> _uploadImage(Uint8List imageBytes) async {
     try {
-      final fallbackName =
-          '${AuthService.instance.currentUserId ?? 'profile'}.jpg';
+      final user = FirebaseAuth.instance.currentUser;
+      final fallbackName = user == null ? 'profile.jpg' : '${user.uid}.jpg';
       final imageUrl = await ImageStorageService.uploadImageBytes(
         imageBytes,
         fileName: fallbackName,
@@ -108,32 +97,31 @@ class MyEditProfileState extends State<EditProfile> {
   }
 
   Future<void> _updateUserData() async {
-    final userId = AuthService.instance.currentUserId;
-    if (userId == null) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
     setState(() {
       _isButtonEnabled = false; // Disable button while updating
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(child: CircularProgressIndicator()),
+      );
     });
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
+    String newUsername = _usernameController.text.trim();
 
-    final newUsername = _usernameController.text.trim();
+    Map<String, dynamic> updatedData = {
+      "username": newUsername,
+      "email": _emailController.text.trim(),
+      "number": _phoneController.text.trim(),
+    };
+
+    if (_isBirthdateChanged) {
+      updatedData["birthdate"] = _dobController.text.trim();
+    }
 
     try {
-      Map<String, dynamic> updatedData = {
-        "username": newUsername,
-        "email": _emailController.text.trim(),
-        "number": _phoneController.text.trim(),
-      };
-
-      if (_isBirthdateChanged) {
-        updatedData["birthdate"] = _dobController.text.trim();
-      }
-
       // If a new image is selected, upload it
       if (_selectedImageTemp != null) {
         if (!ImageStorageService.isConfigured) {
@@ -141,7 +129,7 @@ class MyEditProfileState extends State<EditProfile> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  "Image upload is not configured. Please sign in again."),
+                  "Image upload is not configured. Set cloudName/uploadPreset in lib/src/config/cloudinary_config.dart."),
               backgroundColor: Colors.red,
             ),
           );
@@ -157,7 +145,6 @@ class MyEditProfileState extends State<EditProfile> {
         if (downloadUrl != null) {
           updatedData["profilePic"] = downloadUrl;
         } else {
-          if (!mounted) return;
           Navigator.pop(context);
           final reason = ImageStorageService.lastError;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -175,54 +162,105 @@ class MyEditProfileState extends State<EditProfile> {
         }
       }
 
-      final savedUser = await UserService.updateUserData(
-        name: updatedData["username"] as String?,
-        email: updatedData["email"] as String?,
-        number: updatedData["number"] as String?,
-        birthdate: updatedData["birthdate"] as String?,
-      );
-      final normalizedProfilePic =
-          savedUser["profilePic"]?.toString() ?? updatedData["profilePic"];
+      // Update user document
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user.uid)
+          .update(updatedData);
 
-      if (!mounted) return;
+      // Update username in all notes where the userId matches
+      QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
+          .collection("notes")
+          .where("userId", isEqualTo: user.uid)
+          .get();
+
+      for (var doc in notesSnapshot.docs) {
+        await doc.reference.update({"username": newUsername});
+      }
+
+      // Update username in all comments for the given user
+      QuerySnapshot allNotesSnapshot =
+          await FirebaseFirestore.instance.collection("notes").get();
+
+      for (var noteDoc in allNotesSnapshot.docs) {
+        QuerySnapshot commentsSnapshot = await noteDoc.reference
+            .collection("comments")
+            .where("username", isEqualTo: _oldUsername)
+            .get();
+
+        for (var commentDoc in commentsSnapshot.docs) {
+          await commentDoc.reference.update({"username": newUsername});
+        }
+      }
+
+      // Make sure to call the updateUsernameInComments method as well
+      await updateUsernameInComments(user.uid, newUsername);
+
+      if (_oldUsername != null && _oldUsername != newUsername) {
+        QuerySnapshot userPointsSnapshot = await FirebaseFirestore.instance
+            .collection("userpoints")
+            .where("username", isEqualTo: _oldUsername)
+            .get();
+
+        for (var doc in userPointsSnapshot.docs) {
+          await doc.reference.update({"username": newUsername});
+        }
+      }
+
       setState(() {
-        _selectedImage = normalizedProfilePic;
+        _selectedImage = updatedData["profilePic"];
         _selectedImageTemp = null; // Clear temp image
       });
 
       Navigator.pop(context); // Close loading dialog
 
+      // Redirect to the profile screen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => ProfileSettings()),
+      );
+
       print("User data updated successfully!");
     } catch (error) {
-      if (!mounted) return;
       Navigator.pop(context); // Close loading dialog if error occurs
       print("Error updating user data: $error");
 
       // Show error message
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Failed to update profile. Please try again."),
-      backgroundColor: Colors.red,
+        backgroundColor: Colors.red,
       ));
     }
   }
 
-  void _scheduleUsernameAvailabilityCheck(String username) {
-    _usernameCheckDebounce?.cancel();
-    _usernameCheckDebounce = Timer(_availabilityDebounce, () {
-      if (!mounted) return;
-      unawaited(_checkUsernameAvailability(username));
-    });
-  }
+  Future<void> updateUsernameInComments(
+      String userId, String newUsername) async {
+    FirebaseFirestore firestore = FirebaseFirestore.instance;
 
-  void _scheduleEmailAvailabilityCheck(String email) {
-    _emailCheckDebounce?.cancel();
-    _emailCheckDebounce = Timer(_availabilityDebounce, () {
-      if (!mounted) return;
-      unawaited(_checkEmailAvailability(email));
-    });
+    QuerySnapshot notesSnapshot = await firestore.collection('notes').get();
+
+    for (QueryDocumentSnapshot noteDoc in notesSnapshot.docs) {
+      QuerySnapshot commentsSnapshot = await firestore
+          .collection('notes')
+          .doc(noteDoc.id)
+          .collection('comments')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      for (QueryDocumentSnapshot commentDoc in commentsSnapshot.docs) {
+        await firestore
+            .collection('notes')
+            .doc(noteDoc.id)
+            .collection('comments')
+            .doc(commentDoc.id)
+            .update({'username': newUsername});
+      }
+    }
   }
 
   Future<void> _checkUsernameAvailability(String username) async {
+    final user = FirebaseAuth.instance.currentUser;
+
     if (username.isEmpty) {
       setState(() {
         _isUsernameValid = false;
@@ -246,15 +284,34 @@ class MyEditProfileState extends State<EditProfile> {
       return;
     }
 
-    if (!mounted) return;
-    setState(() {
-      _isUsernameValid = true;
-      _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
-          _emailController.text.trim().isNotEmpty &&
-          _phoneController.text.trim().isNotEmpty &&
-          _isUsernameValid &&
-          _isEmailValid;
-    });
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .where('username', isEqualTo: username)
+        .get();
+
+    if (querySnapshot.docs.isNotEmpty &&
+        querySnapshot.docs.first.id != user?.uid) {
+      setState(() {
+        _isUsernameValid = false;
+        _isButtonEnabled = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("This username is already taken."),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else {
+      setState(() {
+        _isUsernameValid = true;
+        _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
+            _emailController.text.trim().isNotEmpty &&
+            _phoneController.text.trim().isNotEmpty &&
+            _isUsernameValid &&
+            _isEmailValid;
+      });
+    }
   }
 
   bool _isEmailFormatValid(String email) {
@@ -263,7 +320,7 @@ class MyEditProfileState extends State<EditProfile> {
     return regExp.hasMatch(email);
   }
 
-  Future<void> _checkEmailAvailability(String email) async {
+  void _checkEmailAvailability(String email) async {
     if (email.isEmpty) {
       setState(() {
         _isEmailValid = false;
@@ -272,23 +329,34 @@ class MyEditProfileState extends State<EditProfile> {
       return;
     }
 
-    if (!_isEmailFormatValid(email)) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .where('email', isEqualTo: email)
+        .get();
+
+    if (querySnapshot.docs.isNotEmpty &&
+        querySnapshot.docs.first.id != user?.uid) {
       setState(() {
         _isEmailValid = false;
         _isButtonEnabled = false;
       });
-      return;
-    }
 
-    if (!mounted) return;
-    setState(() {
-      _isEmailValid = true;
-      _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
-          _emailController.text.trim().isNotEmpty &&
-          _phoneController.text.trim().isNotEmpty &&
-          _isUsernameValid &&
-          _isEmailValid;
-    });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("This email is already linked to another account."),
+        backgroundColor: Colors.red,
+      ));
+    } else {
+      setState(() {
+        _isEmailValid = true;
+        _isButtonEnabled = _usernameController.text.trim().isNotEmpty &&
+            _emailController.text.trim().isNotEmpty &&
+            _phoneController.text.trim().isNotEmpty &&
+            _isUsernameValid &&
+            _isEmailValid;
+      });
+    }
   }
 
   @override
@@ -395,11 +463,17 @@ class MyEditProfileState extends State<EditProfile> {
                     SizedBox(height: 40),
                     _buildEditableInputField(
                         "Username", _usernameController, companyTheme, (value) {
-                      _scheduleUsernameAvailabilityCheck(value.trim());
+                      if (value != _usernameController.text) {
+                        _checkUsernameAvailability(value);
+                      }
                     }),
                     _buildEditableInputField(
                         "Email", _emailController, companyTheme, (value) {
-                      _scheduleEmailAvailabilityCheck(value.trim());
+                      setState(() {
+                        _isEmailValid = _isEmailFormatValid(value) &&
+                            value != _emailController.text.trim();
+                        _isButtonEnabled = _isEmailValid && _isUsernameValid;
+                      });
                     }),
                     _buildEditableInputField(
                         "Phone Number", _phoneController, companyTheme,
@@ -488,7 +562,6 @@ class MyEditProfileState extends State<EditProfile> {
                     ElevatedButton(
                       onPressed: _isButtonEnabled
                           ? () async {
-                              final navigator = Navigator.of(context);
                               setState(() {
                                 _isButtonEnabled =
                                     false; // Disable button to prevent multiple taps
@@ -496,8 +569,8 @@ class MyEditProfileState extends State<EditProfile> {
 
                               try {
                                 await _updateUserData();
-                                if (!mounted) return;
-                                navigator.pushReplacement(
+                                Navigator.pushReplacement(
+                                  context,
                                   MaterialPageRoute(
                                       builder: (context) =>
                                           ProfilePage(title: 'Profile')),
@@ -506,12 +579,9 @@ class MyEditProfileState extends State<EditProfile> {
                                 print(
                                     "Update failed: $e"); // Handle the error (e.g., show a Snackbar)
                               } finally {
-                                if (mounted) {
-                                  setState(() {
-                                    _isButtonEnabled =
-                                        true; // Re-enable button
-                                  });
-                                }
+                                setState(() {
+                                  _isButtonEnabled = true; // Re-enable button
+                                });
                               }
                             }
                           : null,
@@ -575,9 +645,9 @@ class MyEditProfileState extends State<EditProfile> {
             style: TextStyle(fontSize: 14, color: companyTheme.inkColor),
             onChanged: (value) {
               if (label == "Username") {
-                _scheduleUsernameAvailabilityCheck(value.trim());
+                _checkUsernameAvailability(value.trim());
               } else if (label == "Email") {
-                _scheduleEmailAvailabilityCheck(value.trim());
+                _checkEmailAvailability(value);
               } else {
                 setState(() {
                   _isButtonEnabled = _hasChanges();

@@ -1,16 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
-import 'package:selfcare_projects/src/services/auth_service.dart';
-import 'package:selfcare_projects/src/services/company_theme_service.dart';
-import 'package:selfcare_projects/src/services/fasting_api_service.dart';
-import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
-import 'package:selfcare_projects/src/services/watch_sync_service.dart';
-import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class FastingTimerScreen extends StatefulWidget {
   const FastingTimerScreen({super.key});
@@ -20,8 +15,8 @@ class FastingTimerScreen extends StatefulWidget {
 }
 
 class _FastingTimerScreenState extends State<FastingTimerScreen> {
-  final ActivityStreakService _activityStreakService = ActivityStreakService();
-  final FastingApiService _fastingApi = FastingApiService.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final List<int> _fastingPlans = const [12, 14, 16, 18, 20, 24];
 
   Timer? _timer;
@@ -30,7 +25,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   DateTime? _endTime;
   bool _isLoading = true;
   int _lastOngoingNotificationMinute = -1;
-  List<Map<String, dynamic>> _history = [];
 
   @override
   void initState() {
@@ -38,45 +32,35 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     _loadFastingState();
   }
 
-  String get _userId => AuthService.instance.currentSession?.id.toString() ?? '';
+  String get _userId => _auth.currentUser!.uid;
+
+  DocumentReference<Map<String, dynamic>> get _fastingRef => _firestore
+      .collection('users')
+      .doc(_userId)
+      .collection('wellness')
+      .doc('fasting');
+
+  CollectionReference<Map<String, dynamic>> get _historyRef =>
+      _fastingRef.collection('history');
 
   Future<void> _loadFastingState() async {
     try {
-      final response = await _fastingApi.fetchSession();
-      final session = response['session'];
-      final history = response['history'];
+      final snapshot = await _fastingRef.get();
+      final data = snapshot.data();
 
-      if (!mounted) return;
-      setState(() {
-        _selectedHours = _readInt(
-              session is Map<String, dynamic> ? session['targetHours'] : null,
-            ) ??
-            16;
-        _startTime = _parseDateTime(
-          session is Map<String, dynamic> ? session['startTime'] : null,
-        );
-        _endTime = _parseDateTime(
-          session is Map<String, dynamic> ? session['endTime'] : null,
-        );
-        _history = history is List
-            ? history
-                .whereType<Map>()
-                .map((item) => item.cast<String, dynamic>())
-                .toList()
-            : <Map<String, dynamic>>[];
-      });
+      if (data != null) {
+        setState(() {
+          _selectedHours = (data['targetHours'] as num?)?.toInt() ?? 16;
+          _startTime = (data['startTime'] as Timestamp?)?.toDate();
+          _endTime = (data['endTime'] as Timestamp?)?.toDate();
+        });
 
-      if (_startTime != null && _endTime != null) {
-        await _syncFastingNotifications();
-        _startTicker();
-        WatchSyncService.instance.syncFasting(
-          active: true,
-          start: _startTime,
-          goalHours: _selectedHours,
-        );
-      } else {
-        await _clearFastingNotifications();
-        WatchSyncService.instance.syncFasting(active: false);
+        if (_startTime != null && _endTime != null) {
+          await _syncFastingNotifications();
+          _startTicker();
+        } else {
+          await _clearFastingNotifications();
+        }
       }
     } catch (error) {
       debugPrint('Failed to load fasting state: $error');
@@ -94,15 +78,18 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final end = now.add(Duration(hours: _selectedHours));
 
     try {
-      await _fastingApi.start(targetHours: _selectedHours);
+      await _fastingRef.set({
+        'targetHours': _selectedHours,
+        'startTime': Timestamp.fromDate(now),
+        'endTime': Timestamp.fromDate(end),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       setState(() {
         _startTime = now;
         _endTime = end;
       });
       _startTicker();
-      WatchSyncService.instance
-          .syncFasting(active: true, start: now, goalHours: _selectedHours);
       final notificationsReady = await _syncFastingNotifications();
       _showSnackBar(
         notificationsReady
@@ -121,20 +108,28 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final finishedAt = DateTime.now();
 
     try {
-      var completedTarget = false;
       if (startedAt != null) {
-        completedTarget =
-            plannedEnd != null && !finishedAt.isBefore(plannedEnd);
-        await _fastingApi.end();
+        final durationHours = finishedAt.difference(startedAt).inMinutes / 60.0;
+        await _historyRef.add({
+          'targetHours': _selectedHours,
+          'startTime': Timestamp.fromDate(startedAt),
+          'plannedEndTime':
+              plannedEnd == null ? null : Timestamp.fromDate(plannedEnd),
+          'finishedAt': Timestamp.fromDate(finishedAt),
+          'completedHours': double.parse(durationHours.toStringAsFixed(2)),
+          'completedTarget':
+              plannedEnd != null && !finishedAt.isBefore(plannedEnd),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
 
-      if (completedTarget) {
-        final unlockedRewards = await _recordFastingStreak();
-        if (unlockedRewards.isNotEmpty) {
-          _showSnackBar(
-              'Fasting medal unlocked: ${unlockedRewards.last.title}');
-        }
-      }
+      await _fastingRef.set({
+        'targetHours': _selectedHours,
+        'startTime': null,
+        'endTime': null,
+        'lastCompletedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       _timer?.cancel();
       await _clearFastingNotifications();
@@ -143,7 +138,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         _startTime = null;
         _endTime = null;
       });
-      WatchSyncService.instance.syncFasting(active: false);
     } catch (error) {
       debugPrint('Failed to end fasting timer: $error');
       _showSnackBar('Failed to end fasting timer.');
@@ -185,18 +179,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final elapsed =
         DateTime.now().difference(_startTime!).inSeconds.clamp(0, total);
     return elapsed / total;
-  }
-
-  int? _readInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '');
-  }
-
-  DateTime? _parseDateTime(dynamic value) {
-    if (value == null) return null;
-    if (value is DateTime) return value;
-    return DateTime.tryParse(value.toString());
   }
 
   String _formatClock(Duration duration) {
@@ -279,32 +261,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     }
   }
 
-  Future<List<ActivityStreakMilestone>> _recordFastingStreak() async {
-    try {
-      if (_userId.isEmpty) {
-        return <ActivityStreakMilestone>[];
-      }
-      return await _activityStreakService.recordCompletedSession(
-        userId: _userId,
-        type: ActivityStreakType.fasting,
-      );
-    } catch (error) {
-      debugPrint('Fasting streak update failed: $error');
-      return <ActivityStreakMilestone>[];
-    }
-  }
-
-  void _openFastingRewards() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const MeditationStreakRewardsScreen(
-          activityType: ActivityStreakType.fasting,
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
@@ -318,76 +274,50 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final remaining = _remainingTime();
     final elapsed = _elapsedTime();
     final int percent = (progress * 100).round().clamp(0, 100);
-    return CompanyThemeBuilder(
-      builder: (context, companyTheme) {
-        return Theme(
-          data: AppTheme.company(companyTheme),
-          child: Builder(
-            builder: (context) {
-              final theme = Theme.of(context);
 
-              return Scaffold(
-                backgroundColor: theme.scaffoldBackgroundColor,
-                appBar: AppBar(
-                  backgroundColor: companyTheme.surfaceColor,
-                  foregroundColor: companyTheme.inkColor,
-                  iconTheme: IconThemeData(color: companyTheme.inkColor),
-                  elevation: 0,
-                  scrolledUnderElevation: 0,
-                  title: Text(
-                    'Fasting',
-                    style: TextStyle(
-                      color: companyTheme.inkColor,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  actions: [
-                    IconButton(
-                      onPressed: _openFastingRewards,
-                      icon: const Icon(Icons.workspace_premium_rounded),
-                      tooltip: 'Rewards',
-                    ),
-                    IconButton(
-                      onPressed: () =>
-                          Navigator.pushNamed(context, '/fastingReports'),
-                      icon: const Icon(Icons.insights_outlined),
-                      tooltip: 'Reports',
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                ),
-                body: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildHeroTimerCard(
-                              isActive: isActive,
-                              progress: progress,
-                              percent: percent,
-                              elapsed: elapsed,
-                              remaining: remaining,
-                            ),
-                            const SizedBox(height: 18),
-                            _buildQuickActions(isActive),
-                            const SizedBox(height: 18),
-                            _buildPlanSection(isActive),
-                            const SizedBox(height: 18),
-                            _buildTimelineSection(isActive),
-                            const SizedBox(height: 18),
-                            _buildAchievementSection(),
-                            const SizedBox(height: 18),
-                            _buildHistoryPreview(),
-                          ],
-                        ),
-                      ),
-              );
-            },
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F5F0),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8F5F0),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text('Fasting'),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.pushNamed(context, '/fastingReports'),
+            icon: const Icon(Icons.insights_outlined),
+            tooltip: 'Reports',
           ),
-        );
-      },
+          const SizedBox(width: 6),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeroTimerCard(
+                    isActive: isActive,
+                    progress: progress,
+                    percent: percent,
+                    elapsed: elapsed,
+                    remaining: remaining,
+                  ),
+                  const SizedBox(height: 18),
+                  _buildQuickActions(isActive),
+                  const SizedBox(height: 18),
+                  _buildPlanSection(isActive),
+                  const SizedBox(height: 18),
+                  _buildTimelineSection(isActive),
+                  const SizedBox(height: 18),
+                  _buildAchievementSection(),
+                  const SizedBox(height: 18),
+                  _buildHistoryPreview(),
+                ],
+              ),
+            ),
     );
   }
 
@@ -398,23 +328,19 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     required Duration elapsed,
     required Duration remaining,
   }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final titleColor = colorScheme.onSurface;
-    final mutedColor = colorScheme.onSurfaceVariant;
-    final accentColor = theme.iconTheme.color ?? colorScheme.primary;
+    final titleColor =
+        isActive ? const Color(0xFF2B2826) : const Color(0xFF514A45);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.primary.withValues(alpha: 0.08),
-            blurRadius: 26,
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 24,
             offset: const Offset(0, 14),
           ),
         ],
@@ -427,16 +353,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
+                  color: const Color(0xFFFFEEF2),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: accentColor.withValues(alpha: 0.18),
-                  ),
                 ),
                 child: Text(
                   isActive ? 'Fast in progress' : 'Ready to fast',
-                  style: TextStyle(
-                    color: accentColor,
+                  style: const TextStyle(
+                    color: Color(0xFFFF4663),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -448,8 +371,8 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 icon: const Icon(Icons.auto_graph_rounded, size: 18),
                 label: const Text('Reports'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: colorScheme.surfaceContainer,
-                  foregroundColor: accentColor,
+                  backgroundColor: const Color(0xFFF7F0EA),
+                  foregroundColor: const Color(0xFF3B332F),
                 ),
               ),
             ],
@@ -463,15 +386,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
               children: [
                 Positioned.fill(
                   child: CustomPaint(
-                    painter: _FastingRingPainter(
-                      progress: progress,
-                      baseColor: colorScheme.surfaceContainer,
-                      tickColor: colorScheme.outlineVariant,
-                      activeColors: [
-                        colorScheme.primary,
-                        colorScheme.secondary,
-                      ],
-                    ),
+                    painter: _FastingRingPainter(progress: progress),
                   ),
                 ),
                 Positioned(
@@ -479,14 +394,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   right: 42,
                   child: _buildFloatingBadge(
                     icon: Icons.local_fire_department_rounded,
-                    iconColor: colorScheme.primary,
+                    color: const Color(0xFFFF9A31),
                   ),
                 ),
                 Positioned(
                   right: 8,
                   child: _buildFloatingBadge(
                     icon: Icons.bolt_rounded,
-                    iconColor: colorScheme.tertiary,
+                    color: const Color(0xFFFFC23A),
                   ),
                 ),
                 Positioned(
@@ -494,14 +409,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   bottom: 96,
                   child: _buildFloatingBadge(
                     icon: Icons.restaurant_rounded,
-                    iconColor: colorScheme.secondary,
+                    color: const Color(0xFFFF7A5E),
                   ),
                 ),
                 Positioned(
                   bottom: 20,
                   child: _buildFloatingBadge(
                     icon: Icons.spa_rounded,
-                    iconColor: colorScheme.primary,
+                    color: const Color(0xFF68A5FF),
                   ),
                 ),
                 Positioned(
@@ -509,7 +424,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   top: 94,
                   child: _buildFloatingBadge(
                     icon: Icons.water_drop_rounded,
-                    iconColor: colorScheme.secondary,
+                    color: const Color(0xFFFF7A5E),
                   ),
                 ),
                 Column(
@@ -517,9 +432,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   children: [
                     Text(
                       isActive ? 'Elapsed time ($percent%)' : 'Selected fast',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
-                        color: mutedColor,
+                        color: Colors.black45,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -539,9 +454,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                       isActive
                           ? 'Your fast ends on'
                           : 'Your plan is ready to start',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
-                        color: mutedColor,
+                        color: Colors.black45,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -549,10 +464,10 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                       isActive
                           ? DateFormat('MMM d, hh:mm a').format(_endTime!)
                           : '$_selectedHours hour fasting window',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
-                        color: titleColor,
+                        color: Color(0xFF35302C),
                       ),
                     ),
                     if (isActive) ...[
@@ -563,15 +478,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                           vertical: 9,
                         ),
                         decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainer,
+                          color: const Color(0xFFF8F5F0),
                           borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: colorScheme.outlineVariant),
                         ),
                         child: Text(
                           'Remaining ${_formatClock(remaining)}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: colorScheme.onSurface,
+                            color: Color(0xFF4A4340),
                           ),
                         ),
                       ),
@@ -590,8 +504,8 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 side: BorderSide(
                   color: isActive
-                      ? colorScheme.error
-                      : colorScheme.outlineVariant,
+                      ? const Color(0xFFFF4663)
+                      : const Color(0xFF1B1B1B).withOpacity(0.12),
                 ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(999),
@@ -602,7 +516,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: isActive ? colorScheme.error : titleColor,
+                  color: isActive
+                      ? const Color(0xFFFF4663)
+                      : const Color(0xFF2D2A28),
                 ),
               ),
             ),
@@ -614,26 +530,23 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
 
   Widget _buildFloatingBadge({
     required IconData icon,
-    required Color iconColor,
+    required Color color,
   }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       width: 38,
       height: 38,
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        color: Colors.white,
         shape: BoxShape.circle,
-        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Icon(icon, color: iconColor, size: 20),
+      child: Icon(icon, color: color, size: 20),
     );
   }
 
@@ -676,14 +589,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     required String subtitle,
     VoidCallback? onTap,
   }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final accentColor = theme.iconTheme.color ?? colorScheme.primary;
     return Material(
-      color: colorScheme.surfaceContainerHighest,
+      color: Colors.white,
       borderRadius: BorderRadius.circular(24),
-      elevation: 0,
-      shadowColor: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(24),
@@ -695,29 +603,23 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
+                  color: const Color(0xFFF8F5F0),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: accentColor.withValues(alpha: 0.16),
-                  ),
                 ),
-                child: Icon(icon, color: accentColor),
+                child: Icon(icon, color: const Color(0xFF4B4340)),
               ),
               const SizedBox(height: 10),
               Text(
                 title,
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 3),
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
-                  color: colorScheme.onSurfaceVariant,
+                  color: Colors.black54,
                 ),
               ),
             ],
@@ -728,35 +630,26 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   }
 
   Widget _buildPlanSection(bool isActive) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          const Text(
             'Fasting Plans',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
             isActive
                 ? 'Plan stays locked while your current fast is running.'
                 : 'Pick the fasting window that fits your day.',
-            style: TextStyle(
-              color: colorScheme.onSurfaceVariant,
-            ),
+            style: const TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -768,15 +661,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                 label: Text('$hours h'),
                 selected: isSelected,
                 showCheckmark: false,
-                selectedColor: colorScheme.primaryContainer,
-                backgroundColor: colorScheme.surfaceContainer,
+                selectedColor: const Color(0xFFFF4663),
+                backgroundColor: const Color(0xFFF8F5F0),
                 labelStyle: TextStyle(
-                  color: isSelected
-                      ? colorScheme.onPrimaryContainer
-                      : colorScheme.onSurface,
+                  color: isSelected ? Colors.white : const Color(0xFF2D2A28),
                   fontWeight: FontWeight.w700,
                 ),
-                side: BorderSide(color: colorScheme.outlineVariant),
+                side: BorderSide.none,
                 onSelected: isActive
                     ? null
                     : (_) {
@@ -793,15 +684,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   }
 
   Widget _buildTimelineSection(bool isActive) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
       ),
       child: Column(
         children: [
@@ -812,7 +700,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   label: 'Start fast',
                   value: isActive ? _formatDayTime(_startTime) : '--',
                   icon: Icons.play_arrow_rounded,
-                  tint: colorScheme.primaryContainer,
+                  color: const Color(0xFFFFD7DF),
                 ),
               ),
               const SizedBox(width: 12),
@@ -821,7 +709,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
                   label: 'End fast',
                   value: isActive ? _formatDayTime(_endTime) : '--',
                   icon: Icons.flag_rounded,
-                  tint: colorScheme.secondaryContainer,
+                  color: const Color(0xFFFFEEE3),
                 ),
               ),
             ],
@@ -832,67 +720,71 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   }
 
   Widget _buildAchievementSection() {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          const Text(
             'Achievement Medals',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
-          Text(
+          const Text(
             'Unlock medals as you complete more fasting goals.',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
-            ),
+            style: TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _achievementMedal(
-                  title: 'Bronze',
-                  subtitle: '3 goal hits',
-                  icon: Icons.workspace_premium_rounded,
-                  color: colorScheme.primary,
-                  unlocked: _goalHits >= 3,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _achievementMedal(
-                  title: 'Silver',
-                  subtitle: '7 goal hits',
-                  icon: Icons.military_tech_rounded,
-                  color: colorScheme.secondary,
-                  unlocked: _goalHits >= 7,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _achievementMedal(
-                  title: 'Gold',
-                  subtitle: '15 goal hits',
-                  icon: Icons.emoji_events_rounded,
-                  color: colorScheme.tertiary,
-                  unlocked: _goalHits >= 15,
-                ),
-              ),
-            ],
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _historyRef
+                .orderBy('finishedAt', descending: true)
+                .limit(100)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final docs = snapshot.data?.docs ?? [];
+              final goalHits = docs.where((doc) {
+                return (doc.data()['completedTarget'] as bool?) ?? false;
+              }).length;
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Bronze',
+                      subtitle: '3 goal hits',
+                      icon: Icons.workspace_premium_rounded,
+                      color: const Color(0xFFC78A55),
+                      unlocked: goalHits >= 3,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Silver',
+                      subtitle: '7 goal hits',
+                      icon: Icons.military_tech_rounded,
+                      color: const Color(0xFF98A3B4),
+                      unlocked: goalHits >= 7,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _achievementMedal(
+                      title: 'Gold',
+                      subtitle: '15 goal hits',
+                      icon: Icons.emoji_events_rounded,
+                      color: const Color(0xFFFFB52E),
+                      unlocked: goalHits >= 15,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -906,19 +798,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     required Color color,
     required bool unlocked,
   }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
-        color: unlocked
-            ? colorScheme.primaryContainer.withValues(alpha: 0.55)
-            : colorScheme.surfaceContainer,
+        color: unlocked ? const Color(0xFFFFF8F2) : const Color(0xFFF7F5F3),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: unlocked
-              ? color.withValues(alpha: 0.22)
-              : colorScheme.outlineVariant,
+          color: unlocked ? color.withOpacity(0.22) : Colors.transparent,
         ),
       ),
       child: Column(
@@ -927,14 +813,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: unlocked
-                  ? color.withValues(alpha: 0.16)
-                  : colorScheme.surface,
+              color: unlocked ? color.withOpacity(0.16) : Colors.white,
               shape: BoxShape.circle,
             ),
             child: Icon(
               icon,
-              color: unlocked ? color : colorScheme.onSurfaceVariant,
+              color: unlocked ? color : Colors.black26,
               size: 28,
             ),
           ),
@@ -943,16 +827,16 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             title,
             style: TextStyle(
               fontWeight: FontWeight.w800,
-              color: unlocked ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
+              color: unlocked ? const Color(0xFF2E2A28) : Colors.black45,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 11,
-              color: colorScheme.onSurfaceVariant,
+              color: Colors.black54,
             ),
           ),
           const SizedBox(height: 8),
@@ -961,7 +845,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: unlocked ? color : colorScheme.onSurfaceVariant,
+              color: unlocked ? color : Colors.black38,
             ),
           ),
         ],
@@ -973,16 +857,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     required String label,
     required String value,
     required IconData icon,
-    required Color tint,
+    required Color color,
   }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
+        color: const Color(0xFFF9F8F6),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -991,24 +872,20 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: tint,
+              color: color,
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: colorScheme.onSurface),
+            child: Icon(icon, color: const Color(0xFF514944)),
           ),
           const SizedBox(height: 18),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: colorScheme.onSurface,
-            ),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
             label,
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
+            style: const TextStyle(color: Colors.black54),
           ),
         ],
       ),
@@ -1016,16 +893,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   }
 
   Widget _buildHistoryPreview() {
-    final history = _history.take(6).toList();
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1034,156 +907,152 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             children: [
               const Text(
                 'Recent Fasts',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
               const Spacer(),
               TextButton(
                 onPressed: () =>
                     Navigator.pushNamed(context, '/fastingReports'),
-                style: TextButton.styleFrom(foregroundColor: colorScheme.primary),
-                child: const Text(
-                  'View reports',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
+                child: const Text('View reports'),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          if (history.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: colorScheme.outlineVariant),
-              ),
-              child: Text(
-                'No fasting history yet. Your completed fasts will show here.',
-                style: TextStyle(color: colorScheme.onSurfaceVariant),
-              ),
-            )
-          else
-            Column(
-              children: history.map((entry) {
-                final targetHours = _readInt(entry['targetHours']) ?? 0;
-                final completedHours =
-                    (entry['completedHours'] as num?)?.toDouble() ?? 0;
-                final completedTarget = entry['completedTarget'] == true;
-                final finishedAt = _parseDateTime(entry['finishedAt']);
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _historyRef
+                .orderBy('finishedAt', descending: true)
+                .limit(6)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final history = snapshot.data?.docs ?? [];
 
+              if (history.isEmpty) {
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(16),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: colorScheme.outlineVariant),
+                    color: const Color(0xFFF8F5F0),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 46,
-                        height: 46,
-                        decoration: BoxDecoration(
-                          color: completedTarget
-                              ? colorScheme.primaryContainer
-                              : colorScheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
-                          completedTarget
-                              ? Icons.check_rounded
-                              : Icons.schedule_rounded,
-                          color: completedTarget
-                              ? colorScheme.onPrimaryContainer
-                              : colorScheme.onSecondaryContainer,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${_formatHours(completedHours)} completed',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: colorScheme.onSurface,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              '${_formatShortDateTime(finishedAt)} • Goal ${targetHours}h',
-                              style: TextStyle(color: colorScheme.onSurfaceVariant),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: completedTarget
-                              ? colorScheme.primaryContainer
-                              : colorScheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          completedTarget ? 'Goal hit' : 'Ended early',
-                          style: TextStyle(
-                            color: completedTarget
-                                ? colorScheme.onPrimaryContainer
-                                : colorScheme.onSecondaryContainer,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: const Text(
+                    'No fasting history yet. Your completed fasts will show here.',
+                    style: TextStyle(color: Colors.black54),
                   ),
                 );
-              }).toList(),
-            ),
+              }
+
+              return Column(
+                children: history.map((doc) {
+                  final data = doc.data();
+                  final targetHours =
+                      (data['targetHours'] as num?)?.toInt() ?? 0;
+                  final completedHours = (data['completedHours'] as num?) ?? 0;
+                  final completedTarget =
+                      (data['completedTarget'] as bool?) ?? false;
+                  final finishedAt =
+                      (data['finishedAt'] as Timestamp?)?.toDate();
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9F8F6),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: completedTarget
+                                ? const Color(0xFFFFEEF2)
+                                : const Color(0xFFFFF3E7),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Icon(
+                            completedTarget
+                                ? Icons.check_rounded
+                                : Icons.schedule_rounded,
+                            color: completedTarget
+                                ? const Color(0xFFFF4663)
+                                : const Color(0xFFFF9A31),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_formatHours(completedHours)} completed',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${_formatShortDateTime(finishedAt)} • Goal ${targetHours}h',
+                                style: const TextStyle(color: Colors.black54),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: completedTarget
+                                ? const Color(0xFFFFEEF2)
+                                : const Color(0xFFFFF3E7),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            completedTarget ? 'Goal hit' : 'Ended early',
+                            style: TextStyle(
+                              color: completedTarget
+                                  ? const Color(0xFFFF4663)
+                                  : const Color(0xFFFF9A31),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
         ],
       ),
     );
   }
-
-  int get _goalHits =>
-      _history.where((entry) => entry['completedTarget'] == true).length;
 }
 
 class _FastingRingPainter extends CustomPainter {
-  const _FastingRingPainter({
-    required this.progress,
-    required this.baseColor,
-    required this.tickColor,
-    required this.activeColors,
-  });
+  const _FastingRingPainter({required this.progress});
 
   final double progress;
-  final Color baseColor;
-  final Color tickColor;
-  final List<Color> activeColors;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = math.min(size.width, size.height) / 2 - 26;
     final basePaint = Paint()
-      ..color = baseColor
+      ..color = const Color(0xFFF0ECE7)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 22
       ..strokeCap = StrokeCap.round;
     final activePaint = Paint()
-      ..shader = LinearGradient(
-        colors: activeColors,
+      ..shader = const LinearGradient(
+        colors: [
+          Color(0xFFFF6880),
+          Color(0xFFFF3D5C),
+        ],
       ).createShader(
         Rect.fromCircle(center: center, radius: radius),
       )
@@ -1204,7 +1073,7 @@ class _FastingRingPainter extends CustomPainter {
     );
 
     final tickPaint = Paint()
-      ..color = tickColor
+      ..color = const Color(0xFFDAD2CC)
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
 
@@ -1224,9 +1093,6 @@ class _FastingRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FastingRingPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.baseColor != baseColor ||
-        oldDelegate.tickColor != tickColor ||
-        oldDelegate.activeColors != activeColors;
+    return oldDelegate.progress != progress;
   }
 }
