@@ -1,14 +1,14 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/UsersData/UserService.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
@@ -80,8 +80,8 @@ class MyEditProfileState extends State<EditProfile> {
 
   Future<String?> _uploadImage(Uint8List imageBytes) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      final fallbackName = user == null ? 'profile.jpg' : '${user.uid}.jpg';
+      final fallbackName =
+          AuthService.instance.currentSession?.id.toString() ?? 'profile.jpg';
       final imageUrl = await ImageStorageService.uploadImageBytes(
         imageBytes,
         fileName: fallbackName,
@@ -97,8 +97,9 @@ class MyEditProfileState extends State<EditProfile> {
   }
 
   Future<void> _updateUserData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+    final userId = session.id.toString();
 
     setState(() {
       _isButtonEnabled = false; // Disable button while updating
@@ -125,6 +126,7 @@ class MyEditProfileState extends State<EditProfile> {
       // If a new image is selected, upload it
       if (_selectedImageTemp != null) {
         if (!ImageStorageService.isConfigured) {
+          if (!mounted) return;
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -145,6 +147,7 @@ class MyEditProfileState extends State<EditProfile> {
         if (downloadUrl != null) {
           updatedData["profilePic"] = downloadUrl;
         } else {
+          if (!mounted) return;
           Navigator.pop(context);
           final reason = ImageStorageService.lastError;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -165,13 +168,13 @@ class MyEditProfileState extends State<EditProfile> {
       // Update user document
       await FirebaseFirestore.instance
           .collection("users")
-          .doc(user.uid)
+          .doc(userId)
           .update(updatedData);
 
       // Update username in all notes where the userId matches
       QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
           .collection("notes")
-          .where("userId", isEqualTo: user.uid)
+          .where("userId", isEqualTo: userId)
           .get();
 
       for (var doc in notesSnapshot.docs) {
@@ -194,7 +197,7 @@ class MyEditProfileState extends State<EditProfile> {
       }
 
       // Make sure to call the updateUsernameInComments method as well
-      await updateUsernameInComments(user.uid, newUsername);
+      await updateUsernameInComments(userId, newUsername);
 
       if (_oldUsername != null && _oldUsername != newUsername) {
         QuerySnapshot userPointsSnapshot = await FirebaseFirestore.instance
@@ -207,14 +210,17 @@ class MyEditProfileState extends State<EditProfile> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _selectedImage = updatedData["profilePic"];
         _selectedImageTemp = null; // Clear temp image
       });
 
+      if (!mounted) return;
       Navigator.pop(context); // Close loading dialog
 
       // Redirect to the profile screen
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => ProfileSettings()),
@@ -222,6 +228,7 @@ class MyEditProfileState extends State<EditProfile> {
 
       print("User data updated successfully!");
     } catch (error) {
+      if (!mounted) return;
       Navigator.pop(context); // Close loading dialog if error occurs
       print("Error updating user data: $error");
 
@@ -259,7 +266,7 @@ class MyEditProfileState extends State<EditProfile> {
   }
 
   Future<void> _checkUsernameAvailability(String username) async {
-    final user = FirebaseAuth.instance.currentUser;
+    final currentUserId = AuthService.instance.currentSession?.id.toString();
 
     if (username.isEmpty) {
       setState(() {
@@ -289,8 +296,9 @@ class MyEditProfileState extends State<EditProfile> {
         .where('username', isEqualTo: username)
         .get();
 
+    if (!mounted) return;
     if (querySnapshot.docs.isNotEmpty &&
-        querySnapshot.docs.first.id != user?.uid) {
+        querySnapshot.docs.first.id != currentUserId) {
       setState(() {
         _isUsernameValid = false;
         _isButtonEnabled = false;
@@ -329,15 +337,16 @@ class MyEditProfileState extends State<EditProfile> {
       return;
     }
 
-    final user = FirebaseAuth.instance.currentUser;
+    final currentUserId = AuthService.instance.currentSession?.id.toString();
 
     final querySnapshot = await FirebaseFirestore.instance
         .collection('users')
         .where('email', isEqualTo: email)
         .get();
 
+    if (!mounted) return;
     if (querySnapshot.docs.isNotEmpty &&
-        querySnapshot.docs.first.id != user?.uid) {
+        querySnapshot.docs.first.id != currentUserId) {
       setState(() {
         _isEmailValid = false;
         _isButtonEnabled = false;
@@ -569,6 +578,7 @@ class MyEditProfileState extends State<EditProfile> {
 
                               try {
                                 await _updateUserData();
+                                if (!context.mounted) return;
                                 Navigator.pushReplacement(
                                   context,
                                   MaterialPageRoute(
@@ -579,9 +589,12 @@ class MyEditProfileState extends State<EditProfile> {
                                 print(
                                     "Update failed: $e"); // Handle the error (e.g., show a Snackbar)
                               } finally {
-                                setState(() {
-                                  _isButtonEnabled = true; // Re-enable button
-                                });
+                                if (mounted) {
+                                  setState(() {
+                                    _isButtonEnabled =
+                                        true; // Re-enable button
+                                  });
+                                }
                               }
                             }
                           : null,

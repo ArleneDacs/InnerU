@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/note_card.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
@@ -13,14 +13,14 @@ class CommunityScreen extends StatefulWidget {
 
 class _CommunityScreenState extends State<CommunityScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   String selectedCategory = "Add Value";
   final TextEditingController _searchController = TextEditingController();
   String searchQuery = "";
 
   @override
   Widget build(BuildContext context) {
-    final String? currentUserId = _auth.currentUser?.uid;
+    final String? currentUserId =
+        AuthService.instance.currentSession?.id.toString();
 
     if (currentUserId == null) {
       return Scaffold(
@@ -69,7 +69,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.3),
+                    color: Colors.grey.withValues(alpha: 0.3),
                     blurRadius: 6,
                     offset: Offset(2, 2),
                   ),
@@ -206,8 +206,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
                                     ),
                                     boxShadow: [
                                       BoxShadow(
-                                        color:
-                                            Color(0xFF90A17D).withOpacity(0.3),
+                                        color: Color(0xFF90A17D)
+                                            .withValues(alpha: 0.3),
                                         blurRadius: 6,
                                         offset: Offset(2, 2),
                                       ),
@@ -260,7 +260,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                      color: Color(0xFF90A17D).withOpacity(0.4), blurRadius: 5)
+                      color: Color(0xFF90A17D).withValues(alpha: 0.4),
+                      blurRadius: 5)
                 ]
               : [],
         ),

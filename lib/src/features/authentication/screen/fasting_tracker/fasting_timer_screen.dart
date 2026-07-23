@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 
 class FastingTimerScreen extends StatefulWidget {
   const FastingTimerScreen({super.key});
@@ -15,7 +15,6 @@ class FastingTimerScreen extends StatefulWidget {
 }
 
 class _FastingTimerScreenState extends State<FastingTimerScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final List<int> _fastingPlans = const [12, 14, 16, 18, 20, 24];
 
@@ -32,7 +31,8 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     _loadFastingState();
   }
 
-  String get _userId => _auth.currentUser!.uid;
+  String get _userId =>
+      AuthService.instance.currentSession?.id.toString() ?? '';
 
   DocumentReference<Map<String, dynamic>> get _fastingRef => _firestore
       .collection('users')
@@ -339,7 +339,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 24,
             offset: const Offset(0, 14),
           ),
@@ -502,11 +502,11 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
               onPressed: isActive ? _endFast : _startFast,
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                side: BorderSide(
-                  color: isActive
-                      ? const Color(0xFFFF4663)
-                      : const Color(0xFF1B1B1B).withOpacity(0.12),
-                ),
+                  side: BorderSide(
+                    color: isActive
+                        ? const Color(0xFFFF4663)
+                      : const Color(0xFF1B1B1B).withValues(alpha: 0.12),
+                  ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(999),
                 ),
@@ -540,7 +540,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -804,7 +804,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
         color: unlocked ? const Color(0xFFFFF8F2) : const Color(0xFFF7F5F3),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: unlocked ? color.withOpacity(0.22) : Colors.transparent,
+          color: unlocked ? color.withValues(alpha: 0.22) : Colors.transparent,
         ),
       ),
       child: Column(
@@ -813,7 +813,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: unlocked ? color.withOpacity(0.16) : Colors.white,
+              color: unlocked ? color.withValues(alpha: 0.16) : Colors.white,
               shape: BoxShape.circle,
             ),
             child: Icon(
