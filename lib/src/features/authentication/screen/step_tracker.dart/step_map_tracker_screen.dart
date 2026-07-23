@@ -1338,6 +1338,18 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
     final candidates = <Map<String, dynamic>>[];
 
+    // Works for any authenticated user (not just coaches/admins) — see
+    // WalkController::inviteCandidates on the backend.
+    try {
+      final inviteCandidates = await _api.fetchInviteCandidates();
+      candidates.addAll(inviteCandidates.map(_normalizeInviteUser));
+    } catch (error) {
+      debugPrint('Failed to load invite candidates: $error');
+    }
+
+    // Coach/admin directories add richer results for users who have those
+    // roles, but they 401 for regular users, so failures here are expected
+    // and must not block the list built above.
     try {
       final coachUsers = await CoachApiService.instance.fetchUsers();
       candidates.addAll(coachUsers.map(_normalizeInviteUser));
@@ -2693,9 +2705,14 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         ? selectedMember
         : null;
 
-    final colors = Theme.of(context).colorScheme;
-
-    return Container(
+    // Wrapped in a Builder so Theme.of(context) resolves against this
+    // widget's actual position in the tree (inside the company Theme
+    // override below), instead of the State's outer context which sits
+    // above that override and would resolve to the app's default theme.
+    return Builder(
+      builder: (context) {
+        final colors = Theme.of(context).colorScheme;
+        return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: colors.surface.withValues(alpha: 0.96),
@@ -2886,7 +2903,21 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                     child: TextButton.icon(
                       onPressed: () {
                         final point = _memberFocusPoint(focusMember);
-                        if (point == null) return;
+                        if (point == null) {
+                          // Previously a silent no-op that looked like a
+                          // broken button: there's nothing to center on yet
+                          // because no live location has come in for this
+                          // walker, so tell the user instead of doing
+                          // nothing.
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Waiting for a live location to center on.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
                         setState(() {
                           _isWalkerSessionOverlayVisible = false;
                           _selectedMarkerUserId = focusMember.userId;
@@ -2984,60 +3015,71 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
           ),
         ],
       ),
+        );
+      },
     );
   }
 
   Widget _buildCollapsedWalkerSessionToggle() {
     final walkerCount =
         _sharedMembers.where((member) => member.userId.isNotEmpty).length;
-    final colors = Theme.of(context).colorScheme;
-    final labelColor = colors.onSurface.withValues(alpha: 0.72);
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Material(
-        color: colors.surface.withValues(alpha: 0.96),
-        elevation: 3,
-        borderRadius: BorderRadius.circular(999),
-        child: InkWell(
-          onTap: () {
-            setState(() {
-              _isWalkerSessionOverlayVisible = true;
-            });
-          },
-          borderRadius: BorderRadius.circular(999),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.groups_rounded,
-                  size: 18,
-                  color: labelColor,
+    // See _buildSharedSessionOverlay for why this needs a Builder: Theme.of
+    // must be looked up from a context inside the local company Theme
+    // override, not the State's outer context.
+    return Builder(
+      builder: (context) {
+        final colors = Theme.of(context).colorScheme;
+        final labelColor = colors.onSurface.withValues(alpha: 0.72);
+
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Material(
+            color: colors.surface.withValues(alpha: 0.96),
+            elevation: 3,
+            borderRadius: BorderRadius.circular(999),
+            child: InkWell(
+              onTap: () {
+                setState(() {
+                  _isWalkerSessionOverlayVisible = true;
+                });
+              },
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.groups_rounded,
+                      size: 18,
+                      color: labelColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      walkerCount == 1
+                          ? '1 walker hidden'
+                          : '$walkerCount walkers hidden',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: labelColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.visibility_rounded,
+                      size: 18,
+                      color: labelColor,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  walkerCount == 1
-                      ? '1 walker hidden'
-                      : '$walkerCount walkers hidden',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: labelColor,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.visibility_rounded,
-                  size: 18,
-                  color: labelColor,
-                ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

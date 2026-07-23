@@ -47,6 +47,13 @@ class StepMapApiService {
     return raw.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
   }
 
+  Future<List<Map<String, dynamic>>> fetchInviteCandidates() async {
+    final response = await _api.getJson('/api/walk-invite-candidates', token: _token);
+    final raw = response['users'];
+    if (raw is! List) return const <Map<String, dynamic>>[];
+    return raw.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
+  }
+
   Future<List<Map<String, dynamic>>> fetchRecordedWalks() async {
     final response = await _api.getJson('/api/recorded-walks', token: _token);
     final raw = response['walks'];

@@ -298,6 +298,57 @@ class WalkController extends Controller
         return response()->json(['message' => 'Deleted.']);
     }
 
+    public function inviteCandidates(Request $request): JsonResponse
+    {
+        $user = $this->user($request);
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $companyId = $this->activeCompanyValue($user->active_company_id, $user->company_id);
+        $companyCode = $this->activeCompanyValue($user->active_company_code, $user->company_code);
+        $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
+
+        $users = User::query()
+            ->where('id', '!=', (string) $user->id)
+            ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
+                if ($companyId !== '') {
+                    $builder->where('company_id', $companyId)
+                        ->orWhere('active_company_id', $companyId);
+                }
+                if ($companyCode !== '') {
+                    $builder->orWhere('company_code', $companyCode)
+                        ->orWhere('active_company_code', $companyCode);
+                }
+                if ($companyName !== '') {
+                    $builder->orWhere('company_name', $companyName)
+                        ->orWhere('active_company_name', $companyName);
+                }
+            })
+            ->orderBy('name')
+            ->get()
+            ->map(fn (User $candidate) => [
+                'id' => (string) $candidate->id,
+                'username' => $candidate->name,
+                'email' => $candidate->email,
+                'profilePic' => $candidate->profile_pic,
+                'companyName' => $candidate->company_name,
+                'companyCode' => $candidate->company_code,
+            ])
+            ->values();
+
+        return response()->json(['users' => $users]);
+    }
+
+    private function activeCompanyValue(?string $primary, ?string $fallback): string
+    {
+        $value = trim((string) ($primary ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+        return trim((string) ($fallback ?? ''));
+    }
+
     private function user(Request $request): ?User
     {
         $user = $request->user();

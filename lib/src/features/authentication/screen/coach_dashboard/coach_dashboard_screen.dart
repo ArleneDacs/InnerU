@@ -1932,9 +1932,18 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     await _tileTransitionController.forward(from: 0);
     if (!mounted) return;
 
+    // The regular user dashboard reaches these same feature pages through
+    // named routes wrapped in `_companyThemed` (see main.dart), so they pick
+    // up the company theme. This tile grid instead pushes the destination
+    // page directly through a bare PageRouteBuilder, so without this Theme
+    // wrapper the page would fall back to the app's default light theme
+    // instead of matching the rest of the coach dashboard.
     final targetPage = setupIndex != null
         ? CoachSetuppage(initialIndex: setupIndex)
-        : destinationPage;
+        : Theme(
+            data: AppTheme.company(_companyTheme),
+            child: destinationPage,
+          );
 
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -2431,6 +2440,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   Widget _buildUnifiedMoodSection(BuildContext context) {
+    final companyTheme = _companyTheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2451,10 +2461,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           "Choose the mood that feels closest right now.",
                           style: TextStyle(
-                            color: Color(0xFF5E6E57),
+                            color: companyTheme.mutedInkColor,
                             height: 1.45,
                           ),
                         ),
@@ -2517,10 +2527,10 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                         ),
                         if (_isSavingEmotion) ...[
                           const SizedBox(height: 14),
-                          const Text(
+                          Text(
                             "Saving your mood...",
                             style: TextStyle(
-                              color: Color(0xFF5E6E57),
+                              color: companyTheme.mutedInkColor,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -2536,12 +2546,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                               width: 52,
                               height: 52,
                               decoration: BoxDecoration(
-                                color: const Color(0xFFDDE7D5),
+                                color: companyTheme.isDark
+                                    ? companyTheme.primaryColor
+                                        .withValues(alpha: 0.14)
+                                    : const Color(0xFFDDE7D5),
                                 borderRadius: BorderRadius.circular(18),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 CupertinoIcons.heart_fill,
-                                color: Color(0xFF5E7652),
+                                color: companyTheme.isDark
+                                    ? companyTheme.primaryColor
+                                    : const Color(0xFF5E7652),
                                 size: 24,
                               ),
                             ),
@@ -2549,20 +2564,20 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             Expanded(
                               child: Text(
                                 "Today you're feeling $_currentUserEmotion",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 21,
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF24311F),
+                                  color: companyTheme.inkColor,
                                 ),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           "Nice check-in. You can keep a longer emotion history in the tracker whenever you want.",
                           style: TextStyle(
-                            color: Color(0xFF5E6E57),
+                            color: companyTheme.mutedInkColor,
                             height: 1.45,
                           ),
                         ),
@@ -2577,7 +2592,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             );
                           },
                           style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFF6E8464),
+                            foregroundColor: companyTheme.isDark
+                                ? companyTheme.primaryColor
+                                : const Color(0xFF6E8464),
                             padding: EdgeInsets.zero,
                           ),
                           child: const Row(
@@ -4513,7 +4530,18 @@ class _CoachGroupCustomizationBodyState
       final groups = _groups!;
       final leaderboardPayload =
           _leaderboardPayload ?? const <String, dynamic>{};
-      final summaries = page._apiGroupSummaries(leaderboardPayload, groups);
+      // fetchGroups() (which built `groups`) is already scoped server-side to
+      // groups this coach owns/co-coaches. The leaderboard payload, on the
+      // other hand, is scoped to the whole company so every coach's groups
+      // can be compared against each other — using it unfiltered here was
+      // showing (and offering to edit/delete) other coaches' groups on a
+      // brand-new coach account. Restrict to groups this coach actually owns.
+      final ownedGroupIds =
+          groups.map((group) => group['id']?.toString() ?? '').toSet();
+      final summaries = page
+          ._apiGroupSummaries(leaderboardPayload, groups)
+          .where((summary) => ownedGroupIds.contains(summary.groupId))
+          .toList();
       final sortedByName = summaries.toList()
         ..sort((a, b) => a.groupName.toLowerCase().compareTo(
               b.groupName.toLowerCase(),

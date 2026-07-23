@@ -67,6 +67,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/chat-rooms/{chatRoom}/messages', [ChatController::class, 'messages']);
     Route::post('/chat-rooms/{chatRoom}/messages', [ChatController::class, 'storeMessage']);
     Route::patch('/chat-rooms/{chatRoom}/read', [ChatController::class, 'markRead']);
+    Route::get('/walk-invite-candidates', [WalkController::class, 'inviteCandidates']);
     Route::get('/walk-sessions', [WalkController::class, 'sessions']);
     Route::post('/walk-sessions', [WalkController::class, 'storeSession']);
     Route::get('/walk-sessions/{walkSession}/members', [WalkController::class, 'members']);
