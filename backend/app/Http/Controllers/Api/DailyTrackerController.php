@@ -7,6 +7,7 @@ use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\DailyTracker;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DailyTrackerController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -217,6 +222,8 @@ class DailyTrackerController extends Controller
                 'company_name' => $validated['company_name'] ?? $user->company_name,
             ]
         );
+
+        $this->userScoreService->syncFromPayload($user, $validated);
 
         return response()->json([
             'tracker' => $this->mapTracker($tracker),

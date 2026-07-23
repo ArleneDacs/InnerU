@@ -6,12 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class LeaderboardController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -24,7 +29,7 @@ class LeaderboardController extends Controller
         $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
         $isCoach = (bool) $user->is_coach;
 
-        $query = User::query()
+        $companyUsers = User::query()
             ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
                 if ($companyId !== '') {
                     $builder->where('company_id', $companyId)
@@ -39,37 +44,37 @@ class LeaderboardController extends Controller
                         ->orWhere('active_company_name', $companyName);
                 }
             })
-            ->orderByDesc('score')
-            ->orderBy('name');
+            ->orderBy('name')
+            ->get();
 
-        $companyLeaderboard = $query->get()->map(function (User $candidate, int $index) {
-            return [
-                'userId' => (string) $candidate->id,
-                'name' => $candidate->name,
-                'score' => (int) $candidate->score,
-                'rank' => $index + 1,
-                'profilePic' => $candidate->profile_pic,
-                'teamName' => $candidate->company_name,
-            ];
-        });
+        $companyScores = $this->userScoreService->resolveForUsers($companyUsers);
+        $companyLeaderboard = $companyUsers
+            ->map(function (User $candidate) use ($companyScores): array {
+                $score = $companyScores[(string) $candidate->id] ?? (int) $candidate->score;
 
-        $usersById = User::query()
-            ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
-                if ($companyId !== '') {
-                    $builder->where('company_id', $companyId)
-                        ->orWhere('active_company_id', $companyId);
-                }
-                if ($companyCode !== '') {
-                    $builder->orWhere('company_code', $companyCode)
-                        ->orWhere('active_company_code', $companyCode);
-                }
-                if ($companyName !== '') {
-                    $builder->orWhere('company_name', $companyName)
-                        ->orWhere('active_company_name', $companyName);
-                }
+                return [
+                    'userId' => (string) $candidate->id,
+                    'name' => $candidate->name,
+                    'score' => $score,
+                    'profilePic' => $candidate->profile_pic,
+                    'teamName' => $candidate->company_name,
+                ];
             })
-            ->get()
-            ->keyBy(fn (User $candidate) => (string) $candidate->id);
+            ->sort(function (array $left, array $right): int {
+                if ($left['score'] !== $right['score']) {
+                    return $right['score'] <=> $left['score'];
+                }
+
+                return strcmp($left['name'], $right['name']);
+            })
+            ->values()
+            ->map(function (array $entry, int $index): array {
+                $entry['rank'] = $index + 1;
+                return $entry;
+            })
+            ->values();
+
+        $usersById = $companyUsers->keyBy(fn (User $candidate) => (string) $candidate->id);
 
         $groupLeaderboards = CoachGroup::query()
             ->orderBy('name')
@@ -83,7 +88,7 @@ class LeaderboardController extends Controller
                 return $this->belongsToCompany($group->company_id ?? null, $group->company_code ?? '', $group->company_name ?? '', $companyId, $companyCode, $companyName)
                     || $this->belongsToCompany($coach->company_id ?? null, $coach->company_code ?? '', $coach->company_name ?? '', $companyId, $companyCode, $companyName);
             })
-            ->map(function (CoachGroup $group) use ($usersById) {
+            ->map(function (CoachGroup $group) use ($usersById, $companyScores) {
                 $coach = $usersById->get((string) $group->coach_id);
                 $coachName = $coach?->name ?? 'Coach';
                 $memberIds = CoachMentee::query()
@@ -103,7 +108,7 @@ class LeaderboardController extends Controller
                 }
 
                 $entries = collect($memberIds)
-                    ->map(function (string $memberId) use ($usersById, $group): ?array {
+                    ->map(function (string $memberId) use ($usersById, $group, $companyScores): ?array {
                         $member = $usersById->get($memberId);
                         if ($member === null) {
                             return null;
@@ -112,13 +117,19 @@ class LeaderboardController extends Controller
                         return [
                             'userId' => (string) $member->id,
                             'name' => $member->name,
-                            'score' => (int) $member->score,
+                            'score' => $companyScores[(string) $member->id] ?? (int) $member->score,
                             'profilePic' => $member->profile_pic,
                             'teamName' => $group->name,
                         ];
                     })
                     ->filter()
-                    ->sortByDesc('score')
+                    ->sort(function (array $left, array $right): int {
+                        if ($left['score'] !== $right['score']) {
+                            return $right['score'] <=> $left['score'];
+                        }
+
+                        return strcmp($left['name'], $right['name']);
+                    })
                     ->values()
                     ->map(function (array $entry, int $index): array {
                         $entry['rank'] = $index + 1;
@@ -143,7 +154,7 @@ class LeaderboardController extends Controller
             ->where('coach_id', (string) $user->id)
             ->orderByDesc('updated_at')
             ->get()
-            ->map(function (CoachMentee $relation) use ($usersById): ?array {
+            ->map(function (CoachMentee $relation) use ($usersById, $companyScores): ?array {
                 $mentee = $usersById->get((string) $relation->mentee_id);
                 if ($mentee === null) {
                     return null;
@@ -152,14 +163,20 @@ class LeaderboardController extends Controller
                 return [
                     'userId' => (string) $mentee->id,
                     'name' => $mentee->name,
-                    'score' => (int) $mentee->score,
+                    'score' => $companyScores[(string) $mentee->id] ?? (int) $mentee->score,
                     'rank' => 0,
                     'profilePic' => $mentee->profile_pic,
                     'teamName' => $relation->group_name ?: $relation->team_name,
                 ];
             })
             ->filter()
-            ->sortByDesc('score')
+            ->sort(function (array $left, array $right): int {
+                if ($left['score'] !== $right['score']) {
+                    return $right['score'] <=> $left['score'];
+                }
+
+                return strcmp($left['name'], $right['name']);
+            })
             ->values()
             ->map(function (array $entry, int $index): array {
                 $entry['rank'] = $index + 1;
@@ -181,7 +198,7 @@ class LeaderboardController extends Controller
             'currentUser' => [
                 'userId' => (string) $user->id,
                 'name' => $user->name,
-                'score' => (int) $user->score,
+                'score' => $companyScores[(string) $user->id] ?? (int) $user->score,
                 'isCoach' => $isCoach,
             ],
         ]);

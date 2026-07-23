@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\UserPoint;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -11,6 +12,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class UserPointController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function upsert(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -60,6 +65,8 @@ class UserPointController extends Controller
                 'activity_counts' => $validated['activity_counts'] ?? [],
             ]
         );
+
+        $this->userScoreService->syncFromPayload($user, $validated);
 
         return response()->json([
             'point' => $this->pointPayload($point->refresh()),

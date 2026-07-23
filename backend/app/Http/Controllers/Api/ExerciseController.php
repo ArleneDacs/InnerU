@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DailyTracker;
 use App\Models\ExerciseLog;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ExerciseController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -204,6 +209,8 @@ class ExerciseController extends Controller
                 'created_at' => now(),
             ]
         );
+
+        $this->userScoreService->syncForUser($user, min(100, $logs->count() * 10));
     }
 
     private function logPayload(ExerciseLog $log): array

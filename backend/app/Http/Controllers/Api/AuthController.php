@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PendingRegistration;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -19,6 +20,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -600,6 +605,7 @@ class AuthController extends Controller
             'companyId' => $user->company_id,
             'companyCode' => $user->company_code,
             'companyName' => $user->company_name,
+            'score' => $this->userScoreService->resolveForUser($user),
             'hasCompany' => (bool) $user->has_company,
             'activeCompanyId' => $user->active_company_id,
             'activeCompanyCode' => $user->active_company_code,

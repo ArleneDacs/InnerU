@@ -5,15 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\UserScoreService;
 
 class DashboardController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
         if ($user === null) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
+
+        $score = $this->userScoreService->resolveForUser($user);
 
         return response()->json([
             'user' => [
@@ -26,10 +33,10 @@ class DashboardController extends Controller
                 'company_code' => $user->company_code,
                 'company_name' => $user->company_name,
                 'profile_pic' => $user->profile_pic,
-                'score' => (int) $user->score,
+                'score' => $score,
             ],
             'summary' => [
-                'score' => (int) $user->score,
+                'score' => $score,
                 'company_name' => $user->company_name,
                 'company_code' => $user->company_code,
                 'today_emotion' => null,

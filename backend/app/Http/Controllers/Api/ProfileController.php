@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
@@ -14,6 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ProfileController extends Controller
 {
+    public function __construct(private readonly UserScoreService $userScoreService)
+    {
+    }
+
     public function show(Request $request): JsonResponse
     {
         return response()->json([
@@ -141,6 +146,7 @@ class ProfileController extends Controller
             'companyId' => $user->company_id,
             'companyCode' => $user->company_code,
             'companyName' => $user->company_name,
+            'score' => $this->userScoreService->resolveForUser($user),
             'hasCompany' => (bool) $user->has_company,
             'activeCompanyId' => $user->active_company_id,
             'activeCompanyCode' => $user->active_company_code,
