@@ -514,6 +514,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       groupId: groupId,
       groupName: groupName,
     );
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _createCoachGroup(String name) async {
@@ -534,6 +537,9 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
 
   Future<void> _declineCoachRequest(String requestId) async {
     await CoachApiService.instance.declineRequest(requestId);
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<Map<String, dynamic>?> _latestTrackerForUser(String userId) async {
@@ -3250,6 +3256,185 @@ class CoachGroupCustomizationPage extends StatelessWidget {
     );
   }
 
+  Future<void> _showAddMenteeToGroupDialog(
+    BuildContext context,
+    _CoachApiGroupSummary summary,
+  ) async {
+    List<Map<String, dynamic>> users;
+    try {
+      users = await CoachApiService.instance.fetchUsers();
+    } catch (error) {
+      debugPrint('Failed to load users for group: $error');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load users right now. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final availableUsers = users.where((user) {
+      final userId = user['id']?.toString() ?? '';
+      final isCoach = user['isCoach'] == true ||
+          ((user['role'] as String?)?.toLowerCase() == 'coach');
+      return userId.isNotEmpty &&
+          userId != currentUserId &&
+          !summary.memberIds.contains(userId) &&
+          !isCoach;
+    }).toList();
+
+    if (!context.mounted) return;
+    if (availableUsers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No mentees are available to add to ${summary.groupName}.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final searchController = TextEditingController();
+    try {
+      final selectedUser = await showModalBottomSheet<Map<String, dynamic>?>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (sheetContext, setSheetState) {
+              final query = searchController.text.trim().toLowerCase();
+              final filteredUsers = availableUsers.where((user) {
+                final name = (user['name'] as String?)?.toLowerCase() ?? '';
+                final email = (user['email'] as String?)?.toLowerCase() ?? '';
+                return query.isEmpty ||
+                    name.contains(query) ||
+                    email.contains(query);
+              }).toList();
+
+              return SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    8,
+                    18,
+                    MediaQuery.of(sheetContext).viewInsets.bottom + 18,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Add mentee to ${summary.groupName}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: searchController,
+                        onChanged: (_) => setSheetState(() {}),
+                        decoration: const InputDecoration(
+                          hintText: 'Search mentee',
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: filteredUsers.isEmpty
+                            ? const Center(child: Text('No mentees found.'))
+                            : ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: filteredUsers.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
+                                itemBuilder: (context, index) {
+                                  final user = filteredUsers[index];
+                                  final userName =
+                                      (user['name'] as String?)
+                                                  ?.trim()
+                                                  .isNotEmpty ==
+                                              true
+                                          ? (user['name'] as String).trim()
+                                          : ((user['email'] as String?)
+                                                      ?.trim()
+                                                      .isNotEmpty ==
+                                                  true
+                                              ? (user['email'] as String)
+                                                  .trim()
+                                                  .split('@')
+                                                  .first
+                                              : 'Mentee');
+                                  final profilePic =
+                                      (user['profilePic'] as String?)
+                                              ?.trim() ??
+                                          '';
+                                  final email =
+                                      (user['email'] as String?)?.trim() ?? '';
+
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: CircleAvatar(
+                                      backgroundImage: profilePic.isNotEmpty
+                                          ? NetworkImage(profilePic)
+                                          : null,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.08),
+                                      child: profilePic.isEmpty
+                                          ? Text(
+                                              userName.isNotEmpty
+                                                  ? userName[0].toUpperCase()
+                                                  : '?',
+                                            )
+                                          : null,
+                                    ),
+                                    title: Text(userName),
+                                    subtitle: Text(email),
+                                    onTap: () => Navigator.pop(sheetContext, user),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+
+      if (selectedUser == null) return;
+      final userId = selectedUser['id']?.toString() ?? '';
+      if (userId.isEmpty) return;
+
+      await CoachApiService.instance.assignMentee(
+        menteeId: userId,
+        teamName: teamName,
+        groupId: summary.groupId,
+        groupName: summary.groupName,
+      );
+      if (!context.mounted) return;
+
+      final selectedUserName =
+          (selectedUser['name'] as String?)?.trim().isNotEmpty == true
+              ? (selectedUser['name'] as String).trim()
+              : ((selectedUser['email'] as String?)?.trim().isNotEmpty == true
+                  ? (selectedUser['email'] as String).trim().split('@').first
+                  : 'Mentee');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$selectedUserName added to ${summary.groupName}.'),
+        ),
+      );
+    } finally {
+      searchController.dispose();
+    }
+  }
+
   Future<void> _confirmDeleteGroup({
     required BuildContext context,
     required String groupId,
@@ -4283,6 +4468,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                                 summary: summary,
                                 onAddCoach: () =>
                                     _showAddCoachDialog(context, summary),
+                                onAddMentee: () =>
+                                    _showAddMenteeToGroupDialog(context, summary),
                                 onDelete: () => _confirmDeleteGroup(
                                   context: context,
                                   groupId: summary.groupId,
@@ -4311,6 +4498,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                                 summary: summary,
                                 onAddCoach: () =>
                                     _showAddCoachDialog(context, summary),
+                                onAddMentee: () =>
+                                    _showAddMenteeToGroupDialog(context, summary),
                                 onDelete: () => _confirmDeleteGroup(
                                   context: context,
                                   groupId: summary.groupId,
@@ -5554,187 +5743,13 @@ class CoachManageMenteesPage extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   children: [
-                    if (requests.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(0, 4, 0, 10),
-                        child: Text(
-                          'Pending applications',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      ...requests.map((request) {
-                        final userName = (request['menteeName'] as String?)
-                                    ?.trim()
-                                    .isNotEmpty ==
-                                true
-                            ? (request['menteeName'] as String).trim()
-                            : 'User';
-                        final userEmail =
-                            (request['menteeEmail'] as String?)?.trim() ?? '';
-                        final userId =
-                            (request['menteeId'] as String?)?.trim() ?? '';
-                        final applicantRole =
-                            (request['applicantRole'] as String?)
-                                    ?.trim()
-                                    .toLowerCase() ??
-                                '';
-                        final applicantIsCoach =
-                            request['applicantIsCoach'] == true ||
-                                applicantRole == 'coach';
-                        final applyingAs = (request['applyingAs'] as String?)
-                                ?.trim()
-                                .toLowerCase() ??
-                            '';
-                        final applicantContext = applicantIsCoach
-                            ? 'Coach applying as mentee'
-                            : applyingAs == 'mentee'
-                                ? 'Mentee application'
-                                : '';
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: const Color(0xFFE7E9E2)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  CircleAvatar(
-                                    backgroundColor: const Color(0xFFDDE7D5),
-                                    child: Text(
-                                      userName.isNotEmpty ? userName[0] : '?',
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          userName,
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
-                                        if (userEmail.isNotEmpty)
-                                          Text(
-                                            userEmail,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Color(0xFF6B7165),
-                                            ),
-                                          ),
-                                        if (applicantContext.isNotEmpty) ...[
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            applicantContext,
-                                            style: const TextStyle(
-                                              color: Color(0xFF4F5F68),
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: () async {
-                                        final requestId =
-                                            _requestIdForRequest(request);
-                                        if (requestId.isEmpty) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Could not identify this request.',
-                                              ),
-                                            ),
-                                          );
-                                          return;
-                                        }
-                                        await onDeclineRequest(requestId);
-                                      },
-                                      child: const Text('Decline'),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: ElevatedButton(
-                                      onPressed: userId.isEmpty
-                                          ? null
-                                          : () async {
-                                              final requestId =
-                                                  _requestIdForRequest(request);
-                                              if (requestId.isEmpty) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Could not identify this request.',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              try {
-                                                await onAcceptRequest(
-                                                  requestId: requestId,
-                                                  menteeId: userId,
-                                                  teamName: teamName,
-                                                );
-                                                if (!context.mounted) return;
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                      '$userName is now in $teamName.',
-                                                    ),
-                                                  ),
-                                                );
-                                              } catch (error) {
-                                                debugPrint(
-                                                  'Failed to accept coach request '
-                                                  '$requestId: $error',
-                                                );
-                                                if (!context.mounted) return;
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Could not accept this application. Please try again.',
-                                                    ),
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                      child: const Text('Accept'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
+                    CoachPendingApplicationsSection(
+                      initialRequests: requests,
+                      currentUserId: currentUserId,
+                      teamName: teamName,
+                      onAcceptRequest: onAcceptRequest,
+                      onDeclineRequest: onDeclineRequest,
+                    ),
                     const SizedBox(height: 12),
                     if (groups.isNotEmpty) ...[
                       const Padding(
@@ -6008,6 +6023,326 @@ class CoachManageMenteesPage extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class CoachPendingApplicationsSection extends StatefulWidget {
+  const CoachPendingApplicationsSection({
+    super.key,
+    required this.initialRequests,
+    required this.currentUserId,
+    required this.teamName,
+    required this.onAcceptRequest,
+    required this.onDeclineRequest,
+  });
+
+  final List<Map<String, dynamic>> initialRequests;
+  final String currentUserId;
+  final String teamName;
+  final Future<void> Function({
+    required String requestId,
+    required String menteeId,
+    required String teamName,
+    String? groupId,
+    String? groupName,
+  }) onAcceptRequest;
+  final Future<void> Function(String requestId) onDeclineRequest;
+
+  @override
+  State<CoachPendingApplicationsSection> createState() =>
+      _CoachPendingApplicationsSectionState();
+}
+
+class _CoachPendingApplicationsSectionState
+    extends State<CoachPendingApplicationsSection> {
+  late List<Map<String, dynamic>> _requests;
+  final Set<String> _hiddenRequestIds = <String>{};
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _requests = List<Map<String, dynamic>>.from(widget.initialRequests);
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _refreshRequests();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant CoachPendingApplicationsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _requests = List<Map<String, dynamic>>.from(widget.initialRequests);
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  String _requestIdForRequest(dynamic request) {
+    final requestData = request is Map
+        ? Map<String, dynamic>.from(request)
+        : <String, dynamic>{};
+    final explicitId = (requestData['id'] as String?)?.trim() ?? '';
+    if (explicitId.isNotEmpty) return explicitId;
+
+    final menteeId = (requestData['menteeId'] as String?)?.trim() ?? '';
+    final coachId = (requestData['coachId'] as String?)?.trim() ??
+        widget.currentUserId;
+    if (menteeId.isNotEmpty && coachId.isNotEmpty) {
+      return '${menteeId}_$coachId';
+    }
+
+    return '';
+  }
+
+  Future<void> _refreshRequests() async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final latestRequests = await CoachApiService.instance.fetchRequests();
+      if (!mounted) return;
+      setState(() {
+        _requests = latestRequests;
+      });
+    } catch (error) {
+      debugPrint('Failed to refresh pending applications: $error');
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  Future<void> _handleAccept(Map<String, dynamic> request) async {
+    final userName = (request['menteeName'] as String?)
+                ?.trim()
+                .isNotEmpty ==
+            true
+        ? (request['menteeName'] as String).trim()
+        : 'User';
+    final userId = (request['menteeId'] as String?)?.trim() ?? '';
+    final requestId = _requestIdForRequest(request);
+
+    if (requestId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not identify this request.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await widget.onAcceptRequest(
+        requestId: requestId,
+        menteeId: userId,
+        teamName: widget.teamName,
+      );
+      if (!mounted) return;
+      setState(() {
+        _hiddenRequestIds.add(requestId);
+      });
+      await _refreshRequests();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$userName is now in ${widget.teamName}.'),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Failed to accept coach request $requestId: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not accept this application. Please try again.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleDecline(Map<String, dynamic> request) async {
+    final userName = (request['menteeName'] as String?)
+                ?.trim()
+                .isNotEmpty ==
+            true
+        ? (request['menteeName'] as String).trim()
+        : 'User';
+    final requestId = _requestIdForRequest(request);
+
+    if (requestId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not identify this request.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await widget.onDeclineRequest(requestId);
+      if (!mounted) return;
+      setState(() {
+        _hiddenRequestIds.add(requestId);
+      });
+      await _refreshRequests();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$userName declined.')),
+      );
+    } catch (error) {
+      debugPrint('Failed to decline coach request $requestId: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not decline this application. Please try again.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildRequestCard(Map<String, dynamic> request) {
+    final userName = (request['menteeName'] as String?)
+                ?.trim()
+                .isNotEmpty ==
+            true
+        ? (request['menteeName'] as String).trim()
+        : 'User';
+    final userEmail = (request['menteeEmail'] as String?)?.trim() ?? '';
+    final applicantRole =
+        (request['applicantRole'] as String?)?.trim().toLowerCase() ?? '';
+    final applicantIsCoach =
+        request['applicantIsCoach'] == true || applicantRole == 'coach';
+    final applyingAs =
+        (request['applyingAs'] as String?)?.trim().toLowerCase() ?? '';
+    final applicantContext = applicantIsCoach
+        ? 'Coach applying as mentee'
+        : applyingAs == 'mentee'
+            ? 'Mentee application'
+            : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE7E9E2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: const Color(0xFFDDE7D5),
+                child: Text(userName.isNotEmpty ? userName[0] : '?'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      userName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (userEmail.isNotEmpty)
+                      Text(
+                        userEmail,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF6B7165),
+                        ),
+                      ),
+                    if (applicantContext.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        applicantContext,
+                        style: const TextStyle(
+                          color: Color(0xFF4F5F68),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _handleDecline(request),
+                  child: const Text('Decline'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: (request['menteeId'] as String?)?.trim().isEmpty ==
+                          true
+                      ? null
+                      : () => _handleAccept(request),
+                  child: const Text('Accept'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleRequests = _requests.where((request) {
+      final requestId = _requestIdForRequest(request);
+      return requestId.isNotEmpty && !_hiddenRequestIds.contains(requestId);
+    }).toList();
+
+    if (visibleRequests.isEmpty && _requests.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    if (visibleRequests.isEmpty) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFFE7E9E2)),
+        ),
+        child: const Text('No pending applications right now.'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(0, 4, 0, 10),
+          child: Text(
+            'Pending applications',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+        ),
+        ...visibleRequests.map(_buildRequestCard),
+      ],
     );
   }
 }
@@ -6950,11 +7285,13 @@ class _CoachApiGroupCard extends StatefulWidget {
   const _CoachApiGroupCard({
     required this.summary,
     required this.onAddCoach,
+    required this.onAddMentee,
     required this.onDelete,
   });
 
   final _CoachApiGroupSummary summary;
   final VoidCallback onAddCoach;
+  final VoidCallback onAddMentee;
   final VoidCallback onDelete;
 
   @override
@@ -7023,6 +7360,14 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
                       summary.coachIds.length >= 2 ? null : widget.onAddCoach,
                   icon: Icon(
                     CupertinoIcons.person_badge_plus,
+                    color: colors.primary,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Add mentee',
+                  onPressed: widget.onAddMentee,
+                  icon: Icon(
+                    CupertinoIcons.person_2_fill,
                     color: colors.primary,
                   ),
                 ),

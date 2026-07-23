@@ -31,6 +31,13 @@ class SessionCleanupService {
     await prefs.remove('sleep_tracker_history');
     await prefs.remove(stepCacheOwnerKey);
 
+    if (userId != null && userId.isNotEmpty) {
+      await prefs.remove(savedStepsKey(userId));
+      await prefs.remove(initialStepsKey(userId));
+      await prefs.remove(stepOffsetKey(userId));
+      await prefs.remove(lastSavedDateKey(userId));
+    }
+
     await AudioHelper.stopAudio();
     await SpotifyNativeService.instance.stop();
     await FastingNotificationService.instance.cancelDailySleepBedtimeReminder();

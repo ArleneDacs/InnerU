@@ -94,7 +94,10 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => CheckEmailScreen(email: pendingEmail),
+            builder: (context) => CheckEmailScreen(
+              email: pendingEmail,
+              initialSendFailed: !AuthService.instance.lastVerificationEmailSent,
+            ),
           ),
         );
         return;
@@ -160,7 +163,10 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => CheckEmailScreen(email: pendingEmail),
+            builder: (context) => CheckEmailScreen(
+              email: pendingEmail,
+              initialSendFailed: !AuthService.instance.lastVerificationEmailSent,
+            ),
           ),
         );
         return;

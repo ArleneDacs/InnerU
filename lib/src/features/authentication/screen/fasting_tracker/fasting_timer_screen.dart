@@ -4,8 +4,10 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class FastingTimerScreen extends StatefulWidget {
   const FastingTimerScreen({super.key});
@@ -14,11 +16,13 @@ class FastingTimerScreen extends StatefulWidget {
   State<FastingTimerScreen> createState() => _FastingTimerScreenState();
 }
 
-class _FastingTimerScreenState extends State<FastingTimerScreen> {
+class _FastingTimerScreenState extends State<FastingTimerScreen>
+    with WidgetsBindingObserver {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final List<int> _fastingPlans = const [12, 14, 16, 18, 20, 24];
 
   Timer? _timer;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _fastingSubscription;
   int _selectedHours = 16;
   DateTime? _startTime;
   DateTime? _endTime;
@@ -28,7 +32,16 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadFastingState();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _fastingSubscription?.cancel();
+    _timer?.cancel();
+    super.dispose();
   }
 
   String get _userId =>
@@ -44,24 +57,21 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
       _fastingRef.collection('history');
 
   Future<void> _loadFastingState() async {
+    if (_userId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _startTime = null;
+          _endTime = null;
+        });
+      }
+      return;
+    }
+
     try {
       final snapshot = await _fastingRef.get();
-      final data = snapshot.data();
-
-      if (data != null) {
-        setState(() {
-          _selectedHours = (data['targetHours'] as num?)?.toInt() ?? 16;
-          _startTime = (data['startTime'] as Timestamp?)?.toDate();
-          _endTime = (data['endTime'] as Timestamp?)?.toDate();
-        });
-
-        if (_startTime != null && _endTime != null) {
-          await _syncFastingNotifications();
-          _startTicker();
-        } else {
-          await _clearFastingNotifications();
-        }
-      }
+      await _applyFastingData(snapshot.data());
+      _listenToFastingState();
     } catch (error) {
       debugPrint('Failed to load fasting state: $error');
     } finally {
@@ -70,6 +80,43 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  void _listenToFastingState() {
+    if (_userId.isEmpty) return;
+    _fastingSubscription?.cancel();
+    _fastingSubscription = _fastingRef.snapshots().listen(
+      (snapshot) async {
+        if (!mounted) return;
+        await _applyFastingData(snapshot.data());
+      },
+      onError: (error) {
+        debugPrint('Failed to listen to fasting state: $error');
+      },
+    );
+  }
+
+  Future<void> _applyFastingData(Map<String, dynamic>? data) async {
+    if (!mounted) return;
+
+    final nextSelectedHours = (data?['targetHours'] as num?)?.toInt() ?? 16;
+    final nextStart = (data?['startTime'] as Timestamp?)?.toDate();
+    final nextEnd = (data?['endTime'] as Timestamp?)?.toDate();
+
+    setState(() {
+      _selectedHours = nextSelectedHours;
+      _startTime = nextStart;
+      _endTime = nextEnd;
+    });
+
+    if (_startTime != null && _endTime != null) {
+      await _syncFastingNotifications();
+      _startTicker();
+    } else {
+      _timer?.cancel();
+      await _clearFastingNotifications();
+      _lastOngoingNotificationMinute = -1;
     }
   }
 
@@ -141,6 +188,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     } catch (error) {
       debugPrint('Failed to end fasting timer: $error');
       _showSnackBar('Failed to end fasting timer.');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadFastingState());
     }
   }
 
@@ -262,12 +316,6 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
   }
 
   @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isActive = _startTime != null && _endTime != null;
     final progress = _progress();
@@ -275,49 +323,65 @@ class _FastingTimerScreenState extends State<FastingTimerScreen> {
     final elapsed = _elapsedTime();
     final int percent = (progress * 100).round().clamp(0, 100);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F5F0),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF8F5F0),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const Text('Fasting'),
-        actions: [
-          IconButton(
-            onPressed: () => Navigator.pushNamed(context, '/fastingReports'),
-            icon: const Icon(Icons.insights_outlined),
-            tooltip: 'Reports',
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeroTimerCard(
-                    isActive: isActive,
-                    progress: progress,
-                    percent: percent,
-                    elapsed: elapsed,
-                    remaining: remaining,
-                  ),
-                  const SizedBox(height: 18),
-                  _buildQuickActions(isActive),
-                  const SizedBox(height: 18),
-                  _buildPlanSection(isActive),
-                  const SizedBox(height: 18),
-                  _buildTimelineSection(isActive),
-                  const SizedBox(height: 18),
-                  _buildAchievementSection(),
-                  const SizedBox(height: 18),
-                  _buildHistoryPreview(),
-                ],
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
+        return Theme(
+          data: AppTheme.company(companyTheme),
+          child: Scaffold(
+            backgroundColor: companyTheme.backgroundColor,
+            appBar: AppBar(
+              backgroundColor: companyTheme.surfaceColor,
+              foregroundColor: companyTheme.inkColor,
+              iconTheme: IconThemeData(color: companyTheme.inkColor),
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              title: Text(
+                'Fasting',
+                style: TextStyle(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+              actions: [
+                IconButton(
+                  onPressed: () =>
+                      Navigator.pushNamed(context, '/fastingReports'),
+                  icon: const Icon(Icons.insights_outlined),
+                  tooltip: 'Reports',
+                ),
+                const SizedBox(width: 6),
+              ],
             ),
+            body: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeroTimerCard(
+                          isActive: isActive,
+                          progress: progress,
+                          percent: percent,
+                          elapsed: elapsed,
+                          remaining: remaining,
+                        ),
+                        const SizedBox(height: 18),
+                        _buildQuickActions(isActive),
+                        const SizedBox(height: 18),
+                        _buildPlanSection(isActive),
+                        const SizedBox(height: 18),
+                        _buildTimelineSection(isActive),
+                        const SizedBox(height: 18),
+                        _buildAchievementSection(),
+                        const SizedBox(height: 18),
+                        _buildHistoryPreview(),
+                      ],
+                    ),
+                  ),
+          ),
+        );
+      },
     );
   }
 

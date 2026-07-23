@@ -122,6 +122,7 @@ class _SignupScreenState extends State<SignupScreen> {
       MaterialPageRoute(
         builder: (context) => CheckEmailScreen(
           email: _emailController.text.trim(),
+          initialSendFailed: !AuthService.instance.lastVerificationEmailSent,
         ),
       ),
     );

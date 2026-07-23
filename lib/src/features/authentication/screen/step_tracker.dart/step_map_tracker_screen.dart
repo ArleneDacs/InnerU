@@ -15,6 +15,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/admin_user_api_service.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/step_map_api_service.dart';
@@ -1246,6 +1247,86 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     } catch (error) {
       debugPrint('Failed to load current user: $error');
     }
+  }
+
+  Map<String, dynamic> _normalizeInviteUser(Map<String, dynamic> user) {
+    final id = user['id']?.toString().trim() ?? '';
+    final username = (user['username'] ??
+            user['name'] ??
+            user['fullName'] ??
+            user['displayName'])
+        ?.toString()
+        .trim();
+    final email = (user['email'] ?? user['username'])?.toString().trim();
+
+    return {
+      ...user,
+      'id': id,
+      'username': username?.isNotEmpty == true ? username : email ?? '',
+      'email': email ?? '',
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchInviteUsers() async {
+    final currentUserId = _currentUserId;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final candidates = <Map<String, dynamic>>[];
+
+    try {
+      final coachUsers = await CoachApiService.instance.fetchUsers();
+      candidates.addAll(coachUsers.map(_normalizeInviteUser));
+    } catch (error) {
+      debugPrint('Failed to load invite users from coach endpoint: $error');
+    }
+
+    try {
+      final adminUsers = await AdminUserApiService.instance.fetchUsers();
+      candidates.addAll(
+        adminUsers.map(
+          (user) => _normalizeInviteUser({
+            'id': user.id,
+            'username': user.name,
+            'email': user.email,
+            'profilePic': user.profilePic,
+            'companyName': user.companyName,
+            'companyCode': user.companyCode,
+          }),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Failed to load invite users from admin endpoint: $error');
+    }
+
+    final seenIds = <String>{};
+    final filteredUsers = <Map<String, dynamic>>[];
+    for (final user in candidates) {
+      final id = user['id']?.toString().trim() ?? '';
+      if (id.isEmpty || id == currentUserId || !seenIds.add(id)) {
+        continue;
+      }
+      filteredUsers.add(user);
+    }
+
+    filteredUsers.sort((a, b) {
+      final aName = ((a['username']?.toString().trim().isNotEmpty == true
+                  ? a['username']
+                  : a['email'])
+              ?.toString()
+              .toLowerCase()) ??
+          '';
+      final bName = ((b['username']?.toString().trim().isNotEmpty == true
+                  ? b['username']
+                  : b['email'])
+              ?.toString()
+              .toLowerCase()) ??
+          '';
+      return aName.compareTo(bName);
+    });
+
+    return filteredUsers;
   }
 
   void _listenToWalkSessions() {
@@ -2601,6 +2682,36 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
               ),
             ],
           ),
+          if (_sharedSessionActionLabel != null) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isSessionBusy
+                    ? null
+                    : (_isSessionOwner
+                        ? _endSharedSessionAction
+                        : _leaveSharedSessionAction),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isSessionOwner
+                      ? const Color(0xFFB96D40)
+                      : const Color(0xFF90A17D),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                ),
+                icon: Icon(
+                  _isSessionOwner
+                      ? Icons.stop_circle_outlined
+                      : Icons.logout_rounded,
+                  size: 18,
+                ),
+                label: Text(_sharedSessionActionLabel!),
+              ),
+            ),
+          ],
           if (focusMember != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -2948,8 +3059,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   }
 
   Future<void> _openInviteSheet() async {
-    final userId = _currentUserId;
-    if (userId == null) return;
+    if (_currentUserId == null) return;
     final activeSessionId = _activeSessionId;
     final activeSessionStatus = _activeSessionStatus;
 
@@ -3041,27 +3151,37 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                     const SizedBox(height: 16),
                     SizedBox(
                       height: 360,
-                      child: FutureBuilder<List<AdminUserApiUser>>(
-                        future: AdminUserApiService.instance.fetchUsers(),
+                      child: FutureBuilder<List<Map<String, dynamic>>>(
+                        future: _fetchInviteUsers(),
                         builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                                  ConnectionState.waiting &&
+                              snapshot.data == null) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+
+                          if (snapshot.hasError) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: Text('Unable to load users right now.'),
+                              ),
+                            );
+                          }
+
                           final users = (snapshot.data ?? [])
-                              .map(
-                                (user) => <String, dynamic>{
-                                  'id': user.id,
-                                  'username': user.name,
-                                  'email': user.email,
-                                },
-                              )
-                              .where((user) => user['id'] != userId)
                               .where((user) {
-                            if (searchQuery.isEmpty) return true;
-                            final username =
-                                (user['username'] as String).toLowerCase();
-                            final email =
-                                (user['email'] as String).toLowerCase();
-                            return username.contains(searchQuery) ||
-                                email.contains(searchQuery);
-                          }).toList();
+                                if (searchQuery.isEmpty) return true;
+                                final username =
+                                    (user['username'] as String).toLowerCase();
+                                final email =
+                                    (user['email'] as String).toLowerCase();
+                                return username.contains(searchQuery) ||
+                                    email.contains(searchQuery);
+                              })
+                              .toList();
 
                           if (users.isEmpty) {
                             return const Center(

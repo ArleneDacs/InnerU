@@ -4,9 +4,18 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 
 class CheckEmailScreen extends StatefulWidget {
-  const CheckEmailScreen({super.key, required this.email});
+  const CheckEmailScreen({
+    super.key,
+    required this.email,
+    this.initialSendFailed = false,
+  });
 
   final String email;
+
+  /// True when the server already told us the first verification email
+  /// did not go out (e.g. SMTP failure) — the account still exists, so we
+  /// warn the user up front instead of the generic "check your inbox".
+  final bool initialSendFailed;
 
   @override
   State<CheckEmailScreen> createState() => _CheckEmailScreenState();
@@ -101,20 +110,28 @@ class _CheckEmailScreenState extends State<CheckEmailScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.mark_email_unread_outlined,
+                  Icon(
+                    widget.initialSendFailed
+                        ? Icons.error_outline
+                        : Icons.mark_email_unread_outlined,
                     size: 84,
-                    color: Color(0xFF4C6B43),
+                    color: widget.initialSendFailed
+                        ? Colors.red
+                        : const Color(0xFF4C6B43),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Verify your email',
+                  Text(
+                    widget.initialSendFailed
+                        ? 'We could not send that email'
+                        : 'Verify your email',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'We sent a verification link to ${widget.email}. Please verify your email before signing in.',
+                    widget.initialSendFailed
+                        ? 'Your account for ${widget.email} was created, but the verification email did not go out. Tap below to try sending it again.'
+                        : 'We sent a verification link to ${widget.email}. Please verify your email before signing in.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 15, height: 1.5),
                   ),

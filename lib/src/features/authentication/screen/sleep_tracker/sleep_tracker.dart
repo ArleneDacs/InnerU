@@ -21,7 +21,8 @@ class SleepTracker extends StatefulWidget {
   State<SleepTracker> createState() => _SleepTrackerState();
 }
 
-class _SleepTrackerState extends State<SleepTracker> {
+class _SleepTrackerState extends State<SleepTracker>
+    with WidgetsBindingObserver {
   static const _modeKey = 'sleep_tracker_mode';
   static const _goalKey = 'sleep_tracker_goal_hours';
   static const _bedtimeHourKey = 'sleep_tracker_bedtime_hour';
@@ -43,6 +44,7 @@ class _SleepTrackerState extends State<SleepTracker> {
   Timer? _goalReachedTimer;
   Timer? _completionAlarmTimer;
   bool _goalReachedAlertShown = false;
+  int _lastOngoingNotificationMinute = -1;
   late final AudioPlayer _sleepAlarmPlayer = AudioPlayer()
     ..setPlayerMode(PlayerMode.mediaPlayer);
   bool _isSleepAlarmPlaying = false;
@@ -55,11 +57,13 @@ class _SleepTrackerState extends State<SleepTracker> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSleepData();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
@@ -69,6 +73,9 @@ class _SleepTrackerState extends State<SleepTracker> {
   }
 
   Future<void> _loadSleepData() async {
+    _ticker?.cancel();
+    _goalReachedTimer?.cancel();
+
     final prefs = await SharedPreferences.getInstance();
     final historyStrings =
         prefs.getStringList(_scopedKey(_historyKey)) ?? const [];
@@ -103,6 +110,13 @@ class _SleepTrackerState extends State<SleepTracker> {
     } else {
       await _syncInactiveSleepNotifications();
       await _scheduleBedtimeReminder();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadSleepData());
     }
   }
 
@@ -149,6 +163,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     setState(() {
       _activeSleepStart = start;
       _goalReachedAlertShown = false;
+      _lastOngoingNotificationMinute = -1;
     });
     _startTicker();
     await FastingNotificationService.instance.cancelDailySleepBedtimeReminder();
@@ -181,6 +196,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
     _goalReachedAlertShown = false;
+    _lastOngoingNotificationMinute = -1;
     await _stopSleepAlarmMusic();
     await FastingNotificationService.instance.cancelSleepWakeNotification();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
@@ -199,11 +215,19 @@ class _SleepTrackerState extends State<SleepTracker> {
 
   void _startTicker() {
     _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
         setState(() {});
-        _showSleepOngoingNotification();
         _checkForGoalCompletion();
+        final start = _activeSleepStart;
+        if (start != null) {
+          final elapsed = DateTime.now().difference(start);
+          final elapsedMinute = elapsed.inMinutes;
+          if (elapsedMinute != _lastOngoingNotificationMinute) {
+            _lastOngoingNotificationMinute = elapsedMinute;
+            _showSleepOngoingNotification();
+          }
+        }
       }
     });
   }
@@ -238,6 +262,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     _goalReachedAlertShown = true;
     _goalReachedTimer?.cancel();
     _ticker?.cancel();
+    _lastOngoingNotificationMinute = -1;
     unawaited(
         FastingNotificationService.instance.cancelSleepOngoingNotification());
     unawaited(_playCompletionAlarm());

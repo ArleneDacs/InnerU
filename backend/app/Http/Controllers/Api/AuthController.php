@@ -414,11 +414,14 @@ class AuthController extends Controller
 
                 $pending->forceFill($updates)->save();
 
-                $pending->sendVerificationEmail();
+                $verificationEmailSent = $pending->sendVerificationEmail();
 
                 return response()->json([
-                    'message' => 'Verification email sent. Please verify your email before signing in.',
+                    'message' => $verificationEmailSent
+                        ? 'Verification email sent. Please verify your email before signing in.'
+                        : 'Account created. We could not send the verification email right now, but you can request another one later.',
                     'verification_required' => true,
+                    'verification_email_sent' => $verificationEmailSent,
                     'email' => $pending->email,
                     'name' => $pending->name,
                 ], Response::HTTP_CREATED);
@@ -473,11 +476,14 @@ class AuthController extends Controller
 
             $pending = PendingRegistration::create($pendingAttributes);
 
-            $pending->sendVerificationEmail();
+            $verificationEmailSent = $pending->sendVerificationEmail();
 
             return response()->json([
-                'message' => 'Verification email sent. Please verify your email before signing in.',
+                'message' => $verificationEmailSent
+                    ? 'Verification email sent. Please verify your email before signing in.'
+                    : 'Account created. We could not send the verification email right now, but you can request another one later.',
                 'verification_required' => true,
+                'verification_email_sent' => $verificationEmailSent,
                 'email' => $pending->email,
                 'name' => $pending->name,
             ], Response::HTTP_CREATED);

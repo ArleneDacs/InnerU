@@ -280,24 +280,15 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        final isDark = theme.brightness == Brightness.dark;
-        final backgroundColor =
-            isDark ? const Color(0xFF1B1622) : const Color(0xFFFFFBF7);
-        final borderColor =
-            isDark ? const Color(0xFF443857) : const Color(0xFFE9DED5);
-        final titleColor =
-            isDark ? const Color(0xFFF5EFE9) : const Color(0xFF2B2B2B);
-        final bodyColor =
-            isDark ? const Color(0xFFE1D8D2) : const Color(0xFF6E625B);
-        final mutedColor =
-            isDark ? const Color(0xFFB6ABA3) : const Color(0xFF8D7F75);
-        final iconCircleColor =
-            isDark ? const Color(0xFF3B5240) : const Color(0xFFF7DEAA);
-        final iconColor =
-            isDark ? const Color(0xFFE2EDD8) : const Color(0xFF4C6B43);
-        final primaryButtonColor =
-            isDark ? const Color(0xFF8A67CE) : const Color(0xFF7A5AB8);
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        final backgroundColor = colorScheme.surface;
+        final borderColor = colorScheme.primary.withValues(alpha: 0.18);
+        final titleColor = colorScheme.onSurface;
+        final bodyColor = colorScheme.onSurface.withValues(alpha: 0.78);
+        final mutedColor = colorScheme.primary;
+        final iconCircleColor = colorScheme.primary.withValues(alpha: 0.16);
+        final iconColor = colorScheme.primary;
+        final primaryButtonColor = colorScheme.primary;
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 26),
@@ -421,6 +412,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 28),
@@ -428,9 +420,11 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
             decoration: BoxDecoration(
-              color: const Color(0xFF111734),
+              color: colorScheme.surface,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: const Color(0xFFF7C344)),
+              border: Border.all(
+                color: colorScheme.primary.withValues(alpha: 0.22),
+              ),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x66000000),
@@ -446,25 +440,25 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                   width: 104,
                   height: 104,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF7C344).withValues(alpha: 0.16),
+                    color: colorScheme.primary.withValues(alpha: 0.16),
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: const Color(0xFFF7C344),
+                      color: colorScheme.primary,
                       width: 4,
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.workspace_premium_rounded,
-                    color: Color(0xFFF7C344),
+                    color: colorScheme.primary,
                     size: 54,
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text(
+                Text(
                   'Reward unlocked',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white,
+                    color: colorScheme.onSurface,
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
                   ),
@@ -473,8 +467,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                 Text(
                   reward.title,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFFF7C344),
+                  style: TextStyle(
+                    color: colorScheme.primary,
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
                   ),
@@ -483,8 +477,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                 Text(
                   reward.description,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFFCCD3EA),
+                  style: TextStyle(
+                    color: colorScheme.onSurface.withValues(alpha: 0.75),
                     fontSize: 15,
                     height: 1.4,
                     fontWeight: FontWeight.w600,
@@ -499,8 +493,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                       _openStreakRewards();
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF7C344),
-                      foregroundColor: const Color(0xFF17120A),
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
@@ -659,14 +653,15 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
     timeProvider.stopTimer();
     await AudioHelper.stopAudio();
     await _stopSpotifyPlayer();
-    final unlockedRewards =
-        await _onMeditationComplete(completedSeconds: completedSeconds);
+    _playCompletionAlarm();
+    unawaited(_speakCompletionPraise());
+    final completionFuture =
+        _onMeditationComplete(completedSeconds: completedSeconds);
     await _handleMeditationCompleteAlert();
 
     if (!mounted) return;
-    _playCompletionAlarm();
-    await _speakCompletionPraise();
     await _showMeditationCompleteDialog();
+    final unlockedRewards = await completionFuture;
     if (unlockedRewards.isNotEmpty) {
       await _showUnlockedRewardDialog(unlockedRewards.last);
     }

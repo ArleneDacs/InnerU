@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/services/activity_logs_service.dart';
@@ -13,13 +15,24 @@ class ActivityLogsScreen extends StatefulWidget {
   State<ActivityLogsScreen> createState() => _ActivityLogsScreenState();
 }
 
-class _ActivityLogsScreenState extends State<ActivityLogsScreen> {
+class _ActivityLogsScreenState extends State<ActivityLogsScreen>
+    with WidgetsBindingObserver {
   late Future<ActivityLogsSnapshot> _futureSnapshot;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _futureSnapshot = _load();
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<ActivityLogsSnapshot> _load() {
@@ -31,6 +44,22 @@ class _ActivityLogsScreenState extends State<ActivityLogsScreen> {
       _futureSnapshot = _load();
     });
     await _futureSnapshot;
+  }
+
+  void _startAutoRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        unawaited(_refresh());
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refresh());
+    }
   }
 
   IconData _iconFor(ActivityLogKind kind) {

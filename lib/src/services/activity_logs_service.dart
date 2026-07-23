@@ -177,6 +177,16 @@ class ActivityLogsService {
 
         if (completedHours > 0 || active) {
           final activeStart = startTime ?? DateTime.now();
+          final completedStart = _dateFromValue(
+            latestHistory['startTime'] ?? latestHistory['start_time'],
+          );
+          final completedEnd = _dateFromValue(
+            latestHistory['finishedAt'] ?? latestHistory['finished_at'],
+          );
+          final completedDuration = completedStart != null &&
+                  completedEnd != null
+              ? completedEnd.difference(completedStart)
+              : Duration(minutes: (completedHours * 60).round());
           items.add(
             ActivityLogItem(
               kind: ActivityLogKind.fasting,
@@ -184,7 +194,7 @@ class ActivityLogsService {
               detail: active ? 'In progress' : 'Completed today',
               value: active
                   ? _durationLabel(DateTime.now().difference(activeStart))
-                  : _hoursLabel(completedHours),
+                  : _durationLabel(completedDuration),
             ),
           );
         } else if (targetHours > 0) {
@@ -314,24 +324,14 @@ class ActivityLogsService {
   }
 
   String _durationLabel(Duration duration) {
-    if (duration.inHours >= 1 && duration.inMinutes % 60 == 0) {
-      return '${duration.inHours}h';
-    }
     if (duration.inHours >= 1) {
       final remainingMinutes = duration.inMinutes % 60;
       return '${duration.inHours}h ${remainingMinutes}m';
     }
     if (duration.inMinutes >= 1) {
-      return '${duration.inMinutes} mins';
+      return '${duration.inMinutes}m';
     }
     return '${duration.inSeconds}s';
-  }
-
-  String _hoursLabel(double hours) {
-    final label = hours == hours.truncateToDouble()
-        ? hours.toStringAsFixed(0)
-        : hours.toStringAsFixed(1);
-    return '${label}h';
   }
 }
 

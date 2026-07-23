@@ -351,6 +351,10 @@ class _CoachesScreenState extends State<CoachesScreen> {
   Future<Map<String, CoachApplication>> _applicationsFuture =
       Future.value(const <String, CoachApplication>{});
 
+  String _normalizeCompanyKey(String? value) {
+    return (value ?? '').trim().toLowerCase();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -414,16 +418,16 @@ class _CoachesScreenState extends State<CoachesScreen> {
   }
 
   bool _isSameCompanyCoach(Coach coach) {
-    if (_currentCompanyCode.isNotEmpty && coach.companyId.isNotEmpty) {
-      return coach.companyId == _currentCompanyCode;
-    }
-    if (_currentCompanyId.isNotEmpty && coach.companyId.isNotEmpty) {
-      return coach.companyId == _currentCompanyId;
-    }
-    if (_currentCompanyName.isNotEmpty && coach.companyName.isNotEmpty) {
-      return coach.companyName == _currentCompanyName;
-    }
-    return false;
+    final coachKeys = <String>{
+      _normalizeCompanyKey(coach.companyId),
+      _normalizeCompanyKey(coach.companyName),
+    }.where((value) => value.isNotEmpty).toSet();
+    final currentKeys = <String>{
+      _currentCompanyId,
+      _currentCompanyCode,
+      _currentCompanyName,
+    }.where((value) => value.isNotEmpty).toSet();
+    return coachKeys.intersection(currentKeys).isNotEmpty;
   }
 
   List<Coach> _filterCoaches(
@@ -484,6 +488,10 @@ class _CoachesScreenState extends State<CoachesScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Application sent to ${coach.name}.')),
     );
+    if (!mounted) return;
+    setState(() {
+      _applicationsFuture = _loadApplications();
+    });
   }
 
   Future<List<Coach>> _loadCoaches() async {
@@ -503,8 +511,8 @@ class _CoachesScreenState extends State<CoachesScreen> {
             phone: entry.number ?? '',
             bio: '',
             profilePic: entry.profilePic ?? '',
-            companyId: entry.companyCode ?? '',
-            companyName: entry.companyName ?? '',
+            companyId: _normalizeCompanyKey(entry.companyCode),
+            companyName: _normalizeCompanyKey(entry.companyName),
             backgroundColor: const Color(0xFF6D849A),
           ),
         )

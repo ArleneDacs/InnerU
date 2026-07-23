@@ -713,6 +713,12 @@ class CoachManagementController extends Controller
         return $role === 'admin' || (bool) $user->is_admin;
     }
 
+    private function isCoach(User $user): bool
+    {
+        $role = strtolower(trim((string) $user->role));
+        return $role === 'coach' || (bool) $user->is_coach;
+    }
+
     private function activeCompanyValue(?string $primary, ?string $fallback): string
     {
         $value = trim((string) ($primary ?? ''));

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
@@ -64,11 +65,13 @@ void main() {
       addTearDown(AppSessionService.instance.clear);
       addTearDown(() => CompanyThemeService.clearCachedThemeForUser('42'));
 
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setInt('saved_steps_42', 800);
       await prefs.setInt('initial_steps_42', -1);
       await prefs.setInt('step_offset_42', 0);
-      await prefs.setString('last_saved_date_42', '2026-07-23');
+      await prefs.setString('last_saved_date_42', today);
       await prefs.setInt('daily_step_goal_42', 5000);
       await prefs.setString('step_cache_owner_uid', '42');
 

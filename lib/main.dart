@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
@@ -47,15 +49,42 @@ import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await AuthService.instance.initialize();
-  await FastingNotificationService.instance.initialize();
-  await StepBackgroundService.instance.configure();
-  WatchStepsReceiver.instance.start();
+void main() {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  runApp(const App());
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+
+    try {
+      await AuthService.instance.initialize();
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+    }
+    try {
+      await FastingNotificationService.instance.initialize();
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+    }
+    try {
+      await StepBackgroundService.instance.configure();
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+    }
+    try {
+      WatchStepsReceiver.instance.start();
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+    }
+
+    runApp(const App());
+  }, (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+  });
 }
 
 class App extends StatelessWidget {

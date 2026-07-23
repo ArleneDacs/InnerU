@@ -65,6 +65,7 @@ class AuthService {
   final AppSessionService _sessionService = AppSessionService.instance;
   final ApiClient _apiClient = ApiClient.instance;
   String? _pendingVerificationEmail;
+  bool _lastVerificationEmailSent = true;
   late final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: const ['email'],
     serverClientId: _googleServerClientId,
@@ -75,6 +76,13 @@ class AuthService {
   String? get currentUserId => _sessionService.currentUserId;
   String? get pendingVerificationEmail => _pendingVerificationEmail;
 
+  /// Whether the server actually delivered the verification email for the
+  /// most recent signup, as opposed to just creating the pending account.
+  /// SMTP failures are silent otherwise: the server still reports success
+  /// so the account gets created, and the user is left waiting on an email
+  /// that never sent.
+  bool get lastVerificationEmailSent => _lastVerificationEmailSent;
+
   void clearPendingVerificationEmail() {
     _pendingVerificationEmail = null;
   }
@@ -83,10 +91,14 @@ class AuthService {
     required String email,
   }) async {
     try {
-      await ApiClient.instance.postJson(
+      final response = await ApiClient.instance.postJson(
         '/api/auth/email/verification-notification',
         {'email': email.trim()},
       );
+      if (response['verification_email_sent'] == false) {
+        return response['message']?.toString() ??
+            'We could not send the verification email right now. Please try again later.';
+      }
       return null;
     } on ApiException catch (e) {
       return e.message;
@@ -171,7 +183,7 @@ class AuthService {
 
       final companyCodeValue =
           continueWithoutCompany ? null : companyCode.trim().toUpperCase();
-      await _apiClient.postJson(
+      final response = await _apiClient.postJson(
         '/api/auth/register',
         {
           'name': username.trim(),
@@ -183,6 +195,7 @@ class AuthService {
           'company_name': companyCodeValue,
         },
       );
+      _lastVerificationEmailSent = response['verification_email_sent'] != false;
       return null;
     } on ApiException catch (e) {
       if (e.statusCode == 422 && e.errors != null) {
@@ -362,6 +375,7 @@ class AuthService {
       final verificationRequired = response['verification_required'] == true;
       if (verificationRequired) {
         _pendingVerificationEmail = response['email']?.toString() ?? googleUser.email;
+        _lastVerificationEmailSent = response['verification_email_sent'] != false;
         return null;
       }
 
@@ -431,6 +445,7 @@ class AuthService {
       if (verificationRequired) {
         _pendingVerificationEmail =
             response['email']?.toString() ?? credential.email;
+        _lastVerificationEmailSent = response['verification_email_sent'] != false;
         return null;
       }
 

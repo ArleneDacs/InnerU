@@ -230,7 +230,8 @@ class _CompanyMembershipSettingsPanel extends StatefulWidget {
 }
 
 class _CompanyMembershipSettingsPanelState
-    extends State<_CompanyMembershipSettingsPanel> {
+    extends State<_CompanyMembershipSettingsPanel>
+    with WidgetsBindingObserver {
   late Future<CompanyMembershipData> _membershipFuture;
   final TextEditingController _codeController = TextEditingController();
   CompanyScoreMode _selectedScoreMode = CompanyScoreMode.merged;
@@ -240,13 +241,32 @@ class _CompanyMembershipSettingsPanelState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _membershipFuture = _loadMemberships();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _codeController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      setState(() {
+        _membershipFuture = _loadMemberships();
+      });
+    }
+  }
+
+  bool _isAbundance12Code(String value) {
+    final normalized = value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    return normalized == 'A12' ||
+        normalized.startsWith('AB12') ||
+        normalized.contains('ABUND12') ||
+        normalized.contains('ABUNDANCE12');
   }
 
   Future<CompanyMembershipData> _loadMemberships() async {
@@ -267,6 +287,10 @@ class _CompanyMembershipSettingsPanelState
     final code = _codeController.text.trim().toUpperCase();
     if (code.isEmpty) {
       _showMessage('Enter a company code.');
+      return;
+    }
+    if (code.length < 4 && !_isAbundance12Code(code)) {
+      _showMessage('Enter a valid company code.');
       return;
     }
 
@@ -412,6 +436,17 @@ class _CompanyMembershipSettingsPanelState
               TextField(
                 controller: _codeController,
                 textCapitalization: TextCapitalization.characters,
+                onChanged: (value) {
+                  final upperValue = value.toUpperCase();
+                  if (value != upperValue) {
+                    _codeController.value = _codeController.value.copyWith(
+                      text: upperValue,
+                      selection: TextSelection.collapsed(
+                        offset: upperValue.length,
+                      ),
+                    );
+                  }
+                },
                 decoration: InputDecoration(
                   labelText: 'Company code',
                   filled: true,

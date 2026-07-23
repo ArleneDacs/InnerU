@@ -705,19 +705,33 @@ class _NotesTypeState extends State<NotesType> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: isUploading
-                                ? Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.file(
-                                        File(previewPath),
-                                        width: imageWidth,
-                                        height: imageHeight,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                          return Container(
-                                            width: imageWidth,
-                                            height: imageHeight,
+                              ? Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    Image.file(
+                                      File(previewPath),
+                                      width: imageWidth,
+                                      height: imageHeight,
+                                      fit: BoxFit.cover,
+                                      frameBuilder:
+                                          (context, child, frame, wasLoaded) {
+                                        if (wasLoaded || frame != null) {
+                                          return child;
+                                        }
+                                        return Container(
+                                          width: imageWidth,
+                                          height: imageHeight,
+                                          color: Colors.grey[300],
+                                          child: const Center(
+                                            child: CircularProgressIndicator(),
+                                          ),
+                                        );
+                                      },
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                        return Container(
+                                          width: imageWidth,
+                                          height: imageHeight,
                                             color: Colors.grey[300],
                                             child: const Center(
                                               child: Icon(
@@ -725,13 +739,16 @@ class _NotesTypeState extends State<NotesType> {
                                                 color: Colors.black54,
                                               ),
                                             ),
-                                          );
-                                        },
-                                      ),
-                                      Positioned(
-                                        left: 12,
-                                        bottom: 12,
-                                        child: Container(
+                                        );
+                                      },
+                                    ),
+                                    const Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                    Positioned(
+                                      left: 12,
+                                      bottom: 12,
+                                      child: Container(
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 10,
                                             vertical: 6,
