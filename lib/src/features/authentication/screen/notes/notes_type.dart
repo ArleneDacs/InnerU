@@ -150,7 +150,7 @@ class _NotesTypeState extends State<NotesType> {
     final raw = value.trim();
     if (raw.isEmpty || raw == 'loading') return false;
 
-    final url = ImageStorageService.normalizeMediaUrl(raw);
+    final url = ImageStorageService.normalizeCommunityMediaUrl(raw);
     return url.isNotEmpty &&
         url != "loading" &&
         (url.startsWith("http://") || url.startsWith("https://"));
@@ -550,7 +550,8 @@ class _NotesTypeState extends State<NotesType> {
       if (imageUrl.trim() == 'loading') {
         continue;
       }
-      final normalizedImageUrl = ImageStorageService.normalizeMediaUrl(imageUrl);
+      final normalizedImageUrl =
+          ImageStorageService.normalizeCommunityMediaUrl(imageUrl);
       if (_isValidImageUrl(normalizedImageUrl)) {
         contentList.add({
           "type": "image",
@@ -658,7 +659,7 @@ class _NotesTypeState extends State<NotesType> {
     try {
       final imageUrl =
           await ImageStorageService.uploadCommunityImageFile(imageFile);
-      return ImageStorageService.normalizeMediaUrl(imageUrl);
+      return ImageStorageService.normalizeCommunityMediaUrl(imageUrl);
     } catch (e) {
       print("Error uploading image: $e");
       return "";
@@ -692,16 +693,16 @@ class _NotesTypeState extends State<NotesType> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: uploadedImageUrls[index] == "loading"
-                                ? Container(
-                                    width: imageWidth,
-                                    height: imageHeight,
-                                    color: Colors.grey[300],
-                                    child: Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                  )
+                              ? Container(
+                                  width: imageWidth,
+                                  height: imageHeight,
+                                  color: Colors.grey[300],
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
                                 : Image.network(
-                                    ImageStorageService.normalizeMediaUrl(
+                                    ImageStorageService.normalizeCommunityMediaUrl(
                                       uploadedImageUrls[index],
                                     ),
                                     width: imageWidth,

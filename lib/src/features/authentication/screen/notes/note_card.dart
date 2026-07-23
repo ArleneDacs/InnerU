@@ -37,7 +37,8 @@ class NoteCardState extends State<NoteCard> {
   }
 
   void showImageDialog(String imageUrl) {
-    final resolvedImageUrl = ImageStorageService.normalizeMediaUrl(imageUrl);
+    final resolvedImageUrl =
+        ImageStorageService.normalizeCommunityMediaUrl(imageUrl);
     showDialog(
       context: context,
       builder: (context) {
@@ -75,9 +76,11 @@ class NoteCardState extends State<NoteCard> {
 
     List<String> imageUrls = widget.note.note
         .where((item) => item["type"] == "image")
-        .map<String>((item) => ImageStorageService.normalizeMediaUrl(
-              item["value"],
-            ))
+        .map<String>(
+          (item) => ImageStorageService.normalizeCommunityMediaUrl(
+            item["value"],
+          ),
+        )
         .where((url) =>
             url.trim().isNotEmpty &&
             url != "loading" &&

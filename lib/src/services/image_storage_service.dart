@@ -166,4 +166,43 @@ class ImageStorageService {
 
     return '${ApiConfig.baseUrl}/${raw.replaceAll(RegExp(r'^/+'), '')}';
   }
+
+  static String normalizeCommunityMediaUrl(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return '';
+    if (raw == 'loading') return raw;
+    if (raw.startsWith('data:')) return raw;
+
+    final parsed = Uri.tryParse(raw);
+    if (parsed != null &&
+        parsed.hasScheme &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+      final host = parsed.host.toLowerCase();
+      if (host == 'localhost' || host == '127.0.0.1') {
+        final base = Uri.parse(ApiConfig.baseUrl);
+        final normalized = base.replace(
+          path: parsed.path,
+          queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
+        );
+        if (parsed.fragment.isEmpty) {
+          return normalized.toString();
+        }
+        return normalized.replace(fragment: parsed.fragment).toString();
+      }
+      return raw;
+    }
+
+    if (raw.startsWith('//')) {
+      return 'https:$raw';
+    }
+
+    final cleanedPath = raw.replaceAll(RegExp(r'^/+'), '');
+    if (cleanedPath.isEmpty) return '';
+
+    if (cleanedPath.startsWith('storage/')) {
+      return '${ApiConfig.baseUrl}/$cleanedPath';
+    }
+
+    return '${ApiConfig.baseUrl}/storage/$cleanedPath';
+  }
 }

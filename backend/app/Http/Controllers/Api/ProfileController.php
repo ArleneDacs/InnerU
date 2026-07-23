@@ -97,7 +97,7 @@ class ProfileController extends Controller
 
         $file = $validated['file'];
         $kind = $validated['kind'] ?? 'image';
-        $disk = config('filesystems.media_upload_disk', 'public');
+        $disk = $this->resolveUploadDisk($kind);
 
         [$path, $disk] = $this->storeUploadedMedia($file, $user->id, $kind, $disk);
 
@@ -213,5 +213,29 @@ class ProfileController extends Controller
         }
 
         return [null, $preferredDisk];
+    }
+
+    private function resolveUploadDisk(string $kind): string
+    {
+        $preferredDisk = config('filesystems.media_upload_disk', 'public');
+        if ($kind !== 'community') {
+            return $preferredDisk;
+        }
+
+        $s3Configured = filled(config('filesystems.disks.s3.bucket'))
+            || filled(config('filesystems.disks.s3.url'))
+            || filled(config('filesystems.disks.s3.endpoint'));
+        if ($s3Configured) {
+            return 's3';
+        }
+
+        $doConfigured = filled(config('filesystems.disks.do.bucket'))
+            || filled(config('filesystems.disks.do.url'))
+            || filled(config('filesystems.disks.do.endpoint'));
+        if ($doConfigured) {
+            return 'do';
+        }
+
+        return $preferredDisk;
     }
 }

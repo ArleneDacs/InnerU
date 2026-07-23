@@ -55,8 +55,9 @@ class Note {
         (data['note'] as List<dynamic>).map((item) {
           final mapped = Map<String, String>.from(item);
           if (mapped['type'] == 'image') {
-            mapped['value'] =
-                ImageStorageService.normalizeMediaUrl(mapped['value']);
+            mapped['value'] = ImageStorageService.normalizeCommunityMediaUrl(
+              mapped['value'],
+            );
           }
           return mapped;
         }),

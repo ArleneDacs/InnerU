@@ -35,4 +35,31 @@ void main() {
       expect(ImageStorageService.normalizeMediaUrl('loading'), 'loading');
     });
   });
+
+  group('ImageStorageService.normalizeCommunityMediaUrl', () {
+    test('prefixes storage keys with the api storage url', () {
+      expect(
+        ImageStorageService.normalizeCommunityMediaUrl(
+          'users/42/community-images/post.jpg',
+        ),
+        'https://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
+      );
+
+      expect(
+        ImageStorageService.normalizeCommunityMediaUrl(
+          '/storage/users/42/community-images/post.jpg',
+        ),
+        'https://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
+      );
+    });
+
+    test('keeps absolute urls and rewrites localhost to api base', () {
+      expect(
+        ImageStorageService.normalizeCommunityMediaUrl(
+          'http://localhost:4000/storage/users/42/community-images/post.jpg',
+        ),
+        'https://inneru-api.valenin.com/storage/users/42/community-images/post.jpg',
+      );
+    });
+  });
 }

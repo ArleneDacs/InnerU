@@ -83,6 +83,44 @@ class ProfileMediaUploadTest extends TestCase
         ]);
     }
 
+    public function test_community_media_prefers_s3_when_cloud_storage_is_available(): void
+    {
+        Storage::fake('s3');
+        Storage::fake('public');
+        config()->set('filesystems.media_upload_disk', 'public');
+        config()->set('filesystems.disks.s3.bucket', 'inneru-test-bucket');
+        config()->set('filesystems.disks.s3.url', 'https://inneru-test-bucket.s3.amazonaws.com');
+        config()->set('filesystems.disks.s3.endpoint', null);
+
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/media/upload', [
+            'kind' => 'community',
+            'file' => UploadedFile::fake()->image('community.jpg'),
+        ]);
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'url',
+                'profile_pic',
+                'path',
+                'user',
+            ]);
+
+        $path = $response->json('path');
+        $url = $response->json('url');
+
+        $this->assertIsString($path);
+        $this->assertIsString($url);
+        Storage::disk('s3')->assertExists($path);
+        Storage::disk('public')->assertMissing($path);
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'profile_pic' => null,
+        ]);
+    }
+
     public function test_authenticated_user_can_upload_profile_media_even_when_profile_pic_column_is_unavailable(): void
     {
         Storage::fake('do');
