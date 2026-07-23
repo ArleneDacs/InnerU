@@ -3,12 +3,19 @@ import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/comments_api_service.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class NoteCard extends StatefulWidget {
   final Note note;
   final VoidCallback onPressed;
+  final VoidCallback? onChanged;
 
-  const NoteCard({super.key, required this.note, required this.onPressed});
+  const NoteCard({
+    super.key,
+    required this.note,
+    required this.onPressed,
+    this.onChanged,
+  });
 
   @override
   State<NoteCard> createState() => NoteCardState();
@@ -24,11 +31,13 @@ class NoteCardState extends State<NoteCard> {
       isScrollControlled: true,
       builder: (context) => CommentWidget(
         postId: widget.note.id,
+        onChanged: widget.onChanged,
       ),
     );
   }
 
   void showImageDialog(String imageUrl) {
+    final resolvedImageUrl = ImageStorageService.normalizeMediaUrl(imageUrl);
     showDialog(
       context: context,
       builder: (context) {
@@ -39,7 +48,7 @@ class NoteCardState extends State<NoteCard> {
             onTap: () => Navigator.pop(context),
             child: InteractiveViewer(
               child: Image.network(
-                imageUrl,
+                resolvedImageUrl,
                 fit: BoxFit.contain,
                 loadingBuilder: (context, child, progress) {
                   if (progress == null) return child;
@@ -66,7 +75,9 @@ class NoteCardState extends State<NoteCard> {
 
     List<String> imageUrls = widget.note.note
         .where((item) => item["type"] == "image")
-        .map<String>((item) => item["value"]!)
+        .map<String>((item) => ImageStorageService.normalizeMediaUrl(
+              item["value"],
+            ))
         .where((url) =>
             url.trim().isNotEmpty &&
             url != "loading" &&
@@ -177,8 +188,31 @@ class NoteCardState extends State<NoteCard> {
                                       },
                                       errorBuilder:
                                           (context, error, stackTrace) {
-                                        return const Icon(Icons.broken_image,
-                                            size: 100, color: Colors.red);
+                                        return Container(
+                                          width: double.infinity,
+                                          height: 200,
+                                          color: Colors.black12,
+                                          child: const Center(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons
+                                                      .image_not_supported_rounded,
+                                                  size: 54,
+                                                  color: Colors.black54,
+                                                ),
+                                                SizedBox(height: 8),
+                                                Text(
+                                                  'Image unavailable',
+                                                  style: TextStyle(
+                                                    color: Colors.black54,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
                                       },
                                     ),
                                   ),

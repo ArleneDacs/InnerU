@@ -92,7 +92,7 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'max:20480'],
-            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'video'])],
+            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'community', 'video'])],
         ]);
 
         $file = $validated['file'];
@@ -109,7 +109,7 @@ class ProfileController extends Controller
 
         $url = Storage::disk($disk)->url($path);
 
-        if (Schema::hasColumn($user->getTable(), 'profile_pic')) {
+        if ($kind === 'avatar' && Schema::hasColumn($user->getTable(), 'profile_pic')) {
             try {
                 $user->forceFill([
                     'profile_pic' => $url,
@@ -189,7 +189,12 @@ class ProfileController extends Controller
             ?: 'jpg';
 
         $fileName = $kind.'_'.now()->format('YmdHis').'.'.$extension;
-        $directory = "users/{$userId}/{$kind}s";
+        $directory = match ($kind) {
+            'avatar' => "users/{$userId}/avatars",
+            'community' => "users/{$userId}/community-images",
+            'video' => "users/{$userId}/videos",
+            default => "users/{$userId}/images",
+        };
         $disks = array_values(array_unique(array_filter([
             $preferredDisk,
             'public',

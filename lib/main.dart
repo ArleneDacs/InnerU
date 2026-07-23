@@ -24,6 +24,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/login/login
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/activity_logs/activity_logs_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
@@ -37,6 +38,7 @@ import 'package:selfcare_projects/src/services/app_session_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/step_background_service.dart';
@@ -65,6 +67,7 @@ class App extends StatelessWidget {
       create: (context) => TimeProvider(),
       child: MaterialApp(
         navigatorKey: appNavigatorKey,
+        navigatorObservers: [appRouteObserver],
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
@@ -93,6 +96,8 @@ class App extends StatelessWidget {
           '/userprogress': (context) =>
               _companyThemed(const UserProgressPage()),
           '/communityScreen': (context) => CommunityScreen(),
+          '/activityLogs': (context) =>
+              _companyThemed(const ActivityLogsScreen()),
           '/calorieTracker': (context) =>
               _companyThemed(const CalorieTrackerScreen()),
           '/todayIntake': (context) =>

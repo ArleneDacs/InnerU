@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class Note {
   String id;
@@ -51,8 +52,14 @@ class Note {
       username: data['username'] ?? '',
       title: data['title'] ?? '',
       note: List<Map<String, String>>.from(
-        (data['note'] as List<dynamic>)
-            .map((item) => Map<String, String>.from(item)),
+        (data['note'] as List<dynamic>).map((item) {
+          final mapped = Map<String, String>.from(item);
+          if (mapped['type'] == 'image') {
+            mapped['value'] =
+                ImageStorageService.normalizeMediaUrl(mapped['value']);
+          }
+          return mapped;
+        }),
       ),
       color: data['color'] is int
           ? data['color']

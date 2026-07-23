@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EmotionSaveResult {
   const EmotionSaveResult({
@@ -102,12 +104,65 @@ class EmotionService {
     );
 
     WatchSyncService.instance.syncMood(normalizedEmotion, savedAt);
+    await _appendLocalEmotionLog(
+      userId: userId,
+      emotion: normalizedEmotion,
+      loggedAt: savedAt,
+    );
     return EmotionSaveResult(
       created: previousEmotion == null,
       emotion: normalizedEmotion,
       previousEmotion: previousEmotion,
     );
   }
+
+  Future<List<Map<String, dynamic>>> loadLocalEmotionHistory({
+    required String userId,
+    String? month,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawEntries = prefs.getStringList(_emotionHistoryKey(userId)) ?? const [];
+    final monthKey = month?.trim();
+    return rawEntries.map((entry) {
+      try {
+        final data = jsonDecode(entry);
+        if (data is Map) {
+          return Map<String, dynamic>.from(data);
+        }
+      } catch (_) {}
+      return <String, dynamic>{};
+    }).where((entry) {
+      if (entry.isEmpty) return false;
+      if (monthKey == null || monthKey.isEmpty) return true;
+      final date = entry['date']?.toString() ?? '';
+      return date.startsWith(monthKey);
+    }).toList();
+  }
+
+  Future<void> _appendLocalEmotionLog({
+    required String userId,
+    required String emotion,
+    required DateTime loggedAt,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _emotionHistoryKey(userId);
+    final existing = prefs.getStringList(key) ?? <String>[];
+    existing.add(
+      jsonEncode({
+        'date': dateKeyFor(loggedAt),
+        'emotion': emotion,
+        'loggedAt': loggedAt.toIso8601String(),
+      }),
+    );
+
+    if (existing.length > 200) {
+      existing.removeRange(0, existing.length - 200);
+    }
+
+    await prefs.setStringList(key, existing);
+  }
+
+  String _emotionHistoryKey(String userId) => 'emotion_history_$userId';
 
   String? _normalizeEmotion(dynamic value) {
     if (value is! String) {

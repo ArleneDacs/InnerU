@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_tracker_utils.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -136,6 +137,7 @@ class _TrackingScreenState extends State<TrackingScreen>
     }
 
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final cachedGoal = prefs.getInt('daily_step_goal_$userId');
     final owner = prefs.getString(SessionCleanupService.stepCacheOwnerKey);
     final localTodaySteps = owner == userId
@@ -236,7 +238,11 @@ class _TrackingScreenState extends State<TrackingScreen>
         ? (calorieResponse['day'] as Map).cast<String, dynamic>()
         : <String, dynamic>{};
 
-    var steps = _readInt(trackerData['stepCount']) ?? 0;
+    final remoteSteps = _readInt(trackerData['stepCount']) ?? 0;
+    var steps = resolveDisplayedStepCount(
+      cachedSteps: DateUtils.isSameDay(date, today) ? todaySteps : 0,
+      remoteSteps: remoteSteps,
+    );
     if (DateUtils.isSameDay(date, today)) {
       steps = math.max(steps, todaySteps);
     }
@@ -597,7 +603,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         color: _primaryDarkColor,
                       ),
                     )
-                  : _buildContent(selectedSummary),
+                  : _buildContent(context, selectedSummary),
             ),
           ),
         );
@@ -605,7 +611,7 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
-  Widget _buildContent(_DayStepSummary? selectedSummary) {
+  Widget _buildContent(BuildContext context, _DayStepSummary? selectedSummary) {
     return RefreshIndicator(
       color: _primaryDarkColor,
       backgroundColor: _surfaceColor,
@@ -626,7 +632,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                   const SizedBox(height: 18),
                   _buildWeekOverviewCard(),
                   const SizedBox(height: 18),
-                  _buildHistorySection(),
+                  _buildHistorySection(context),
                 ],
               ),
       ),
@@ -1095,7 +1101,21 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
-  Widget _buildHistorySection() {
+  Widget _buildHistorySection(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final surfaceColor = colorScheme.surface;
+    final textPrimaryColor = colorScheme.onSurface;
+    final textSecondaryColor = colorScheme.onSurfaceVariant;
+    final primaryColor = colorScheme.primary;
+    final primaryDarkColor = colorScheme.primary;
+    final borderColor = colorScheme.outlineVariant;
+    final shadowColor = Colors.black.withValues(
+      alpha: Theme.of(context).brightness == Brightness.dark ? 0.24 : 0.08,
+    );
+    final selectedBg = colorScheme.primaryContainer.withValues(alpha: 0.52);
+    final unselectedBg = colorScheme.secondaryContainer.withValues(alpha: 0.42);
+    final outsideMonthBg =
+        colorScheme.surfaceContainerHighest.withValues(alpha: 0.72);
     final history = _historyMonthSummaries;
     final today = DateUtils.dateOnly(DateTime.now());
     final currentMonth = _startOfMonth(today);
@@ -1113,12 +1133,12 @@ class _TrackingScreenState extends State<TrackingScreen>
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _surfaceColor,
+        color: surfaceColor,
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: _borderColor),
-        boxShadow: const [
+        border: Border.all(color: borderColor),
+        boxShadow: [
           BoxShadow(
-            color: _shadowColor,
+            color: shadowColor,
             blurRadius: 18,
             offset: Offset(0, 8),
           ),
@@ -1129,10 +1149,10 @@ class _TrackingScreenState extends State<TrackingScreen>
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'History',
                 style: TextStyle(
-                  color: _textPrimaryColor,
+                  color: textPrimaryColor,
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
                 ),
@@ -1146,12 +1166,12 @@ class _TrackingScreenState extends State<TrackingScreen>
                         ),
                 icon: const Icon(Icons.chevron_left_rounded),
                 visualDensity: VisualDensity.compact,
-                color: _primaryDarkColor,
+                color: primaryDarkColor,
               ),
               Text(
                 _historyMonthLabel(visibleMonth),
-                style: const TextStyle(
-                  color: _textSecondaryColor,
+                style: TextStyle(
+                  color: textSecondaryColor,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1164,15 +1184,15 @@ class _TrackingScreenState extends State<TrackingScreen>
                     : null,
                 icon: const Icon(Icons.chevron_right_rounded),
                 visualDensity: VisualDensity.compact,
-                color: _primaryDarkColor,
+                color: primaryDarkColor,
               ),
             ],
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Tap a date to open that day\'s steps, distance, calories, and goals.',
             style: TextStyle(
-              color: _textSecondaryColor,
+              color: textSecondaryColor,
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
@@ -1185,8 +1205,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                     child: Center(
                       child: Text(
                         label,
-                        style: const TextStyle(
-                          color: _textSecondaryColor,
+                        style: TextStyle(
+                          color: textSecondaryColor,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1198,10 +1218,10 @@ class _TrackingScreenState extends State<TrackingScreen>
           ),
           const SizedBox(height: 10),
           if (_isLoadingHistoryMonth)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
               child: Center(
-                child: CircularProgressIndicator(color: _primaryDarkColor),
+                child: CircularProgressIndicator(color: primaryDarkColor),
               ),
             )
           else
@@ -1238,23 +1258,23 @@ class _TrackingScreenState extends State<TrackingScreen>
                                 _selectedDayIndex = weekIndex;
                               }
                             });
-                            await _showHistoryDayDetails(summary);
+                            await _showHistoryDayDetails(context, summary);
                           },
                     child: Ink(
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? _softGreenSurfaceColor
+                            ? selectedBg
                             : !isInMonth
-                                ? const Color(0xFFF3F0EA)
+                                ? outsideMonthBg
                                 : isFuture
-                                    ? const Color(0xFFF3F0EA)
-                                    : _softSurfaceColor,
+                                    ? outsideMonthBg
+                                    : unselectedBg,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: isSelected
-                              ? _primaryColor
+                              ? primaryColor
                               : isToday
-                                  ? _primaryDarkColor
+                                  ? primaryDarkColor
                                   : Colors.transparent,
                         ),
                       ),
@@ -1270,8 +1290,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                               '${date.day}',
                               style: TextStyle(
                                 color: !isInMonth || isFuture
-                                    ? Colors.black38
-                                    : _textPrimaryColor,
+                                    ? textSecondaryColor.withValues(alpha: 0.6)
+                                    : textPrimaryColor,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -1284,7 +1304,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                                 color: summary != null &&
                                         summary.steps > 0 &&
                                         !isFuture
-                                    ? _primaryColor
+                                    ? primaryColor
                                     : Colors.transparent,
                                 shape: BoxShape.circle,
                               ),
@@ -1293,12 +1313,12 @@ class _TrackingScreenState extends State<TrackingScreen>
                             SizedBox(
                               height: 10,
                               child: isToday
-                                  ? const FittedBox(
+                                  ? FittedBox(
                                       fit: BoxFit.scaleDown,
                                       child: Text(
                                         'Today',
                                         style: TextStyle(
-                                          color: _primaryDarkColor,
+                                          color: primaryDarkColor,
                                           fontSize: 9,
                                           fontWeight: FontWeight.w800,
                                         ),
@@ -1321,6 +1341,7 @@ class _TrackingScreenState extends State<TrackingScreen>
   }
 
   Future<void> _showHistoryDayDetails(
+    BuildContext context,
     _DayStepSummary summary,
   ) async {
     if (!mounted) return;
@@ -1330,6 +1351,21 @@ class _TrackingScreenState extends State<TrackingScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        final surfaceColor = colorScheme.surface;
+        final textPrimaryColor = colorScheme.onSurface;
+        final textSecondaryColor = colorScheme.onSurfaceVariant;
+        final primaryDarkColor = colorScheme.primary;
+        final softGreenSurfaceColor =
+            colorScheme.primaryContainer.withValues(alpha: 0.48);
+        final softSurfaceColor =
+            colorScheme.secondaryContainer.withValues(alpha: 0.35);
+        final chipSurfaceColor = colorScheme.surfaceContainerHighest;
+        final dragHandleColor = colorScheme.outlineVariant;
+        final shadowColor = Colors.black.withValues(
+          alpha: Theme.of(context).brightness == Brightness.dark ? 0.24 : 0.10,
+        );
+
         Widget statusCard({
           required IconData icon,
           required String title,
@@ -1350,10 +1386,10 @@ class _TrackingScreenState extends State<TrackingScreen>
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: chipSurfaceColor.withValues(alpha: 0.92),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: _primaryDarkColor, size: 20),
+                  child: Icon(icon, color: primaryDarkColor, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1362,8 +1398,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
-                          color: _textPrimaryColor,
+                        style: TextStyle(
+                          color: textPrimaryColor,
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1371,8 +1407,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                       const SizedBox(height: 4),
                       Text(
                         message,
-                        style: const TextStyle(
-                          color: _textSecondaryColor,
+                        style: TextStyle(
+                          color: textSecondaryColor,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           height: 1.35,
@@ -1389,9 +1425,16 @@ class _TrackingScreenState extends State<TrackingScreen>
         return FractionallySizedBox(
           heightFactor: 0.78,
           child: Container(
-            decoration: const BoxDecoration(
-              color: _surfaceColor,
+            decoration: BoxDecoration(
+              color: surfaceColor,
               borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              boxShadow: [
+                BoxShadow(
+                  color: shadowColor,
+                  blurRadius: 22,
+                  offset: const Offset(0, -2),
+                ),
+              ],
             ),
             child: SafeArea(
               top: false,
@@ -1405,7 +1448,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         width: 44,
                         height: 5,
                         decoration: BoxDecoration(
-                          color: Colors.black12,
+                          color: dragHandleColor,
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),
@@ -1419,8 +1462,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                             children: [
                               Text(
                                 _formatSelectedDate(summary.date),
-                                style: const TextStyle(
-                                  color: _textPrimaryColor,
+                                style: TextStyle(
+                                  color: textPrimaryColor,
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -1428,8 +1471,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                               const SizedBox(height: 4),
                               Text(
                                 '${_historyLabel(summary)} • ${_formatSteps(summary.steps)} steps logged',
-                                style: const TextStyle(
-                                  color: _textSecondaryColor,
+                                style: TextStyle(
+                                  color: textSecondaryColor,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -1440,6 +1483,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         IconButton(
                           onPressed: () => Navigator.pop(context),
                           icon: const Icon(Icons.close_rounded),
+                          color: textSecondaryColor,
                         ),
                       ],
                     ),
@@ -1448,7 +1492,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                       width: double.infinity,
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: _softGreenSurfaceColor,
+                        color: softGreenSurfaceColor,
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: Row(
@@ -1465,8 +1509,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                               children: [
                                 Text(
                                   '${_stepPercentFor(summary)}% of goal',
-                                  style: const TextStyle(
-                                    color: _primaryDarkColor,
+                                  style: TextStyle(
+                                    color: primaryDarkColor,
                                     fontSize: 18,
                                     fontWeight: FontWeight.w800,
                                   ),
@@ -1474,8 +1518,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                                 const SizedBox(height: 6),
                                 Text(
                                   'Goal ${_formatSteps(summary.stepGoal)} steps',
-                                  style: const TextStyle(
-                                    color: _textSecondaryColor,
+                                  style: TextStyle(
+                                    color: textSecondaryColor,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -1483,8 +1527,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                                 const SizedBox(height: 10),
                                 Text(
                                   _stepStatusText(summary),
-                                  style: const TextStyle(
-                                    color: _textPrimaryColor,
+                                  style: TextStyle(
+                                    color: textPrimaryColor,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
                                     height: 1.35,
@@ -1505,8 +1549,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                             value: _formatDistance(summary.distanceKm),
                             helper: 'Walked that day',
                             icon: Icons.route_rounded,
-                            iconColor: _primaryDarkColor,
-                            tintColor: _softGreenSurfaceColor,
+                            iconColor: primaryDarkColor,
+                            tintColor: softGreenSurfaceColor,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1517,7 +1561,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                             helper: 'Estimated movement calories',
                             icon: Icons.local_fire_department_rounded,
                             iconColor: _secondaryColor,
-                            tintColor: _softSurfaceColor,
+                            tintColor: softSurfaceColor,
                           ),
                         ),
                       ],
@@ -1532,7 +1576,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                             helper: 'Food intake for the day',
                             icon: Icons.restaurant_menu_rounded,
                             iconColor: _secondaryColor,
-                            tintColor: _softSurfaceColor,
+                            tintColor: softSurfaceColor,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1542,8 +1586,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                             value: _formatKcal(summary.calorieGoal),
                             helper: 'Daily intake target',
                             icon: Icons.flag_rounded,
-                            iconColor: _primaryDarkColor,
-                            tintColor: _softGreenSurfaceColor,
+                            iconColor: primaryDarkColor,
+                            tintColor: softGreenSurfaceColor,
                           ),
                         ),
                       ],
@@ -1553,14 +1597,14 @@ class _TrackingScreenState extends State<TrackingScreen>
                       icon: Icons.directions_walk_rounded,
                       title: 'Step Status',
                       message: _stepStatusText(summary),
-                      backgroundColor: _softGreenSurfaceColor,
+                      backgroundColor: softGreenSurfaceColor,
                     ),
                     const SizedBox(height: 12),
                     statusCard(
                       icon: Icons.restaurant_rounded,
                       title: 'Calorie Status',
                       message: _calorieStatusText(summary),
-                      backgroundColor: _softSurfaceColor,
+                      backgroundColor: softSurfaceColor,
                     ),
                     const SizedBox(height: 16),
                     Wrap(
@@ -1570,7 +1614,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         _ActionChip(
                           icon: Icons.flag_rounded,
                           label: 'Step Goal',
-                          color: _primaryDarkColor,
+                          color: primaryDarkColor,
                           onTap: () {
                             Navigator.pop(context);
                             _openStepGoalScreen(summary.stepGoal);
@@ -1588,7 +1632,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         _ActionChip(
                           icon: Icons.restaurant_menu_rounded,
                           label: 'Open Calories',
-                          color: _primaryDarkColor,
+                          color: primaryDarkColor,
                           onTap: () {
                             Navigator.pop(context);
                             _openCalorieTracker();

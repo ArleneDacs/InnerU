@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lottie/lottie.dart';
@@ -13,6 +14,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_tracker_utils.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
@@ -28,7 +30,23 @@ import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class StepTracker extends StatefulWidget {
-  const StepTracker({super.key});
+  const StepTracker({
+    super.key,
+    this.debugBackgroundStepStream,
+    this.debugStepCountStream,
+    this.debugRemoteTodayStepsLoader,
+    this.debugUserDataLoader,
+    this.debugAutoGrantStepPermission = false,
+    this.debugSkipBackgroundService = false,
+  });
+
+  final Stream<int>? debugBackgroundStepStream;
+  final Stream<StepCount>? debugStepCountStream;
+  final Future<int> Function(String userId, String date)?
+      debugRemoteTodayStepsLoader;
+  final Future<Map<String, dynamic>> Function()? debugUserDataLoader;
+  final bool debugAutoGrantStepPermission;
+  final bool debugSkipBackgroundService;
 
   @override
   State<StepTracker> createState() => _StepTrackerState();
@@ -43,6 +61,7 @@ class _StepTrackerState extends State<StepTracker>
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
   StreamSubscription<StepCount>? _stepCountStream;
+  StreamSubscription<dynamic>? _backgroundStepUpdates;
 
   int _steps = 0;
   int _initialSteps = -1;
@@ -78,12 +97,25 @@ class _StepTrackerState extends State<StepTracker>
     WidgetsBinding.instance.addObserver(this);
     _lottieController = AnimationController(vsync: this);
     _stepStreamController = StreamController<int>.broadcast();
+    _backgroundStepUpdates = (widget.debugBackgroundStepStream ??
+            FlutterBackgroundService()
+                .on('stepsUpdated')
+                .map((event) => event?['steps']))
+        .listen((dynamic steps) {
+      if (steps is! num) return;
+      unawaited(_applyExternalStepUpdate(steps.toInt()));
+    });
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
     await _loadDailyGoal();
     await _loadSteps();
+    if (widget.debugAutoGrantStepPermission) {
+      _hasStepPermission = true;
+      _initStepCounter();
+      return;
+    }
     final status = await _stepPermission.status;
     if (!mounted || _isDisposed) return;
 
@@ -119,7 +151,7 @@ class _StepTrackerState extends State<StepTracker>
     }
 
     try {
-      final userData = await UserService.getUserData();
+      final userData = await _loadUserData();
       final dynamic rawGoal = userData['daily_step_goal'] ??
           userData['dailyStepGoal'] ??
           userData['daily_goal'] ??
@@ -149,6 +181,7 @@ class _StepTrackerState extends State<StepTracker>
     }
 
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final savedStepsKey = SessionCleanupService.savedStepsKey(userId);
     final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
@@ -177,10 +210,12 @@ class _StepTrackerState extends State<StepTracker>
       _initialSteps = -1;
       _stepCountOffset = 0;
     } else {
-      _steps = prefs.getInt(savedStepsKey) ?? 0; // Load today's saved steps
-      if (_steps == 0) {
-        _steps = await _loadRemoteTodaySteps(userId, today);
-      }
+      final cachedSteps = prefs.getInt(savedStepsKey) ?? 0;
+      final remoteSteps = await _loadRemoteTodaySteps(userId, today);
+      _steps = resolveDisplayedStepCount(
+        cachedSteps: cachedSteps,
+        remoteSteps: remoteSteps,
+      );
       _stepCountOffset = prefs.getInt(stepOffsetKey) ?? 0;
     }
     _lastRawStepCount = _steps;
@@ -224,7 +259,48 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
+  Future<Map<String, dynamic>> _loadUserData() async {
+    final loader = widget.debugUserDataLoader;
+    if (loader != null) {
+      return loader();
+    }
+    return UserService.getUserData();
+  }
+
+  Future<void> _applyExternalStepUpdate(int newSteps) async {
+    if (!mounted || _isDisposed) return;
+    if (newSteps < 0 || newSteps == _steps) return;
+
+    final previousSteps = _steps;
+    setState(() {
+      _isWalking = newSteps > _steps;
+      _steps = newSteps;
+    });
+
+    await _persistCurrentStepState();
+    if (!mounted || _isDisposed) return;
+
+    if (!_stepStreamController.isClosed) {
+      _stepStreamController.add(_steps);
+    }
+
+    if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+      await _handleStepGoalCompleted();
+    }
+  }
+
   Future<bool> _requestPermission() async {
+    if (widget.debugAutoGrantStepPermission) {
+      debugPrint('Step tracking permission granted (debug override).');
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _hasStepPermission = true;
+          _stepPermissionMessage = null;
+        });
+      }
+      return true;
+    }
+
     var status = await _stepPermission.status;
     if (!status.isGranted) {
       status = await _stepPermission.request();
@@ -253,6 +329,11 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<int> _loadRemoteTodaySteps(String userId, String date) async {
+    final loader = widget.debugRemoteTodayStepsLoader;
+    if (loader != null) {
+      return loader(userId, date);
+    }
+
     try {
       final response = await _dailyTrackerApiService.fetch(date: date);
       final tracker = response['tracker'];
@@ -294,7 +375,9 @@ class _StepTrackerState extends State<StepTracker>
     if (userId == null || userId.isEmpty) return;
 
     _stepCounterInitialized = true;
-    unawaited(StepBackgroundService.instance.startTracking());
+    if (!widget.debugSkipBackgroundService) {
+      unawaited(StepBackgroundService.instance.startTracking());
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
@@ -303,7 +386,9 @@ class _StepTrackerState extends State<StepTracker>
     _stepCountOffset = prefs.getInt(stepOffsetKey) ?? _stepCountOffset;
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
 
-    _stepCountStream = Pedometer.stepCountStream.listen(
+    final stepStream = widget.debugStepCountStream ?? Pedometer.stepCountStream;
+
+    _stepCountStream = stepStream.listen(
       (StepCount event) async {
         if (!mounted || _isDisposed) return;
 
@@ -477,7 +562,7 @@ class _StepTrackerState extends State<StepTracker>
       {bool meditation = false, bool steps = false}) async {
     final userId = _currentUserId;
     if (userId == null) return;
-    final userData = await UserService.getUserData();
+    final userData = await _loadUserData();
     final username = userData['username']?.toString() ??
         userData['name']?.toString() ??
         userData['displayName']?.toString();
@@ -660,6 +745,17 @@ class _StepTrackerState extends State<StepTracker>
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
+        final dialogTheme = Theme.of(dialogContext);
+        final isDark = dialogTheme.brightness == Brightness.dark;
+        final surfaceColor = isDark
+            ? dialogTheme.colorScheme.surface
+            : const Color(0xFFFFFBF7);
+        final borderColor = isDark
+            ? dialogTheme.colorScheme.outlineVariant
+            : const Color(0xFFE9DED5);
+        final titleColor = dialogTheme.colorScheme.onSurface;
+        final bodyColor = dialogTheme.colorScheme.onSurfaceVariant;
+        final accentColor = dialogTheme.colorScheme.primary;
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 26),
@@ -667,9 +763,9 @@ class _StepTrackerState extends State<StepTracker>
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(24, 34, 24, 24),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFFBF7),
+              color: surfaceColor,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: const Color(0xFFE9DED5)),
+              border: Border.all(color: borderColor),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x26000000),
@@ -684,22 +780,22 @@ class _StepTrackerState extends State<StepTracker>
                 Container(
                   height: 74,
                   width: 74,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFEAF4DE),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: isDark ? 0.16 : 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.directions_walk_rounded,
-                    color: Color(0xFF4C6B43),
+                    color: accentColor,
                     size: 40,
                   ),
                 ),
                 const SizedBox(height: 18),
-                const Text(
+                Text(
                   'Step goal complete',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Color(0xFF2B2B2B),
+                    color: titleColor,
                     fontSize: 25,
                     fontWeight: FontWeight.w800,
                   ),
@@ -708,8 +804,8 @@ class _StepTrackerState extends State<StepTracker>
                 Text(
                   'You reached $formattedSteps steps today. Save this moment as a memory.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF6E625B),
+                  style: TextStyle(
+                    color: bodyColor,
                     fontSize: 16,
                     height: 1.45,
                     fontWeight: FontWeight.w600,
@@ -723,8 +819,8 @@ class _StepTrackerState extends State<StepTracker>
                     icon: const Icon(Icons.add_photo_alternate_rounded),
                     label: const Text('Share with memories'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF4C6B43),
-                      side: const BorderSide(color: Color(0xFFD8C7B9)),
+                      foregroundColor: accentColor,
+                      side: BorderSide(color: borderColor),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
@@ -738,8 +834,8 @@ class _StepTrackerState extends State<StepTracker>
                   child: ElevatedButton(
                     onPressed: () => Navigator.of(dialogContext).pop(),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF7A5AB8),
-                      foregroundColor: Colors.white,
+                      backgroundColor: accentColor,
+                      foregroundColor: dialogTheme.colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
@@ -767,11 +863,15 @@ class _StepTrackerState extends State<StepTracker>
   Future<ImageSource?> _showMemorySourceSheet() {
     return showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: const Color(0xFFFFFBF7),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (sheetContext) {
+        final sheetTheme = Theme.of(sheetContext);
+        final titleColor = sheetTheme.colorScheme.onSurface;
+        final accentColor = sheetTheme.colorScheme.primary;
+        final handleColor = sheetTheme.colorScheme.outlineVariant;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
@@ -783,29 +883,29 @@ class _StepTrackerState extends State<StepTracker>
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD8C7B9),
+                    color: handleColor,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
                 ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.photo_camera_rounded,
-                    color: Color(0xFF4C6B43),
+                    color: accentColor,
                   ),
-                  title: const Text(
+                  title: Text(
                     'Take photo',
-                    style: TextStyle(color: Color(0xFF2B2B2B)),
+                    style: TextStyle(color: titleColor),
                   ),
                   onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
                 ),
                 ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.photo_library_rounded,
-                    color: Color(0xFF4C6B43),
+                    color: accentColor,
                   ),
-                  title: const Text(
+                  title: Text(
                     'Upload image',
-                    style: TextStyle(color: Color(0xFF2B2B2B)),
+                    style: TextStyle(color: titleColor),
                   ),
                   onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
                 ),
@@ -894,6 +994,28 @@ class _StepTrackerState extends State<StepTracker>
   Future<void> _resumeStepCounterIfNeeded() async {
     if (!mounted) return;
 
+    if (widget.debugAutoGrantStepPermission) {
+      setState(() {
+        _hasStepPermission = true;
+        _stepPermissionMessage = null;
+      });
+      if (_stepCounterInitialized) {
+        if (!widget.debugSkipBackgroundService) {
+          unawaited(StepBackgroundService.instance.startTracking());
+        }
+        await _loadSteps();
+        if (_checkTimer == null) {
+          _startStepWatchdogTimer();
+        }
+        if (_statePersistTimer == null) {
+          _startStepStateAutosave();
+        }
+        return;
+      }
+      _initStepCounter();
+      return;
+    }
+
     final status = await _stepPermission.status;
     if (!mounted || !status.isGranted) return;
 
@@ -904,6 +1026,7 @@ class _StepTrackerState extends State<StepTracker>
 
     if (_stepCounterInitialized) {
       unawaited(StepBackgroundService.instance.startTracking());
+      await _loadSteps();
       if (_checkTimer == null) {
         _startStepWatchdogTimer();
       }
@@ -952,6 +1075,7 @@ class _StepTrackerState extends State<StepTracker>
     _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_persistCurrentStepState());
+    _backgroundStepUpdates?.cancel();
     _stepCountStream?.cancel();
     _checkTimer?.cancel();
     _statePersistTimer?.cancel();
@@ -1294,3 +1418,5 @@ class _StepTrackerState extends State<StepTracker>
     );
   }
 }
+
+typedef StepTrackerState = _StepTrackerState;

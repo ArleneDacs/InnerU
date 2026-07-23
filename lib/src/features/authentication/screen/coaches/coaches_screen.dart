@@ -13,6 +13,12 @@ import 'package:selfcare_projects/src/utils/responsive.dart';
 import 'package:selfcare_projects/src/utils/phone_launcher.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
+Color _contrastOnColor(Color background) {
+  return ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+      ? Colors.white
+      : Colors.black87;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -158,6 +164,7 @@ class CoachProfileDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final foregroundColor = _contrastOnColor(coach.backgroundColor);
     return Dialog(
       backgroundColor: coach.backgroundColor,
       shape: RoundedRectangleBorder(
@@ -172,17 +179,17 @@ class CoachProfileDialog extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     CupertinoIcons.arrow_left,
-                    color: Colors.white,
+                    color: foregroundColor,
                   ),
                   onPressed: () => Navigator.pop(context),
                 ),
                 IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     CupertinoIcons.chat_bubble_2_fill,
                     size: 30,
-                    color: Colors.white,
+                    color: foregroundColor,
                   ),
                   onPressed: () async {
                     if (applicationStatus != CoachApplicationStatus.accepted) {
@@ -241,21 +248,21 @@ class CoachProfileDialog extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: foregroundColor.withValues(alpha: 0.6),
                   width: 2,
                 ),
               ),
               child: CircleAvatar(
                 radius: 48,
-                backgroundColor: Colors.white,
+                backgroundColor: foregroundColor.withValues(alpha: 0.12),
                 backgroundImage: coach.profilePic.isNotEmpty
                     ? NetworkImage(coach.profilePic)
                     : null,
                 child: coach.profilePic.isEmpty
-                    ? const Icon(
+                    ? Icon(
                         Icons.person,
                         size: 48,
-                        color: Colors.grey,
+                        color: foregroundColor.withValues(alpha: 0.75),
                       )
                     : null,
               ),
@@ -263,10 +270,10 @@ class CoachProfileDialog extends StatelessWidget {
             const SizedBox(height: 18),
             Text(
               coach.name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: foregroundColor,
               ),
               textAlign: TextAlign.center,
             ),
@@ -279,17 +286,17 @@ class CoachProfileDialog extends StatelessWidget {
               },
               child: Text(
                 coach.phone.isNotEmpty ? coach.phone : 'No phone available',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: foregroundColor,
                   decoration: TextDecoration.underline,
                 ),
                 textAlign: TextAlign.center,
               ),
             ),
             const SizedBox(height: 24),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 'About',
@@ -297,7 +304,7 @@ class CoachProfileDialog extends StatelessWidget {
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
-                  color: Colors.white70,
+                  color: foregroundColor.withValues(alpha: 0.8),
                 ),
               ),
             ),
@@ -306,13 +313,13 @@ class CoachProfileDialog extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.14),
+                color: foregroundColor.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
                 coach.bio.isEmpty ? 'No bio available' : coach.bio,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: foregroundColor,
                   fontSize: 15,
                   height: 1.45,
                 ),
@@ -476,28 +483,10 @@ class _CoachesScreenState extends State<CoachesScreen> {
     if (session == null) return const <Coach>[];
 
     final currentUserId = session.id.toString();
-    final currentCompanyId = _currentCompanyId;
-    final currentCompanyName = _currentCompanyName;
 
     final directory = await CoachDirectoryApiService.instance.fetchCoaches();
     final coaches = directory
         .where((coach) => coach.id != currentUserId)
-        .where((coach) {
-          if (currentCompanyId.isEmpty && currentCompanyName.isEmpty) {
-            return true;
-          }
-          final sameCompanyId =
-              currentCompanyId.isNotEmpty &&
-                  coach.companyCode?.trim().isNotEmpty == true &&
-                  coach.companyCode!.trim().toLowerCase() ==
-                      currentCompanyId.toLowerCase();
-          final sameCompanyName =
-              currentCompanyName.isNotEmpty &&
-                  coach.companyName?.trim().isNotEmpty == true &&
-                  coach.companyName!.trim().toLowerCase() ==
-                      currentCompanyName.toLowerCase();
-          return sameCompanyId || sameCompanyName;
-        })
         .map(
           (entry) => Coach(
             id: entry.id,
@@ -580,6 +569,11 @@ class _CoachesScreenState extends State<CoachesScreen> {
         final status = application?.status ?? CoachApplicationStatus.none;
         final canApply = status == CoachApplicationStatus.none ||
             status == CoachApplicationStatus.rejected;
+        final cardTextColor =
+            companyTheme.isDark ? companyTheme.inkColor : _contrastOnColor(coach.backgroundColor);
+        final cardMutedTextColor = companyTheme.isDark
+            ? companyTheme.mutedInkColor
+            : _contrastOnColor(coach.backgroundColor).withValues(alpha: 0.72);
         return Container(
           margin: EdgeInsets.only(
             bottom: context.responsiveValue(10),
@@ -620,14 +614,13 @@ class _CoachesScreenState extends State<CoachesScreen> {
                   ? NetworkImage(coach.profilePic)
                   : null,
               child: coach.profilePic.isEmpty
-                  ? const Icon(Icons.person, color: Colors.grey)
+                  ? Icon(Icons.person, color: cardMutedTextColor)
                   : null,
             ),
             title: Text(
               coach.name,
               style: TextStyle(
-                color:
-                    companyTheme.isDark ? companyTheme.inkColor : Colors.white,
+                color: cardTextColor,
                 fontWeight: FontWeight.w700,
                 fontSize: context.responsiveFont(16),
               ),
@@ -637,9 +630,7 @@ class _CoachesScreenState extends State<CoachesScreen> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: companyTheme.isDark
-                    ? companyTheme.mutedInkColor
-                    : Colors.white70,
+                color: cardMutedTextColor,
                 fontSize: context.responsiveFont(13),
               ),
             ),
@@ -688,11 +679,16 @@ class _CoachesScreenState extends State<CoachesScreen> {
           backgroundColor: companyTheme.backgroundColor,
           appBar: AppBar(
             backgroundColor: companyTheme.surfaceColor,
-            foregroundColor: companyTheme.inkColor,
+            foregroundColor: _contrastOnColor(companyTheme.surfaceColor),
+            iconTheme: IconThemeData(
+              color: _contrastOnColor(companyTheme.surfaceColor),
+            ),
             surfaceTintColor: Colors.transparent,
             title: Text(
               'Our Coaches',
-              style: TextStyle(color: companyTheme.inkColor),
+              style: TextStyle(
+                color: _contrastOnColor(companyTheme.surfaceColor),
+              ),
             ),
           ),
           body: SafeArea(

@@ -7,8 +7,13 @@ import 'package:selfcare_projects/src/services/user_preferences.dart';
 
 class CommentWidget extends StatefulWidget {
   final String postId;
+  final VoidCallback? onChanged;
 
-  const CommentWidget({super.key, required this.postId});
+  const CommentWidget({
+    super.key,
+    required this.postId,
+    this.onChanged,
+  });
 
   @override
   State<CommentWidget> createState() => _CommentWidgetState();
@@ -94,6 +99,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       await _api.addComment(postId: widget.postId, comment: comment.trim());
       _commentController.clear();
       _reloadComments();
+      widget.onChanged?.call();
     } catch (e) {
       debugPrint('Failed to send comment: $e');
     } finally {
@@ -109,6 +115,7 @@ class _CommentWidgetState extends State<CommentWidget> {
     try {
       await _api.deleteComment(postId: widget.postId, commentId: commentId);
       _reloadComments();
+      widget.onChanged?.call();
     } catch (e) {
       debugPrint('Error deleting comment: $e');
       if (!mounted) return;
@@ -162,6 +169,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                     comment: updatedText,
                   );
                   _reloadComments();
+                  widget.onChanged?.call();
                 }
                 if (context.mounted) {
                   Navigator.pop(dialogContext);

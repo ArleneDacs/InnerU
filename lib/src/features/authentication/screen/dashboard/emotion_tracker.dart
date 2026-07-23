@@ -128,8 +128,53 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
         }
       }
 
+      final localLogs = await _emotionService.loadLocalEmotionHistory(
+        userId: session.id.toString(),
+        month: DateFormat('yyyy-MM').format(_focusedMonth),
+      );
+      for (final entry in localLogs) {
+        final rawDate = entry['date']?.toString();
+        final rawEmotion = _normalizeEmotion(entry['emotion'] as String?);
+        if (rawDate == null || rawDate.isEmpty || rawEmotion.isEmpty) {
+          continue;
+        }
+
+        final normalizedDate = _parseFirestoreDate(rawDate);
+        final loggedAt = _readDateTime(entry['loggedAt']) ?? normalizedDate;
+        final dayLogs = logsByDay.putIfAbsent(
+          normalizedDate,
+          () => <_TimedEmotionEntry>[],
+        );
+        final alreadyRecorded = dayLogs.any(
+          (existing) =>
+              existing.emotion == rawEmotion &&
+              existing.loggedAt == loggedAt,
+        );
+        if (!alreadyRecorded) {
+          dayLogs.add(
+            _TimedEmotionEntry(
+              emotion: rawEmotion,
+              loggedAt: loggedAt,
+            ),
+          );
+        }
+      }
+
       final emotionsData = <DateTime, String>{};
       logsByDay.forEach((day, entries) {
+        final uniqueEntries = <_TimedEmotionEntry>[];
+        final seenKeys = <String>{};
+        for (final entry in entries) {
+          final key =
+              '${entry.emotion}|${entry.loggedAt.toUtc().toIso8601String()}';
+          if (seenKeys.add(key)) {
+            uniqueEntries.add(entry);
+          }
+        }
+        uniqueEntries.sort((a, b) => a.loggedAt.compareTo(b.loggedAt));
+        entries
+          ..clear()
+          ..addAll(uniqueEntries);
         entries.sort((a, b) => a.loggedAt.compareTo(b.loggedAt));
         if (entries.isNotEmpty) {
           emotionsData[day] = entries.last.emotion;
@@ -807,54 +852,30 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
       );
     }
 
-    Widget ratingTile(int rating, String label) {
-      final selected = _todayMoodScore == rating;
-      return InkWell(
-        onTap: () {
-          setState(() {
-            _todayMoodScore = rating;
-          });
-        },
-        borderRadius: BorderRadius.circular(18),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            color: selected
-                ? companyTheme.primaryColor.withValues(alpha: 0.16)
-                : companyTheme.surfaceColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected
-                  ? companyTheme.primaryColor
-                  : companyTheme.primaryColor.withValues(alpha: 0.14),
-            ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                '$rating',
-                style: TextStyle(
-                  color: companyTheme.inkColor,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: companyTheme.mutedInkColor,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
+    Widget moodDropdown() {
+      return DropdownButtonFormField<int>(
+        initialValue: _todayMoodScore,
+        decoration: fieldDecoration('Choose a feeling'),
+        dropdownColor: companyTheme.surfaceColor,
+        iconEnabledColor: companyTheme.iconColor,
+        style: TextStyle(
+          color: companyTheme.inkColor,
+          fontWeight: FontWeight.w700,
         ),
+        items: options.entries.map((entry) {
+          return DropdownMenuItem<int>(
+            value: entry.key,
+            child: Text('${entry.key} - ${entry.value}'),
+          );
+        }).toList(),
+        onChanged: _isSavingCheckIn
+            ? null
+            : (value) {
+                if (value == null) return;
+                setState(() {
+                  _todayMoodScore = value;
+                });
+              },
       );
     }
 
@@ -869,56 +890,44 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
               : const Color(0xFFE0E5D9),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          initiallyExpanded: !_hasTodayCheckIn,
+          iconColor: companyTheme.inkColor,
+          collapsedIconColor: companyTheme.mutedInkColor,
+          title: Text(
+            "Today's check-in",
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 20,
+                ),
+          ),
+          subtitle: Text(
+            _hasTodayCheckIn
+                ? 'Saved for today. Expand to update your notes.'
+                : 'A quick check-in can help you see the day more clearly.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: companyTheme.mutedInkColor,
+                  height: 1.35,
+                ),
+          ),
           children: [
-            Text(
-              "Today's check-in",
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: companyTheme.inkColor,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20,
-                  ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Honest beats impressive. Nobody scores you on the prose.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: companyTheme.mutedInkColor,
-                    height: 1.35,
-                  ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'How did today feel?',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: companyTheme.inkColor,
-                    fontWeight: FontWeight.w800,
-                  ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'How did today feel?',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: companyTheme.inkColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
             ),
             const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final count = constraints.maxWidth >= 700 ? 5 : 2;
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: options.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: count,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: count == 5 ? 1.8 : 1.45,
-                  ),
-                  itemBuilder: (context, index) {
-                    final rating = index + 1;
-                    return ratingTile(rating, options[rating]!);
-                  },
-                );
-              },
-            ),
+            moodDropdown(),
             const SizedBox(height: 12),
             TextField(
               controller: _winsController,
@@ -979,8 +988,9 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
                 color: companyTheme.inkColor,
                 fontWeight: FontWeight.w500,
               ),
-              decoration: fieldDecoration('Who or what are you grateful for today?')
-                  .copyWith(
+              decoration: fieldDecoration(
+                'Who or what are you grateful for today?',
+              ).copyWith(
                 labelText: 'Gratitude',
                 labelStyle: TextStyle(
                   color: companyTheme.inkColor,
@@ -996,8 +1006,9 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
                 color: companyTheme.inkColor,
                 fontWeight: FontWeight.w500,
               ),
-              decoration: fieldDecoration('The one thing that would make tomorrow a win.')
-                  .copyWith(
+              decoration: fieldDecoration(
+                'The one thing that would make tomorrow a win.',
+              ).copyWith(
                 labelText: "Tomorrow's focus",
                 labelStyle: TextStyle(
                   color: companyTheme.inkColor,
@@ -1488,175 +1499,181 @@ class _EmotionTrackerPageState extends State<EmotionTrackerPage> {
                 style: TextStyle(color: companyTheme.inkColor),
               ),
             ),
-            body: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-                  children: [
-                    if (_isLoading) ...[
-                      _buildLoadingHistoryCard(companyTheme),
-                      const SizedBox(height: 16),
-                    ],
-                    _buildLoadErrorCard(companyTheme),
-                    if (_loadErrorMessage != null) const SizedBox(height: 16),
-                    _buildTodayCheckInCard(companyTheme),
-                    const SizedBox(height: 16),
-                    _buildPastCheckInsCard(companyTheme),
-                    const SizedBox(height: 16),
-                    _buildTodayMoodCard(companyTheme),
-                    const SizedBox(height: 16),
-                    _buildEmotionChooser(companyTheme),
-                    const SizedBox(height: 16),
-                    _buildTodayTimeline(companyTheme),
-                    const SizedBox(height: 16),
-                    Card(
-                      elevation: 0,
-                      color: companyTheme.surfaceColor,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        side: BorderSide(
-                          color: companyTheme.isDark
-                              ? companyTheme.primaryColor
-                                  .withValues(alpha: 0.18)
-                              : const Color(0xFFE0E5D9),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        child: DropdownButton<String>(
-                          value: _selectedWeek,
-                          hint: Text(
-                            "Select a week",
-                            style: TextStyle(
-                              color: companyTheme.mutedInkColor,
+            body: Stack(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                      children: [
+                        if (_isLoading) ...[
+                          _buildLoadingHistoryCard(companyTheme),
+                          const SizedBox(height: 16),
+                        ],
+                        _buildLoadErrorCard(companyTheme),
+                        if (_loadErrorMessage != null)
+                          const SizedBox(height: 16),
+                        _buildTodayCheckInCard(companyTheme),
+                        const SizedBox(height: 16),
+                        _buildPastCheckInsCard(companyTheme),
+                        const SizedBox(height: 16),
+                        _buildTodayMoodCard(companyTheme),
+                        const SizedBox(height: 16),
+                        _buildEmotionChooser(companyTheme),
+                        const SizedBox(height: 16),
+                        _buildTodayTimeline(companyTheme),
+                        const SizedBox(height: 16),
+                        Card(
+                          elevation: 0,
+                          color: companyTheme.surfaceColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(
+                              color: companyTheme.isDark
+                                  ? companyTheme.primaryColor
+                                      .withValues(alpha: 0.18)
+                                  : const Color(0xFFE0E5D9),
                             ),
                           ),
-                          dropdownColor: companyTheme.surfaceColor,
-                          isExpanded: true,
-                          underline: const SizedBox.shrink(),
-                          onChanged: (String? newValue) {
-                            if (newValue != null) {
-                              setState(() {
-                                _selectedWeek = newValue;
-                              });
-                              _analyzeStressForWeek(newValue);
-                            }
-                          },
-                          items: _weeks.map((String week) {
-                            return DropdownMenuItem<String>(
-                              value: week,
-                              child: Text(
-                                week,
-                                overflow: TextOverflow.ellipsis,
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: DropdownButton<String>(
+                              value: _selectedWeek,
+                              hint: Text(
+                                "Select a week",
                                 style: TextStyle(
-                                  color: companyTheme.inkColor,
+                                  color: companyTheme.mutedInkColor,
                                 ),
                               ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Card(
-                      elevation: 0,
-                      color: companyTheme.surfaceColor,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        side: BorderSide(
-                          color: companyTheme.isDark
-                              ? companyTheme.primaryColor
-                                  .withValues(alpha: 0.18)
-                              : const Color(0xFFE0E5D9),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10.0),
-                        child: TableCalendar(
-                          focusedDay: _focusedMonth,
-                          firstDay: DateTime.utc(2020, 1, 1),
-                          lastDay: DateTime.utc(2030, 12, 31),
-                          calendarStyle: CalendarStyle(
-                            markersMaxCount: 0,
-                            defaultTextStyle: TextStyle(
-                              color: companyTheme.inkColor,
-                            ),
-                            weekendTextStyle: TextStyle(
-                              color: companyTheme.inkColor,
-                            ),
-                            outsideTextStyle: TextStyle(
-                              color: companyTheme.mutedInkColor
-                                  .withValues(alpha: 0.55),
-                            ),
-                            todayDecoration: BoxDecoration(
-                              color: companyTheme.primaryColor
-                                  .withValues(alpha: 0.78),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          headerStyle: HeaderStyle(
-                            titleTextStyle: TextStyle(
-                              color: companyTheme.inkColor,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                            ),
-                            formatButtonVisible: false,
-                          ),
-                          daysOfWeekStyle: DaysOfWeekStyle(
-                            weekdayStyle: TextStyle(
-                              color: companyTheme.mutedInkColor,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            weekendStyle: TextStyle(
-                              color: companyTheme.mutedInkColor,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          calendarBuilders: CalendarBuilders(
-                            defaultBuilder: (context, date, _) {
-                              DateTime normalizedDate = _normalizeDate(date);
-                              if (_emotionsByDay.containsKey(normalizedDate)) {
-                                String emotion =
-                                    _emotionsByDay[normalizedDate]!;
-                                return Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: _getColorForEmotion(emotion),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      width: 35,
-                                      height: 35,
+                              dropdownColor: companyTheme.surfaceColor,
+                              isExpanded: true,
+                              underline: const SizedBox.shrink(),
+                              onChanged: (String? newValue) {
+                                if (newValue != null) {
+                                  setState(() {
+                                    _selectedWeek = newValue;
+                                  });
+                                  _analyzeStressForWeek(newValue);
+                                }
+                              },
+                              items: _weeks.map((String week) {
+                                return DropdownMenuItem<String>(
+                                  value: week,
+                                  child: Text(
+                                    week,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: companyTheme.inkColor,
                                     ),
-                                    _buildEmotionIcon(
-                                      emotion,
-                                      color: Colors.white,
-                                      size: 18,
-                                    ),
-                                  ],
+                                  ),
                                 );
-                              }
-                              return null;
-                            },
+                              }).toList(),
+                            ),
                           ),
-                          onDaySelected: (selectedDay, focusedDay) {
-                            _showDayEmotionMessage(context, selectedDay);
-                          },
-                          onPageChanged: (focusedDay) {
-                            setState(() {
-                              _focusedMonth = focusedDay;
-                              _weeks = _weeksForMonth(_focusedMonth.month);
-                              _selectedWeek = null;
-                            });
-                          },
                         ),
-                      ),
+                        const SizedBox(height: 16),
+                        Card(
+                          elevation: 0,
+                          color: companyTheme.surfaceColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(
+                              color: companyTheme.isDark
+                                  ? companyTheme.primaryColor
+                                      .withValues(alpha: 0.18)
+                                  : const Color(0xFFE0E5D9),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(10.0),
+                            child: TableCalendar(
+                              focusedDay: _focusedMonth,
+                              firstDay: DateTime.utc(2020, 1, 1),
+                              lastDay: DateTime.utc(2030, 12, 31),
+                              calendarStyle: CalendarStyle(
+                                markersMaxCount: 0,
+                                defaultTextStyle: TextStyle(
+                                  color: companyTheme.inkColor,
+                                ),
+                                weekendTextStyle: TextStyle(
+                                  color: companyTheme.inkColor,
+                                ),
+                                outsideTextStyle: TextStyle(
+                                  color: companyTheme.mutedInkColor
+                                      .withValues(alpha: 0.55),
+                                ),
+                                todayDecoration: BoxDecoration(
+                                  color: companyTheme.primaryColor
+                                      .withValues(alpha: 0.78),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              headerStyle: HeaderStyle(
+                                titleTextStyle: TextStyle(
+                                  color: companyTheme.inkColor,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                formatButtonVisible: false,
+                              ),
+                              daysOfWeekStyle: DaysOfWeekStyle(
+                                weekdayStyle: TextStyle(
+                                  color: companyTheme.mutedInkColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                weekendStyle: TextStyle(
+                                  color: companyTheme.mutedInkColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              calendarBuilders: CalendarBuilders(
+                                defaultBuilder: (context, date, _) {
+                                  DateTime normalizedDate = _normalizeDate(date);
+                                  if (_emotionsByDay.containsKey(normalizedDate)) {
+                                    String emotion =
+                                        _emotionsByDay[normalizedDate]!;
+                                    return Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            color: _getColorForEmotion(emotion),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          width: 35,
+                                          height: 35,
+                                        ),
+                                        _buildEmotionIcon(
+                                          emotion,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ],
+                                    );
+                                  }
+                                  return null;
+                                },
+                              ),
+                              onDaySelected: (selectedDay, focusedDay) {
+                                _showDayEmotionMessage(context, selectedDay);
+                              },
+                              onPageChanged: (focusedDay) {
+                                setState(() {
+                                  _focusedMonth = focusedDay;
+                                  _weeks = _weeksForMonth(_focusedMonth.month);
+                                  _selectedWeek = null;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         );

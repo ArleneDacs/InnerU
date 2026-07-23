@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
@@ -150,7 +151,8 @@ class Leaderboard extends StatefulWidget {
   State<Leaderboard> createState() => _LeaderboardState();
 }
 
-class _LeaderboardState extends State<Leaderboard> {
+class _LeaderboardState extends State<Leaderboard>
+    with WidgetsBindingObserver, RouteAware {
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
 
@@ -162,6 +164,7 @@ class _LeaderboardState extends State<Leaderboard> {
   bool _isA12Loading = true;
   bool _isAbundance12Company = false;
   bool _isCoachUser = false;
+  ModalRoute<dynamic>? _route;
 
   bool _isAbundance12CompanyByIdentity({
     String name = '',
@@ -182,7 +185,21 @@ class _LeaderboardState extends State<Leaderboard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<dynamic> && route != _route) {
+      if (_route != null) {
+        appRouteObserver.unsubscribe(this);
+      }
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -325,6 +342,25 @@ class _LeaderboardState extends State<Leaderboard> {
       _isA12Loading = true;
     });
     await _loadLeaderboardFromApi();
+  }
+
+  @override
+  void didPopNext() {
+    unawaited(_refreshLeaderboard());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshLeaderboard());
+    }
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override

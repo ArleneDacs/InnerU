@@ -14,10 +14,10 @@ class ProfileMediaUploadTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_authenticated_user_can_upload_profile_media_to_the_public_disk(): void
+    public function test_authenticated_user_can_upload_profile_media_to_the_cloud_disk(): void
     {
-        Storage::fake('public');
-        config()->set('filesystems.media_upload_disk', 'public');
+        Storage::fake('do');
+        config()->set('filesystems.media_upload_disk', 'do');
 
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -41,7 +41,7 @@ class ProfileMediaUploadTest extends TestCase
         $this->assertIsString($path);
         $this->assertIsString($url);
 
-        Storage::disk('public')->assertExists($path);
+        Storage::disk('do')->assertExists($path);
 
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
@@ -49,10 +49,44 @@ class ProfileMediaUploadTest extends TestCase
         ]);
     }
 
+    public function test_authenticated_user_can_upload_community_media_without_updating_profile_pic(): void
+    {
+        Storage::fake('do');
+        config()->set('filesystems.media_upload_disk', 'do');
+
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/media/upload', [
+            'kind' => 'community',
+            'file' => UploadedFile::fake()->image('community.jpg'),
+        ]);
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'url',
+                'profile_pic',
+                'path',
+                'user',
+            ]);
+
+        $path = $response->json('path');
+        $url = $response->json('url');
+
+        $this->assertIsString($path);
+        $this->assertIsString($url);
+        Storage::disk('do')->assertExists($path);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'profile_pic' => null,
+        ]);
+    }
+
     public function test_authenticated_user_can_upload_profile_media_even_when_profile_pic_column_is_unavailable(): void
     {
-        Storage::fake('public');
-        config()->set('filesystems.media_upload_disk', 'public');
+        Storage::fake('do');
+        config()->set('filesystems.media_upload_disk', 'do');
         Schema::shouldReceive('hasColumn')
             ->once()
             ->with('users', 'profile_pic')
@@ -85,7 +119,7 @@ class ProfileMediaUploadTest extends TestCase
             'profile_pic' => null,
         ]);
 
-        Storage::disk('public')->assertExists($path);
+        Storage::disk('do')->assertExists($path);
     }
 
     public function test_authenticated_user_can_upload_profile_media_when_the_configured_disk_is_invalid(): void

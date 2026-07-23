@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
+import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
@@ -40,6 +43,9 @@ class _SleepTrackerState extends State<SleepTracker> {
   Timer? _goalReachedTimer;
   Timer? _completionAlarmTimer;
   bool _goalReachedAlertShown = false;
+  late final AudioPlayer _sleepAlarmPlayer = AudioPlayer()
+    ..setPlayerMode(PlayerMode.mediaPlayer);
+  bool _isSleepAlarmPlaying = false;
 
   String get _userId =>
       AuthService.instance.currentSession?.id.toString() ?? 'guest';
@@ -57,6 +63,8 @@ class _SleepTrackerState extends State<SleepTracker> {
     _ticker?.cancel();
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
+    unawaited(_stopSleepAlarmMusic());
+    unawaited(_sleepAlarmPlayer.dispose());
     super.dispose();
   }
 
@@ -173,6 +181,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
     _goalReachedAlertShown = false;
+    await _stopSleepAlarmMusic();
     await FastingNotificationService.instance.cancelSleepWakeNotification();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
     await _scheduleBedtimeReminder();
@@ -185,6 +194,7 @@ class _SleepTrackerState extends State<SleepTracker> {
     _showSnackBar(
       'Sleep session saved: ${_formatDuration(session.duration)}.',
     );
+    await _promptShareSleepSession(session);
   }
 
   void _startTicker() {
@@ -230,31 +240,93 @@ class _SleepTrackerState extends State<SleepTracker> {
     _ticker?.cancel();
     unawaited(
         FastingNotificationService.instance.cancelSleepOngoingNotification());
-    _playCompletionAlarm();
+    unawaited(_playCompletionAlarm());
     unawaited(_showGoalReachedDialog());
   }
 
-  void _playCompletionAlarm() {
+  Future<void> _playCompletionAlarm() async {
     _completionAlarmTimer?.cancel();
+    _completionAlarmTimer = null;
 
-    var rings = 0;
-    void ring() {
-      SystemSound.play(SystemSoundType.alert);
+    try {
+      await _sleepAlarmPlayer.stop();
+      await _sleepAlarmPlayer.setReleaseMode(ReleaseMode.loop);
+      await _sleepAlarmPlayer.play(
+        AssetSource('audio/Night_Firepit.mp3'),
+        volume: 1.0,
+      );
+      _isSleepAlarmPlaying = true;
       HapticFeedback.mediumImpact();
+    } catch (error) {
+      debugPrint('Sleep alarm music failed: $error');
     }
+  }
 
-    ring();
-    _completionAlarmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      rings += 1;
-      if (rings >= 3) {
-        timer.cancel();
-        if (_completionAlarmTimer == timer) {
-          _completionAlarmTimer = null;
-        }
-        return;
-      }
-      ring();
-    });
+  Future<void> _stopSleepAlarmMusic() async {
+    if (!_isSleepAlarmPlaying) return;
+    try {
+      await _sleepAlarmPlayer.stop();
+      await _sleepAlarmPlayer.setReleaseMode(ReleaseMode.release);
+    } catch (error) {
+      debugPrint('Stopping sleep alarm music failed: $error');
+    } finally {
+      _isSleepAlarmPlaying = false;
+    }
+  }
+
+  Future<void> _promptShareSleepSession(_SleepSession session) async {
+    if (!mounted) return;
+
+    final shouldShare = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Share sleep session?'),
+          content: Text(
+            'You slept for ${_formatDuration(session.duration)}. Would you like to share this milestone to the community?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Done'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Share'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldShare != true || !mounted) return;
+
+    final memoryNote = Note(
+      id: '',
+      userId: '',
+      username: '',
+      title: 'Sleep Milestone',
+      note: [
+        {
+          'type': 'text',
+          'value':
+              'I completed a sleep session of ${_formatDuration(session.duration)} and wanted to share this restful milestone with the community.',
+        },
+      ],
+      createdAt: DateTime.now(),
+      category: 'Learning',
+    );
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotesType(
+          note: memoryNote,
+          initialCategory: 'Learning',
+          openCommunityAfterPost: true,
+        ),
+      ),
+    );
   }
 
   Future<void> _showGoalReachedDialog() async {

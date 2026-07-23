@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/abundance_dashboard_section.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
@@ -20,9 +21,11 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
 import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
@@ -43,7 +46,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   String quote = "Your daily inspiration...";
   String author = "Unknown";
   String? selectedEmotion;
@@ -59,9 +62,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   late final AnimationController _introController;
   late final AnimationController _tileTransitionController;
   StreamSubscription<String?>? _todayEmotionSubscription;
+  Timer? _quoteRefreshTimer;
+  Timer? _moodOverlayTimer;
   _DashboardTileTransition? _activeTileTransition;
   bool _isEmotionLoading = true;
   bool _isSavingEmotion = false;
+  bool _hasObservedEmotionStream = false;
+  ModalRoute<dynamic>? _route;
 
   String get _todayDate => EmotionService.todayKey();
 
@@ -80,9 +87,25 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  String? _emotionGifAsset(String emotion) {
+    switch (emotion.toLowerCase()) {
+      case 'happy':
+        return 'assets/images/happy.gif';
+      case 'sad':
+        return 'assets/images/rain.gif';
+      case 'angry':
+        return 'assets/images/angry.gif';
+      case 'neutral':
+        return 'assets/images/neutral.gif';
+      default:
+        return null;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final currentUserId =
         AuthService.instance.currentSession?.id.toString() ?? '';
     _companyTheme = widget.initialCompanyTheme ??
@@ -99,6 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadCompanyTheme();
     _fetchProfilePic();
     fetchQuote();
+    _scheduleNextQuoteRefresh();
     _restoreTodayEmotionFromCache();
     _listenToTodayEmotion();
     _loadLocalChatReadOverrides();
@@ -106,6 +130,33 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (watchUserId != null && watchUserId.isNotEmpty) {
       unawaited(WatchStateRefresher().refresh(watchUserId));
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<dynamic> && route != _route) {
+      if (_route != null) {
+        appRouteObserver.unsubscribe(this);
+      }
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshQuoteIfNeeded());
+      unawaited(_fetchProfilePic());
+    }
+  }
+
+  @override
+  void didPopNext() {
+    unawaited(_refreshQuoteIfNeeded());
+    unawaited(_fetchProfilePic());
   }
 
   @override
@@ -156,6 +207,26 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  String _todayQuoteKey() {
+    return DateFormat('yyyy-MM-dd').format(DateTime.now());
+  }
+
+  String _quoteStorageKey(String userId) => 'quote_$userId';
+  String _authorStorageKey(String userId) => 'author_$userId';
+  String _quoteDateStorageKey(String userId) => 'quote_date_$userId';
+
+  void _scheduleNextQuoteRefresh() {
+    _quoteRefreshTimer?.cancel();
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    final delay = nextMidnight.difference(now);
+    _quoteRefreshTimer = Timer(delay, () {
+      if (!mounted) return;
+      unawaited(_refreshQuoteIfNeeded(forceRefresh: true));
+      _scheduleNextQuoteRefresh();
+    });
+  }
+
   Future<void> _fetchProfilePic() async {
     final session = AuthService.instance.currentSession;
     if (session == null) return;
@@ -176,15 +247,25 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> fetchQuote() async {
+  Future<void> _refreshQuoteIfNeeded({bool forceRefresh = false}) async {
     try {
+      final session = AuthService.instance.currentSession;
+      final userId = session?.id.toString();
       final prefs = await SharedPreferences.getInstance();
-      final savedQuote = prefs.getString('quote');
-      final savedAuthor = prefs.getString('author');
-      final savedDate = prefs.getString('quote_date');
-      final today = DateTime.now().toString().split(' ')[0];
+      final today = _todayQuoteKey();
+      final quoteKey = userId == null ? 'quote_guest' : _quoteStorageKey(userId);
+      final authorKey =
+          userId == null ? 'author_guest' : _authorStorageKey(userId);
+      final dateKey =
+          userId == null ? 'quote_date_guest' : _quoteDateStorageKey(userId);
+      final savedQuote = prefs.getString(quoteKey);
+      final savedAuthor = prefs.getString(authorKey);
+      final savedDate = prefs.getString(dateKey);
 
-      if (savedQuote != null && savedAuthor != null && savedDate == today) {
+      if (!forceRefresh &&
+          savedQuote != null &&
+          savedAuthor != null &&
+          savedDate == today) {
         if (!mounted) return;
         setState(() {
           quote = savedQuote;
@@ -207,9 +288,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           author = newAuthor;
         });
 
-        await prefs.setString('quote', newQuote);
-        await prefs.setString('author', newAuthor);
-        await prefs.setString('quote_date', today);
+        await prefs.setString(quoteKey, newQuote);
+        await prefs.setString(authorKey, newAuthor);
+        await prefs.setString(dateKey, today);
       } else {
         if (!mounted) return;
         setState(() {
@@ -225,6 +306,10 @@ class _DashboardScreenState extends State<DashboardScreen>
         author = "Unknown";
       });
     }
+  }
+
+  Future<void> fetchQuote() {
+    return _refreshQuoteIfNeeded();
   }
 
   Future<void> selectEmotion(String emotion) async {
@@ -251,6 +336,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         selectedEmotion = emotion;
         currentUserEmotion = result.emotion ?? emotion;
       });
+      _showMoodOverlay(result.emotion ?? emotion);
       await _cacheTodayEmotion(result.emotion ?? emotion);
     } catch (e) {
       debugPrint("Error saving emotion: $e");
@@ -291,6 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         currentUserEmotion = savedEmotion;
         _isEmotionLoading = false;
       });
+      _hasObservedEmotionStream = true;
     }
   }
 
@@ -309,10 +396,18 @@ class _DashboardScreenState extends State<DashboardScreen>
         _emotionService.watchTodayEmotion(session.id.toString()).listen(
       (emotion) async {
         if (!mounted) return;
+        final previousEmotion = currentUserEmotion;
         setState(() {
           currentUserEmotion = emotion;
           _isEmotionLoading = false;
         });
+        if (_hasObservedEmotionStream &&
+            emotion != null &&
+            emotion.isNotEmpty &&
+            emotion != previousEmotion) {
+          _showMoodOverlay(emotion);
+        }
+        _hasObservedEmotionStream = true;
         await _cacheTodayEmotion(emotion);
       },
       onError: (Object error, StackTrace stackTrace) {
@@ -341,6 +436,24 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     await prefs.setString(emotionKey, emotion);
     await prefs.setString(dateKey, _todayDate);
+  }
+
+  void _showMoodOverlay(String emotion) {
+    if (!mounted) return;
+
+    _moodOverlayTimer?.cancel();
+    setState(() {
+      selectedEmotion = emotion;
+    });
+
+    _moodOverlayTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      if (selectedEmotion == emotion) {
+        setState(() {
+          selectedEmotion = null;
+        });
+      }
+    });
   }
 
   Widget _buildSectionTitle(String title) {
@@ -956,6 +1069,10 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    _quoteRefreshTimer?.cancel();
+    _moodOverlayTimer?.cancel();
     _todayEmotionSubscription?.cancel();
     _introController.dispose();
     _tileTransitionController.dispose();
@@ -1038,15 +1155,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     final dashboardUser = _dashboardData?['user'];
     final summary = _dashboardData?['summary'];
     final rawScore = dashboardUser is Map<String, dynamic>
-        ? dashboardUser['score']
+        ? DailyScoreService.resolveDisplayTotalPoints(dashboardUser)
         : summary is Map<String, dynamic>
-            ? summary['score']
-            : null;
-    final totalPointsLabel = rawScore is num
-        ? (rawScore == rawScore.roundToDouble()
-            ? rawScore.toStringAsFixed(0)
-            : rawScore.toStringAsFixed(1))
-        : '0';
+            ? DailyScoreService.resolveDisplayTotalPoints(summary)
+            : 0;
+    final totalPointsLabel = rawScore == rawScore.roundToDouble()
+        ? rawScore.toStringAsFixed(0)
+        : rawScore.toStringAsFixed(1);
 
     return InkWell(
       borderRadius: BorderRadius.circular(999),
@@ -2726,6 +2841,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                             height: 1.45,
                           ),
                         ),
+                        if (_emotionGifAsset(currentUserEmotion!) != null) ...[
+                          const SizedBox(height: 14),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(22),
+                            child: Image.asset(
+                              _emotionGifAsset(currentUserEmotion!)!,
+                              height: 120,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         TextButton(
                           onPressed: () {

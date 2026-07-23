@@ -4,6 +4,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/UsersData/u
 import 'package:selfcare_projects/src/models/community_bottom_sheet.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -657,25 +658,22 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       final tracker = trackerResponse['tracker'];
       if (tracker is! Map<String, dynamic>) return;
-
-      final meditationMinutes = (tracker['meditationMinutes'] as num?)?.toInt() ?? 0;
+      final dailyTrackerIds = dailyTrackerItems
+          .map((item) => item.id)
+          .where((id) => id.trim().isNotEmpty && id != 'todoList')
+          .toList();
+      final scoreSummary = DailyScoreService.summarizeTracker(
+        tracker,
+        dailyTrackerIds: dailyTrackerIds,
+      );
+      final meditationMinutes =
+          (tracker['meditationMinutes'] as num?)?.toInt() ?? 0;
       final stepsTaken = (tracker['stepCount'] as num?)?.toInt() ?? 0;
       final exerciseCount = (tracker['exerciseCount'] as num?)?.toInt() ?? 0;
       final callsMade = (tracker['callCount'] as num?)?.toInt() ?? 0;
       final learningEntries = (tracker['learningCount'] as num?)?.toInt() ?? 0;
       final valueEntries = (tracker['valueCount'] as num?)?.toInt() ?? 0;
       final todoListCount = (tracker['todoListCount'] as num?)?.toInt() ?? 0;
-      final todoListScore = (tracker['todoListScore'] as num?)?.toInt() ?? todoListCount;
-      final rawTodoListContribution = tracker['todoListScoreDailyContribution'];
-      final todoListScoreContribution = rawTodoListContribution is num
-          ? rawTodoListContribution.round()
-          : todoListScore;
-      final includeTodoListScore = tracker['todoListIncludedInTotal'] == true;
-      final rawDailyTrackerScore = tracker['dailyTrackerScore'];
-      final dailyTrackerScore = rawDailyTrackerScore is num
-          ? rawDailyTrackerScore.round()
-          : _dailyTrackerScore;
-
       final taskCompletion = <String, bool>{
         'Meditation': tracker['meditation'] == true,
         'Steps': tracker['steps'] == true,
@@ -686,59 +684,15 @@ class _ProfilePageState extends State<ProfilePage> {
         'Todo List': tracker['todoList'] == true,
       };
 
-      final taskPoints = <String, int>{
-        'Meditation Points': meditationMinutes,
-        'Steps Points': (stepsTaken / 200).floor(),
-        'Exercise Points': exerciseCount * 10,
-        'Call Points': callsMade,
-        'Learning Points': learningEntries,
-        'Add Value Points': valueEntries,
-        'Todo List Points': todoListScore,
-      };
-
-      if (meditationMinutes == 0 && taskCompletion['Meditation'] == true) {
-        taskPoints['Meditation Points'] = 5;
-      }
-      if (stepsTaken == 0 && taskCompletion['Steps'] == true) {
-        taskPoints['Steps Points'] = 10;
-      }
-      if (exerciseCount == 0 && taskCompletion['Exercise'] == true) {
-        taskPoints['Exercise Points'] = 10;
-      }
-      if (callsMade == 0 && taskCompletion['Call'] == true) {
-        taskPoints['Call Points'] = 10;
-      }
-      if (learningEntries == 0 && taskCompletion['Learning'] == true) {
-        taskPoints['Learning Points'] = 15;
-      }
-      if (valueEntries == 0 && taskCompletion['Add Value'] == true) {
-        taskPoints['Add Value Points'] = 15;
-      }
-      if (todoListScore == 0 && taskCompletion['Todo List'] == true) {
-        taskPoints['Todo List Points'] = 1;
-      }
-
-      final activityPoints = taskPoints.values.fold<int>(0, (a, b) => a + b);
-      final clampedDailyTrackerScore = dailyTrackerScore.clamp(0, 100);
-      final clampedTodoListScore = todoListScore.clamp(0, 100);
-      final clampedTodoListContribution =
-          todoListScoreContribution.clamp(0, 100);
-      final totalPoints = includeTodoListScore
-          ? ((clampedDailyTrackerScore + clampedTodoListContribution) / 2)
-              .clamp(0, 100)
-          : clampedDailyTrackerScore;
-
       await UserPointApiService.instance.upsert(
         date: todayDate,
         username: usernameValue,
-        totalPoints: totalPoints,
-        activityPoints: activityPoints,
-        dailyTrackerScore: clampedDailyTrackerScore,
-        todoListScore: clampedTodoListScore,
-        todoListScoreDailyContribution: clampedTodoListContribution,
-        todoListIncludedInTotal: includeTodoListScore,
-        userTotalScore: totalPoints.round(),
-        taskPoints: taskPoints.map((key, value) => MapEntry(key, value)),
+        totalPoints: scoreSummary.totalPoints,
+        dailyTrackerScore: scoreSummary.dailyTrackerScore,
+        todoListScore: scoreSummary.todoListScore,
+        todoListScoreDailyContribution: scoreSummary.todoListScoreContribution,
+        todoListIncludedInTotal: scoreSummary.todoListIncludedInTotal,
+        userTotalScore: scoreSummary.totalPoints.round(),
         tasks: taskCompletion.map((key, value) => MapEntry(key, value)),
         server: userData['team']?.toString() ?? 'Default',
         companyId: membershipData.activeMembership?.id,
@@ -752,17 +706,16 @@ class _ProfilePageState extends State<ProfilePage> {
           'learningEntries': learningEntries,
           'valueEntries': valueEntries,
           'todoListCount': todoListCount,
-          'todoListScore': clampedTodoListScore,
-          'todoListScoreDailyContribution': clampedTodoListContribution,
-          'todoListIncludedInTotal': includeTodoListScore,
-          'dailyTrackerScore': clampedDailyTrackerScore,
-          'userTotalScore': totalPoints,
-          'activityPoints': activityPoints,
+          'todoListScore': scoreSummary.todoListScore,
+          'todoListScoreDailyContribution':
+              scoreSummary.todoListScoreContribution,
+          'todoListIncludedInTotal': scoreSummary.todoListIncludedInTotal,
+          'dailyTrackerScore': scoreSummary.dailyTrackerScore,
+          'userTotalScore': scoreSummary.totalPoints,
         },
       );
 
-      print("Total points assigned: $totalPoints");
-      print("Points per task: $taskPoints");
+      print("Total points assigned: ${scoreSummary.totalPoints}");
     } catch (e) {
       print("Error in assigning points: $e");
     }

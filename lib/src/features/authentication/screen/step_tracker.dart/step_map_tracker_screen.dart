@@ -963,6 +963,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   String _currentUsername = 'Walker';
   String? _activeSessionId;
   String? _activeSessionStatus;
+  String? _activeSessionCreatedBy;
   String? _selectedMarkerUserId;
   _RecordedWalk? _selectedRecordedWalk;
   List<_WalkSessionMember> _sharedMembers = const [];
@@ -975,6 +976,26 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   int _replayRouteIndex = 0;
   List<LatLng> _replayRoutePoints = const [];
   LatLng? _replayCurrentPoint;
+
+  bool get _isSessionOwner {
+    final currentUserId = _currentUserId;
+    final sessionOwner = _activeSessionCreatedBy;
+    return currentUserId != null &&
+        currentUserId.isNotEmpty &&
+        sessionOwner != null &&
+        sessionOwner.isNotEmpty &&
+        sessionOwner == currentUserId;
+  }
+
+  bool get _hasActiveSharedSession {
+    return _activeSessionId != null &&
+        (_activeSessionStatus == 'pending' || _activeSessionStatus == 'active');
+  }
+
+  String? get _sharedSessionActionLabel {
+    if (!_hasActiveSharedSession) return null;
+    return _isSessionOwner ? 'End Session' : 'Leave Session';
+  }
 
   void _listenToSessionMembers(String? sessionId) {
     _memberSubscription?.cancel();
@@ -1249,6 +1270,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         setState(() {
           _activeSessionId = null;
           _activeSessionStatus = null;
+          _activeSessionCreatedBy = null;
           _sharedMembers = const [];
         });
         _trackingController.updateActiveSession(null);
@@ -1259,6 +1281,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       final activeDoc = docs.first;
       final nextSessionId = activeDoc['id'] as String? ?? '';
       final nextStatus = activeDoc['status'] as String? ?? 'pending';
+      final nextCreatedBy = activeDoc['createdBy'] as String? ?? '';
 
       if (_activeSessionId != nextSessionId) {
         _listenToSessionMembers(nextSessionId);
@@ -1267,6 +1290,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       setState(() {
         _activeSessionId = nextSessionId;
         _activeSessionStatus = nextStatus;
+        _activeSessionCreatedBy = nextCreatedBy;
       });
       _trackingController.updateActiveSession(nextSessionId);
     }, onError: (error) {
@@ -1361,6 +1385,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         _activeSessionStatus = hasReusableSession
             ? (_activeSessionStatus ?? 'pending')
             : 'pending';
+        _activeSessionCreatedBy = userId;
       });
       _trackingController.updateActiveSession(sessionId);
       _listenToSessionMembers(sessionId);
@@ -1409,6 +1434,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       setState(() {
         _activeSessionId = sessionId;
         _activeSessionStatus = 'active';
+        _activeSessionCreatedBy =
+            (inviteData['fromUserId'] as String?)?.trim().isNotEmpty == true
+                ? inviteData['fromUserId'] as String?
+                : null;
       });
       _trackingController.updateActiveSession(sessionId);
       _listenToSessionMembers(sessionId);
@@ -1827,6 +1856,83 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     await _trackingController.stopTracking();
     if (shouldSave) {
       await _saveRecordedWalk();
+    }
+  }
+
+  Future<void> _leaveSharedSessionAction() async {
+    if (_isSessionBusy || !_hasActiveSharedSession) return;
+
+    setState(() {
+      _isSessionBusy = true;
+    });
+
+    try {
+      await _trackingController.stopTracking(syncSharedSession: false);
+      await _trackingController.leaveSharedSession();
+      if (!mounted) return;
+      setState(() {
+        _activeSessionId = null;
+        _activeSessionStatus = null;
+        _activeSessionCreatedBy = null;
+        _sharedMembers = const [];
+        _sharedMemberStatuses = const {};
+        _selectedMarkerUserId = null;
+      });
+      _trackingController.updateActiveSession(null);
+      _listenToWalkSessions();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSessionBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _endSharedSessionAction() async {
+    if (_isSessionBusy || !_hasActiveSharedSession) return;
+
+    final sessionId = _activeSessionId;
+    final currentUserId = _currentUserId;
+    if (sessionId == null || currentUserId == null) return;
+
+    setState(() {
+      _isSessionBusy = true;
+    });
+
+    try {
+      await _trackingController.stopTracking(syncSharedSession: false);
+
+      await _api.saveSession({
+        'id': sessionId,
+        'status': 'ended',
+        'participant_ids': _sharedMembers
+            .map((member) => member.userId)
+            .where((value) => value.isNotEmpty)
+            .toList(),
+        'created_by': _activeSessionCreatedBy ?? currentUserId,
+        'created_by_name': _currentUsername,
+      });
+
+      await _trackingController.leaveSharedSession();
+
+      if (!mounted) return;
+      setState(() {
+        _activeSessionId = null;
+        _activeSessionStatus = null;
+        _activeSessionCreatedBy = null;
+        _sharedMembers = const [];
+        _sharedMemberStatuses = const {};
+        _selectedMarkerUserId = null;
+      });
+      _trackingController.updateActiveSession(null);
+      _listenToWalkSessions();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSessionBusy = false;
+        });
+      }
     }
   }
 
@@ -3287,6 +3393,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
           ];
     final pendingInvitesOverlay = _buildPendingInvitesOverlay();
     final sharedSessionOverlay = _buildSharedSessionOverlay(selectedMember);
+    final sharedSessionActionLabel = _sharedSessionActionLabel;
     final dockStatusText = _selectedRecordedWalk == null
         ? _statusText
         : (_isReplayingRecordedWalk
@@ -3455,6 +3562,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                         viewingRecordedWalk: _selectedRecordedWalk != null,
                         replayEnabled: _selectedRecordedWalk != null,
                         isReplaying: _isReplayingRecordedWalk,
+                        sessionActionLabel: sharedSessionActionLabel,
+                        onSessionAction: sharedSessionActionLabel == null
+                            ? null
+                            : (_isSessionOwner
+                                ? _endSharedSessionAction
+                                : _leaveSharedSessionAction),
+                        isSessionOwner: _isSessionOwner,
                         onReplay: _selectedRecordedWalk == null
                             ? null
                             : (_isReplayingRecordedWalk
@@ -3800,6 +3914,9 @@ class _BottomTrackerDock extends StatelessWidget {
     required this.startStopLabel,
     required this.isTracking,
     required this.onReset,
+    required this.sessionActionLabel,
+    required this.onSessionAction,
+    required this.isSessionOwner,
   });
 
   final int liveWalkerCount;
@@ -3817,6 +3934,9 @@ class _BottomTrackerDock extends StatelessWidget {
   final String startStopLabel;
   final bool isTracking;
   final VoidCallback? onReset;
+  final String? sessionActionLabel;
+  final VoidCallback? onSessionAction;
+  final bool isSessionOwner;
 
   @override
   Widget build(BuildContext context) {
@@ -3840,6 +3960,27 @@ class _BottomTrackerDock extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (sessionActionLabel != null && onSessionAction != null) ...[
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onSessionAction,
+                icon: Icon(
+                  isSessionOwner
+                      ? Icons.stop_circle_rounded
+                      : Icons.logout_rounded,
+                ),
+                label: Text(sessionActionLabel!),
+                style: FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: theme.colorScheme.onPrimary,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (liveWalkerCount > 0 || onCenterMap != null || onToggleVisibility != null) ...[
             Row(
               children: [

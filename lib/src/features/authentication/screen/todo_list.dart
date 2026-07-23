@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goals_hub_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -26,6 +27,12 @@ class TodoList extends StatelessWidget {
   Widget build(BuildContext context) {
     return const TodoListScreen();
   }
+}
+
+Color _onSurfaceFor(Color background) {
+  return ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+      ? Colors.white
+      : Colors.black87;
 }
 
 // Task model
@@ -404,6 +411,12 @@ class _TodoListScreenState extends State<TodoListScreen> {
   // Create an instance of FirestoreRepository with fallback
   late final FirestoreRepository _repository;
 
+  CompanyThemeData _currentCompanyTheme() {
+    final userId = AuthService.instance.currentSession?.id.toString() ?? '';
+    return CompanyThemeService.cachedThemeForUser(userId) ??
+        CompanyThemeData.standard;
+  }
+
   // Constructor with repository initialization
   _TodoListScreenState() {
     try {
@@ -519,7 +532,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
       print('Error adding task: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to add task. Please try again.')),
+        const SnackBar(content: Text('Failed to add goal. Please try again.')),
       );
     }
   }
@@ -798,7 +811,15 @@ class _TodoListScreenState extends State<TodoListScreen> {
     required List<TaskSubItem> subTasks,
     required TextEditingController controller,
     required void Function(VoidCallback fn) setDialogState,
+    required CompanyThemeData companyTheme,
   }) {
+    final surfaceColor = companyTheme.surfaceColor;
+    final textColor = companyTheme.inkColor;
+    final mutedColor = companyTheme.mutedInkColor;
+    final borderColor = companyTheme.isDark
+        ? companyTheme.primaryColor.withValues(alpha: 0.22)
+        : mutedColor.withValues(alpha: 0.22);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -813,12 +834,27 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   hintText: 'Example: Drink water',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: borderColor),
                   ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: borderColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: companyTheme.iconColor,
+                      width: 1.4,
+                    ),
+                  ),
+                  labelStyle: TextStyle(color: mutedColor),
+                  hintStyle: TextStyle(color: mutedColor),
                   contentPadding: const EdgeInsets.symmetric(
                     vertical: 14,
                     horizontal: 12,
                   ),
                 ),
+                style: TextStyle(color: textColor),
               ),
             ),
             const SizedBox(width: 10),
@@ -832,8 +868,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 });
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEFD199),
-                foregroundColor: const Color(0xFF2B2B2B),
+                backgroundColor: companyTheme.primaryColor,
+                foregroundColor: _onSurfaceFor(companyTheme.primaryColor),
                 elevation: 0,
               ),
               child: const Text('ADD'),
@@ -846,9 +882,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: surfaceColor,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: borderColor),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -870,8 +906,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             });
                           },
                           shape: const CircleBorder(),
-                          checkColor: Colors.white,
-                          activeColor: const Color(0xFF90A17D),
+                          checkColor: _onSurfaceFor(companyTheme.primaryColor),
+                          activeColor: companyTheme.primaryColor,
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -883,8 +919,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                               style: TextStyle(
                                 fontSize: 14,
                                 color: subTasks[index].isCompleted
-                                    ? Colors.grey
-                                    : const Color(0xFF2B2B2B),
+                                    ? mutedColor
+                                    : textColor,
                                 decoration: subTasks[index].isCompleted
                                     ? TextDecoration.lineThrough
                                     : null,
@@ -900,7 +936,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             });
                           },
                           icon: const Icon(Icons.close),
-                          color: Colors.grey.shade600,
+                          color: mutedColor,
                         ),
                       ],
                     ),
@@ -994,12 +1030,19 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }) {
     final clampedTodoListContribution =
         includeTodoListScore ? todoListScoreContribution.clamp(0, 100) : 0;
+    final scoreSummary = DailyScoreService.summarizeTracker(
+      {
+        ...tracker,
+        'todoListScore': todoListScore,
+        'todoListScoreDailyContribution': clampedTodoListContribution,
+        'todoListIncludedInTotal': includeTodoListScore,
+      },
+      dailyTrackerIds: dailyTrackerIds,
+    );
     if (dailyTrackerIds.isEmpty) {
       return {
-        'dailyTrackerScore': 0,
-        'userTotalScore': includeTodoListScore
-            ? (clampedTodoListContribution / 2).clamp(0, 100)
-            : 0,
+        'dailyTrackerScore': scoreSummary.dailyTrackerScore,
+        'userTotalScore': scoreSummary.totalPoints,
         'dailyTrackerCompletedCount': 0,
         'dailyTrackerCompletedWeight': 0,
         'dailyTrackerTaskCount': 0,
@@ -1020,12 +1063,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
       if (progress >= 1) completedCount += 1;
     }
 
-    final dailyTrackerScore = ((completedWeight / dailyTrackerIds.length) * 100)
-        .round()
-        .clamp(0, 100);
-    final userTotalScore = includeTodoListScore
-        ? ((dailyTrackerScore + clampedTodoListContribution) / 2).clamp(0, 100)
-        : dailyTrackerScore;
+    final dailyTrackerScore = scoreSummary.dailyTrackerScore;
+    final userTotalScore = scoreSummary.totalPoints;
 
     return {
       'dailyTrackerScore': dailyTrackerScore,
@@ -1327,7 +1366,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'To Do Score',
+                        'Goals Score',
                         style: TextStyle(
                           fontSize: 20,
                           color: companyTheme.inkColor,
@@ -1435,6 +1474,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }
 
   void _showAddTaskDialog() {
+    final companyTheme = _currentCompanyTheme();
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
     final subTaskController = TextEditingController();
@@ -1444,16 +1484,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     showDialog(
       context: context,
-      // The dialog surface is intentionally light, so force light text styles
-      // even when the app is in a dark company theme.
       builder: (context) => Theme(
-        data: AppTheme.light,
+        data: AppTheme.company(companyTheme),
         child: StatefulBuilder(
           builder: (context, setState) => AlertDialog(
-            title: const Text('New Task'),
+            title: const Text('New Goal'),
             contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
             actionsPadding: EdgeInsets.zero,
-            backgroundColor: const Color(0xFFF2F0F7),
+            backgroundColor: companyTheme.surfaceColor,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1463,28 +1501,36 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.list, color: Colors.brown[400], size: 28),
+                      Icon(Icons.list, color: companyTheme.iconColor, size: 28),
                       const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: titleController,
                           decoration: InputDecoration(
-                            labelText: 'Title',
+                            labelText: 'Goal title',
                             hintText: '',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide: BorderSide(
+                                color: companyTheme.mutedInkColor
+                                    .withValues(alpha: 0.25),
+                                width: 1.4,
+                              ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide: BorderSide(
+                                color: companyTheme.mutedInkColor
+                                    .withValues(alpha: 0.25),
+                                width: 1.4,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide: BorderSide(
+                                color: companyTheme.iconColor,
+                                width: 1.4,
+                              ),
                             ),
                             counterText: '${titleController.text.length}/60',
                             helperText: 'Maximum 60 characters',
@@ -1513,7 +1559,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                       Container(
                         padding: const EdgeInsets.only(top: 12),
                         child: Icon(Icons.chat_bubble_outline,
-                            color: Colors.brown[400], size: 28),
+                            color: companyTheme.iconColor, size: 28),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1538,14 +1584,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Icon(Icons.local_offer_outlined,
-                          color: Colors.brown[400], size: 28),
+                          color: companyTheme.iconColor, size: 28),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade400),
+                            border: Border.all(
+                              color: companyTheme.mutedInkColor
+                                  .withValues(alpha: 0.25),
+                            ),
                             borderRadius: BorderRadius.circular(8),
-                            color: Colors.white,
+                            color: companyTheme.surfaceColor,
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<TaskTag>(
@@ -1570,7 +1619,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                           height: 12,
                                           decoration: BoxDecoration(
                                             color: tag == TaskTag.none
-                                                ? Colors.grey
+                                                ? companyTheme.mutedInkColor
                                                 : tag.color,
                                             shape: BoxShape.circle,
                                           ),
@@ -1596,7 +1645,12 @@ class _TodoListScreenState extends State<TodoListScreen> {
                               },
                               // Constrain dropdown menu width
                               menuMaxHeight: 300,
-                              hint: const Text('Add a task tag'),
+                              hint: Text(
+                                'Add a goal tag',
+                                style: TextStyle(
+                                  color: companyTheme.mutedInkColor,
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -1609,6 +1663,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     subTasks: subTasks,
                     controller: subTaskController,
                     setDialogState: setState,
+                    companyTheme: companyTheme,
                   ),
                   const SizedBox(height: 16),
 
@@ -1617,16 +1672,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Icon(Icons.calendar_today,
-                          color: Colors.brown[400], size: 28),
+                          color: companyTheme.iconColor, size: 28),
                       const SizedBox(width: 12),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Due Date',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
+                              color: companyTheme.inkColor,
                             ),
                           ),
                           GestureDetector(
@@ -1646,7 +1702,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             child: Text(
                               DateFormat('EEE, MMM d, yyyy')
                                   .format(selectedDate),
-                              style: const TextStyle(fontSize: 16),
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: companyTheme.mutedInkColor,
+                              ),
                             ),
                           ),
                         ],
@@ -1685,9 +1744,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             }
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                const Color(0xFFEFD199), // Gold/beige color
-                            foregroundColor: Colors.white,
+                            backgroundColor: companyTheme.primaryColor,
+                            foregroundColor:
+                                _onSurfaceFor(companyTheme.primaryColor),
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -1711,13 +1770,16 @@ class _TodoListScreenState extends State<TodoListScreen> {
                         child: ElevatedButton(
                           onPressed: () => Navigator.pop(context),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.grey,
+                            backgroundColor: companyTheme.surfaceColor,
+                            foregroundColor: companyTheme.mutedInkColor,
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
-                              side: BorderSide(color: Colors.grey.shade300),
+                              side: BorderSide(
+                                color: companyTheme.mutedInkColor
+                                    .withValues(alpha: 0.25),
+                              ),
                             ),
                           ),
                           child: const Text(
@@ -1810,7 +1872,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                         style: TextStyle(color: companyTheme.inkColor),
                         cursorColor: companyTheme.iconColor,
                         decoration: InputDecoration(
-                          hintText: 'Search tasks...',
+                          hintText: 'Search goals...',
                           hintStyle:
                               TextStyle(color: companyTheme.mutedInkColor),
                           prefixIcon: Icon(
@@ -1901,13 +1963,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             Container(
                               height: 46,
                               width: 46,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFEFD199),
+                              decoration: BoxDecoration(
+                                color: companyTheme.primaryColor
+                                    .withValues(alpha: 0.18),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.stars_rounded,
-                                color: Color(0xFF5F4E31),
+                                color: companyTheme.primaryColor,
                               ),
                             ),
                             const SizedBox(width: 14),
@@ -1916,7 +1979,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Todo score',
+                                    'Goals score',
                                     style: TextStyle(
                                       fontSize: 13,
                                       color: companyTheme.mutedInkColor,
@@ -1975,10 +2038,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                   const SizedBox(height: 16),
                                   Text(
                                     _searchQuery.isNotEmpty
-                                        ? 'No matching tasks found'
+                                        ? 'No matching goals found'
                                         : _currentTabIndex == 2
-                                            ? 'No completed tasks yet'
-                                            : 'No tasks yet',
+                                            ? 'No completed goals yet'
+                                            : 'No goals yet',
                                     style: TextStyle(
                                       fontSize: 18,
                                       color: companyTheme.mutedInkColor,
@@ -2001,9 +2064,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                       showDialog(
                                         context: context,
                                         builder: (context) => AlertDialog(
-                                          title: const Text('Delete Task'),
+                                          title: const Text('Delete Goal'),
                                           content: const Text(
-                                              'Are you sure you want to delete this task?'),
+                                              'Are you sure you want to delete this goal?'),
                                           actions: [
                                             TextButton(
                                               onPressed: () =>
@@ -2018,7 +2081,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                     .showSnackBar(
                                                   SnackBar(
                                                     content: const Text(
-                                                        'Task deleted'),
+                                                        'Goal deleted'),
                                                     action: SnackBarAction(
                                                       label: 'UNDO',
                                                       onPressed: () {
@@ -2267,9 +2330,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                         builder: (context) =>
                                                             AlertDialog(
                                                           title: const Text(
-                                                              'Delete Task'),
+                                                              'Delete Goal'),
                                                           content: const Text(
-                                                              'Are you sure you want to delete this task?'),
+                                                              'Are you sure you want to delete this goal?'),
                                                           actions: [
                                                             TextButton(
                                                               onPressed: () =>
@@ -2312,7 +2375,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ],
                 ),
           floatingActionButton: FloatingActionButton(
-            onPressed: _showAddTaskDialog,
+            onPressed: () => _showAddTaskDialog(),
             backgroundColor: companyTheme.isDark
                 ? companyTheme.iconColor
                 : const Color(0xFFEFD199),
@@ -2327,15 +2390,20 @@ class _TodoListScreenState extends State<TodoListScreen> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                const DrawerHeader(
+                DrawerHeader(
                   decoration: BoxDecoration(
-                    color: Color(0xFF90A17D),
+                    color: companyTheme.isDark
+                        ? companyTheme.surfaceColor
+                        : companyTheme.primaryColor,
                   ),
                   child: Text(
-                    'Todo List',
+                    'Goals',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: _onSurfaceFor(companyTheme.isDark
+                          ? companyTheme.surfaceColor
+                          : companyTheme.primaryColor),
                       fontSize: 24,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
@@ -2356,6 +2424,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }
 
   void _showTaskDetails(Task task) {
+    final companyTheme = _currentCompanyTheme();
     final dueDate = DateFormat('EEE, MMM d, yyyy').format(task.dueDate);
     final completedDate = task.completedAt == null
         ? null
@@ -2363,15 +2432,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     showDialog(
       context: context,
-      // The dialog surface is intentionally light, so force light text styles
-      // even when the app is in a dark company theme.
       builder: (dialogContext) => Theme(
-        data: AppTheme.light,
+        data: AppTheme.company(companyTheme),
         child: AlertDialog(
-          title: const Text('Task Details'),
+          title: const Text('Goal Details'),
           contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
           actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          backgroundColor: const Color(0xFFF2F0F7),
+          backgroundColor: companyTheme.surfaceColor,
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -2379,8 +2446,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
               children: [
                 _buildTaskDetailRow(
                   icon: Icons.list,
-                  label: 'Title',
+                  label: 'Goal title',
                   value: task.title,
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                 ),
                 const SizedBox(height: 16),
                 _buildTaskDetailRow(
@@ -2389,12 +2458,16 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   value: task.description.trim().isEmpty
                       ? 'No description added.'
                       : task.description.trim(),
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                 ),
                 const SizedBox(height: 16),
                 _buildTaskDetailRow(
                   icon: Icons.local_offer_outlined,
                   label: 'Tag',
                   value: task.tag.fullDisplayName,
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                   accentColor:
                       task.tag == TaskTag.none ? Colors.grey : task.tag.color,
                 ),
@@ -2403,12 +2476,16 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   icon: Icons.calendar_today,
                   label: 'Due Date',
                   value: dueDate,
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                 ),
                 const SizedBox(height: 16),
                 _buildTaskDetailRow(
                   icon: Icons.insights_outlined,
                   label: 'Progress',
                   value: '${taskProgress(task).round()}%',
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                   accentColor:
                       task.tag == TaskTag.none ? Colors.grey : task.tag.color,
                 ),
@@ -2424,8 +2501,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   const SizedBox(height: 16),
                   _buildSubtaskRows(
                     task: task,
-                    titleColor: const Color(0xFF2B2B2B),
-                    mutedColor: const Color(0xFF6E625B),
+                    titleColor: companyTheme.inkColor,
+                    mutedColor: companyTheme.mutedInkColor,
                     accentColor:
                         task.tag == TaskTag.none ? Colors.grey : task.tag.color,
                   ),
@@ -2439,6 +2516,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   value: taskIsEffectivelyCompleted(task)
                       ? 'Completed'
                       : 'Pending',
+                  labelColor: companyTheme.mutedInkColor,
+                  valueColor: companyTheme.inkColor,
                   accentColor:
                       taskIsEffectivelyCompleted(task)
                           ? const Color(0xFF6F8A5F)
@@ -2450,6 +2529,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     icon: Icons.event_available,
                     label: 'Completed At',
                     value: completedDate,
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
                   ),
                 ],
               ],
@@ -2468,8 +2549,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: const Text('EDIT'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEFD199),
-                foregroundColor: const Color(0xFF2B2B2B),
+                backgroundColor: companyTheme.primaryColor,
+                foregroundColor: _onSurfaceFor(companyTheme.primaryColor),
               ),
             ),
           ],
@@ -2482,9 +2563,11 @@ class _TodoListScreenState extends State<TodoListScreen> {
     required IconData icon,
     required String label,
     required String value,
+    required Color labelColor,
+    required Color valueColor,
     Color? accentColor,
   }) {
-    final effectiveAccent = accentColor ?? Colors.brown[400]!;
+    final effectiveAccent = accentColor ?? Colors.grey;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2496,19 +2579,19 @@ class _TodoListScreenState extends State<TodoListScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                label,
-                style: const TextStyle(
+              label,
+                style: TextStyle(
                   fontSize: 13,
-                  color: Color(0xFF6E625B),
+                  color: labelColor,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
-                  color: Color(0xFF2B2B2B),
+                  color: valueColor,
                   fontWeight: FontWeight.w700,
                   height: 1.3,
                 ),
@@ -2521,6 +2604,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
   }
 
   void _editTask(Task task) {
+    final companyTheme = _currentCompanyTheme();
     final titleController = TextEditingController(text: task.title);
     final descriptionController = TextEditingController(text: task.description);
     final subTaskController = TextEditingController();
@@ -2535,16 +2619,23 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     showDialog(
       context: context,
-      // The dialog surface is intentionally light, so force light text styles
-      // even when the app is in a dark company theme.
       builder: (context) => Theme(
-        data: AppTheme.light,
+        data: AppTheme.company(companyTheme),
         child: StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: const Text('Edit Task'),
+          builder: (context, setState) {
+            final colorScheme = Theme.of(context).colorScheme;
+            final surfaceColor = colorScheme.surface;
+            final textPrimaryColor = colorScheme.onSurface;
+            final textSecondaryColor = colorScheme.onSurfaceVariant;
+            final borderColor = colorScheme.outlineVariant;
+            final accentColor = colorScheme.primary;
+            final onAccentColor = colorScheme.onPrimary;
+
+            return AlertDialog(
+            title: const Text('Edit Goal'),
             contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
             actionsPadding: EdgeInsets.zero,
-            backgroundColor: const Color(0xFFF2F0F7),
+            backgroundColor: surfaceColor,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2554,31 +2645,33 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.list, color: Colors.brown[400], size: 28),
+                      Icon(Icons.list, color: accentColor, size: 28),
                       const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: titleController,
                           decoration: InputDecoration(
-                            labelText: 'Title',
+                            labelText: 'Goal title',
                             hintText: '',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide:
+                                  BorderSide(color: borderColor, width: 1.4),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide:
+                                  BorderSide(color: borderColor, width: 1.4),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2),
+                              borderSide:
+                                  BorderSide(color: accentColor, width: 1.4),
                             ),
                             counterText: '${titleController.text.length}/60',
                             helperText: 'Maximum 60 characters',
+                            labelStyle: TextStyle(color: textSecondaryColor),
+                            helperStyle: TextStyle(color: textSecondaryColor),
                           ),
                           autofocus: true,
                           maxLength: 60,
@@ -2591,6 +2684,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           onChanged: (text) {
                             setState(() {});
                           },
+                          style: TextStyle(color: textPrimaryColor),
                         ),
                       ),
                     ],
@@ -2604,7 +2698,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                       Container(
                         padding: const EdgeInsets.only(top: 12),
                         child: Icon(Icons.chat_bubble_outline,
-                            color: Colors.brown[400], size: 28),
+                            color: accentColor, size: 28),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -2614,11 +2708,23 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             hintText: 'Description (optional)',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: borderColor),
                             ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide:
+                                  BorderSide(color: accentColor, width: 1.4),
+                            ),
+                            hintStyle: TextStyle(color: textSecondaryColor),
                             contentPadding: const EdgeInsets.symmetric(
                                 vertical: 16, horizontal: 12),
                           ),
                           maxLines: 3,
+                          style: TextStyle(color: textPrimaryColor),
                         ),
                       ),
                     ],
@@ -2629,14 +2735,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Icon(Icons.local_offer_outlined,
-                          color: Colors.brown[400], size: 28),
+                          color: accentColor, size: 28),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade400),
+                            border: Border.all(color: borderColor),
                             borderRadius: BorderRadius.circular(8),
-                            color: Colors.white,
+                            color: surfaceColor,
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<TaskTag>(
@@ -2657,7 +2763,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                           height: 12,
                                           decoration: BoxDecoration(
                                             color: tag == TaskTag.none
-                                                ? Colors.grey
+                                                ? textSecondaryColor
                                                 : tag.color,
                                             shape: BoxShape.circle,
                                           ),
@@ -2680,7 +2786,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                 });
                               },
                               menuMaxHeight: 300,
-                              hint: const Text('Add a task tag'),
+                              hint: Text(
+                                'Add a goal tag',
+                                style: TextStyle(color: textSecondaryColor),
+                              ),
                             ),
                           ),
                         ),
@@ -2693,6 +2802,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     subTasks: subTasks,
                     controller: subTaskController,
                     setDialogState: setState,
+                    companyTheme: companyTheme,
                   ),
                   const SizedBox(height: 16),
 
@@ -2701,16 +2811,17 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Icon(Icons.calendar_today,
-                          color: Colors.brown[400], size: 28),
+                          color: accentColor, size: 28),
                       const SizedBox(width: 12),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Due Date',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
+                              color: textPrimaryColor,
                             ),
                           ),
                           GestureDetector(
@@ -2730,7 +2841,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             child: Text(
                               DateFormat('EEE, MMM d, yyyy')
                                   .format(selectedDate),
-                              style: const TextStyle(fontSize: 16),
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: textSecondaryColor,
+                              ),
                             ),
                           ),
                         ],
@@ -2772,8 +2886,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             }
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFEFD199),
-                            foregroundColor: Colors.white,
+                            backgroundColor: accentColor,
+                            foregroundColor: onAccentColor,
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -2797,13 +2911,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
                         child: ElevatedButton(
                           onPressed: () => Navigator.pop(context),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.grey,
+                            backgroundColor: surfaceColor,
+                            foregroundColor: textSecondaryColor,
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
-                              side: BorderSide(color: Colors.grey.shade300),
+                              side: BorderSide(color: borderColor),
                             ),
                           ),
                           child: const Text(
@@ -2820,7 +2934,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 ),
               ),
             ],
-          ),
+          );
+          },
         ),
       ),
     );
@@ -2846,14 +2961,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
       // Show a confirmation message
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task updated successfully')),
+        const SnackBar(content: Text('Goal updated successfully')),
       );
     } catch (e) {
       print('Error updating task: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Failed to update task. Please try again.')),
+            content: Text('Failed to update goal. Please try again.')),
       );
       // If update fails, reload tasks to ensure UI is in sync with database
       await _loadTasks();
@@ -2949,10 +3064,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
     if (category == 'All') {
       buttonWidth = 80;
     } else if (category == 'Pending') {
-      buttonWidth = 120;
+      buttonWidth = 132;
     } else {
       // Completed
-      buttonWidth = 120;
+      buttonWidth = 132;
     }
 
     return GestureDetector(

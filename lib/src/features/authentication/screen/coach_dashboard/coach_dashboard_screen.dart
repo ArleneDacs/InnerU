@@ -23,6 +23,7 @@ import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/chat_api_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
@@ -932,23 +933,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
   }
 
   num _scoreFromUserPointData(Map<String, dynamic>? data) {
-    final rawPoints = data?['totalPoints'];
-    final rawDailyTrackerScore = data?['dailyTrackerScore'];
-    final rawTodoListScore = data?['todoListScore'];
-    final rawTodoListContribution = data?['todoListScoreDailyContribution'];
-    final includeTodoListScore = data?['todoListIncludedInTotal'] == true;
-
-    if (rawDailyTrackerScore is num && rawTodoListScore is num) {
-      final dailyScore = rawDailyTrackerScore.clamp(0, 100);
-      final todoScore = rawTodoListContribution is num
-          ? rawTodoListContribution.clamp(0, 100)
-          : rawTodoListScore.clamp(0, 100);
-      return includeTodoListScore
-          ? ((dailyScore + todoScore) / 2).clamp(0, 100)
-          : dailyScore;
-    }
-
-    return rawPoints is num ? rawPoints.clamp(0, 100) : 0;
+    return DailyScoreService.resolveDisplayTotalPoints(data);
   }
 
   String _scoreLabel(num score) {

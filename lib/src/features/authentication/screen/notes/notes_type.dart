@@ -147,7 +147,10 @@ class _NotesTypeState extends State<NotesType> {
 
   bool _isFormValid = false;
   bool _isValidImageUrl(String value) {
-    final url = value.trim();
+    final raw = value.trim();
+    if (raw.isEmpty || raw == 'loading') return false;
+
+    final url = ImageStorageService.normalizeMediaUrl(raw);
     return url.isNotEmpty &&
         url != "loading" &&
         (url.startsWith("http://") || url.startsWith("https://"));
@@ -544,10 +547,14 @@ class _NotesTypeState extends State<NotesType> {
 
     // Ensure images are always uploaded even if only one remains
     for (var imageUrl in uploadedImageUrls) {
-      if (_isValidImageUrl(imageUrl)) {
+      if (imageUrl.trim() == 'loading') {
+        continue;
+      }
+      final normalizedImageUrl = ImageStorageService.normalizeMediaUrl(imageUrl);
+      if (_isValidImageUrl(normalizedImageUrl)) {
         contentList.add({
           "type": "image",
-          "value": imageUrl,
+          "value": normalizedImageUrl,
         });
       }
     }
@@ -649,8 +656,9 @@ class _NotesTypeState extends State<NotesType> {
 
   Future<String> uploadImage(File imageFile) async {
     try {
-      final imageUrl = await ImageStorageService.uploadImageFile(imageFile);
-      return imageUrl ?? "";
+      final imageUrl =
+          await ImageStorageService.uploadCommunityImageFile(imageFile);
+      return ImageStorageService.normalizeMediaUrl(imageUrl);
     } catch (e) {
       print("Error uploading image: $e");
       return "";
@@ -693,10 +701,25 @@ class _NotesTypeState extends State<NotesType> {
                                     ),
                                   )
                                 : Image.network(
-                                    uploadedImageUrls[index],
+                                    ImageStorageService.normalizeMediaUrl(
+                                      uploadedImageUrls[index],
+                                    ),
                                     width: imageWidth,
                                     height: imageHeight,
                                     fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        width: imageWidth,
+                                        height: imageHeight,
+                                        color: Colors.grey[300],
+                                        child: const Center(
+                                          child: Icon(
+                                            Icons.image_not_supported_rounded,
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                           ),
                           Positioned(

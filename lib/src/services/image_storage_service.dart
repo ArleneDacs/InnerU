@@ -22,6 +22,17 @@ class ImageStorageService {
     );
   }
 
+  static Future<String?> uploadCommunityImageBytes(
+    Uint8List bytes, {
+    String fileName = 'community.jpg',
+  }) async {
+    return _uploadBytes(
+      bytes,
+      fileName: fileName,
+      kind: 'community',
+    );
+  }
+
   static Future<String?> uploadVideoFile(File file) async {
     final bytes = await file.readAsBytes();
     return _uploadBytes(
@@ -108,5 +119,50 @@ class ImageStorageService {
       fileName: file.uri.pathSegments.last,
       kind: 'avatar',
     );
+  }
+
+  static Future<String?> uploadCommunityImageFile(File file) async {
+    final bytes = await file.readAsBytes();
+    return _uploadBytes(
+      bytes,
+      fileName: file.uri.pathSegments.last,
+      kind: 'community',
+    );
+  }
+
+  static String normalizeMediaUrl(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return '';
+    if (raw == 'loading') return raw;
+    if (raw.startsWith('data:')) return raw;
+
+    final parsed = Uri.tryParse(raw);
+    if (parsed != null &&
+        parsed.hasScheme &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+      final host = parsed.host.toLowerCase();
+      if (host == 'localhost' || host == '127.0.0.1') {
+        final base = Uri.parse(ApiConfig.baseUrl);
+        final normalized = base.replace(
+          path: parsed.path,
+          queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
+        );
+        if (parsed.fragment.isEmpty) {
+          return normalized.toString();
+        }
+        return normalized.replace(fragment: parsed.fragment).toString();
+      }
+      return raw;
+    }
+
+    if (raw.startsWith('//')) {
+      return 'https:$raw';
+    }
+
+    if (raw.startsWith('/')) {
+      return '${ApiConfig.baseUrl}$raw';
+    }
+
+    return '${ApiConfig.baseUrl}/${raw.replaceAll(RegExp(r'^/+'), '')}';
   }
 }
