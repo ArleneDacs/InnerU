@@ -36,6 +36,7 @@ class SessionCleanupService {
     await FastingNotificationService.instance.cancelDailySleepBedtimeReminder();
     await FastingNotificationService.instance.cancelSleepWakeNotification();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
+    await FastingNotificationService.instance.cancelExerciseCompleteNotification();
     FlutterBackgroundService().invoke('stopService');
     await clearStepMapTrackerStateForSignOut();
   }

@@ -28,6 +28,7 @@ class ExerciseApiService {
   Future<Map<String, dynamic>> store({
     required String type,
     required int durationMinutes,
+    required int durationSeconds,
     required int intensity,
     String? notes,
     String? startPhotoUrl,
@@ -39,6 +40,7 @@ class ExerciseApiService {
       {
         'type': type,
         'duration_minutes': durationMinutes,
+        'duration_seconds': durationSeconds,
         'intensity': intensity,
         if (notes != null) 'notes': notes,
         if (startPhotoUrl != null) 'start_photo_url': startPhotoUrl,

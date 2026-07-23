@@ -18,6 +18,7 @@ class ExerciseLog extends Model
         'username',
         'type',
         'duration_minutes',
+        'duration_seconds',
         'intensity',
         'notes',
         'start_photo_url',
@@ -31,6 +32,7 @@ class ExerciseLog extends Model
             'date' => 'date:Y-m-d',
             'intensity' => 'integer',
             'duration_minutes' => 'integer',
+            'duration_seconds' => 'integer',
         ];
     }
 }

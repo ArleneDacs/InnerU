@@ -52,13 +52,22 @@ class ExerciseController extends Controller
 
         $validated = $request->validate([
             'type' => ['required', 'string', 'max:120'],
-            'duration_minutes' => ['required', 'integer', 'min:1', 'max:10000'],
+            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:10000', 'required_without:duration_seconds'],
+            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:86400', 'required_without:duration_minutes'],
             'intensity' => ['required', 'integer', 'min:1', 'max:3'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'start_photo_url' => ['nullable', 'string', 'max:2048'],
             'end_photo_url' => ['nullable', 'string', 'max:2048'],
             'date' => ['nullable', 'date'],
         ]);
+
+        $durationSeconds = (int) ($validated['duration_seconds'] ?? 0);
+        if ($durationSeconds <= 0) {
+            $durationMinutes = (int) ($validated['duration_minutes'] ?? 0);
+            $durationSeconds = $durationMinutes * 60;
+        }
+
+        $durationMinutes = max(1, (int) round($durationSeconds / 60));
 
         $date = isset($validated['date'])
             ? Carbon::parse($validated['date'])->toDateString()
@@ -69,7 +78,8 @@ class ExerciseController extends Controller
             'user_id' => $user->id,
             'username' => $user->name,
             'type' => trim($validated['type']),
-            'duration_minutes' => $validated['duration_minutes'],
+            'duration_minutes' => $durationMinutes,
+            'duration_seconds' => $durationSeconds,
             'intensity' => $validated['intensity'],
             'notes' => trim((string) ($validated['notes'] ?? '')),
             'start_photo_url' => $validated['start_photo_url'] ?? null,
@@ -131,7 +141,7 @@ class ExerciseController extends Controller
             ->whereDate('date', $date)
             ->get();
 
-        $totalMinutes = $logs->sum('duration_minutes');
+        $totalMinutes = $logs->sum(fn (ExerciseLog $log) => $this->logDurationMinutes($log));
 
         DailyTracker::updateOrCreate(
             [
@@ -164,7 +174,7 @@ class ExerciseController extends Controller
             ->whereDate('date', $date)
             ->get();
 
-        $activityPoints = $logs->sum(fn (ExerciseLog $log) => max(1, $log->duration_minutes));
+        $activityPoints = $logs->sum(fn (ExerciseLog $log) => max(1, $this->logDurationMinutes($log)));
         DB::table('user_points')->updateOrInsert(
             [
                 'user_id' => $user->id,
@@ -188,7 +198,7 @@ class ExerciseController extends Controller
                 'company_name' => $user->company_name,
                 'activity_counts' => json_encode([
                     'exerciseCount' => $logs->count(),
-                    'exerciseMinutes' => $logs->sum('duration_minutes'),
+                    'exerciseMinutes' => $logs->sum(fn (ExerciseLog $log) => $this->logDurationMinutes($log)),
                 ]),
                 'updated_at' => now(),
                 'created_at' => now(),
@@ -204,6 +214,7 @@ class ExerciseController extends Controller
             'username' => $log->username,
             'type' => $log->type,
             'durationMinutes' => $log->duration_minutes,
+            'durationSeconds' => $this->logDurationSeconds($log),
             'intensity' => $log->intensity,
             'notes' => $log->notes,
             'startPhotoUrl' => $log->start_photo_url,
@@ -211,5 +222,19 @@ class ExerciseController extends Controller
             'date' => $log->date?->toDateString(),
             'createdAt' => $log->created_at?->toIso8601String(),
         ];
+    }
+
+    private function logDurationSeconds(ExerciseLog $log): int
+    {
+        if ($log->duration_seconds !== null && $log->duration_seconds > 0) {
+            return $log->duration_seconds;
+        }
+
+        return max(1, $log->duration_minutes * 60);
+    }
+
+    private function logDurationMinutes(ExerciseLog $log): int
+    {
+        return max(1, (int) round($this->logDurationSeconds($log) / 60));
     }
 }

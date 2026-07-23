@@ -27,6 +27,7 @@ class ExerciseTest extends TestCase
         $create = $this->postJson('/api/exercise', [
             'type' => 'Yoga',
             'duration_minutes' => 45,
+            'duration_seconds' => 2700,
             'intensity' => 2,
             'notes' => 'Morning flow',
             'date' => '2026-07-21',
@@ -34,12 +35,35 @@ class ExerciseTest extends TestCase
 
         $create->assertCreated()
             ->assertJsonPath('log.type', 'Yoga')
-            ->assertJsonPath('log.durationMinutes', 45);
+            ->assertJsonPath('log.durationMinutes', 45)
+            ->assertJsonPath('log.durationSeconds', 2700);
+
+        $secondCreate = $this->postJson('/api/exercise', [
+            'type' => 'Walk',
+            'duration_minutes' => 2,
+            'duration_seconds' => 90,
+            'intensity' => 1,
+            'notes' => 'Afternoon cooldown',
+            'date' => '2026-07-22',
+        ]);
+
+        $secondCreate->assertCreated()
+            ->assertJsonPath('log.type', 'Walk')
+            ->assertJsonPath('log.durationMinutes', 2)
+            ->assertJsonPath('log.durationSeconds', 90);
 
         $this->assertDatabaseHas('exercise_logs', [
             'user_id' => $user->id,
             'type' => 'Yoga',
             'duration_minutes' => 45,
+            'duration_seconds' => 2700,
+        ]);
+
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'type' => 'Walk',
+            'duration_minutes' => 2,
+            'duration_seconds' => 90,
         ]);
 
         $this->assertDatabaseHas('daily_trackers', [
@@ -50,10 +74,17 @@ class ExerciseTest extends TestCase
             'exercise_minutes' => 45,
         ]);
 
+        $history = $this->getJson('/api/exercise?date=2026-07-21');
+        $history->assertOk()
+            ->assertJsonCount(1, 'logs')
+            ->assertJsonPath('logs.0.type', 'Yoga')
+            ->assertJsonPath('logs.0.durationSeconds', 2700);
+
         $list = $this->getJson('/api/exercise');
         $list->assertOk()
-            ->assertJsonCount(1, 'logs')
-            ->assertJsonPath('logs.0.type', 'Yoga');
+            ->assertJsonCount(2, 'logs')
+            ->assertJsonFragment(['type' => 'Yoga'])
+            ->assertJsonFragment(['type' => 'Walk']);
 
         $logId = $create->json('log.id');
         $delete = $this->deleteJson('/api/exercise/'.$logId);

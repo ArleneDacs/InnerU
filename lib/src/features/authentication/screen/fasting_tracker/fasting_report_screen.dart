@@ -47,6 +47,7 @@ class _FastingReportScreenState extends State<FastingReportScreen> {
           child: Builder(
             builder: (context) {
               final theme = Theme.of(context);
+              final colorScheme = theme.colorScheme;
 
               return Scaffold(
                 backgroundColor: theme.scaffoldBackgroundColor,
@@ -84,21 +85,21 @@ class _FastingReportScreenState extends State<FastingReportScreen> {
                             title: 'Weekly',
                             subtitle: 'Your last 7 days of fasting',
                             report: reports.weekly,
-                            accentColor: const Color(0xFFFF4663),
+                            accentColor: colorScheme.primary,
                           ),
                           const SizedBox(height: 16),
                           _PeriodReportCard(
                             title: 'Monthly',
                             subtitle: 'Your last 30 days of fasting',
                             report: reports.monthly,
-                            accentColor: const Color(0xFFFF9A31),
+                            accentColor: colorScheme.secondary,
                           ),
                           const SizedBox(height: 16),
                           _PeriodReportCard(
                             title: 'Yearly',
                             subtitle: 'Your last 365 days of fasting',
                             report: reports.yearly,
-                            accentColor: const Color(0xFF6B8BFF),
+                            accentColor: colorScheme.tertiary,
                           ),
                           const SizedBox(height: 18),
                           _RecentFastList(history: history.take(12).toList()),
@@ -236,6 +237,7 @@ class _ReportHeroCard extends StatelessWidget {
     final totalHours = reports.yearly.totalHours;
     final yearlyHitRate = (reports.yearly.hitRate * 100).round();
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -243,28 +245,36 @@ class _ReportHeroCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(30),
         gradient: LinearGradient(
           colors: [
-            theme.colorScheme.primary.withValues(alpha: 0.16),
-            theme.colorScheme.secondary.withValues(alpha: 0.14),
+            colorScheme.primary.withValues(alpha: 0.16),
+            colorScheme.secondary.withValues(alpha: 0.14),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.65)),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.primary.withValues(alpha: 0.06),
+            blurRadius: 22,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Your Fasting Overview',
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'A quick snapshot of how consistent your fasting routine has been.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 18),
           Wrap(
@@ -274,25 +284,28 @@ class _ReportHeroCard extends StatelessWidget {
               SizedBox(
                 width: 150,
                 child: _overviewTile(
+                  context,
                   'Yearly fasts',
                   '$totalFasts',
-                  const Color(0xFFFF4663),
+                  colorScheme.primary,
                 ),
               ),
               SizedBox(
                 width: 150,
                 child: _overviewTile(
+                  context,
                   'Hours fasted',
                   _hoursLabel(totalHours),
-                  const Color(0xFFFF9A31),
+                  colorScheme.secondary,
                 ),
               ),
               SizedBox(
                 width: 150,
                 child: _overviewTile(
+                  context,
                   'Goal hit rate',
                   '$yearlyHitRate%',
-                  const Color(0xFF6B8BFF),
+                  colorScheme.tertiary,
                 ),
               ),
             ],
@@ -302,12 +315,20 @@ class _ReportHeroCard extends StatelessWidget {
     );
   }
 
-  Widget _overviewTile(String label, String value, Color accent) {
+  Widget _overviewTile(
+    BuildContext context,
+    String label,
+    String value,
+    Color accent,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -323,16 +344,16 @@ class _ReportHeroCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -347,6 +368,8 @@ class _CalendarBarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final now = DateTime.now();
     final monthStart = DateTime(now.year, now.month, 1);
     final monthEnd = DateTime(now.year, now.month + 1, 0);
@@ -372,11 +395,12 @@ class _CalendarBarCard extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: colorScheme.primary.withValues(alpha: 0.05),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -385,18 +409,18 @@ class _CalendarBarCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Calendar Report',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 6),
           Text(
             DateFormat('MMMM yyyy').format(now),
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           SizedBox(height: isSmallScreen ? 14 : 18),
           LayoutBuilder(
@@ -414,7 +438,7 @@ class _CalendarBarCard extends StatelessWidget {
                           child: Text(
                             label,
                             style: TextStyle(
-                              color: Colors.black45,
+                              color: colorScheme.onSurfaceVariant,
                               fontWeight: FontWeight.w700,
                               fontSize: compact ? 11 : 12,
                             ),
@@ -452,17 +476,17 @@ class _CalendarBarCard extends StatelessWidget {
                       return Container(
                         decoration: BoxDecoration(
                           color: hours <= 0
-                              ? const Color(0xFFF7F3EF)
+                              ? colorScheme.surfaceContainer
                               : Color.lerp(
-                                  const Color(0xFFFFEEF2),
-                                  const Color(0xFFFF4663),
+                                  colorScheme.primaryContainer,
+                                  colorScheme.primary,
                                   intensity,
                                 ),
                           borderRadius:
                               BorderRadius.circular(compact ? 12 : 16),
                           border: isToday
                               ? Border.all(
-                                  color: const Color(0xFF2F2B29),
+                                  color: colorScheme.primary,
                                   width: 1.2,
                                 )
                               : null,
@@ -482,8 +506,8 @@ class _CalendarBarCard extends StatelessWidget {
                                 fontWeight: FontWeight.w800,
                                 height: 1,
                                 color: hours > 0.5
-                                    ? Colors.white
-                                    : const Color(0xFF383230),
+                                    ? colorScheme.onPrimary
+                                    : colorScheme.onSurface,
                               ),
                             ),
                             FittedBox(
@@ -499,8 +523,8 @@ class _CalendarBarCard extends StatelessWidget {
                                   fontWeight: FontWeight.w700,
                                   height: 1,
                                   color: hours > 0.5
-                                      ? Colors.white
-                                      : Colors.black45,
+                                      ? colorScheme.onPrimary
+                                      : colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ),
@@ -514,12 +538,12 @@ class _CalendarBarCard extends StatelessWidget {
             },
           ),
           SizedBox(height: isSmallScreen ? 16 : 20),
-          const Text(
+          Text(
             'Last 7 Days',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           SizedBox(height: isSmallScreen ? 8 : 12),
@@ -542,7 +566,7 @@ class _CalendarBarCard extends StatelessWidget {
                           point.value <= 0 ? '0h' : _hoursLabel(point.value),
                           style: TextStyle(
                             fontSize: isSmallScreen ? 9 : 10,
-                            color: Colors.black54,
+                            color: colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -552,12 +576,12 @@ class _CalendarBarCard extends StatelessWidget {
                           width: isSmallScreen ? 22 : 24,
                           height: barHeight,
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(
+                            gradient: LinearGradient(
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
                               colors: [
-                                Color(0xFFFF4663),
-                                Color(0xFFFF9A87),
+                                colorScheme.primary,
+                                colorScheme.secondary,
                               ],
                             ),
                             borderRadius: BorderRadius.circular(999),
@@ -569,7 +593,7 @@ class _CalendarBarCard extends StatelessWidget {
                           style: TextStyle(
                             fontSize: isSmallScreen ? 10 : 11,
                             fontWeight: FontWeight.w700,
-                            color: Colors.black54,
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -611,15 +635,18 @@ class _PeriodReportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hitRatePercent = (report.hitRate * 100).round();
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: colorScheme.primary.withValues(alpha: 0.05),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -641,10 +668,10 @@ class _PeriodReportCard extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF2E2A28),
+                  color: colorScheme.onSurface,
                 ),
               ),
             ],
@@ -652,17 +679,17 @@ class _PeriodReportCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
-                child: _metricBox('Completed', '${report.completedFasts}'),
+                child: _metricBox(context, 'Completed', '${report.completedFasts}'),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _metricBox('Goal hits', '${report.goalHits}'),
+                child: _metricBox(context, 'Goal hits', '${report.goalHits}'),
               ),
             ],
           ),
@@ -670,20 +697,28 @@ class _PeriodReportCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _metricBox('Avg fast', _hoursLabel(report.averageHours)),
+                child: _metricBox(
+                  context,
+                  'Avg fast',
+                  _hoursLabel(report.averageHours),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _metricBox('Longest', _hoursLabel(report.longestHours)),
+                child: _metricBox(
+                  context,
+                  'Longest',
+                  _hoursLabel(report.longestHours),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           Text(
             'Goal completion $hitRatePercent%',
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w700,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 8),
@@ -692,7 +727,7 @@ class _PeriodReportCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: report.hitRate.clamp(0.0, 1.0),
               minHeight: 10,
-              backgroundColor: const Color(0xFFF2ECE7),
+              backgroundColor: colorScheme.surfaceContainer,
               valueColor: AlwaysStoppedAnimation<Color>(accentColor),
             ),
           ),
@@ -701,28 +736,30 @@ class _PeriodReportCard extends StatelessWidget {
     );
   }
 
-  Widget _metricBox(String label, String value) {
+  Widget _metricBox(BuildContext context, String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F5F0),
+        color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -737,28 +774,30 @@ class _RecentFastList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.72)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Recent Sessions',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF2E2A28),
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 14),
           if (history.isEmpty)
-            const Text(
+            Text(
               'No completed fasting sessions yet.',
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
             )
           else
             ...history.map((data) {
@@ -774,8 +813,9 @@ class _RecentFastList extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8F5F0),
+                  color: colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: colorScheme.outlineVariant),
                 ),
                 child: Row(
                   children: [
@@ -784,8 +824,8 @@ class _RecentFastList extends StatelessWidget {
                           ? Icons.check_circle_rounded
                           : Icons.timelapse_rounded,
                       color: completedTarget
-                          ? const Color(0xFFFF4663)
-                          : const Color(0xFFFF9A31),
+                          ? colorScheme.primary
+                          : colorScheme.secondary,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -794,16 +834,18 @@ class _RecentFastList extends StatelessWidget {
                         children: [
                           Text(
                             '${_hoursLabel(completedHours)} completed',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF2E2A28),
+                              color: colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             '${finishedAt == null ? 'Unknown date' : DateFormat('MMM d, yyyy • hh:mm a').format(finishedAt)} • Goal ${targetHours}h',
-                            style: const TextStyle(color: Colors.black54),
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ),

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/barcode_scanner_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_math.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -32,7 +33,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 5,
       aliases: ['egg', 'eggs', 'boiled egg', 'boiled eggs'],
       defaultUnit: 'piece',
-      gramsPerUnit: 50,
+      gramsPerUnit: 50.0,
     ),
     _PresetFood(
       name: 'Chicken Breast',
@@ -42,7 +43,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 4,
       aliases: ['chicken breast', 'chicken'],
       defaultUnit: '100g',
-      gramsPerUnit: 100,
+      gramsPerUnit: 100.0,
     ),
     _PresetFood(
       name: 'White Rice',
@@ -52,7 +53,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 0,
       aliases: ['white rice', 'rice'],
       defaultUnit: 'cup',
-      gramsPerUnit: 158,
+      gramsPerUnit: 158.0,
     ),
     _PresetFood(
       name: 'Banana',
@@ -62,7 +63,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 0,
       aliases: ['banana', 'bananas'],
       defaultUnit: 'piece',
-      gramsPerUnit: 118,
+      gramsPerUnit: 118.0,
     ),
     _PresetFood(
       name: 'Apple',
@@ -72,7 +73,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 0,
       aliases: ['apple', 'apples'],
       defaultUnit: 'piece',
-      gramsPerUnit: 182,
+      gramsPerUnit: 182.0,
     ),
     _PresetFood(
       name: 'Greek Yogurt',
@@ -82,7 +83,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 2,
       aliases: ['greek yogurt', 'yogurt'],
       defaultUnit: 'cup',
-      gramsPerUnit: 170,
+      gramsPerUnit: 170.0,
     ),
     _PresetFood(
       name: 'Milk',
@@ -92,7 +93,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 2,
       aliases: ['milk'],
       defaultUnit: '250ml',
-      gramsPerUnit: 250,
+      gramsPerUnit: 250.0,
     ),
     _PresetFood(
       name: 'Bread',
@@ -102,7 +103,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 1,
       aliases: ['bread', 'toast'],
       defaultUnit: 'slice',
-      gramsPerUnit: 30,
+      gramsPerUnit: 30.0,
     ),
     _PresetFood(
       name: 'Peanut Butter',
@@ -112,7 +113,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 8,
       aliases: ['peanut butter'],
       defaultUnit: 'tbsp',
-      gramsPerUnit: 16,
+      gramsPerUnit: 16.0,
     ),
     _PresetFood(
       name: 'Olive Oil',
@@ -122,7 +123,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       fat: 5,
       aliases: ['olive oil'],
       defaultUnit: 'tsp',
-      gramsPerUnit: 5,
+      gramsPerUnit: 5.0,
     ),
   ];
 
@@ -192,6 +193,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   String _selectedMealType = 'Breakfast';
   String _selectedMeasurementUnit = 'piece';
   String _selectedHistoryDateKey = '';
+  final GlobalKey _addMealSectionKey = GlobalKey();
   late DateTime _historyWeekStart;
   String? _mealPhotoPath;
   String _ollamaStatusMessage =
@@ -229,6 +231,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     setState(() {
       _showGoalHintBubble = false;
     });
+  }
+
+  Future<void> _scrollToSection(GlobalKey key) async {
+    final targetContext = key.currentContext;
+    if (targetContext == null) return;
+
+    await Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeInOutCubic,
+      alignment: 0.08,
+    );
   }
 
   Future<void> _openScanOptions() async {
@@ -1124,7 +1138,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     });
   }
 
-  void _applyFoodAmount(_CalculatedFoodAmount calculated) {
+  void _applyFoodAmount(CalorieFoodAmount calculated) {
     if (!mounted) return;
 
     _mealController.text = calculated.displayName;
@@ -1139,75 +1153,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   _PresetFood? _findPresetFood(String query) {
-    final normalized = query.trim().toLowerCase();
-    if (normalized.isEmpty) return null;
-
-    for (final preset in _presetFoods) {
-      if (preset.matches(normalized)) return preset;
-    }
-    return null;
+    final preset = CalorieTrackerMath.findPresetFood(query, _presetFoods);
+    if (preset == null) return null;
+    return preset is _PresetFood ? preset : null;
   }
 
   String _normalizeMeasurementUnit(String rawUnit) {
-    final normalized = rawUnit.trim().toLowerCase();
-    if (normalized.isEmpty) return 'piece';
-    if (normalized == 'grams' || normalized == 'gram') return 'g';
-    if (normalized == 'kilograms' || normalized == 'kilogram') return 'kg';
-    if (normalized == 'ounces' || normalized == 'ounce') return 'oz';
-    if (normalized == 'pounds' || normalized == 'pound') return 'lb';
-    if (normalized == 'milliliters' || normalized == 'milliliter') return 'ml';
-    if (normalized == 'liters' ||
-        normalized == 'liter' ||
-        normalized == 'litres' ||
-        normalized == 'litre') {
-      return 'liter';
-    }
-    if (normalized == 'cups') return 'cup';
-    if (normalized == 'tablespoons' || normalized == 'tablespoon') {
-      return 'tbsp';
-    }
-    if (normalized == 'teaspoons' || normalized == 'teaspoon') return 'tsp';
-    if (normalized == 'slices') return 'slice';
-    if (normalized == 'pieces' || normalized == 'pcs' || normalized == 'pc') {
-      return 'piece';
-    }
-    if (normalized.endsWith('ml')) return 'ml';
-    if (normalized.endsWith('g')) return 'g';
-    return normalized;
-  }
-
-  double _measurementMultiplier(
-      String unit, double quantity, _PresetFood preset) {
-    switch (_normalizeMeasurementUnit(unit)) {
-      case 'g':
-        return quantity / preset.gramsPerUnit;
-      case 'kg':
-        return (quantity * 1000) / preset.gramsPerUnit;
-      case 'oz':
-        return (quantity * 28.3495) / preset.gramsPerUnit;
-      case 'lb':
-        return (quantity * 453.592) / preset.gramsPerUnit;
-      case 'ml':
-        return quantity / preset.gramsPerUnit;
-      case 'liter':
-        return (quantity * 1000) / preset.gramsPerUnit;
-      case 'cup':
-        return quantity *
-            (preset.defaultUnit == 'cup' ? 1 : 240 / preset.gramsPerUnit);
-      case 'tbsp':
-        return quantity *
-            (preset.defaultUnit == 'tbsp' ? 1 : 15 / preset.gramsPerUnit);
-      case 'tsp':
-        return quantity *
-            (preset.defaultUnit == 'tsp' ? 1 : 5 / preset.gramsPerUnit);
-      case 'slice':
-        return quantity *
-            (preset.defaultUnit == 'slice' ? 1 : 30 / preset.gramsPerUnit);
-      case 'serving':
-      case 'piece':
-      default:
-        return quantity;
-    }
+    return CalorieTrackerMath.normalizeMeasurementUnit(rawUnit);
   }
 
   _CalculatedFoodAmount? _calculateFromMeasurement({
@@ -1215,128 +1167,38 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     required double quantity,
     required String unit,
   }) {
-    final preset = _findPresetFood(mealName);
-    if (preset == null || quantity <= 0) return null;
-
-    final normalizedUnit = _normalizeMeasurementUnit(unit);
-    final multiplier = _measurementMultiplier(normalizedUnit, quantity, preset);
-    final quantityLabel = quantity == quantity.roundToDouble()
-        ? quantity.toInt().toString()
-        : quantity.toStringAsFixed(quantity % 1 == 0 ? 0 : 1);
-
+    final result = CalorieTrackerMath.calculateFromMeasurement(
+      mealName: mealName,
+      quantity: quantity,
+      unit: unit,
+      presets: _presetFoods,
+    );
+    if (result == null) return null;
     return _CalculatedFoodAmount(
-      displayName: '$quantityLabel $normalizedUnit ${preset.name}',
-      quantityLabel: quantityLabel,
-      unit: normalizedUnit,
-      calories: (preset.calories * multiplier).round(),
-      protein: (preset.protein * multiplier).round(),
-      carbs: (preset.carbs * multiplier).round(),
-      fat: (preset.fat * multiplier).round(),
+      displayName: result.displayName,
+      quantityLabel: result.quantityLabel,
+      unit: result.unit,
+      calories: result.calories,
+      protein: result.protein,
+      carbs: result.carbs,
+      fat: result.fat,
     );
   }
 
   _CalculatedFoodAmount? _calculateFoodAmount(String query) {
-    final normalized = query.trim().toLowerCase();
-    if (normalized.isEmpty) return null;
-
-    final parts = normalized.split(RegExp(r'\s+'));
-    if (parts.isEmpty) return null;
-
-    final firstTokenMatch =
-        RegExp(r'^(\d+(?:\.\d+)?)([a-zA-Z]+)?$').firstMatch(parts.first);
-    final quantity = firstTokenMatch == null
-        ? double.tryParse(parts.first)
-        : double.tryParse(firstTokenMatch.group(1)!);
-    if (quantity == null) return null;
-
-    final inlineUnit = firstTokenMatch?.group(2)?.toLowerCase() ?? '';
-    final remaining = parts.skip(1).join(' ').trim();
-    if (remaining.isEmpty) return null;
-
-    final unitMatchers = <String>[
-      'milliliters',
-      'milliliter',
-      'ml',
-      'slices',
-      'slice',
-      'tablespoons',
-      'tablespoon',
-      'tbsp',
-      'teaspoons',
-      'teaspoon',
-      'tsp',
-      'grams',
-      'gram',
-      'g',
-      'cups',
-      'cup',
-      'pieces',
-      'piece',
-      'pcs',
-      'pc',
-    ];
-
-    String unit = inlineUnit;
-    String foodName = remaining;
-
-    if (unit.isEmpty) {
-      for (final matcher in unitMatchers) {
-        if (remaining.startsWith('$matcher ')) {
-          unit = matcher;
-          foodName = remaining.substring(matcher.length).trim();
-          break;
-        }
-      }
-    }
-
-    if (foodName.isEmpty) return null;
-
-    final preset = _findPresetFood(foodName);
-    if (preset == null) return null;
-
-    final normalizedUnit = unit.isEmpty ? preset.defaultUnit : unit;
-    double multiplier;
-
-    if (normalizedUnit == 'g' ||
-        normalizedUnit == 'gram' ||
-        normalizedUnit == 'grams' ||
-        normalizedUnit == 'ml' ||
-        normalizedUnit == 'milliliter' ||
-        normalizedUnit == 'milliliters') {
-      multiplier = quantity / preset.gramsPerUnit;
-    } else if (normalizedUnit == 'cup' || normalizedUnit == 'cups') {
-      if (preset.defaultUnit != 'cup') return null;
-      multiplier = quantity;
-    } else if (normalizedUnit == 'slice' || normalizedUnit == 'slices') {
-      if (preset.defaultUnit != 'slice') return null;
-      multiplier = quantity;
-    } else if (normalizedUnit == 'tbsp' ||
-        normalizedUnit == 'tablespoon' ||
-        normalizedUnit == 'tablespoons') {
-      if (preset.defaultUnit != 'tbsp') return null;
-      multiplier = quantity;
-    } else if (normalizedUnit == 'tsp' ||
-        normalizedUnit == 'teaspoon' ||
-        normalizedUnit == 'teaspoons') {
-      if (preset.defaultUnit != 'tsp') return null;
-      multiplier = quantity;
-    } else {
-      multiplier = quantity;
-    }
-
-    final quantityLabel = quantity == quantity.roundToDouble()
-        ? quantity.toInt().toString()
-        : quantity.toString();
-
+    final result = CalorieTrackerMath.calculateFoodAmount(
+      query: query,
+      presets: _presetFoods,
+    );
+    if (result == null) return null;
     return _CalculatedFoodAmount(
-      displayName:
-          '$quantityLabel ${unit.isEmpty ? preset.defaultUnit : unit} ${preset.name}',
-      quantityLabel: quantityLabel,
-      unit: _normalizeMeasurementUnit(unit.isEmpty ? preset.defaultUnit : unit),
-      calories: (preset.calories * multiplier).round(),
-      protein: (preset.protein * multiplier).round(),
-      carbs: (preset.carbs * multiplier).round(),
-      fat: (preset.fat * multiplier).round(),
+      displayName: result.displayName,
+      quantityLabel: result.quantityLabel,
+      unit: result.unit,
+      calories: result.calories,
+      protein: result.protein,
+      carbs: result.carbs,
+      fat: result.fat,
     );
   }
 
@@ -1950,44 +1812,49 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   child: CustomPaint(
                     painter: _ArcProgressPainter(
                       progress: progress,
-                      backgroundColor: Colors.white.withValues(alpha: 0.7),
-                      progressColor: const Color(0xFFFFFFFF),
+                      backgroundColor:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.14),
+                      progressColor: theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.local_fire_department,
-                      color: Color(0xFFE28B54),
+                      color: theme.colorScheme.tertiary,
                       size: 20,
                     ),
                     const SizedBox(height: 8),
                     Text(
                       totalCalories.toString(),
-                      style: const TextStyle(
-                          fontSize: 34, fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w800,
+                        color: theme.colorScheme.onSurface,
+                      ),
                     ),
-                    const Text(
+                    Text(
                       'Calories',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.black54,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-                const Positioned(
+                Positioned(
                   left: 10,
                   bottom: 18,
                   child: Text(
                     '0%',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w700),
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 Positioned(
@@ -1995,10 +1862,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   bottom: 18,
                   child: Text(
                     '$progressPercent%',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -2018,15 +1886,15 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _openCalorieCalculator,
-              icon: const Icon(
+              icon: Icon(
                 Icons.calculate_outlined,
                 size: 18,
-                color: Color(0xFF4D6A45),
+                color: theme.colorScheme.primary,
               ),
-              label: const Text(
+              label: Text(
                 'Calculate Intake',
                 style: TextStyle(
-                  color: Color(0xFF4D6A45),
+                  color: theme.colorScheme.primary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -2035,10 +1903,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
           const SizedBox(height: 4),
           Text(
             '$mealCount meal entries logged today',
-            style: const TextStyle(
-                fontSize: 13,
-                color: Colors.black54,
-                fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 13,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -2052,7 +1921,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     required VoidCallback onTap,
   }) {
     return Material(
-      color: const Color(0xFFF7F8F3),
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(22),
       child: InkWell(
         onTap: onTap,
@@ -2065,10 +1934,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE6F0DF),
+                  color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: Icon(icon, color: const Color(0xFF4D6A45)),
+                child: Icon(icon, color: Theme.of(context).colorScheme.primary),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -2077,21 +1946,30 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF2E2A28),
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.72),
+                      ),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              Icon(Icons.chevron_right_rounded,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.55)),
             ],
           ),
         ),
@@ -2107,16 +1985,20 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final logsByDate = {
       for (final day in dayDocs) (day['date']?.toString() ?? ''): day,
     };
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.22 : 0.04,
+            ),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2127,9 +2009,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'History',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                ),
               ),
               const Spacer(),
               IconButton(
@@ -2141,12 +2027,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 },
                 icon: const Icon(Icons.chevron_left_rounded),
                 visualDensity: VisualDensity.compact,
-                color: const Color(0xFF4D6A45),
+                color: colorScheme.primary,
               ),
               Text(
                 _historyWeekLabel(weekStart),
-                style: const TextStyle(
-                  color: Colors.black54,
+                style: TextStyle(
+                  color: colorScheme.onSurface.withValues(alpha: 0.7),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -2157,11 +2043,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           _historyWeekStart =
                               weekStart.add(const Duration(days: 7));
                         });
-                      }
-                    : null,
+                    }
+                  : null,
                 icon: const Icon(Icons.chevron_right_rounded),
                 visualDensity: VisualDensity.compact,
-                color: const Color(0xFF4D6A45),
+                color: colorScheme.primary,
               ),
             ],
           ),
@@ -2190,12 +2076,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? const Color(0xFFE8F0DF)
-                          : const Color(0xFFF8FAF5),
+                          ? colorScheme.primaryContainer
+                          : colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: isSelected
-                            ? const Color(0xFF90A17D)
+                            ? colorScheme.primary
                             : Colors.transparent,
                       ),
                     ),
@@ -2207,8 +2093,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: isSelected
-                                ? const Color(0xFF4D6A45)
-                                : Colors.black45,
+                                ? colorScheme.onPrimaryContainer
+                                : colorScheme.onSurface.withValues(alpha: 0.7),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -2218,8 +2104,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: isSelected
-                                ? const Color(0xFF20351D)
-                                : Colors.black87,
+                                ? colorScheme.onPrimaryContainer
+                                : colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -2228,7 +2114,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           height: 7,
                           decoration: BoxDecoration(
                             color: dayCalories > 0
-                                ? const Color(0xFF90A17D)
+                                ? colorScheme.primary
                                 : Colors.transparent,
                             shape: BoxShape.circle,
                           ),
@@ -2245,7 +2131,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF4D6A45),
+                              color: colorScheme.primary,
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: const FittedBox(
@@ -2288,7 +2174,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAF5),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
       ),
       child: Column(
@@ -2296,7 +2182,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         children: [
           Text(
             DateFormat('EEEE, MMM d').format(selectedDate),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -2319,12 +2209,12 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
       ),
       child: RichText(
         text: TextSpan(
-          style: const TextStyle(color: Colors.black87),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
           children: [
             TextSpan(
               text: '$value\n',
@@ -2332,8 +2222,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             ),
             TextSpan(
               text: label,
-              style: const TextStyle(
-                color: Colors.black54,
+              style: TextStyle(
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.72),
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
               ),
@@ -2357,6 +2250,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         : previewSuffix == null || previewSuffix.isEmpty
             ? rawValue
             : '$rawValue $previewSuffix';
+    final theme = Theme.of(context);
 
     return Expanded(
       child: TextField(
@@ -2366,23 +2260,57 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
           if (!mounted) return;
           setState(() {});
         },
-        decoration: InputDecoration(
+        decoration: _themedInputDecoration(
+          theme: theme,
           labelText: label,
           hintText: hint ?? label,
           helperText: previewValue,
-          helperMaxLines: previewValue == null ? null : 1,
           suffixText: suffix,
-          filled: true,
-          fillColor: const Color(0xFFF8FAF5),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
         ),
+      ),
+    );
+  }
+
+  InputDecoration _themedInputDecoration({
+    required ThemeData theme,
+    required String labelText,
+    String? hintText,
+    String? helperText,
+    String? suffixText,
+  }) {
+    final colorScheme = theme.colorScheme;
+    final fillColor = theme.brightness == Brightness.dark
+        ? colorScheme.surfaceContainerHigh
+        : colorScheme.surfaceContainerHighest;
+
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      helperText: helperText,
+      helperMaxLines: helperText == null ? null : 1,
+      suffixText: suffixText,
+      filled: true,
+      fillColor: fillColor,
+      labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+      floatingLabelStyle: TextStyle(color: colorScheme.primary),
+      hintStyle: TextStyle(
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.82),
+      ),
+      helperStyle: TextStyle(
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.88),
+      ),
+      suffixStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
       ),
     );
   }
@@ -2392,12 +2320,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     if (photoPath == null || photoPath.isEmpty) {
       return const SizedBox.shrink();
     }
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAF5),
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -2413,9 +2343,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                 return Container(
                   width: 72,
                   height: 72,
-                  color: Colors.black12,
+                  color: colorScheme.surfaceContainer,
                   alignment: Alignment.center,
-                  child: const Icon(Icons.photo, color: Colors.black45),
+                  child: Icon(Icons.photo, color: colorScheme.onSurfaceVariant),
                 );
               },
             ),
@@ -2426,6 +2356,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               _isAnalyzingMealPhoto
                   ? 'Analyzing your meal photo and filling calories...'
                   : 'Meal photo ready. We will auto-fill calories when the food is detected.',
+              style: TextStyle(color: colorScheme.onSurface),
             ),
           ),
           IconButton(
@@ -2445,16 +2376,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     if (_mealPhotoPath == null || _mealPhotoPath!.isEmpty) {
       return const SizedBox.shrink();
     }
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F7F0),
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(18),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -2462,14 +2395,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF4D6A45),
+              color: colorScheme.primary,
             ),
           ),
-          SizedBox(height: 4),
+          const SizedBox(height: 4),
           Text(
             'Check the Food Name first, then enter the Grams so calories match the portion more accurately.',
             style: TextStyle(
-              color: Colors.black54,
+              color: colorScheme.onSurface.withValues(alpha: 0.72),
               height: 1.3,
             ),
           ),
@@ -2480,10 +2413,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
 
   Widget _buildOllamaStatusBanner() {
     final bool isReady = _isOllamaReachable == true;
-    final Color tint =
-        isReady ? const Color(0xFFE6F3E0) : const Color(0xFFF5F0DE);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final Color tint = isReady
+        ? colorScheme.primaryContainer.withValues(alpha: 0.85)
+        : colorScheme.tertiaryContainer.withValues(alpha: 0.85);
     final Color iconColor =
-        isReady ? const Color(0xFF4D6A45) : const Color(0xFF8B6F2D);
+        isReady ? colorScheme.primary : colorScheme.tertiary;
     final String title = _isCheckingOllamaStatus
         ? 'Checking AI calorie assist'
         : isReady
@@ -2504,7 +2440,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.7),
+              color: colorScheme.surface.withValues(alpha: 0.72),
               borderRadius: BorderRadius.circular(12),
             ),
             child: _isCheckingOllamaStatus
@@ -2526,9 +2462,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: Colors.black87,
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -2536,8 +2472,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                   _isCheckingOllamaStatus
                       ? 'Saved foods are reused first while we check the AI connection.'
                       : _ollamaStatusMessage,
-                  style: const TextStyle(
-                    color: Colors.black54,
+                  style: TextStyle(
+                    color: colorScheme.onSurface.withValues(alpha: 0.72),
                     height: 1.3,
                   ),
                 ),
@@ -2558,6 +2494,9 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 
   Widget _buildMealTypeSelector() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     return Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -2566,11 +2505,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         return ChoiceChip(
           label: Text(mealType),
           selected: isSelected,
-          selectedColor: const Color(0xFF90A17D),
-          backgroundColor: const Color(0xFFF8FAF5),
+          selectedColor:
+              isDark ? colorScheme.primaryContainer : const Color(0xFF90A17D),
+          backgroundColor: colorScheme.surfaceContainerHighest,
           side: BorderSide.none,
           labelStyle: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
+            color: isSelected
+                ? colorScheme.onPrimaryContainer
+                : colorScheme.onSurface,
             fontWeight: FontWeight.w600,
           ),
           onSelected: (_) {
@@ -2590,16 +2532,18 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     final progress = waterGoal <= 0
         ? 0.0
         : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F4FB),
+        color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF69A9D5).withValues(alpha: 0.12),
+            color: colorScheme.primary.withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2610,17 +2554,22 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'Water Tracker',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
+                ),
               ),
               const Spacer(),
               Text(
                 '$waterGlasses/$waterGoal glasses',
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black54),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurface.withValues(alpha: 0.72),
+                ),
               ),
             ],
           ),
@@ -2630,9 +2579,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 10,
-              backgroundColor: Colors.white,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF69A9D5)),
+              backgroundColor: colorScheme.surface,
+              valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
             ),
           ),
           const SizedBox(height: 12),
@@ -2654,16 +2602,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                       ? null
                       : () => _setWaterGlasses(waterGlasses + 1),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF69A9D5),
+                    backgroundColor: colorScheme.primary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  icon: const Icon(Icons.water_drop_outlined,
-                      color: Colors.white),
-                  label: const Text(
+                  icon: Icon(Icons.water_drop_outlined,
+                      color: colorScheme.onPrimary),
+                  label: Text(
                     'Add Glass',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: colorScheme.onPrimary),
                   ),
                 ),
               ),
@@ -2678,17 +2626,23 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
     required String title,
     required Widget child,
     Widget? trailing,
+    Key? key,
   }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Container(
+      key: key,
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE8EDE3)),
+        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: Colors.black.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.22 : 0.03,
+            ),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -2701,8 +2655,11 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
             children: [
               Text(
                 title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                ),
               ),
               if (trailing != null) ...[
                 const Spacer(),
@@ -2712,6 +2669,189 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
           ),
           const SizedBox(height: 12),
           child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTodayEntriesCard(List<Map<String, dynamic>> entries) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final totalCalories = entries.fold<int>(
+      0,
+      (sum, item) => sum + ((item['calories'] as num?)?.toInt() ?? 0),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.22 : 0.03,
+            ),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Today\'s Entries',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${entries.length} item${entries.length == 1 ? '' : 's'}',
+                style: TextStyle(
+                  color: colorScheme.onSurface.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (entries.isEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No meals logged yet today.',
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Start with a quick scan or tap Log Food to add your first meal.',
+                  style: TextStyle(
+                    color: colorScheme.onSurface.withValues(alpha: 0.72),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => _scrollToSection(_addMealSectionKey),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Log a meal'),
+                ),
+              ],
+            )
+          else ...[
+            Text(
+              '$totalCalories kcal logged today',
+              style: TextStyle(
+                color: colorScheme.onSurface.withValues(alpha: 0.72),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...entries.take(4).map((entry) {
+              final meal =
+                  (entry['meal'] as String?)?.trim().isNotEmpty == true
+                      ? (entry['meal'] as String).trim()
+                      : 'Meal';
+              final mealType =
+                  (entry['mealType'] as String?)?.trim().isNotEmpty == true
+                      ? (entry['mealType'] as String).trim()
+                      : 'Snack';
+              final calories = (entry['calories'] as num?)?.toInt() ?? 0;
+              final quantity = entry['quantity']?.toString().trim();
+              final unit = (entry['measurementUnit'] as String?)?.trim();
+
+              final quantityText = [
+                if (quantity != null && quantity.isNotEmpty && quantity != 'null')
+                  quantity,
+                if (unit != null && unit.isNotEmpty) unit,
+              ].join(' ').trim();
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        mealType,
+                        style: TextStyle(
+                          color: colorScheme.onPrimaryContainer,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            meal,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          if (quantityText.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              quantityText,
+                              style: TextStyle(
+                                color: colorScheme.onSurface
+                                    .withValues(alpha: 0.66),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '$calories kcal',
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            if (entries.length > 4)
+              Text(
+                '+${entries.length - 4} more logged items',
+                style: TextStyle(
+                  color: colorScheme.onSurface.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -2766,11 +2906,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                       tooltip: 'Quick scan',
                     ),
                     const SizedBox(width: 4),
-                    TextButton(
+                    TextButton.icon(
                       onPressed: () =>
                           Navigator.pushNamed(context, '/todayIntake'),
-                      child: Text(
-                        'Today',
+                      icon: Icon(
+                        Icons.calendar_month_rounded,
+                        color: companyTheme.iconColor,
+                        size: 18,
+                      ),
+                      label: Text(
+                        'History',
                         style: TextStyle(
                           color: companyTheme.iconColor,
                           fontWeight: FontWeight.w700,
@@ -2834,65 +2979,64 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                           final weeklyFat = _weeklyTotal(weekDocs, 'totalFat');
 
                           return SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildHistoryCalendarStrip(dayDocs),
-                              const SizedBox(height: 18),
-                              _buildDailyProgressCard(
-                                totalCalories: totalCalories,
-                                currentGoal: currentGoal,
-                                totalCarbs: totalCarbs,
-                                totalProtein: totalProtein,
-                                totalFat: totalFat,
-                                mealCount: mealCount,
-                                progress: progress,
-                              ),
-                              const SizedBox(height: 18),
-                              _buildWaterTracker(
-                                waterGlasses: waterGlasses,
-                                waterGoal: waterGoal,
-                              ),
-                              const SizedBox(height: 18),
-                              _buildSoftSection(
-                                title: 'Selected Day',
-                                child: _buildSelectedDayHistoryCard(
-                                    selectedHistoryData),
-                              ),
-                              const SizedBox(height: 18),
-                              _buildSoftSection(
-                                title: 'Preset Foods',
-                                trailing: TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _showPresetFoods = !_showPresetFoods;
-                                    });
-                                  },
-                                  child:
-                                      Text(_showPresetFoods ? 'Hide' : 'Show'),
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildDailyProgressCard(
+                                  totalCalories: totalCalories,
+                                  currentGoal: currentGoal,
+                                  totalCarbs: totalCarbs,
+                                  totalProtein: totalProtein,
+                                  totalFat: totalFat,
+                                  mealCount: mealCount,
+                                  progress: progress,
                                 ),
-                                child: _showPresetFoods
-                                    ? Wrap(
-                                        spacing: 10,
-                                        runSpacing: 10,
-                                        children: _presetFoods.map((preset) {
-                                          return ActionChip(
-                                            label: Text(preset.name),
-                                            onPressed: () =>
-                                                _applyPresetFood(preset),
-                                          );
-                                        }).toList(),
-                                      )
-                                    : const Text(
-                                        'Show quick picks for common foods and portion ideas.',
-                                        style: TextStyle(color: Colors.black54),
-                                      ),
-                              ),
-                              const SizedBox(height: 18),
-                              _buildSoftSection(
-                                title: 'Add Meal',
-                                child: Column(
+                                const SizedBox(height: 18),
+                                _buildWaterTracker(
+                                  waterGlasses: waterGlasses,
+                                  waterGoal: waterGoal,
+                                ),
+                                const SizedBox(height: 18),
+                                _buildTodayEntriesCard(_todayEntries),
+                                const SizedBox(height: 18),
+                                _buildSoftSection(
+                                  title: 'Preset Foods',
+                                  trailing: TextButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        _showPresetFoods = !_showPresetFoods;
+                                      });
+                                    },
+                                    child: Text(
+                                      _showPresetFoods ? 'Hide' : 'Show',
+                                    ),
+                                  ),
+                                  child: _showPresetFoods
+                                      ? Wrap(
+                                          spacing: 10,
+                                          runSpacing: 10,
+                                          children: _presetFoods.map((preset) {
+                                            return ActionChip(
+                                              label: Text(preset.name),
+                                              onPressed: () =>
+                                                  _applyPresetFood(preset),
+                                            );
+                                          }).toList(),
+                                        )
+                                      : Text(
+                                          'Show quick picks for common foods and portion ideas.',
+                                          style: TextStyle(
+                                            color: theme.colorScheme.onSurface
+                                                .withValues(alpha: 0.72),
+                                          ),
+                                        ),
+                                ),
+                                const SizedBox(height: 18),
+                                _buildSoftSection(
+                                  key: _addMealSectionKey,
+                                  title: 'Add Meal',
+                                  child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _buildMealTypeSelector(),
@@ -2920,10 +3064,14 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                       onSelected: _applyPresetFood,
                                       optionsViewBuilder:
                                           (context, onSelected, options) {
+                                        final popupTheme = Theme.of(context);
+                                        final popupColors =
+                                            popupTheme.colorScheme;
                                         return Align(
                                           alignment: Alignment.topLeft,
                                           child: Material(
                                             elevation: 4,
+                                            color: popupColors.surface,
                                             borderRadius:
                                                 BorderRadius.circular(14),
                                             child: ConstrainedBox(
@@ -2939,9 +3087,21 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                                   final option =
                                                       options.elementAt(index);
                                                   return ListTile(
-                                                    title: Text(option.name),
+                                                    title: Text(
+                                                      option.name,
+                                                      style: TextStyle(
+                                                        color: popupColors
+                                                            .onSurface,
+                                                      ),
+                                                    ),
                                                     subtitle: Text(
                                                       '${option.calories} kcal',
+                                                      style: TextStyle(
+                                                        color: popupColors
+                                                            .onSurface
+                                                            .withValues(
+                                                                alpha: 0.72),
+                                                      ),
                                                     ),
                                                     onTap: () =>
                                                         onSelected(option),
@@ -2964,28 +3124,15 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                           onChanged: (value) {
                                             _handleMealNameChanged(value);
                                           },
-                                          decoration: InputDecoration(
-                                            labelText: _mealPhotoPath == null
-                                                ? 'Food Name'
-                                                : 'Food Name',
+                                          decoration: _themedInputDecoration(
+                                            theme: theme,
+                                            labelText: 'Food Name',
                                             hintText: _mealPhotoPath == null
                                                 ? 'Meal or snack'
                                                 : 'Detected food name',
                                             helperText: _mealPhotoPath == null
                                                 ? 'Use food name plus quantity/unit below for better accuracy.'
                                                 : 'Review the detected food name before saving.',
-                                            filled: true,
-                                            fillColor: const Color(0xFFF8FAF5),
-                                            border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(18),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(18),
-                                              borderSide: BorderSide.none,
-                                            ),
                                           ),
                                         );
                                       },
@@ -3004,26 +3151,10 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                               _handleMealNameChanged(
                                                   _mealController.text.trim());
                                             },
-                                            decoration: InputDecoration(
-                                              labelText: _mealPhotoPath == null
-                                                  ? 'Quantity'
-                                                  : 'Quantity',
-                                              hintText: _mealPhotoPath == null
-                                                  ? 'Enter amount'
-                                                  : 'Enter amount',
-                                              filled: true,
-                                              fillColor:
-                                                  const Color(0xFFF8FAF5),
-                                              border: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
+                                            decoration: _themedInputDecoration(
+                                              theme: theme,
+                                              labelText: 'Quantity',
+                                              hintText: 'Enter amount',
                                             ),
                                           ),
                                         ),
@@ -3033,23 +3164,16 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                               DropdownButtonFormField<String>(
                                             initialValue:
                                                 _selectedMeasurementUnit,
-                                            decoration: InputDecoration(
+                                            style: TextStyle(
+                                              color: theme.colorScheme.onSurface,
+                                            ),
+                                            dropdownColor:
+                                                theme.colorScheme.surface,
+                                            decoration: _themedInputDecoration(
+                                              theme: theme,
                                               labelText: _mealPhotoPath == null
                                                   ? 'Measurement'
                                                   : 'Unit',
-                                              filled: true,
-                                              fillColor:
-                                                  const Color(0xFFF8FAF5),
-                                              border: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
                                             ),
                                             items:
                                                 _measurementUnits.map((unit) {
@@ -3087,7 +3211,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                         width: double.infinity,
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFF8FAF5),
+                                          color: theme.colorScheme.surface,
                                           borderRadius:
                                               BorderRadius.circular(18),
                                         ),
@@ -3095,11 +3219,13 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
                                           children: [
-                                            const Text(
+                                            Text(
                                               'Suggestions',
                                               style: TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
+                                                color: theme
+                                                    .colorScheme.onSurface,
                                               ),
                                             ),
                                             const SizedBox(height: 8),
@@ -3108,14 +3234,28 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                               return ListTile(
                                                 contentPadding: EdgeInsets.zero,
                                                 title: Text(
-                                                    suggestion.displayName),
+                                                  suggestion.displayName,
+                                                  style: TextStyle(
+                                                    color: theme.colorScheme
+                                                        .onSurface,
+                                                  ),
+                                                ),
                                                 subtitle: Text(
                                                   suggestion.subtitle == null
                                                       ? '${suggestion.calories} kcal'
                                                       : '${suggestion.subtitle} - ${suggestion.calories} kcal',
+                                                  style: TextStyle(
+                                                    color: theme.colorScheme
+                                                        .onSurface
+                                                        .withValues(
+                                                            alpha: 0.72),
+                                                  ),
                                                 ),
-                                                trailing: const Icon(
-                                                    Icons.north_west),
+                                                trailing: Icon(
+                                                  Icons.north_west,
+                                                  color: theme.colorScheme
+                                                      .primary,
+                                                ),
                                                 onTap: () =>
                                                     _applyOnlineSuggestion(
                                                         suggestion),
@@ -3129,7 +3269,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                     _buildOllamaStatusBanner(),
                                     const SizedBox(height: 12),
                                     Material(
-                                      color: const Color(0xFFF4F7F0),
+                                      color: theme.colorScheme.surface,
                                       borderRadius: BorderRadius.circular(22),
                                       child: InkWell(
                                         onTap: _isLookingUpFood ||
@@ -3148,19 +3288,19 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                                 width: 46,
                                                 height: 46,
                                                 decoration: BoxDecoration(
-                                                  color:
-                                                      const Color(0xFFE6F0DF),
+                                                  color: theme.colorScheme
+                                                      .primaryContainer,
                                                   borderRadius:
                                                       BorderRadius.circular(16),
                                                 ),
-                                                child: const Icon(
+                                                child: Icon(
                                                   Icons
                                                       .center_focus_weak_rounded,
-                                                  color: Color(0xFF4D6A45),
+                                                  color: theme.colorScheme.primary,
                                                 ),
                                               ),
                                               const SizedBox(width: 14),
-                                              const Expanded(
+                                              Expanded(
                                                 child: Column(
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
@@ -3171,14 +3311,20 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                                         fontSize: 16,
                                                         fontWeight:
                                                             FontWeight.w700,
+                                                        color: theme
+                                                            .colorScheme.onSurface,
                                                       ),
                                                     ),
                                                     SizedBox(height: 2),
                                                     Text(
                                                       'Open camera or barcode scanner',
                                                       style: TextStyle(
-                                                          color:
-                                                              Colors.black54),
+                                                        color: theme
+                                                            .colorScheme
+                                                            .onSurface
+                                                            .withValues(
+                                                                alpha: 0.72),
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
@@ -3189,8 +3335,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                                     : _isLookingUpFood
                                                         ? 'Loading...'
                                                         : 'Open',
-                                                style: const TextStyle(
-                                                  color: Color(0xFF4D6A45),
+                                                style: TextStyle(
+                                                  color: theme.colorScheme.primary,
                                                   fontWeight: FontWeight.w700,
                                                 ),
                                               ),
@@ -3248,7 +3394,7 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                             _isLookingUpFood ? null : _addMeal,
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor:
-                                              const Color(0xFF90A17D),
+                                              theme.colorScheme.primary,
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 15),
                                           shape: RoundedRectangleBorder(
@@ -3260,25 +3406,30 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                           _isLookingUpFood
                                               ? 'Looking Up Food...'
                                               : 'Add Entry',
-                                          style: const TextStyle(
-                                              color: Colors.white),
+                                          style: TextStyle(
+                                            color: theme.colorScheme.onPrimary,
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 18),
-                              _buildSoftSection(
-                                title: 'History',
-                                child: Column(
+                                const SizedBox(height: 18),
+                                _buildSoftSection(
+                                  title: 'History',
+                                  child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    _buildHistoryCalendarStrip(dayDocs),
+                                    const SizedBox(height: 18),
                                     Container(
                                       width: double.infinity,
                                       padding: const EdgeInsets.all(16),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFF8FAF5),
+                                        color: theme
+                                            .colorScheme.surfaceContainerHighest,
                                         borderRadius: BorderRadius.circular(18),
                                       ),
                                       child: Column(
@@ -3287,17 +3438,43 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                         children: [
                                           Text(
                                             'This Week: $weeklyCalories kcal',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 18,
                                               fontWeight: FontWeight.bold,
+                                              color:
+                                                  theme.colorScheme.onSurface,
                                             ),
                                           ),
                                           const SizedBox(height: 8),
-                                          Text('Protein: ${weeklyProtein}g'),
-                                          Text('Carbs: ${weeklyCarbs}g'),
-                                          Text('Fat: ${weeklyFat}g'),
+                                          Text(
+                                            'Protein: ${weeklyProtein}g',
+                                            style: TextStyle(
+                                              color: theme.colorScheme.onSurface
+                                                  .withValues(alpha: 0.72),
+                                            ),
+                                          ),
+                                          Text(
+                                            'Carbs: ${weeklyCarbs}g',
+                                            style: TextStyle(
+                                              color: theme.colorScheme.onSurface
+                                                  .withValues(alpha: 0.72),
+                                            ),
+                                          ),
+                                          Text(
+                                            'Fat: ${weeklyFat}g',
+                                            style: TextStyle(
+                                              color: theme.colorScheme.onSurface
+                                                  .withValues(alpha: 0.72),
+                                            ),
+                                          ),
                                         ],
                                       ),
+                                    ),
+                                    const SizedBox(height: 18),
+                                    _buildSoftSection(
+                                      title: 'Selected Day',
+                                      child: _buildSelectedDayHistoryCard(
+                                          selectedHistoryData),
                                     ),
                                     const SizedBox(height: 12),
                                     if (dayDocs.isEmpty)
@@ -3314,18 +3491,29 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                           margin:
                                               const EdgeInsets.only(bottom: 10),
                                           elevation: 0,
-                                          color: const Color(0xFFF8FAF5),
+                                          color: theme.colorScheme
+                                              .surfaceContainerHighest,
                                           shape: RoundedRectangleBorder(
                                             borderRadius:
                                                 BorderRadius.circular(18),
                                           ),
                                           child: ListTile(
-                                            title: Text(dateKey),
+                                            title: Text(
+                                              dateKey,
+                                              style: TextStyle(
+                                                color:
+                                                    theme.colorScheme.onSurface,
+                                              ),
+                                            ),
                                             subtitle: Text(
                                               '${(day['totalCalories'] as num?)?.toInt() ?? 0} kcal - '
                                               'P ${(day['totalProtein'] as num?)?.toInt() ?? 0}g - '
                                               'C ${(day['totalCarbs'] as num?)?.toInt() ?? 0}g - '
                                               'F ${(day['totalFat'] as num?)?.toInt() ?? 0}g',
+                                              style: TextStyle(
+                                                color: theme.colorScheme.onSurface
+                                                    .withValues(alpha: 0.72),
+                                              ),
                                             ),
                                           ),
                                         );
@@ -3333,8 +3521,8 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
                                   ],
                                 ),
                               ),
-                            ],
-                          ),
+                              ],
+                            ),
                           );
                         },
                       ),
@@ -3347,52 +3535,29 @@ class _CalorieTrackerScreenState extends State<CalorieTrackerScreen> {
   }
 }
 
-class _PresetFood {
+class _PresetFood extends CalorieFoodPreset {
   const _PresetFood({
-    required this.name,
-    required this.calories,
-    required this.protein,
-    required this.carbs,
-    required this.fat,
-    required this.aliases,
-    required this.defaultUnit,
-    required this.gramsPerUnit,
+    required super.name,
+    required super.calories,
+    required super.protein,
+    required super.carbs,
+    required super.fat,
+    required super.aliases,
+    required super.defaultUnit,
+    required super.gramsPerUnit,
   });
-
-  final String name;
-  final int calories;
-  final int protein;
-  final int carbs;
-  final int fat;
-  final List<String> aliases;
-  final String defaultUnit;
-  final double gramsPerUnit;
-
-  bool matches(String query) {
-    final normalized = query.trim().toLowerCase();
-    return name.toLowerCase() == normalized ||
-        aliases.any((alias) => alias.toLowerCase() == normalized);
-  }
 }
 
-class _CalculatedFoodAmount {
+class _CalculatedFoodAmount extends CalorieFoodAmount {
   const _CalculatedFoodAmount({
-    required this.displayName,
-    required this.quantityLabel,
-    required this.unit,
-    required this.calories,
-    required this.protein,
-    required this.carbs,
-    required this.fat,
+    required super.displayName,
+    required super.quantityLabel,
+    required super.unit,
+    required super.calories,
+    required super.protein,
+    required super.carbs,
+    required super.fat,
   });
-
-  final String displayName;
-  final String quantityLabel;
-  final String unit;
-  final int calories;
-  final int protein;
-  final int carbs;
-  final int fat;
 }
 
 class _NutritionLookupResult {

@@ -121,6 +121,7 @@ class _WaterSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final progress = waterGoal <= 0
         ? 0.0
         : (waterGlasses / waterGoal).clamp(0, 1).toDouble();
@@ -128,11 +129,11 @@ class _WaterSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(alpha: 0.10),
+        color: colorScheme.primaryContainer.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: theme.colorScheme.primary.withValues(alpha: 0.12),
+            color: colorScheme.primary.withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -143,14 +144,14 @@ class _WaterSummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.water_drop_outlined, color: theme.colorScheme.primary),
+              Icon(Icons.water_drop_outlined, color: colorScheme.primary),
               const SizedBox(width: 8),
               Text(
                 'Water Intake Today',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onSurface,
+                  color: colorScheme.onSurface,
                 ),
               ),
             ],
@@ -161,7 +162,7 @@ class _WaterSummaryCard extends StatelessWidget {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+              color: colorScheme.onSurface.withValues(alpha: 0.65),
             ),
           ),
           const SizedBox(height: 12),
@@ -170,9 +171,8 @@ class _WaterSummaryCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 12,
-              backgroundColor: theme.colorScheme.surface,
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
+              backgroundColor: colorScheme.surface,
+              valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
             ),
           ),
         ],
@@ -192,6 +192,8 @@ class _MealSectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final totalCalories = entries.fold<int>(
       0,
       (sum, doc) => sum + ((doc['calories'] as num?)?.toInt() ?? 0),
@@ -200,12 +202,14 @@ class _MealSectionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE8EDE3)),
+        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: Colors.black.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.22 : 0.03,
+            ),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -218,25 +222,28 @@ class _MealSectionCard extends StatelessWidget {
             children: [
               Text(
                 title,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
+                ),
               ),
               const Spacer(),
               Text(
                 '$totalCalories kcal',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: Colors.black54,
+                  color: colorScheme.onSurface.withValues(alpha: 0.72),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
           if (entries.isEmpty)
-            const Text(
+            Text(
               'No entries yet for this meal.',
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.72)),
             )
           else
             ...entries.map((doc) {
@@ -250,7 +257,7 @@ class _MealSectionCard extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAF5),
+                  color: colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
@@ -258,16 +265,17 @@ class _MealSectionCard extends StatelessWidget {
                   children: [
                     Text(
                       meal,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '$calories kcal - P ${protein}g - C ${carbs}g - F ${fat}g',
-                      style: const TextStyle(
-                        color: Colors.black54,
+                      style: TextStyle(
+                        color: colorScheme.onSurface.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w500,
                       ),
                     ),

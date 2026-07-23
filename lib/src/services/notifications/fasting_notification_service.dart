@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_duration_utils.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -14,6 +15,7 @@ class FastingNotificationService {
   static const int fastingOngoingNotificationId = 4003;
   static const int walkTrackingNotificationId = 4002;
   static const int walkInviteAcceptedNotificationId = 4004;
+  static const int exerciseCompleteNotificationId = 5003;
   static const int meditationCompleteNotificationId = 5001;
   static const int dailyMeditationReminderNotificationId = 5002;
   static const int dailySleepBedtimeReminderNotificationId = 7001;
@@ -50,6 +52,31 @@ class FastingNotificationService {
       _meditationCompleteChannelId,
       _meditationCompleteChannelName,
       channelDescription: _meditationChannelDescription,
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.alarm,
+    ),
+    iOS: DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: false,
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    ),
+  );
+  static const String _exerciseCompleteChannelId =
+      'exercise_complete_alarm_channel';
+  static const String _exerciseCompleteChannelName =
+      'Exercise completion alerts';
+  static const String _exerciseCompleteChannelDescription =
+      'Alerts you when your exercise timer is complete.';
+  static const NotificationDetails _exerciseCompleteNotificationDetails =
+      NotificationDetails(
+    android: AndroidNotificationDetails(
+      _exerciseCompleteChannelId,
+      _exerciseCompleteChannelName,
+      channelDescription: _exerciseCompleteChannelDescription,
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
@@ -211,6 +238,68 @@ class FastingNotificationService {
   Future<void> cancelFastingCompleteNotification() async {
     await initialize();
     await _notifications.cancel(id: fastingCompleteNotificationId);
+  }
+
+  Future<void> scheduleExerciseCompleteNotification({
+    required DateTime endsAt,
+    required Duration goalDuration,
+  }) async {
+    await initialize();
+
+    if (!endsAt.isAfter(DateTime.now())) {
+      await cancelExerciseCompleteNotification();
+      return;
+    }
+
+    final body =
+        'Your ${formatExerciseDuration(goalDuration)} workout is done. Great job. Tap stop to save your photos.';
+
+    try {
+      await _notifications.zonedSchedule(
+        id: exerciseCompleteNotificationId,
+        title: 'Exercise complete',
+        body: body,
+        scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
+        notificationDetails: _exerciseCompleteNotificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'exercise_complete',
+      );
+    } catch (error) {
+      debugPrint(
+        'Exact exercise notification scheduling failed, retrying inexact: $error',
+      );
+      await _notifications.zonedSchedule(
+        id: exerciseCompleteNotificationId,
+        title: 'Exercise complete',
+        body: body,
+        scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
+        notificationDetails: _exerciseCompleteNotificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'exercise_complete',
+      );
+    }
+  }
+
+  Future<void> showExerciseCompleteNotification({
+    required Duration goalDuration,
+  }) async {
+    await initialize();
+
+    await _notifications.show(
+      id: exerciseCompleteNotificationId,
+      title: 'Exercise complete',
+      body:
+          'Your ${formatExerciseDuration(goalDuration)} workout is done. Great job. Tap stop to save your photos.',
+      notificationDetails: _exerciseCompleteNotificationDetails,
+      payload: 'exercise_complete',
+    );
+  }
+
+  Future<void> cancelExerciseCompleteNotification() async {
+    await initialize();
+    await _notifications.cancel(id: exerciseCompleteNotificationId);
   }
 
   Future<void> scheduleMeditationCompleteNotification({
