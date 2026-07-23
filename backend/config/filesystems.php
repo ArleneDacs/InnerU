@@ -15,6 +15,8 @@ return [
 
     'default' => env('FILESYSTEM_DISK', 'local'),
 
+    'media_upload_disk' => env('MEDIA_UPLOAD_DISK', 'public'),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks

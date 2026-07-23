@@ -1,0 +1,78 @@
+name: Deploy Backend
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: true
+        default: master
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust deployment host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+
+      - name: Deploy
+        run: |
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          REMOTE_PATH=$(printf '%q' "${DEPLOY_PATH}")
+          REMOTE_BRANCH=$(printf '%q' "${DEPLOY_BRANCH}")
+          REMOTE_SHA=$(printf '%q' "${DEPLOY_SHA:-}")
+          REMOTE_RESTART=$(printf '%q' "${DEPLOY_RESTART_COMMAND:-}")
+
+          ssh -p "${DEPLOY_PORT}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_PATH=${REMOTE_PATH} DEPLOY_BRANCH=${REMOTE_BRANCH} DEPLOY_SHA=${REMOTE_SHA} DEPLOY_RESTART_COMMAND=${REMOTE_RESTART} bash -s" <<'EOF'
+          set -euo pipefail
+
+          cd "$DEPLOY_PATH"
+          git fetch origin "$DEPLOY_BRANCH"
+
+          if [ -n "$DEPLOY_SHA" ]; then
+            git checkout --force "$DEPLOY_SHA"
+          else
+            git checkout "$DEPLOY_BRANCH"
+            git pull --rebase --autostash origin "$DEPLOY_BRANCH"
+          fi
+
+          cd backend
+          composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
+          php artisan migrate --force
+          php artisan config:clear
+
+          if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
+            sh -lc "$DEPLOY_RESTART_COMMAND"
+          fi
+          EOF
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_BRANCH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.branch }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+          DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}

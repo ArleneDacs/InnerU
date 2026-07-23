@@ -96,13 +96,30 @@ class ProfileController extends Controller
         $file = $validated['file'];
         $kind = $validated['kind'] ?? 'image';
         $extension = $file->getClientOriginalExtension() ?: $file->extension() ?: 'jpg';
-        $path = $file->storePubliclyAs(
-            "users/{$user->id}/{$kind}s",
-            $kind.'_'.now()->format('YmdHis').'.'.$extension,
-            's3'
-        );
 
-        $user->profile_pic = Storage::disk('s3')->url($path);
+        $disk = config('filesystems.media_upload_disk', 'public');
+
+        try {
+            $path = $file->storePubliclyAs(
+                "users/{$user->id}/{$kind}s",
+                $kind.'_'.now()->format('YmdHis').'.'.$extension,
+                $disk
+            );
+        } catch (\Throwable $throwable) {
+            report($throwable);
+
+            return response()->json([
+                'message' => 'Media upload failed. Please try again.',
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        if (! is_string($path) || $path === '') {
+            return response()->json([
+                'message' => 'Media upload failed. Please try again.',
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $user->profile_pic = Storage::disk($disk)->url($path);
         $user->save();
 
         return response()->json([
