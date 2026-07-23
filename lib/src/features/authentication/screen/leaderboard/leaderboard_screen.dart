@@ -155,6 +155,7 @@ class _LeaderboardState extends State<Leaderboard>
     with WidgetsBindingObserver, RouteAware {
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
+  Timer? _refreshTimer;
 
   List<LeaderboardEntry> _allEntries = [];
   List<A12LeaderboardEntry> _a12Entries = [];
@@ -162,6 +163,7 @@ class _LeaderboardState extends State<Leaderboard>
   List<GroupLeaderboardSummary> _groupLeaderboards = [];
   bool _isLoading = true;
   bool _isA12Loading = true;
+  bool _isRefreshing = false;
   bool _isAbundance12Company = false;
   bool _isCoachUser = false;
   ModalRoute<dynamic>? _route;
@@ -175,7 +177,8 @@ class _LeaderboardState extends State<Leaderboard>
     final normalizedCode =
         code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
     return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
+        (normalizedName.contains('abundance') &&
+            normalizedName.contains('12')) ||
         normalizedCode.contains('ABUNDANCE12') ||
         normalizedCode.contains('ABUND12') ||
         normalizedCode == 'A12' ||
@@ -187,6 +190,10 @@ class _LeaderboardState extends State<Leaderboard>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted) return;
+      unawaited(_refreshLeaderboard());
+    });
   }
 
   @override
@@ -337,11 +344,17 @@ class _LeaderboardState extends State<Leaderboard>
   }
 
   Future<void> _refreshLeaderboard() async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
     setState(() {
       _isLoading = true;
       _isA12Loading = true;
     });
-    await _loadLeaderboardFromApi();
+    try {
+      await _loadLeaderboardFromApi();
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   @override
@@ -358,6 +371,7 @@ class _LeaderboardState extends State<Leaderboard>
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     appRouteObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -435,7 +449,7 @@ class _LeaderboardState extends State<Leaderboard>
                       showRankLabels: _isAbundance12Company,
                       title: 'Company leaderboard',
                       onEntryTap: (entry) =>
-                          _showA12PointsBreakdown(context, entry, companyTheme),
+                          _showScoreBreakdown(context, entry, companyTheme),
                     ),
                     _GroupLeaderboardsBoard(
                       groups: _groupLeaderboards,
@@ -639,14 +653,13 @@ class _LeaderboardState extends State<Leaderboard>
     );
   }
 
-  void _showA12PointsBreakdown(
+  void _showScoreBreakdown(
     BuildContext context,
     A12LeaderboardEntry entry,
     CompanyThemeData theme,
   ) {
-    final rankColor = _isAbundance12Company
-        ? _rankColor(entry.rank)
-        : theme.primaryColor;
+    final accentColor =
+        _isAbundance12Company ? _rankColor(entry.rank) : theme.primaryColor;
 
     showModalBottomSheet(
       context: context,
@@ -664,103 +677,166 @@ class _LeaderboardState extends State<Leaderboard>
               right: 16,
               top: 16,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.name}\'s A12 Score',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: theme.inkColor,
-                  ),
-                ),
-                if ((entry.teamName ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Team: ${entry.teamName}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: theme.mutedInkColor,
-                    ),
-                  ),
-                ],
-                if (_isAbundance12Company) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Level ${entry.rank.name} · ${entry.rank.min}–${entry.rank.max}%',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: rankColor,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                _buildPointsRow(
-                  'Goal score',
-                  entry.score.goalScore.round(),
-                  'A12 goal total',
-                  entry.score.goalScore.round(),
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Daily tracker',
-                  entry.score.coreTaskScore.round(),
-                  'Core task completion',
-                  entry.score.coreTaskScore.round(),
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Consistency',
-                  entry.score.consistencyScore.round(),
-                  'Streak + check-ins',
-                  entry.score.consistencyScore.round(),
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Streak',
-                  entry.score.currentStreak,
-                  'Consecutive active days',
-                  entry.score.currentStreak,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Overall score',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: theme.inkColor,
-                        ),
-                      ),
-                      Text(
-                        _formatLeaderboardScore(entry.score.overallScore),
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: rankColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            child: LeaderboardScoreBreakdownSheet(
+              name: entry.name,
+              teamName: entry.teamName,
+              goalScore: entry.score.goalScore.round(),
+              dailyTrackerScore: entry.score.coreTaskScore.round(),
+              totalScore: entry.score.overallScore,
+              accentColor: accentColor,
+              theme: theme,
             ),
           ),
         );
       },
     );
   }
+}
+
+class LeaderboardScoreBreakdownSheet extends StatelessWidget {
+  const LeaderboardScoreBreakdownSheet({
+    super.key,
+    required this.name,
+    required this.goalScore,
+    required this.dailyTrackerScore,
+    required this.totalScore,
+    required this.accentColor,
+    required this.theme,
+    this.teamName,
+  });
+
+  final String name;
+  final String? teamName;
+  final int goalScore;
+  final int dailyTrackerScore;
+  final num totalScore;
+  final Color accentColor;
+  final CompanyThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$name score',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: theme.inkColor,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Goal score and daily tracker only.',
+          style: TextStyle(
+            fontSize: 14,
+            color: theme.mutedInkColor,
+          ),
+        ),
+        if ((teamName ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Team: $teamName',
+            style: TextStyle(
+              fontSize: 14,
+              color: theme.mutedInkColor,
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        _buildScoreBreakdownRow(
+          'Goal score',
+          goalScore,
+          'Goal completion',
+          goalScore,
+          theme,
+        ),
+        Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+        _buildScoreBreakdownRow(
+          'Daily tracker',
+          dailyTrackerScore,
+          'Today\'s tracker completion',
+          dailyTrackerScore,
+          theme,
+        ),
+        Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Total score',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: theme.inkColor,
+                ),
+              ),
+              Text(
+                _formatLeaderboardScore(totalScore),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: accentColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Widget _buildScoreBreakdownRow(
+  String title,
+  int value,
+  String rate,
+  int points,
+  CompanyThemeData theme,
+) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(
+            title,
+            style: TextStyle(fontSize: 16, color: theme.inkColor),
+          ),
+        ),
+        Expanded(
+          flex: 3,
+          child: Text(
+            '$value',
+            style: TextStyle(fontSize: 16, color: theme.inkColor),
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Text(
+            rate,
+            style: TextStyle(fontSize: 14, color: theme.mutedInkColor),
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Text(
+            '$points pts',
+            style: TextStyle(
+              fontSize: 16,
+              color: theme.isDark ? theme.primaryColor : Colors.orange,
+            ),
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 Color _rankColor(GoalRank rank) {
@@ -1639,7 +1715,7 @@ class _AllUsersLeaderboardBoardState extends State<_AllUsersLeaderboardBoard> {
               ),
               const SizedBox(width: 8),
               ChoiceChip(
-                label: const Text('A12 score'),
+                label: const Text('Company score'),
                 selected: _showA12,
                 onSelected: (_) => setState(() => _showA12 = true),
               ),
@@ -1695,7 +1771,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
     required this.theme,
     required this.currentUserId,
     required this.showRankLabels,
-    this.title = 'A12 leaderboard',
+    this.title = 'Company leaderboard',
     required this.onEntryTap,
   });
 
@@ -1791,7 +1867,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
           color: theme.surfaceColor,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.22 : 0.14),
+            color: theme.primaryColor
+                .withValues(alpha: theme.isDark ? 0.22 : 0.14),
           ),
           boxShadow: [
             BoxShadow(
@@ -1845,7 +1922,9 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    entry?.name.isNotEmpty == true ? entry!.name : 'Company score',
+                    entry?.name.isNotEmpty == true
+                        ? entry!.name
+                        : 'Company score',
                     style: TextStyle(
                       color: theme.inkColor,
                       fontSize: 18,
@@ -1854,7 +1933,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Goal total score, daily tracker completion, and check-ins.',
+                    'Goal score and daily tracker only.',
                     style: TextStyle(
                       color: theme.mutedInkColor,
                       height: 1.35,
@@ -1929,7 +2008,9 @@ class _A12LeaderboardBoard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry?.name.isNotEmpty == true ? entry!.name : 'A12 score',
+                  entry?.name.isNotEmpty == true
+                      ? entry!.name
+                      : 'Company score',
                   style: TextStyle(
                     color: theme.inkColor,
                     fontSize: 18,
@@ -1938,7 +2019,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Goal total score, daily tracker completion, and check-ins.',
+                  'Goal score and daily tracker only.',
                   style: TextStyle(
                     color: theme.mutedInkColor,
                     height: 1.35,
@@ -1969,7 +2050,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: scoreColor.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: scoreColor.withValues(alpha: 0.22)),
+                      border:
+                          Border.all(color: scoreColor.withValues(alpha: 0.22)),
                     ),
                     child: Text(
                       'Level ${rank.name}',
@@ -2028,7 +2110,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
 
   Widget _buildItem(A12LeaderboardEntry entry, int position) {
     final isCurrentUser = entry.userId == currentUserId;
-    final rankColor = showRankLabels ? _rankColor(entry.rank) : theme.primaryColor;
+    final rankColor =
+        showRankLabels ? _rankColor(entry.rank) : theme.primaryColor;
     final progress = (entry.score.goalScore / 100).clamp(0.0, 1.0);
     final scoreLabel = entry.score.goalScore.toStringAsFixed(0);
 
@@ -2224,7 +2307,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text(
-            'No A12 scores yet. Finish goals and daily tracker tasks to build your level.',
+            'No company scores yet. Finish goals and daily tracker tasks to build your level.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey),
           ),
@@ -2232,18 +2315,19 @@ class _A12LeaderboardBoard extends StatelessWidget {
       );
     }
 
-    final sorted = [...entries]
-      ..sort((a, b) {
+    final sorted = [...entries]..sort((a, b) {
         if (a.score.goalScore != b.score.goalScore) {
           return b.score.goalScore.compareTo(a.score.goalScore);
         }
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
     final currentUserEntry = _currentUserEntry;
-    final remainingEntries =
-        sorted.length > 3 ? sorted.skip(3).toList() : const <A12LeaderboardEntry>[];
-    final scoreColor =
-        showRankLabels ? _rankColor(currentUserEntry?.rank ?? rankForPercent(0)) : theme.primaryColor;
+    final remainingEntries = sorted.length > 3
+        ? sorted.skip(3).toList()
+        : const <A12LeaderboardEntry>[];
+    final scoreColor = showRankLabels
+        ? _rankColor(currentUserEntry?.rank ?? rankForPercent(0))
+        : theme.primaryColor;
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
@@ -2267,7 +2351,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
             children: [
               _buildA12MetricChip(
                 label: 'Goal score',
-                value: '${currentUserEntry?.score.goalScore.toStringAsFixed(0) ?? '0'}%',
+                value:
+                    '${currentUserEntry?.score.goalScore.toStringAsFixed(0) ?? '0'}%',
                 color: scoreColor,
               ),
               const SizedBox(width: 10),
@@ -2276,26 +2361,6 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 value:
                     '${currentUserEntry?.score.coreTaskScore.toStringAsFixed(0) ?? '0'}%',
                 color: theme.primaryColor,
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: Row(
-            children: [
-              _buildA12MetricChip(
-                label: 'Consistency',
-                value:
-                    '${currentUserEntry?.score.consistencyScore.toStringAsFixed(0) ?? '0'}%',
-                color: showRankLabels ? theme.iconColor : theme.primaryColor,
-              ),
-              const SizedBox(width: 10),
-              _buildA12MetricChip(
-                label: 'Streak',
-                value:
-                    '${currentUserEntry?.score.currentStreak.toString()} days',
-                color: showRankLabels ? theme.accentColor : theme.primaryColor,
               ),
             ],
           ),
