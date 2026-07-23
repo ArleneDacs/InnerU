@@ -146,9 +146,13 @@ class _NotesTypeState extends State<NotesType> {
   }
 
   bool _isFormValid = false;
+  bool _isUploadingPlaceholder(String value) {
+    return value.trim().startsWith('loading:');
+  }
+
   bool _isValidImageUrl(String value) {
     final raw = value.trim();
-    if (raw.isEmpty || raw == 'loading') return false;
+    if (raw.isEmpty || _isUploadingPlaceholder(raw)) return false;
 
     final url = ImageStorageService.normalizeCommunityMediaUrl(raw);
     return url.isNotEmpty &&
@@ -162,6 +166,7 @@ class _NotesTypeState extends State<NotesType> {
         widget is TextField &&
         (widget.controller?.text.trim().isNotEmpty ?? false));
     bool hasImage = uploadedImageUrls.any(_isValidImageUrl);
+    bool hasPendingImage = uploadedImageUrls.any(_isUploadingPlaceholder);
     bool hasCategory =
         selectedCategory != null && selectedCategory!.trim().isNotEmpty;
 
@@ -169,10 +174,11 @@ class _NotesTypeState extends State<NotesType> {
 
     if (selectedCategory == "Learning") {
       // Image is optional
-      isValid = hasTitle && hasText && hasCategory;
+      isValid = hasTitle && hasText && hasCategory && !hasPendingImage;
     } else if (selectedCategory == "Add Value") {
       // Image is required
-      isValid = hasTitle && hasText && hasImage && hasCategory;
+      isValid =
+          hasTitle && hasText && hasImage && hasCategory && !hasPendingImage;
     }
 
     setState(() {
@@ -547,7 +553,7 @@ class _NotesTypeState extends State<NotesType> {
 
     // Ensure images are always uploaded even if only one remains
     for (var imageUrl in uploadedImageUrls) {
-      if (imageUrl.trim() == 'loading') {
+      if (_isUploadingPlaceholder(imageUrl)) {
         continue;
       }
       final normalizedImageUrl =
@@ -610,8 +616,9 @@ class _NotesTypeState extends State<NotesType> {
 
     if (!mounted) return;
 
+    final loadingToken = 'loading:${image.path}';
     setState(() {
-      uploadedImageUrls.add("loading");
+      uploadedImageUrls.add(loadingToken);
     });
     _validateForm();
 
@@ -619,8 +626,8 @@ class _NotesTypeState extends State<NotesType> {
 
     if (imageUrl.isNotEmpty && mounted) {
       setState(() {
-        // Find the "loading" state and replace it with the actual URL
-        int loadingIndex = uploadedImageUrls.indexOf("loading");
+        // Replace the local preview placeholder with the uploaded URL.
+        int loadingIndex = uploadedImageUrls.indexOf(loadingToken);
         if (loadingIndex != -1) {
           uploadedImageUrls[loadingIndex] = imageUrl;
         } else {
@@ -631,7 +638,7 @@ class _NotesTypeState extends State<NotesType> {
     } else if (mounted) {
       final reason = ImageStorageService.lastError;
       setState(() {
-        uploadedImageUrls.remove("loading");
+        uploadedImageUrls.remove(loadingToken);
       });
       _validateForm();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -681,6 +688,11 @@ class _NotesTypeState extends State<NotesType> {
                   double screenWidth = MediaQuery.of(context).size.width;
                   double imageWidth = screenWidth * 0.8;
                   double imageHeight = screenWidth * 1;
+                  final currentImage = uploadedImageUrls[index];
+                  final isUploading = _isUploadingPlaceholder(currentImage);
+                  final previewPath = isUploading
+                      ? currentImage.substring('loading:'.length)
+                      : '';
 
                   return Align(
                     alignment: Alignment.center,
@@ -692,18 +704,60 @@ class _NotesTypeState extends State<NotesType> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: uploadedImageUrls[index] == "loading"
-                              ? Container(
-                                  width: imageWidth,
-                                  height: imageHeight,
-                                  color: Colors.grey[300],
-                                  child: Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                )
+                            child: isUploading
+                                ? Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.file(
+                                        File(previewPath),
+                                        width: imageWidth,
+                                        height: imageHeight,
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                          return Container(
+                                            width: imageWidth,
+                                            height: imageHeight,
+                                            color: Colors.grey[300],
+                                            child: const Center(
+                                              child: Icon(
+                                                Icons.image_not_supported_rounded,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      Positioned(
+                                        left: 12,
+                                        bottom: 12,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.55,
+                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                          ),
+                                          child: const Text(
+                                            'Uploading...',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
                                 : Image.network(
                                     ImageStorageService.normalizeCommunityMediaUrl(
-                                      uploadedImageUrls[index],
+                                      currentImage,
                                     ),
                                     width: imageWidth,
                                     height: imageHeight,
@@ -757,7 +811,9 @@ class _NotesTypeState extends State<NotesType> {
       uploadedImageUrls.removeAt(index);
     });
 
-    await deleteImageFromStorage(imageUrl);
+    if (!_isUploadingPlaceholder(imageUrl)) {
+      await deleteImageFromStorage(imageUrl);
+    }
   }
 
   Future<void> deleteImageFromStorage(String imageUrl) async {
