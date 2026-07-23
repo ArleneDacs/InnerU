@@ -228,7 +228,7 @@ class FastingNotificationService {
         id: meditationCompleteNotificationId,
         title: 'Meditation complete',
         body:
-            'Your meditation session is over. Take a soft breath before moving on.',
+            'Great job. Your meditation session is over. Take a soft breath before moving on.',
         scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
         notificationDetails: _meditationCompleteNotificationDetails,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -243,7 +243,7 @@ class FastingNotificationService {
         id: meditationCompleteNotificationId,
         title: 'Meditation complete',
         body:
-            'Your meditation session is over. Take a soft breath before moving on.',
+            'Great job. Your meditation session is over. Take a soft breath before moving on.',
         scheduledDate: tz.TZDateTime.from(endsAt, tz.local),
         notificationDetails: _meditationCompleteNotificationDetails,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -260,7 +260,7 @@ class FastingNotificationService {
       id: meditationCompleteNotificationId,
       title: 'Meditation complete',
       body:
-          'Your meditation session is over. Take a soft breath before moving on.',
+          'Great job. Your meditation session is over. Take a soft breath before moving on.',
       notificationDetails: _meditationCompleteNotificationDetails,
       payload: 'meditation_complete',
     );

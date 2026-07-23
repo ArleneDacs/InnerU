@@ -32,6 +32,9 @@ class Meditation extends StatefulWidget {
 }
 
 class _MeditationState extends State<Meditation> {
+  static const MethodChannel _feedbackChannel =
+      MethodChannel('inneru/meditation_feedback');
+
   String favoriteSong = "No favorite selected";
   String favoriteSongSource = "default";
   String? favoriteSpotifyTrackId;
@@ -97,6 +100,7 @@ class _MeditationState extends State<Meditation> {
       favoriteSongSource = source ?? "default";
       favoriteSpotifyTrackId = _extractSpotifyTrackId(spotifyUrl);
       favoriteSongPath = _getSongPath(favoriteSong);
+      playingSong = AudioHelper.playingSong;
     });
   }
 
@@ -191,6 +195,7 @@ class _MeditationState extends State<Meditation> {
   Future<void> _cancelMeditationCompletionAlert() async {
     await FastingNotificationService.instance
         .cancelMeditationCompleteNotification();
+    await _stopCompletionSpeech();
   }
 
   Future<void> _handleMeditationCompleteAlert() async {
@@ -230,6 +235,24 @@ class _MeditationState extends State<Meditation> {
       }
       ring();
     });
+  }
+
+  Future<void> _speakCompletionPraise() async {
+    try {
+      await _feedbackChannel.invokeMethod<void>('speak', {
+        'text': 'Meditation, great job.',
+      });
+    } catch (error) {
+      debugPrint('Meditation completion speech failed: $error');
+    }
+  }
+
+  Future<void> _stopCompletionSpeech() async {
+    try {
+      await _feedbackChannel.invokeMethod<void>('stop');
+    } catch (error) {
+      debugPrint('Meditation completion speech stop failed: $error');
+    }
   }
 
   Future<void> _showMeditationCompleteDialog() async {
@@ -567,6 +590,7 @@ class _MeditationState extends State<Meditation> {
 
     if (!mounted) return;
     _playCompletionAlarm();
+    await _speakCompletionPraise();
     await _showMeditationCompleteDialog();
     if (unlockedRewards.isNotEmpty) {
       await _showUnlockedRewardDialog(unlockedRewards.last);
@@ -967,6 +991,7 @@ class _MeditationState extends State<Meditation> {
                                               AudioHelper.stopAudio();
                                               _stopSpotifyPlayer();
                                               _cancelMeditationCompletionAlert();
+                                              _stopCompletionSpeech();
                                               setState(() {
                                                 playingSong = null;
                                               });

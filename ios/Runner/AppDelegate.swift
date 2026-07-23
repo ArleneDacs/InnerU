@@ -1,10 +1,14 @@
 import Flutter
+import AVFoundation
 import flutter_background_service_ios
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var shareChannel: FlutterMethodChannel?
+  private var meditationKeepAwakeChannel: FlutterMethodChannel?
+  private var meditationFeedbackChannel: FlutterMethodChannel?
+  private let meditationSynthesizer = AVSpeechSynthesizer()
 
   override func application(
     _ application: UIApplication,
@@ -52,6 +56,66 @@ import UIKit
         host.present(activityViewController, animated: true) {
           result(nil)
         }
+      }
+    }
+
+    meditationKeepAwakeChannel = FlutterMethodChannel(
+      name: "inneru/meditation_keep_awake",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    meditationKeepAwakeChannel?.setMethodCallHandler { call, result in
+      guard call.method == "setEnabled",
+            let args = call.arguments as? [String: Any],
+            let enabled = args["enabled"] as? Bool else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+
+      DispatchQueue.main.async {
+        UIApplication.shared.isIdleTimerDisabled = enabled
+        result(nil)
+      }
+    }
+
+    meditationFeedbackChannel = FlutterMethodChannel(
+      name: "inneru/meditation_feedback",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    meditationFeedbackChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+
+      switch call.method {
+      case "speak":
+        guard let args = call.arguments as? [String: Any],
+              let text = args["text"] as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+          result(nil)
+          return
+        }
+
+        DispatchQueue.main.async {
+          let session = AVAudioSession.sharedInstance()
+          try? session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+          try? session.setActive(true)
+          self.meditationSynthesizer.stopSpeaking(at: .immediate)
+          let utterance = AVSpeechUtterance(string: text)
+          utterance.voice = AVSpeechSynthesisVoice(
+            language: Locale.preferredLanguages.first ?? "en-US"
+          )
+          utterance.rate = 0.48
+          self.meditationSynthesizer.speak(utterance)
+          result(nil)
+        }
+      case "stop":
+        DispatchQueue.main.async {
+          self.meditationSynthesizer.stopSpeaking(at: .immediate)
+          result(nil)
+        }
+      default:
+        result(FlutterMethodNotImplemented)
       }
     }
   }
