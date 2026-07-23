@@ -83,4 +83,4 @@ Route::get('/email/verify/{id}/{hash}', function (Request $request, string $id, 
     return view('auth.email-verified', [
         'verified' => true,
     ]);
-})->middleware('signed')->name('verification.verify');
+})->name('verification.verify');

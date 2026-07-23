@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\URL;
 
 class PendingRegistration extends Model
 {
@@ -65,14 +64,10 @@ class PendingRegistration extends Model
 
     public function verificationUrl(): string
     {
-        return URL::temporarySignedRoute(
-            'verification.verify',
-            now()->addDay(),
-            [
-                'id' => $this->getKey(),
-                'hash' => sha1($this->email),
-            ]
-        );
+        return route('verification.verify', [
+            'id' => $this->getKey(),
+            'hash' => sha1($this->email),
+        ]);
     }
 
     /**
