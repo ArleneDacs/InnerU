@@ -41,9 +41,11 @@ class UserActivity {
 }
 
 String _formatLeaderboardScore(num score) {
-  return score == score.roundToDouble()
-      ? score.toStringAsFixed(0)
-      : score.toStringAsFixed(1);
+  // Normalize floating-point noise first so scores stay compact in the UI.
+  final roundedToTenth = (score * 10).roundToDouble() / 10;
+  return roundedToTenth == roundedToTenth.roundToDouble()
+      ? roundedToTenth.toStringAsFixed(0)
+      : roundedToTenth.toStringAsFixed(1);
 }
 
 class LeaderboardEntry {
