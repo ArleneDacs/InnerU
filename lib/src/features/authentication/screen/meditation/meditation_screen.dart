@@ -31,7 +31,7 @@ class Meditation extends StatefulWidget {
   State<Meditation> createState() => _MeditationState();
 }
 
-class _MeditationState extends State<Meditation> {
+class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   static const MethodChannel _feedbackChannel =
       MethodChannel('inneru/meditation_feedback');
 
@@ -62,13 +62,28 @@ class _MeditationState extends State<Meditation> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scheduleDailyMeditationReminder();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _completionAlarmTimer?.cancel();
+    super.dispose();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     loadFavorite();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<TimeProvider>().reconcileWithClock();
+    }
   }
 
   Future<void> _scheduleDailyMeditationReminder() async {
@@ -313,7 +328,7 @@ class _MeditationState extends State<Meditation> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  affirmation,
+                  'You finished your session. If you want, take a photo and share this calm moment to the community page.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Color(0xFF6E625B),
@@ -322,13 +337,24 @@ class _MeditationState extends State<Meditation> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                const SizedBox(height: 10),
+                Text(
+                  affirmation,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF8D7F75),
+                    fontSize: 14,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: _shareWithMemories,
                     icon: const Icon(Icons.add_photo_alternate_rounded),
-                    label: const Text('Share with memories'),
+                    label: const Text('Take photo & share'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF4C6B43),
                       side: const BorderSide(color: Color(0xFFD8C7B9)),
@@ -522,10 +548,6 @@ class _MeditationState extends State<Meditation> {
   Future<void> _shareWithMemories() async {
     if (!mounted) return;
 
-    Navigator.of(context).pop();
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    if (!mounted) return;
-
     final source = await _showMemorySourceSheet();
     if (source == null || !mounted) return;
 
@@ -551,12 +573,12 @@ class _MeditationState extends State<Meditation> {
       id: '',
       userId: '',
       username: '',
-      title: 'Meditation Memory',
+      title: 'Meditation Moment',
       note: const [
         {
           'type': 'text',
           'value':
-              'I completed a meditation session today and wanted to remember this calm moment.',
+              'I completed a meditation session today and wanted to share this calm moment with the community.',
         },
       ],
       createdAt: DateTime.now(),
@@ -867,12 +889,6 @@ class _MeditationState extends State<Meditation> {
     final minutes = (totalSecond % 3600) ~/ 60;
     final seconds = totalSecond % 60;
     return "${hours.toString().padLeft(2, "0")}:${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}";
-  }
-
-  @override
-  void dispose() {
-    _completionAlarmTimer?.cancel();
-    super.dispose();
   }
 
   @override

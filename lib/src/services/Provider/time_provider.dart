@@ -1,12 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
-class TimeProvider extends ChangeNotifier with WidgetsBindingObserver {
+class TimeProvider extends ChangeNotifier {
   static const int defaultMeditationSeconds = 30 * 60;
   static const MethodChannel _keepAwakeChannel =
       MethodChannel('inneru/meditation_keep_awake');
@@ -23,13 +22,8 @@ class TimeProvider extends ChangeNotifier with WidgetsBindingObserver {
   int get initialTime => _initialTime;
   bool get isRunning => _isRunning;
 
-  TimeProvider() {
-    WidgetsBinding.instance.addObserver(this);
-  }
-
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     unawaited(_setKeepAwake(false));
     super.dispose();
@@ -47,9 +41,8 @@ class TimeProvider extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(_setKeepAwake(true));
     _timer = Timer.periodic(
       Duration(seconds: 1),
-      (_) => _syncCountdownWithClock(),
+      (_) => _tickCountdown(),
     );
-    _syncCountdownWithClock();
   }
 
   void pauseTimer() {
@@ -99,16 +92,12 @@ class TimeProvider extends ChangeNotifier with WidgetsBindingObserver {
         active: true,
         endsAt: _endsAt,
       );
-      _syncCountdownWithClock();
     }
     notifyListeners();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _syncCountdownWithClock();
-    }
+  void reconcileWithClock() {
+    _syncCountdownWithClock();
   }
 
   Future<void> _setKeepAwake(bool enabled) async {
@@ -138,6 +127,23 @@ class TimeProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _remainingTime = 0;
+    _finishTimer();
+  }
+
+  void _tickCountdown() {
+    if (!_isRunning) return;
+
+    if (_remainingTime > 1) {
+      _remainingTime -= 1;
+      notifyListeners();
+      return;
+    }
+
+    _remainingTime = 0;
+    _finishTimer();
+  }
+
+  void _finishTimer() {
     _timer?.cancel();
     _timer = null;
     _isRunning = false;
