@@ -1106,11 +1106,21 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
           stream: _coachStream,
           builder: (context, coachSnapshot) {
             final coachData = coachSnapshot.data?.data() ?? <String, dynamic>{};
+            // coachData/userData come from Firestore docs that are only
+            // populated once a coach profile exists there; new accounts
+            // created since the move to Postgres never get one, so both
+            // were coming back empty and displayName fell through to the
+            // literal 'Coach' placeholder — rendering as "Hello, Coach
+            // Coach" next to the hardcoded prefix below. The account's real
+            // name always lives in the Postgres-backed session, so use that
+            // before falling back to the legacy Firestore fields.
+            final sessionName = AuthService.instance.currentSession?.name;
             final teamName = (coachData['fullName'] as String?) ??
                 (userData['team'] as String?) ??
                 (userData['username'] as String?) ??
                 'My Team';
             final displayName = (coachData['fullName'] as String?) ??
+                sessionName ??
                 (userData['username'] as String?) ??
                 'Coach';
             final profilePic = (userData['profilePic'] as String?)?.trim();
