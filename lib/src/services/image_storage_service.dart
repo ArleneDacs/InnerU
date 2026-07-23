@@ -91,6 +91,7 @@ class ImageStorageService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      print('Media upload response: ${response.body}');
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         String message = 'Media upload failed (${response.statusCode}).';

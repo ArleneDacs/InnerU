@@ -196,11 +196,7 @@ class ProfileController extends Controller
             default => "users/{$userId}/images",
         };
         $prefix = trim((string) config('filesystems.media_upload_path', ''), '/');
-        $diskRoot = trim(
-            (string) config("filesystems.disks.{$preferredDisk}.root", ''),
-            '/'
-        );
-        if ($prefix !== '' && $diskRoot === '') {
+        if ($prefix !== '') {
             $directory = "{$prefix}/{$directory}";
         }
         $disks = array_values(array_unique(array_filter([

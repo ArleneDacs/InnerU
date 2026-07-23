@@ -98,7 +98,6 @@ return [
             'throw' => false,
             'report' => false,
             'visibility' => env('STORAGE_PUBLIC', true) ? 'public' : 'private',
-            'root' => trim((string) env('STORAGE_PATH', ''), '/'),
         ],
 
     ],
