@@ -115,8 +115,16 @@ class PendingRegistration extends Model
         return $attributes;
     }
 
-    public function sendVerificationEmail(): void
+    public function sendVerificationEmail(): bool
     {
-        $this->notify(new PendingRegistrationVerificationNotification($this));
+        try {
+            $this->notify(new PendingRegistrationVerificationNotification($this));
+
+            return true;
+        } catch (\Throwable $throwable) {
+            report($throwable);
+
+            return false;
+        }
     }
 }

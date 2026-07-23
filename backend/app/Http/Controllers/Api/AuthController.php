@@ -63,11 +63,14 @@ class AuthController extends Controller
             ]
         );
 
-        $pending->sendVerificationEmail();
+        $verificationEmailSent = $pending->sendVerificationEmail();
 
         return response()->json([
-            'message' => 'Verification email sent. Please verify your email before signing in.',
+            'message' => $verificationEmailSent
+                ? 'Verification email sent. Please verify your email before signing in.'
+                : 'Account created. We could not send the verification email right now, but you can request another one later.',
             'verification_required' => true,
+            'verification_email_sent' => $verificationEmailSent,
             'email' => $pending->email,
             'name' => $pending->name,
         ], Response::HTTP_CREATED);
@@ -121,10 +124,13 @@ class AuthController extends Controller
 
         if ($user === null) {
             if ($pending !== null) {
-                $pending->sendVerificationEmail();
+                $verificationEmailSent = $pending->sendVerificationEmail();
 
                 return response()->json([
-                    'message' => 'Verification email sent. Please check your inbox.',
+                    'message' => $verificationEmailSent
+                        ? 'Verification email sent. Please check your inbox.'
+                        : 'We could not send the verification email right now. Please try again later.',
+                    'verification_email_sent' => $verificationEmailSent,
                 ]);
             }
 
@@ -226,11 +232,14 @@ class AuthController extends Controller
                     'encrypted_password' => Crypt::encryptString(Str::random(64)),
                 ])->save();
 
-                $pending->sendVerificationEmail();
+                $verificationEmailSent = $pending->sendVerificationEmail();
 
                 return response()->json([
-                    'message' => 'Verification email sent. Please verify your email before signing in.',
+                    'message' => $verificationEmailSent
+                        ? 'Verification email sent. Please verify your email before signing in.'
+                        : 'Account created. We could not send the verification email right now, but you can request another one later.',
                     'verification_required' => true,
+                    'verification_email_sent' => $verificationEmailSent,
                     'email' => $pending->email,
                     'name' => $pending->name,
                 ], Response::HTTP_CREATED);
@@ -272,11 +281,14 @@ class AuthController extends Controller
                 'encrypted_password' => Crypt::encryptString(Str::random(64)),
             ]);
 
-            $pending->sendVerificationEmail();
+            $verificationEmailSent = $pending->sendVerificationEmail();
 
             return response()->json([
-                'message' => 'Verification email sent. Please verify your email before signing in.',
+                'message' => $verificationEmailSent
+                    ? 'Verification email sent. Please verify your email before signing in.'
+                    : 'Account created. We could not send the verification email right now, but you can request another one later.',
                 'verification_required' => true,
+                'verification_email_sent' => $verificationEmailSent,
                 'email' => $pending->email,
                 'name' => $pending->name,
             ], Response::HTTP_CREATED);
