@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -46,5 +47,44 @@ class ProfileMediaUploadTest extends TestCase
             'id' => $user->id,
             'profile_pic' => $url,
         ]);
+    }
+
+    public function test_authenticated_user_can_upload_profile_media_even_when_profile_pic_column_is_unavailable(): void
+    {
+        Storage::fake('public');
+        config()->set('filesystems.media_upload_disk', 'public');
+        Schema::shouldReceive('hasColumn')
+            ->once()
+            ->with('users', 'profile_pic')
+            ->andReturn(false);
+
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/media/upload', [
+            'kind' => 'avatar',
+            'file' => UploadedFile::fake()->image('avatar.jpg'),
+        ]);
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'url',
+                'profile_pic',
+                'path',
+                'user',
+            ]);
+
+        $path = $response->json('path');
+        $url = $response->json('url');
+
+        $this->assertIsString($path);
+        $this->assertIsString($url);
+        $this->assertSame($url, $response->json('profile_pic'));
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'profile_pic' => null,
+        ]);
+
+        Storage::disk('public')->assertExists($path);
     }
 }

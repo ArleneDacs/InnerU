@@ -15,7 +15,10 @@ return [
 
     'default' => env('FILESYSTEM_DISK', 'local'),
 
-    'media_upload_disk' => env('MEDIA_UPLOAD_DISK', 'public'),
+    'media_upload_disk' => env(
+        'MEDIA_UPLOAD_DISK',
+        env('STORAGE_DRIVER', 'public')
+    ),
 
     /*
     |--------------------------------------------------------------------------
@@ -60,6 +63,21 @@ return [
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
             'report' => false,
+        ],
+
+        'do' => [
+            'driver' => 's3',
+            'key' => env('STORAGE_ACCESS_KEY'),
+            'secret' => env('STORAGE_SECRET_KEY'),
+            'region' => env('STORAGE_REGION'),
+            'bucket' => env('STORAGE_BUCKET'),
+            'url' => env('STORAGE_CDN_URL'),
+            'endpoint' => env('STORAGE_ENDPOINT'),
+            'use_path_style_endpoint' => env('STORAGE_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+            'visibility' => env('STORAGE_PUBLIC', true) ? 'public' : 'private',
+            'root' => trim((string) env('STORAGE_PATH', ''), '/'),
         ],
 
     ],

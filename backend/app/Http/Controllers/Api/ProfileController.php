@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -119,12 +120,21 @@ class ProfileController extends Controller
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        $user->profile_pic = Storage::disk($disk)->url($path);
-        $user->save();
+        $url = Storage::disk($disk)->url($path);
+
+        if (Schema::hasColumn($user->getTable(), 'profile_pic')) {
+            try {
+                $user->forceFill([
+                    'profile_pic' => $url,
+                ])->save();
+            } catch (\Throwable $throwable) {
+                report($throwable);
+            }
+        }
 
         return response()->json([
-            'url' => $user->profile_pic,
-            'profile_pic' => $user->profile_pic,
+            'url' => $url,
+            'profile_pic' => $url,
             'path' => $path,
             'user' => $this->userPayload($user->refresh()),
         ]);
