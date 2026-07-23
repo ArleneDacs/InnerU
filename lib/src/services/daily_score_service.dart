@@ -71,9 +71,13 @@ class DailyScoreService {
     final todoListScoreContribution = rawTodoListContribution is num
         ? rawTodoListContribution.round().clamp(0, 100)
         : todoListScore;
-    final todoListIncludedInTotal = tracker['todoListIncludedInTotal'] == true;
+    final effectiveTodoListScore =
+        todoListScore > 0 ? todoListScore : todoListScoreContribution;
+    final todoListIncludedInTotal = tracker['todoListIncludedInTotal'] == true ||
+        todoListScore > 0 ||
+        todoListScoreContribution > 0;
     final totalPoints = todoListIncludedInTotal
-        ? ((dailyTrackerScore + todoListScoreContribution) / 2)
+        ? ((dailyTrackerScore + effectiveTodoListScore) / 2)
             .clamp(0, 100)
         : dailyTrackerScore.toDouble();
 
@@ -92,7 +96,9 @@ class DailyScoreService {
     final rawDailyTrackerScore = data['dailyTrackerScore'];
     final rawTodoListScore = data['todoListScore'];
     final rawTodoListContribution = data['todoListScoreDailyContribution'];
-    final includeTodoListScore = data['todoListIncludedInTotal'] == true;
+    final includeTodoListScore = data['todoListIncludedInTotal'] == true ||
+        _readInt(rawTodoListScore) > 0 ||
+        _readInt(rawTodoListContribution) > 0;
 
     final hasDerivedFields = rawDailyTrackerScore is num ||
         rawTodoListScore is num ||
@@ -103,11 +109,12 @@ class DailyScoreService {
       final dailyTrackerScore =
           _readInt(rawDailyTrackerScore).clamp(0, 100);
       final todoListScore = _readInt(rawTodoListScore).clamp(0, 100);
-      final todoListScoreContribution = rawTodoListContribution is num
-          ? rawTodoListContribution.round().clamp(0, 100)
-          : todoListScore;
+      final todoListScoreContribution =
+          _readInt(rawTodoListContribution).clamp(0, 100);
+      final effectiveTodoListScore =
+          todoListScore > 0 ? todoListScore : todoListScoreContribution;
       return includeTodoListScore
-          ? ((dailyTrackerScore + todoListScoreContribution) / 2)
+          ? ((dailyTrackerScore + effectiveTodoListScore) / 2)
               .clamp(0, 100)
           : dailyTrackerScore;
     }

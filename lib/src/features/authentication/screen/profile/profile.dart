@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_role_home.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
@@ -9,6 +11,7 @@ import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/user_point_api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const customColor1 = Color(0xFF6D849A); // Example primary color
 const customColor2 = Color(0xFFCE8F5A); // Example secondary color
@@ -28,6 +31,7 @@ String _dailyTaskFieldKey(String task) {
       return 'learning';
     case 'Add Value':
       return 'addValue';
+    case 'Goals':
     case 'Todo List':
       return 'todoList';
     default:
@@ -149,7 +153,10 @@ class _ProfilePageState extends State<ProfilePage> {
     _fetchProfilePic();
     _loadDailyTrackerItems().then((_) {
       if (!mounted) return;
-      fetchDailyTrackerData();
+      _restoreCachedDailyTrackerState().then((_) {
+        if (!mounted) return;
+        fetchDailyTrackerData();
+      });
     });
   }
 
@@ -173,9 +180,13 @@ class _ProfilePageState extends State<ProfilePage> {
           : trackerOnlyItems;
 
       if (!mounted) return;
+      final preservedTasks = {
+        for (final item in resolvedItems)
+          item.id: todayTasks[item.id] ?? false,
+      };
       setState(() {
         dailyTrackerItems = resolvedItems;
-        todayTasks = _emptyTaskState(resolvedItems);
+        todayTasks = preservedTasks;
       });
 
       if (parsedItems.any((item) => item.id == 'todoList')) {
@@ -239,9 +250,78 @@ class _ProfilePageState extends State<ProfilePage> {
         .clamp(0, 100);
   }
 
+  String _dailyTrackerCacheKey(String date) {
+    final session = AuthService.instance.currentSession;
+    final userId = session?.id.toString() ?? 'guest';
+    return 'profile_daily_tracker_${userId}_$date';
+  }
+
+  Future<void> _restoreCachedDailyTrackerState() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final cache = prefs.getString(
+      _dailyTrackerCacheKey(DateFormat('yyyy-MM-dd').format(DateTime.now())),
+    );
+    if (cache == null || cache.isEmpty) return;
+
+    final decoded = jsonDecode(cache);
+    if (decoded is! Map) return;
+
+    final cachedTasksRaw = decoded['todayTasks'];
+    final cachedTasks = <String, bool>{};
+    if (cachedTasksRaw is Map) {
+      for (final entry in cachedTasksRaw.entries) {
+        final key = entry.key?.toString();
+        if (key == null || key.isEmpty) continue;
+        cachedTasks[key] = entry.value == true;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      if (cachedTasks.isNotEmpty) {
+        todayTasks = {
+          for (final item in dailyTrackerItems)
+            item.id: cachedTasks[item.id] ?? false,
+        };
+      }
+
+      _todayTodoListScore = (decoded['todoListScore'] is num)
+          ? (decoded['todoListScore'] as num).round().clamp(0, 100)
+          : _todayTodoListScore;
+      _todayTodoListScoreContribution = (decoded['todoListScoreContribution'] is num)
+          ? (decoded['todoListScoreContribution'] as num).round().clamp(0, 100)
+          : _todayTodoListScoreContribution;
+      _todayTodoListIncludedInTotal =
+          decoded['todoListIncludedInTotal'] == true ||
+              _todayTodoListScore > 0 ||
+              _todayTodoListIncludedInTotal;
+    });
+  }
+
+  Future<void> _cacheDailyTrackerState() async {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _dailyTrackerCacheKey(DateFormat('yyyy-MM-dd').format(DateTime.now())),
+      jsonEncode({
+        'todayTasks': todayTasks,
+        'todoListScore': _todayTodoListScore,
+        'todoListScoreContribution': _todayTodoListScoreContribution,
+        'todoListIncludedInTotal': _todayTodoListIncludedInTotal,
+      }),
+    );
+  }
+
   num get _combinedDailyAndTodoScore {
     if (!_todayTodoListIncludedInTotal) return _dailyTrackerScore;
-    return ((_dailyTrackerScore + _todayTodoListScoreContribution) / 2)
+    final effectiveTodoListScore =
+        _todayTodoListScore > 0 ? _todayTodoListScore : _todayTodoListScoreContribution;
+    return ((_dailyTrackerScore + effectiveTodoListScore) / 2)
         .clamp(0, 100);
   }
 
@@ -315,13 +395,17 @@ class _ProfilePageState extends State<ProfilePage> {
         _todayTodoListScoreContribution = rawTodoListContribution is num
             ? rawTodoListContribution.round().clamp(0, 100)
             : 0;
-        _todayTodoListIncludedInTotal = tracker['todoListIncludedInTotal'] == true;
+        _todayTodoListIncludedInTotal =
+            tracker['todoListIncludedInTotal'] == true ||
+                _todayTodoListScore > 0 ||
+                _todayTodoListScoreContribution > 0;
         todayTasks = {
           for (final item in dailyTrackerItems)
             item.id: _readTaskCompletion(tracker, item),
         };
         isLoading = false;
       });
+      await _cacheDailyTrackerState();
       await checkAndAssignPoints();
     } catch (e) {
       print("Error fetching tracker data: $e");
@@ -341,6 +425,7 @@ class _ProfilePageState extends State<ProfilePage> {
       _todayTodoListIncludedInTotal = false;
       isLoading = false;
     });
+    await _cacheDailyTrackerState();
 
     await DailyTrackerApiService.instance.upsert(
       date: todayDate,
@@ -447,6 +532,7 @@ class _ProfilePageState extends State<ProfilePage> {
         companyCode: membershipData.activeMembership?.code,
         companyName: membershipData.activeMembership?.name,
       );
+      await _cacheDailyTrackerState();
 
       await checkAndAssignPoints();
     } catch (e) {
@@ -681,7 +767,7 @@ class _ProfilePageState extends State<ProfilePage> {
         'Call': tracker['call'] == true,
         'Learning': tracker['learning'] == true,
         'Add Value': tracker['addValue'] == true,
-        'Todo List': tracker['todoList'] == true,
+        'Goals': tracker['todoList'] == true,
       };
 
       await UserPointApiService.instance.upsert(

@@ -249,15 +249,20 @@ class UserScoreService
             ? $this->normalizeScore(($completedCount / count($dailyTrackerIds)) * 100)
             : $this->normalizeScore($tracker->user_total_score);
 
-        $todoListScoreContribution = $this->normalizeScore(
-            $tracker->todo_list_score_daily_contribution > 0
-                ? $tracker->todo_list_score_daily_contribution
-                : $tracker->todo_list_score
+        $todoListScore = $this->normalizeScore(
+            $tracker->todo_list_score > 0
+                ? $tracker->todo_list_score
+                : $tracker->todo_list_score_daily_contribution
         );
-        $includeTodoListScore = (bool) $tracker->todo_list_included_in_total;
+        $effectiveTodoListScore = $todoListScore > 0
+            ? $todoListScore
+            : $this->normalizeScore($tracker->todo_list_score_daily_contribution);
+        $includeTodoListScore = (bool) $tracker->todo_list_included_in_total
+            || $todoListScore > 0
+            || $tracker->todo_list_score_daily_contribution > 0;
 
         $resolved = $includeTodoListScore
-            ? (($dailyTrackerScore + $todoListScoreContribution) / 2)
+            ? (($dailyTrackerScore + $effectiveTodoListScore) / 2)
             : $dailyTrackerScore;
 
         if ($resolved <= 0) {
@@ -270,14 +275,20 @@ class UserScoreService
     private function scoreFromUserPoint(UserPoint $point): int
     {
         $dailyTrackerScore = $this->normalizeScore($point->daily_tracker_score);
-        $todoListScoreContribution = $this->normalizeScore(
-            $point->todo_list_score_daily_contribution > 0
-                ? $point->todo_list_score_daily_contribution
-                : $point->todo_list_score
+        $todoListScore = $this->normalizeScore(
+            $point->todo_list_score > 0
+                ? $point->todo_list_score
+                : $point->todo_list_score_daily_contribution
         );
+        $effectiveTodoListScore = $todoListScore > 0
+            ? $todoListScore
+            : $this->normalizeScore($point->todo_list_score_daily_contribution);
 
-        if ((bool) $point->todo_list_included_in_total) {
-            $resolved = (($dailyTrackerScore + $todoListScoreContribution) / 2);
+        if ((bool) $point->todo_list_included_in_total
+            || $todoListScore > 0
+            || $point->todo_list_score_daily_contribution > 0
+        ) {
+            $resolved = (($dailyTrackerScore + $effectiveTodoListScore) / 2);
             if ($resolved > 0) {
                 return $this->normalizeScore($resolved);
             }

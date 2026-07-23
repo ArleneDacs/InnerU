@@ -53,6 +53,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? currentUserEmotion;
   String? _profilePic;
   Map<String, dynamic>? _dashboardData;
+  num? _cachedScore;
   late CompanyThemeData _companyTheme;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
@@ -120,6 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       duration: const Duration(milliseconds: 1100),
     );
     _loadCompanyTheme();
+    _loadCachedDashboardScore(currentUserId);
     _fetchProfilePic();
     fetchQuote();
     _scheduleNextQuoteRefresh();
@@ -130,6 +132,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (watchUserId != null && watchUserId.isNotEmpty) {
       unawaited(WatchStateRefresher().refresh(watchUserId));
     }
+  }
+
+  Future<void> _loadCachedDashboardScore(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('dashboard_score_$userId');
+    final cachedScore = raw == null ? null : num.tryParse(raw);
+    if (!mounted || cachedScore == null) return;
+    setState(() {
+      _cachedScore = cachedScore;
+    });
   }
 
   @override
@@ -235,6 +247,21 @@ class _DashboardScreenState extends State<DashboardScreen>
       final dashboard = await DashboardApiService.instance.fetchDashboard();
       _dashboardData = dashboard;
       final user = dashboard['user'];
+      final summary = dashboard['summary'];
+      final dashboardScore = user is Map<String, dynamic>
+          ? DailyScoreService.resolveDisplayTotalPoints(user)
+          : summary is Map<String, dynamic>
+              ? DailyScoreService.resolveDisplayTotalPoints(summary)
+              : _cachedScore ?? 0;
+      _cachedScore = dashboardScore;
+      final session = AuthService.instance.currentSession;
+      if (session != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+          'dashboard_score_${session.id}',
+          dashboardScore.toString(),
+        );
+      }
       final rawProfilePic =
           user is Map<String, dynamic> ? user['profile_pic'] : null;
       final cleanedUrl = rawProfilePic is String ? rawProfilePic.trim() : "";
@@ -1158,7 +1185,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ? DailyScoreService.resolveDisplayTotalPoints(dashboardUser)
         : summary is Map<String, dynamic>
             ? DailyScoreService.resolveDisplayTotalPoints(summary)
-            : 0;
+            : _cachedScore ?? 0;
     final totalPointsLabel = rawScore == rawScore.roundToDouble()
         ? rawScore.toStringAsFixed(0)
         : rawScore.toStringAsFixed(1);

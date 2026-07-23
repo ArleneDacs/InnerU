@@ -209,18 +209,43 @@ class Task {
     return null;
   }
 
+  static TaskTag _tagFromValue(dynamic value) {
+    if (value is int) {
+      return TaskTag.values[
+        value.clamp(0, TaskTag.values.length - 1).toInt()
+      ];
+    }
+
+    final raw = value?.toString().trim().toLowerCase() ?? '';
+    if (raw.isEmpty) return TaskTag.none;
+
+    switch (raw) {
+      case 'personal':
+        return TaskTag.personal;
+      case 'professional':
+        return TaskTag.professional;
+      case 'contribution':
+        return TaskTag.contribution;
+      case 'none':
+        return TaskTag.none;
+      default:
+        final parsed = int.tryParse(raw);
+        if (parsed != null) {
+          return TaskTag.values[
+            parsed.clamp(0, TaskTag.values.length - 1).toInt()
+          ];
+        }
+        return TaskTag.none;
+    }
+  }
+
   factory Task.fromJson(Map<String, dynamic> json) => Task(
         id: (json['id'] ?? '').toString(),
         title: (json['title'] ?? '').toString(),
         description: (json['description'] ?? '').toString(),
         isCompleted: json['isCompleted'] == true,
         dueDate: DateTime.tryParse(json['dueDate'].toString()) ?? DateTime.now(),
-        tag: TaskTag.values[
-          (int.tryParse((json['tag'] ?? TaskTag.none.index).toString()) ??
-                  TaskTag.none.index)
-              .clamp(0, TaskTag.values.length - 1)
-              .toInt()
-        ],
+        tag: _tagFromValue(json['tag']),
         createdAt: _dateFromValue(json['createdAt']) ??
             DateTime.fromMillisecondsSinceEpoch(0),
         updatedAt: _dateFromValue(json['updatedAt']),
@@ -1108,7 +1133,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
             .clamp(0, 100);
     final todoListScoreContribution =
         (score - previousTodoListScore).clamp(0, 100);
-    final includeTodoListScore = todoListScoreContribution > 0;
+    final includeTodoListScore = score > 0;
 
     String? trackerUsername;
     Map<String, dynamic>? userData;
@@ -1142,9 +1167,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
       todoListScore: score,
       todoListScoreDailyContribution: todoListScoreContribution,
       todoListIncludedInTotal: includeTodoListScore,
-      userTotalScore: includeTodoListScore
-          ? ((score + todoListScoreContribution) / 2).round()
-          : score,
+      userTotalScore: dailyTrackerScoreFields['userTotalScore'],
       username: trackerUsername,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
@@ -1192,8 +1215,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final todoListContribution =
         _readInt(trackerData['todoListScoreDailyContribution']).clamp(0, 100);
     final includeTodoListScore = trackerData['todoListIncludedInTotal'] == true;
+    final effectiveTodoListScore =
+        todoListScore > 0 ? todoListScore : todoListContribution;
     final totalPoints = includeTodoListScore
-        ? ((dailyTrackerScore + todoListContribution) / 2).clamp(0, 100)
+        ? ((dailyTrackerScore + effectiveTodoListScore) / 2).clamp(0, 100)
         : dailyTrackerScore;
     final totalPointsInt = totalPoints.round();
     final membershipData = CompanyMembershipService.fromUserData(userData);

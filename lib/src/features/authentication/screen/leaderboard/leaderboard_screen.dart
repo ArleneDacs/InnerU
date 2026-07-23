@@ -565,7 +565,7 @@ class _LeaderboardState extends State<Leaderboard>
                 ),
                 Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
                 _buildPointsRow(
-                  'Todo List',
+                  'Goals',
                   entry.activity.todoListCount,
                   '1 pt/task',
                   entry.activity.todoListCount,

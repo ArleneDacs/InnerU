@@ -2982,7 +2982,7 @@ class CoachGroupCustomizationPage extends StatelessWidget {
     );
     final todoListPoints = _extractIntValue(
       taskPoints,
-      ['Todo List Points', 'todo_list_points', 'todoListPoints'],
+      ['Goals Points', 'todo_list_points', 'todoListPoints'],
     );
 
     return callIntent +
@@ -4252,7 +4252,7 @@ class CoachManageMenteesPage extends StatelessWidget {
     );
     final todoListPoints = _extractIntValue(
       taskPoints,
-      ['Todo List Points', 'todo_list_points', 'todoListPoints'],
+      ['Goals Points', 'todo_list_points', 'todoListPoints'],
     );
 
     return callIntent +
