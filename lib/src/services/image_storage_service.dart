@@ -76,6 +76,7 @@ class ImageStorageService {
         'POST',
         Uri.parse('${ApiConfig.baseUrl}/api/media/upload'),
       )
+        ..headers['Accept'] = 'application/json'
         ..headers['Authorization'] = 'Bearer ${session.token}'
         ..fields['kind'] = kind
         ..files.add(
