@@ -4,23 +4,52 @@ use App\Models\PendingRegistration;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
 Route::get('/password-reset', function (Request $request) {
-    $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
-    $query = $request->getQueryString();
-    $target = $frontendUrl.'/';
+    return view('auth.password-reset', [
+        'token' => (string) $request->query('token', ''),
+        'email' => (string) $request->query('email', ''),
+    ]);
+});
 
-    if (is_string($query) && $query !== '') {
-        $target .= '?'.$query;
+Route::post('/password-reset', function (Request $request) {
+    $validated = $request->validate([
+        'token' => ['required', 'string'],
+        'email' => ['required', 'string', 'email:rfc', 'max:255'],
+        'password' => ['required', 'string', PasswordRule::min(8), 'confirmed'],
+    ]);
+
+    $status = Password::reset(
+        $validated,
+        function (User $user, string $password): void {
+            $user->forceFill([
+                'password' => Hash::make($password),
+            ])->save();
+        }
+    );
+
+    if ($status !== Password::PASSWORD_RESET) {
+        return back()
+            ->withInput($request->only('email', 'token'))
+            ->withErrors([
+                'password' => __('The password reset link is invalid or has expired.'),
+            ]);
     }
 
-    return redirect()->away($target);
+    return view('auth.password-reset', [
+        'token' => '',
+        'email' => $validated['email'],
+        'successMessage' => 'Your password has been updated successfully.',
+    ]);
 });
 
 Route::get('/email/verify/{id}/{hash}', function (Request $request, string $id, string $hash) {

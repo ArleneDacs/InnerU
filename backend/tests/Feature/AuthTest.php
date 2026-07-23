@@ -8,8 +8,10 @@ use App\Notifications\PendingRegistrationVerificationNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -228,22 +230,38 @@ class AuthTest extends TestCase
             ->assertJsonPath('message', 'Please verify your email first.');
     }
 
-    public function test_password_reset_web_route_redirects_to_the_flutter_app(): void
+    public function test_password_reset_web_route_shows_the_reset_form(): void
     {
         $response = $this->get('/password-reset?mode=resetPassword&token=abc123&email=user%40example.com');
 
-        $redirectUrl = $response->headers->get('Location');
+        $response->assertOk()
+            ->assertSee('Reset your password')
+            ->assertSee('New password')
+            ->assertSee('Confirm password')
+            ->assertSee('Save new password');
+    }
 
-        $this->assertNotNull($redirectUrl);
-        $this->assertStringStartsWith(
-            rtrim((string) config('app.frontend_url'), '/').'/',
-            $redirectUrl
-        );
+    public function test_password_reset_web_form_updates_the_password(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'reset.user.inneru@gmail.com',
+            'password' => bcrypt('OldPassword123'),
+            'email_verified_at' => now(),
+        ]);
 
-        parse_str(parse_url($redirectUrl, PHP_URL_QUERY) ?? '', $query);
-        $this->assertSame('resetPassword', $query['mode'] ?? null);
-        $this->assertSame('abc123', $query['token'] ?? null);
-        $this->assertSame('user@example.com', $query['email'] ?? null);
+        $token = Password::broker()->createToken($user);
+
+        $response = $this->post('/password-reset', [
+            'token' => $token,
+            'email' => $user->email,
+            'password' => 'NewPassword123',
+            'password_confirmation' => 'NewPassword123',
+        ]);
+
+        $response->assertOk()
+            ->assertSee('Password updated');
+
+        $this->assertTrue(Hash::check('NewPassword123', $user->fresh()->password));
     }
 
     public function test_login_rejects_unverified_email_password_accounts(): void
