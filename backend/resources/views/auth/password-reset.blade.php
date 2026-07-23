@@ -102,6 +102,10 @@
             margin-bottom: 16px;
         }
 
+        .input-wrap {
+            position: relative;
+        }
+
         label {
             display: block;
             margin-bottom: 8px;
@@ -120,6 +124,37 @@
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
             background: #fbfdfc;
+        }
+
+        .input-wrap input {
+            padding-right: 52px;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 34px;
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: #6b7f79;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .toggle-password:hover {
+            background: rgba(47, 127, 117, 0.08);
+            color: var(--accent-dark);
+        }
+
+        .toggle-password:focus-visible {
+            outline: 2px solid rgba(47, 127, 117, 0.45);
+            outline-offset: 2px;
         }
 
         input:focus {
@@ -203,31 +238,71 @@
                     This reset link is incomplete. Please request a new password reset email.
                 </div>
             @else
-                <form method="POST" action="{{ url('/password-reset') }}">
+                <form method="POST" action="/password-reset">
                     @csrf
                     <input type="hidden" name="token" value="{{ old('token', $token) }}">
                     <input type="hidden" name="email" value="{{ old('email', $email) }}">
 
                     <div class="field">
                         <label for="password">New password</label>
-                        <input
-                            id="password"
-                            name="password"
-                            type="password"
-                            autocomplete="new-password"
-                            required
-                        >
+                        <div class="input-wrap">
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                autocomplete="new-password"
+                                required
+                            >
+                            <button
+                                class="toggle-password"
+                                type="button"
+                                data-toggle-password="password"
+                                aria-label="Show password"
+                                aria-pressed="false"
+                            >
+                                <svg data-eye-open xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
+                                </svg>
+                                <svg data-eye-closed xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" aria-hidden="true" class="hidden">
+                                    <path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                    <path d="M10.6 10.6a2.5 2.5 0 0 0 3.53 3.53" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                    <path d="M6.2 6.2C4 7.8 2.6 10 2 12c.9 3.2 4.6 6.5 10 6.5 1.9 0 3.7-.4 5.2-1.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M17.8 17.8C20 16.2 21.4 14 22 12c-.9-3.2-4.6-6.5-10-6.5-1.3 0-2.5.2-3.6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="field">
                         <label for="password_confirmation">Confirm password</label>
-                        <input
-                            id="password_confirmation"
-                            name="password_confirmation"
-                            type="password"
-                            autocomplete="new-password"
-                            required
-                        >
+                        <div class="input-wrap">
+                            <input
+                                id="password_confirmation"
+                                name="password_confirmation"
+                                type="password"
+                                autocomplete="new-password"
+                                required
+                            >
+                            <button
+                                class="toggle-password"
+                                type="button"
+                                data-toggle-password="password_confirmation"
+                                aria-label="Show confirm password"
+                                aria-pressed="false"
+                            >
+                                <svg data-eye-open xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
+                                </svg>
+                                <svg data-eye-closed xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" aria-hidden="true" class="hidden">
+                                    <path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                    <path d="M10.6 10.6a2.5 2.5 0 0 0 3.53 3.53" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                    <path d="M6.2 6.2C4 7.8 2.6 10 2 12c.9 3.2 4.6 6.5 10 6.5 1.9 0 3.7-.4 5.2-1.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M17.8 17.8C20 16.2 21.4 14 22 12c-.9-3.2-4.6-6.5-10-6.5-1.3 0-2.5.2-3.6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="actions">
@@ -238,5 +313,24 @@
             @endif
         @endif
     </main>
+    <script>
+        document.querySelectorAll('[data-toggle-password]').forEach((button) => {
+            const targetId = button.getAttribute('data-toggle-password');
+            const input = targetId ? document.getElementById(targetId) : null;
+            const eyeOpen = button.querySelector('[data-eye-open]');
+            const eyeClosed = button.querySelector('[data-eye-closed]');
+
+            if (!input || !eyeOpen || !eyeClosed) return;
+
+            button.addEventListener('click', () => {
+                const isHidden = input.type === 'password';
+                input.type = isHidden ? 'text' : 'password';
+                eyeOpen.classList.toggle('hidden', !isHidden);
+                eyeClosed.classList.toggle('hidden', isHidden);
+                button.setAttribute('aria-pressed', String(isHidden));
+                button.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
+            });
+        });
+    </script>
 </body>
 </html>
