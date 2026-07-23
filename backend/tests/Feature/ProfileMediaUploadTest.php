@@ -87,4 +87,33 @@ class ProfileMediaUploadTest extends TestCase
 
         Storage::disk('public')->assertExists($path);
     }
+
+    public function test_authenticated_user_can_upload_profile_media_when_the_configured_disk_is_invalid(): void
+    {
+        Storage::fake('public');
+        config()->set('filesystems.media_upload_disk', 'missing-disk');
+
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/media/upload', [
+            'kind' => 'avatar',
+            'file' => UploadedFile::fake()->image('avatar.jpg'),
+        ]);
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'url',
+                'profile_pic',
+                'path',
+                'user',
+            ]);
+
+        $path = $response->json('path');
+        $url = $response->json('url');
+
+        $this->assertIsString($path);
+        $this->assertIsString($url);
+        Storage::disk('public')->assertExists($path);
+    }
 }

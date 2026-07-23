@@ -17,7 +17,7 @@ return [
 
     'media_upload_disk' => env(
         'MEDIA_UPLOAD_DISK',
-        env('STORAGE_DRIVER', 'public')
+        'public'
     ),
 
     /*

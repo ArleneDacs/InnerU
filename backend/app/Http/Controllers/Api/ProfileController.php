@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
@@ -96,25 +97,11 @@ class ProfileController extends Controller
 
         $file = $validated['file'];
         $kind = $validated['kind'] ?? 'image';
-        $extension = $file->getClientOriginalExtension() ?: $file->extension() ?: 'jpg';
-
         $disk = config('filesystems.media_upload_disk', 'public');
 
-        try {
-            $path = $file->storePubliclyAs(
-                "users/{$user->id}/{$kind}s",
-                $kind.'_'.now()->format('YmdHis').'.'.$extension,
-                $disk
-            );
-        } catch (\Throwable $throwable) {
-            report($throwable);
+        [$path, $disk] = $this->storeUploadedMedia($file, $user->id, $kind, $disk);
 
-            return response()->json([
-                'message' => 'Media upload failed. Please try again.',
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        if (! is_string($path) || $path === '') {
+        if ($path === null) {
             return response()->json([
                 'message' => 'Media upload failed. Please try again.',
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -186,5 +173,40 @@ class ProfileController extends Controller
             'created_at' => optional($user->created_at)?->toIso8601String(),
             'updated_at' => optional($user->updated_at)?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function storeUploadedMedia(
+        UploadedFile $file,
+        int $userId,
+        string $kind,
+        string $preferredDisk
+    ): array {
+        $extension = $file->getClientOriginalExtension()
+            ?: $file->extension()
+            ?: 'jpg';
+
+        $fileName = $kind.'_'.now()->format('YmdHis').'.'.$extension;
+        $directory = "users/{$userId}/{$kind}s";
+        $disks = array_values(array_unique(array_filter([
+            $preferredDisk,
+            'public',
+        ])));
+
+        foreach ($disks as $disk) {
+            try {
+                $path = $file->storePubliclyAs($directory, $fileName, $disk);
+
+                if (is_string($path) && $path !== '') {
+                    return [$path, $disk];
+                }
+            } catch (\Throwable $throwable) {
+                report($throwable);
+            }
+        }
+
+        return [null, $preferredDisk];
     }
 }
