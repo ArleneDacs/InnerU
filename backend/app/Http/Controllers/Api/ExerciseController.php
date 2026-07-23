@@ -147,6 +147,10 @@ class ExerciseController extends Controller
             ->get();
 
         $totalMinutes = $logs->sum(fn (ExerciseLog $log) => $this->logDurationMinutes($log));
+        $existingTracker = DailyTracker::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', $date)
+            ->first();
 
         DailyTracker::updateOrCreate(
             [
@@ -154,17 +158,28 @@ class ExerciseController extends Controller
                 'date' => $date,
             ],
             [
-                'username' => $logs->first()?->username ?? 'User',
-                'step_count' => 0,
-                'step_goal' => 5000,
-                'meditation' => false,
-                'steps' => false,
-                'learning' => false,
-                'add_value' => false,
+                'username' => $logs->first()?->username ?? $existingTracker?->username ?? 'User',
+                'step_count' => $existingTracker?->step_count ?? 0,
+                'step_goal' => $existingTracker?->step_goal ?? 5000,
+                'meditation' => $existingTracker?->meditation ?? false,
+                'steps' => $existingTracker?->steps ?? false,
+                'call' => $existingTracker?->call ?? false,
+                'learning' => $existingTracker?->learning ?? false,
+                'add_value' => $existingTracker?->add_value ?? false,
+                'todo_list' => $existingTracker?->todo_list ?? false,
                 'exercise' => $logs->isNotEmpty(),
+                'call_count' => $existingTracker?->call_count ?? 0,
                 'exercise_count' => $logs->count(),
                 'exercise_minutes' => $totalMinutes,
-                'meditation_minutes' => 0,
+                'learning_count' => $existingTracker?->learning_count ?? 0,
+                'value_count' => $existingTracker?->value_count ?? 0,
+                'todo_list_count' => $existingTracker?->todo_list_count ?? 0,
+                'todo_list_score' => $existingTracker?->todo_list_score ?? 0,
+                'todo_list_score_daily_contribution' => $existingTracker?->todo_list_score_daily_contribution ?? 0,
+                'todo_list_included_in_total' => $existingTracker?->todo_list_included_in_total ?? false,
+                'user_total_score' => $existingTracker?->user_total_score ?? 0,
+                'custom_daily_tasks' => $existingTracker?->custom_daily_tasks ?? [],
+                'meditation_minutes' => $existingTracker?->meditation_minutes ?? 0,
                 'company_id' => $user->company_id,
                 'company_code' => $user->company_code,
                 'company_name' => $user->company_name,
@@ -210,7 +225,6 @@ class ExerciseController extends Controller
             ]
         );
 
-        $this->userScoreService->syncForUser($user, min(100, $logs->count() * 10));
     }
 
     private function logPayload(ExerciseLog $log): array

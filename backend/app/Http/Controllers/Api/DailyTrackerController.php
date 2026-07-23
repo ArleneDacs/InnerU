@@ -189,44 +189,58 @@ class DailyTrackerController extends Controller
             ? Carbon::parse($validated['date'])->toDateString()
             : now()->toDateString();
 
+        $existingTracker = DailyTracker::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', $date)
+            ->first();
+
+        $customDailyTasks = $validated['custom_daily_tasks'] ?? $existingTracker?->custom_daily_tasks ?? [];
+        if (! is_array($customDailyTasks)) {
+            $customDailyTasks = [];
+        }
+
         $tracker = DailyTracker::updateOrCreate(
             [
                 'user_id' => $user->id,
                 'date' => $date,
             ],
             [
-                'username' => $validated['username'] ?? $user->name,
-                'step_count' => $validated['step_count'] ?? 0,
-                'step_goal' => $validated['step_goal'] ?? 5000,
-                'meditation' => $validated['meditation'] ?? false,
-                'steps' => $validated['steps'] ?? false,
-                'call' => $validated['call'] ?? false,
-                'exercise' => $validated['exercise'] ?? false,
-                'learning' => $validated['learning'] ?? false,
-                'add_value' => $validated['add_value'] ?? false,
-                'todo_list' => $validated['todo_list'] ?? false,
-                'call_count' => $validated['call_count'] ?? 0,
-                'exercise_count' => $validated['exercise_count'] ?? 0,
-                'exercise_minutes' => $validated['exercise_minutes'] ?? 0,
-                'learning_count' => $validated['learning_count'] ?? 0,
-                'value_count' => $validated['value_count'] ?? 0,
-                'todo_list_count' => $validated['todo_list_count'] ?? 0,
-                'todo_list_score' => $validated['todo_list_score'] ?? 0,
-                'todo_list_score_daily_contribution' => $validated['todo_list_score_daily_contribution'] ?? 0,
-                'todo_list_included_in_total' => $validated['todo_list_included_in_total'] ?? false,
-                'user_total_score' => $validated['user_total_score'] ?? 0,
-                'custom_daily_tasks' => $validated['custom_daily_tasks'] ?? [],
-                'meditation_minutes' => $validated['meditation_minutes'] ?? 0,
-                'company_id' => $validated['company_id'] ?? $user->company_code,
-                'company_code' => $validated['company_code'] ?? $user->company_code,
-                'company_name' => $validated['company_name'] ?? $user->company_name,
+                'username' => $validated['username'] ?? $existingTracker?->username ?? $user->name,
+                'step_count' => $validated['step_count'] ?? $existingTracker?->step_count ?? 0,
+                'step_goal' => $validated['step_goal'] ?? $existingTracker?->step_goal ?? 5000,
+                'meditation' => $validated['meditation'] ?? $existingTracker?->meditation ?? false,
+                'steps' => $validated['steps'] ?? $existingTracker?->steps ?? false,
+                'call' => $validated['call'] ?? $existingTracker?->call ?? false,
+                'exercise' => $validated['exercise'] ?? $existingTracker?->exercise ?? false,
+                'learning' => $validated['learning'] ?? $existingTracker?->learning ?? false,
+                'add_value' => $validated['add_value'] ?? $existingTracker?->add_value ?? false,
+                'todo_list' => $validated['todo_list'] ?? $existingTracker?->todo_list ?? false,
+                'call_count' => $validated['call_count'] ?? $existingTracker?->call_count ?? 0,
+                'exercise_count' => $validated['exercise_count'] ?? $existingTracker?->exercise_count ?? 0,
+                'exercise_minutes' => $validated['exercise_minutes'] ?? $existingTracker?->exercise_minutes ?? 0,
+                'learning_count' => $validated['learning_count'] ?? $existingTracker?->learning_count ?? 0,
+                'value_count' => $validated['value_count'] ?? $existingTracker?->value_count ?? 0,
+                'todo_list_count' => $validated['todo_list_count'] ?? $existingTracker?->todo_list_count ?? 0,
+                'todo_list_score' => $validated['todo_list_score'] ?? $existingTracker?->todo_list_score ?? 0,
+                'todo_list_score_daily_contribution' => $validated['todo_list_score_daily_contribution'] ?? $existingTracker?->todo_list_score_daily_contribution ?? 0,
+                'todo_list_included_in_total' => $validated['todo_list_included_in_total'] ?? $existingTracker?->todo_list_included_in_total ?? false,
+                'user_total_score' => $validated['user_total_score'] ?? $existingTracker?->user_total_score ?? 0,
+                'custom_daily_tasks' => $customDailyTasks,
+                'meditation_minutes' => $validated['meditation_minutes'] ?? $existingTracker?->meditation_minutes ?? 0,
+                'company_id' => $validated['company_id'] ?? $existingTracker?->company_id ?? $user->company_code,
+                'company_code' => $validated['company_code'] ?? $existingTracker?->company_code ?? $user->company_code,
+                'company_name' => $validated['company_name'] ?? $existingTracker?->company_name ?? $user->company_name,
             ]
         );
 
-        $this->userScoreService->syncFromPayload($user, $validated);
+        $resolvedScore = $this->userScoreService->resolveForUser($user);
+        $tracker->forceFill([
+            'user_total_score' => $resolvedScore,
+        ])->save();
+        $this->userScoreService->syncForUser($user, $resolvedScore);
 
         return response()->json([
-            'tracker' => $this->mapTracker($tracker),
+            'tracker' => $this->mapTracker($tracker->refresh()),
         ]);
     }
 
