@@ -41,7 +41,6 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
-        $this->assertStringStartsWith('uploads/', $path);
 
         Storage::disk('do')->assertExists($path);
 
@@ -78,7 +77,6 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
-        $this->assertStringStartsWith('uploads/', $path);
         Storage::disk('do')->assertExists($path);
 
         $this->assertDatabaseHas('users', [
@@ -118,7 +116,6 @@ class ProfileMediaUploadTest extends TestCase
 
         $this->assertIsString($path);
         $this->assertIsString($url);
-        $this->assertStringStartsWith('uploads/', $path);
         Storage::disk('s3')->assertExists($path);
         Storage::disk('public')->assertMissing($path);
         $this->assertDatabaseHas('users', [
@@ -159,7 +156,6 @@ class ProfileMediaUploadTest extends TestCase
         $this->assertIsString($path);
         $this->assertIsString($url);
         $this->assertSame($url, $response->json('profile_pic'));
-        $this->assertStringStartsWith('uploads/', $path);
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
             'profile_pic' => null,

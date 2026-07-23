@@ -1,5 +1,24 @@
 <?php
 
+$normalizeStorageUrl = static function ($value): ?string {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+
+    if (
+        preg_match(
+            '/^\[(https?:\/\/[^\]]+)\]\((https?:\/\/[^)]+)\)$/',
+            $raw,
+            $matches
+        )
+    ) {
+        $raw = $matches[1];
+    }
+
+    return rtrim($raw, '/');
+};
+
 return [
 
     /*
@@ -73,8 +92,8 @@ return [
             'secret' => env('STORAGE_SECRET_KEY'),
             'region' => env('STORAGE_REGION'),
             'bucket' => env('STORAGE_BUCKET'),
-            'url' => env('STORAGE_CDN_URL'),
-            'endpoint' => env('STORAGE_ENDPOINT'),
+            'url' => $normalizeStorageUrl(env('STORAGE_CDN_URL')),
+            'endpoint' => $normalizeStorageUrl(env('STORAGE_ENDPOINT')),
             'use_path_style_endpoint' => env('STORAGE_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
             'report' => false,
