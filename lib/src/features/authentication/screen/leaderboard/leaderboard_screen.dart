@@ -43,7 +43,7 @@ class UserActivity {
 String _formatLeaderboardScore(num score) {
   return score == score.roundToDouble()
       ? score.toStringAsFixed(0)
-      : score.toString();
+      : score.toStringAsFixed(1);
 }
 
 class LeaderboardEntry {

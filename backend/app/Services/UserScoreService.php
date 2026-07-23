@@ -302,7 +302,7 @@ class UserScoreService
         }
 
         $coreTaskAverage = $coreTaskScore / $count;
-        $overallScore = min(100.0, $goalScore + $coreTaskAverage);
+        $overallScore = ($goalScore + $coreTaskAverage) / 2;
 
         return [
             'goalScore' => $goalScore,
