@@ -110,6 +110,24 @@ class _AdminDailyTrackerOverviewContentState
   String _todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
   final Set<String> _expandedUserIds = {};
 
+  int _readInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    if (value is bool) return value ? 1 : 0;
+    if (value is String) return int.tryParse(value.trim()) ?? fallback;
+    return fallback;
+  }
+
+  bool _readBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -185,11 +203,11 @@ class _AdminDailyTrackerOverviewContentState
     final theme = Theme.of(context);
     final filtered = _filteredUsers;
     final usersWithActivityToday = _users
-        .where((user) => (user['todayCompletedCount'] as int? ?? 0) > 0)
+        .where((user) => _readInt(user['todayCompletedCount']) > 0)
         .length;
     final usersFullyDoneToday = _users.where((user) {
-      final completed = user['todayCompletedCount'] as int? ?? 0;
-      final total = user['todayTaskCount'] as int? ?? 0;
+      final completed = _readInt(user['todayCompletedCount']);
+      final total = _readInt(user['todayTaskCount']);
       return total > 0 && completed >= total;
     }).length;
 
@@ -428,8 +446,11 @@ class _AdminDailyTrackerOverviewContentState
         : 'Unknown';
     final email = user['email']?.toString() ?? '';
     final companyName = user['companyName']?.toString() ?? '';
-    final completed = user['todayCompletedCount'] as int? ?? 0;
-    final total = user['todayTaskCount'] as int? ?? _dailyTrackerTaskLabels.length;
+    final completed = _readInt(user['todayCompletedCount']);
+    final total = _readInt(
+      user['todayTaskCount'],
+      fallback: _dailyTrackerTaskLabels.length,
+    );
     final isFullyDone = total > 0 && completed >= total;
     final hasActivity = completed > 0;
     final badgeColor = isFullyDone
@@ -508,7 +529,8 @@ class _AdminDailyTrackerOverviewContentState
     if (progress is Map && progress[dateKey] is Map) {
       final raw = Map<String, dynamic>.from(progress[dateKey] as Map);
       return {
-        for (final label in _dailyTrackerTaskLabels) label: raw[label] == true,
+        for (final label in _dailyTrackerTaskLabels)
+          label: _readBool(raw[label] ?? raw[label.toLowerCase()]),
       };
     }
     return {for (final label in _dailyTrackerTaskLabels) label: false};
@@ -545,6 +567,67 @@ class _AdminDailyTrackerOverviewContentState
     final trackedDates = progress is Map
         ? progress.keys.map((key) => key.toString()).toSet()
         : <String>{};
+    final cells = <Widget>[];
+    final totalCells = daysInMonth + firstDayOfWeek;
+    const cellCount = 7;
+
+    for (var i = 0; i < totalCells; i++) {
+      if (i < firstDayOfWeek) {
+        cells.add(const SizedBox.shrink());
+        continue;
+      }
+
+      final day = i - firstDayOfWeek + 1;
+      final dateKey =
+          '$_selectedYear-${_selectedMonth.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+      final tracked = trackedDates.contains(dateKey);
+      final tasks = tracked ? _tasksForDate(user, dateKey) : null;
+      final completedCount =
+          tasks?.values.where((done) => done).length ?? 0;
+      final isFull = tasks != null &&
+          completedCount >= _dailyTrackerTaskLabels.length;
+
+      cells.add(
+        Padding(
+          padding: const EdgeInsets.all(1.5),
+          child: InkWell(
+            onTap: tracked ? () => _showDayDetails(context, dateKey, user) : null,
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                color: !tracked
+                    ? Colors.transparent
+                    : isFull
+                        ? const Color(0xFF90A17D).withValues(alpha: 0.55)
+                        : const Color(0xFFCE8F5A).withValues(alpha: 0.4),
+                border: Border.all(
+                  color: theme.colorScheme.outline.withValues(alpha: 0.16),
+                ),
+              ),
+              child: Text(
+                '$day',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    while (cells.length % cellCount != 0) {
+      cells.add(const SizedBox.shrink());
+    }
+
+    final rows = <TableRow>[];
+    for (var i = 0; i < cells.length; i += cellCount) {
+      rows.add(TableRow(children: cells.sublist(i, i + cellCount)));
+    }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
@@ -570,62 +653,67 @@ class _AdminDailyTrackerOverviewContentState
                           ),
                         ),
                       ),
-                    ))
+                ))
                 .toList(),
           ),
           const SizedBox(height: 6),
-          GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              crossAxisSpacing: 3,
-              mainAxisSpacing: 3,
-            ),
-            itemCount: daysInMonth + firstDayOfWeek,
-            itemBuilder: (context, index) {
-              if (index < firstDayOfWeek) return const SizedBox.shrink();
-              final day = index - firstDayOfWeek + 1;
-              final dateKey =
-                  '$_selectedYear-${_selectedMonth.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
-              final tracked = trackedDates.contains(dateKey);
-              final tasks = tracked ? _tasksForDate(user, dateKey) : null;
-              final completedCount =
-                  tasks?.values.where((done) => done).length ?? 0;
-              final isFull = tasks != null &&
-                  completedCount >= _dailyTrackerTaskLabels.length;
-
-              return Tooltip(
-                message: tracked
-                    ? '$dateKey: $completedCount/${_dailyTrackerTaskLabels.length}'
-                    : dateKey,
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    color: !tracked
-                        ? Colors.transparent
-                        : isFull
-                            ? const Color(0xFF90A17D).withValues(alpha: 0.55)
-                            : const Color(0xFFCE8F5A).withValues(alpha: 0.4),
-                    border: Border.all(
-                      color: theme.colorScheme.outline.withValues(alpha: 0.16),
-                    ),
-                  ),
-                  child: Text(
-                    '$day',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-              );
+          Table(
+            columnWidths: const {
+              0: FlexColumnWidth(),
+              1: FlexColumnWidth(),
+              2: FlexColumnWidth(),
+              3: FlexColumnWidth(),
+              4: FlexColumnWidth(),
+              5: FlexColumnWidth(),
+              6: FlexColumnWidth(),
             },
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            children: rows,
           ),
         ],
       ),
+    );
+  }
+
+  void _showDayDetails(
+    BuildContext context,
+    String dateKey,
+    Map<String, dynamic> user,
+  ) {
+    final tasks = _tasksForDate(user, dateKey);
+    final completedCount = tasks.values.where((done) => done).length;
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(dateKey),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$completedCount/${_dailyTrackerTaskLabels.length} tasks completed',
+              ),
+              const SizedBox(height: 12),
+              ...tasks.entries.map(
+                (entry) => CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(entry.key),
+                  value: entry.value,
+                  onChanged: null,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

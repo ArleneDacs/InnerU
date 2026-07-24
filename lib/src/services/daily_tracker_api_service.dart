@@ -9,6 +9,75 @@ class DailyTrackerApiService {
   final ApiClient _api = ApiClient.instance;
   String? get _token => AuthService.instance.currentSession?.token;
 
+  static bool _asBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
+  static int _asInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    if (value is bool) return value ? 1 : 0;
+    if (value is String) return int.tryParse(value.trim()) ?? fallback;
+    return fallback;
+  }
+
+  static Map<String, bool> _normalizeTaskMap(dynamic rawTasks) {
+    if (rawTasks is! Map) {
+      return const <String, bool>{};
+    }
+
+    final tasks = Map<String, dynamic>.from(rawTasks);
+    return {
+      'Call': _asBool(tasks['Call'] ?? tasks['call']),
+      'Steps': _asBool(tasks['Steps'] ?? tasks['steps']),
+      'Exercise': _asBool(tasks['Exercise'] ?? tasks['exercise']),
+      'Meditation': _asBool(tasks['Meditation'] ?? tasks['meditation']),
+      'Learning': _asBool(tasks['Learning'] ?? tasks['learning']),
+      'Add Value': _asBool(tasks['Add Value'] ?? tasks['addValue'] ?? tasks['add_value']),
+    };
+  }
+
+  static Map<String, dynamic> _normalizeAdminUser(Map<String, dynamic> user) {
+    final progress = user['progress'];
+    final normalizedProgress = <String, Map<String, bool>>{};
+    if (progress is Map) {
+      for (final entry in progress.entries) {
+        final dateKey = entry.key.toString();
+        normalizedProgress[dateKey] = _normalizeTaskMap(entry.value);
+      }
+    }
+
+    return {
+      ...user,
+      'todayCompletedCount': _asInt(user['todayCompletedCount']),
+      'todayTaskCount': _asInt(user['todayTaskCount'], fallback: 6),
+      'todayUpdatedAt': user['todayUpdatedAt']?.toString() ?? '',
+      'progress': normalizedProgress,
+    };
+  }
+
+  static Map<String, dynamic> _normalizeFriend(Map<String, dynamic> friend) {
+    final progress = friend['progress'];
+    final normalizedProgress = <String, Map<String, bool>>{};
+    if (progress is Map) {
+      for (final entry in progress.entries) {
+        final dateKey = entry.key.toString();
+        normalizedProgress[dateKey] = _normalizeTaskMap(entry.value);
+      }
+    }
+
+    return {
+      ...friend,
+      'progress': normalizedProgress,
+    };
+  }
+
   Future<Map<String, dynamic>> upsert({
     String? date,
     int? stepCount,
@@ -127,7 +196,9 @@ class DailyTrackerApiService {
       'users': users is List
           ? users
               .whereType<Map>()
-              .map((user) => Map<String, dynamic>.from(user))
+              .map(
+                (user) => _normalizeAdminUser(Map<String, dynamic>.from(user)),
+              )
               .toList()
           : const <Map<String, dynamic>>[],
     };
@@ -149,7 +220,7 @@ class DailyTrackerApiService {
     if (friends is List) {
       return friends
           .whereType<Map>()
-          .map((friend) => Map<String, dynamic>.from(friend))
+          .map((friend) => _normalizeFriend(Map<String, dynamic>.from(friend)))
           .toList();
     }
 
