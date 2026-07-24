@@ -156,11 +156,22 @@ void main() {
     test('exact alarms are permitted on Android (notification timeliness)',
         () {
       expect(
+        manifest.contains('android.permission.USE_EXACT_ALARM'),
+        isTrue,
+        reason: 'Android 13+ should use USE_EXACT_ALARM so wake alarms '
+            'can fire without waiting for the user to grant special access.',
+      );
+      expect(
         manifest.contains('android.permission.SCHEDULE_EXACT_ALARM'),
         isTrue,
-        reason: 'Without SCHEDULE_EXACT_ALARM, fasting/meditation/sleep '
-            'alarms silently fall back to inexact on Android 12+ and can '
-            'arrive very late, while iOS fires them on time.',
+        reason: 'Older Android versions still need SCHEDULE_EXACT_ALARM '
+            'to schedule exact sleep and fasting alarms.',
+      );
+      expect(
+        manifest.contains('android:maxSdkVersion="32"'),
+        isTrue,
+        reason: 'SCHEDULE_EXACT_ALARM should be limited to Android 12 and '
+            'below once USE_EXACT_ALARM is declared for Android 13+.',
       );
     });
 
