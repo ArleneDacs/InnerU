@@ -62,8 +62,6 @@
 	<string>Allow InnerU to scan barcodes and capture meal photos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Allow InnerU to show your walking route and track step sessions on the map.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Allow InnerU to track your walking route during active step sessions, including when the app needs to keep the session running.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow InnerU to access the microphone when media features need audio input.</string>
 	<key>NSMotionUsageDescription</key>
@@ -101,7 +99,6 @@
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
-		<string>location</string>
 		<string>processing</string>
 	</array>
 	<key>UILaunchStoryboardName</key>

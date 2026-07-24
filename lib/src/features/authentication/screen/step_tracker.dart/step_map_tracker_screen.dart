@@ -333,8 +333,8 @@ class _StepMapTrackingController extends ChangeNotifier {
     return true;
   }
 
-  /// Tracking must survive screen-off and backgrounding: Android needs a
-  /// foreground service, iOS needs background location updates enabled.
+  /// Route tracking is session-based and only needs active location updates
+  /// while the user is on the walk screen.
   LocationSettings _trackingLocationSettings() {
     if (Platform.isAndroid) {
       return AndroidSettings(
@@ -352,9 +352,6 @@ class _StepMapTrackingController extends ChangeNotifier {
       return AppleSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
-        allowBackgroundLocationUpdates: true,
-        showBackgroundLocationIndicator: true,
-        pauseLocationUpdatesAutomatically: false,
       );
     }
     return const LocationSettings(
@@ -1149,10 +1146,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     _loadInitialMapPreview();
   }
 
-  // Tracking intentionally continues while the app is backgrounded or the
-  // screen is off (Android foreground service / iOS background location),
-  // so no lifecycle handling stops it. A session interrupted by a process
-  // kill is finalized by reconcileStaleSession on next launch.
+  // Tracking is managed by the route screen itself. If the app is
+  // backgrounded, the session can be restored on the next launch by
+  // reconcileStaleSession.
 
   Future<void> _loadInitialMapPreview() async {
     await _trackingController.loadInitialMapPreview();
