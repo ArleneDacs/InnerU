@@ -13,6 +13,7 @@ import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/step_map_api_service.dart';
 import 'package:selfcare_projects/src/services/watch_snapshot.dart';
 import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
@@ -265,6 +266,17 @@ class WatchStepsReceiver {
       }
     }
     if (points.length < 2) return;
+
+    await StepMapApiService.instance.saveRecordedWalk({
+      'id': 'watch-${at.millisecondsSinceEpoch}',
+      'username': username,
+      'started_at':
+          at.subtract(Duration(seconds: seconds)).toIso8601String(),
+      'ended_at': at.toIso8601String(),
+      'distance_meters': distance,
+      'elapsed_seconds': seconds,
+      'route_points': points,
+    });
 
     await DailyTrackerApiService.instance.upsert(
       date: dayKey(at),

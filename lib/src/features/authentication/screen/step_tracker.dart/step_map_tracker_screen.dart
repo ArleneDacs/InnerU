@@ -2765,36 +2765,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
               ),
             ],
           ),
-          if (_sharedSessionActionLabel != null) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isSessionBusy
-                    ? null
-                    : (_isSessionOwner
-                        ? _endSharedSessionAction
-                        : _leaveSharedSessionAction),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isSessionOwner
-                      ? const Color(0xFFB96D40)
-                      : const Color(0xFF90A17D),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                ),
-                icon: Icon(
-                  _isSessionOwner
-                      ? Icons.stop_circle_outlined
-                      : Icons.logout_rounded,
-                  size: 18,
-                ),
-                label: Text(_sharedSessionActionLabel!),
-              ),
-            ),
-          ],
+          // The End/Leave Session action already lives in the persistent
+          // bottom tracker dock (_BottomTrackerDock) — having it here too
+          // duplicated the same button right on top of it.
           if (focusMember != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -3487,6 +3460,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
+                                    color: Colors.black87,
                                   ),
                                 ),
                               ),
@@ -3499,7 +3473,11 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                                 borderRadius: BorderRadius.circular(10),
                                 child: const Padding(
                                   padding: EdgeInsets.all(2),
-                                  child: Icon(Icons.close, size: 16),
+                                  child: Icon(
+                                    Icons.close,
+                                    size: 16,
+                                    color: Colors.black54,
+                                  ),
                                 ),
                               ),
                             ],
@@ -3507,17 +3485,26 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                           const SizedBox(height: 6),
                           Text(
                             'Steps: ${member.stepCount}',
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black87,
+                            ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'Distance: ${_formatDistance(member.distanceMeters)}',
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black87,
+                            ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'Time: ${_formatDuration(Duration(seconds: member.elapsedSeconds))}',
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black87,
+                            ),
                           ),
                           const SizedBox(height: 2),
                           FutureBuilder<String>(
@@ -3532,7 +3519,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 softWrap: false,
-                                style: const TextStyle(fontSize: 11),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.black87,
+                                ),
                               );
                             },
                           ),
