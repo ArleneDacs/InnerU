@@ -1,5 +1,13 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+/// Formats a sleep goal duration as e.g. "9h" or "7h 30m".
+String formatSleepGoal(Duration duration) {
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes % 60;
+  return minutes == 0 ? '${hours}h' : '${hours}h ${minutes}m';
+}
 
 class SleepSettings extends StatefulWidget {
   const SleepSettings({super.key});
@@ -13,8 +21,7 @@ class SleepSettingsState extends State<SleepSettings> {
   List<String> modeOptions = ["Alarm", "Vibrate"];
 
   TimeOfDay selectedBedtime = TimeOfDay(hour: 22, minute: 0);
-  int? selectedSleepGoal = 9;
-  List<int> sleepGoalOptions = List.generate(12, (index) => index + 1);
+  Duration selectedSleepGoal = const Duration(hours: 9);
 
   Future<void> _pickTime(BuildContext context) async {
     TimeOfDay? pickedTime = await showTimePicker(
@@ -27,6 +34,30 @@ class SleepSettingsState extends State<SleepSettings> {
         selectedBedtime = pickedTime;
       });
     }
+  }
+
+  Future<void> _pickSleepGoal(BuildContext context) async {
+    Duration tempGoal = selectedSleepGoal;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SizedBox(
+          height: 250,
+          child: CupertinoTimerPicker(
+            mode: CupertinoTimerPickerMode.hm,
+            initialTimerDuration: selectedSleepGoal,
+            onTimerDurationChanged: (Duration newDuration) {
+              tempGoal = newDuration;
+            },
+          ),
+        );
+      },
+    );
+
+    setState(() {
+      selectedSleepGoal = tempGoal;
+    });
   }
 
   @override
@@ -50,12 +81,7 @@ class SleepSettingsState extends State<SleepSettings> {
               ),
               _buildTimePickerColumn(),
               Expanded(
-                child: _buildDropdownColumn("Set your \nsleep goal",
-                    selectedSleepGoal, sleepGoalOptions, (newValue) {
-                  setState(() {
-                    selectedSleepGoal = newValue;
-                  });
-                }),
+                child: _buildSleepGoalColumn(),
               ),
             ],
           ),
@@ -111,6 +137,33 @@ class SleepSettingsState extends State<SleepSettings> {
           ),
         ),
         Text("Set your bedtime\n", style: TextStyle(fontSize: 14)),
+      ],
+    );
+  }
+
+  Widget _buildSleepGoalColumn() {
+    return Column(
+      children: [
+        InkWell(
+          onTap: () => _pickSleepGoal(context),
+          child: SizedBox(
+            child: Container(
+              width: 110,
+              height: 45,
+              padding: EdgeInsets.all(10.0),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                formatSleepGoal(selectedSleepGoal),
+                style: GoogleFonts.roboto(),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+        Text("Set your \nsleep goal", style: TextStyle(fontSize: 14)),
       ],
     );
   }
