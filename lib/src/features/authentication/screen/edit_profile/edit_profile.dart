@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
-import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
@@ -242,13 +241,14 @@ class MyEditProfileState extends State<EditProfile> {
       if (!mounted) return;
       Navigator.pop(context); // Close loading dialog
 
-      // Redirect to the profile screen
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => ProfileSettings()),
-      );
-
+      // Navigation from here is the caller's responsibility (see the
+      // "Update" button's onPressed) -- this method used to also
+      // pushReplacement to ProfileSettings here, which meant every save
+      // fired two competing pushReplacement transitions back to back, the
+      // second one using a context whose route the first had already
+      // replaced. That left the destination screen stuck mid-render
+      // (including the just-uploaded profile picture) until something
+      // external, like backgrounding the app, forced a full repaint.
       print("User data updated successfully!");
     } catch (error) {
       if (!mounted) return;

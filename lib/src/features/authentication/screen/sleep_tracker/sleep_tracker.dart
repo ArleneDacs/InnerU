@@ -48,6 +48,7 @@ class _SleepTrackerState extends State<SleepTracker>
   late final AudioPlayer _sleepAlarmPlayer = AudioPlayer()
     ..setPlayerMode(PlayerMode.mediaPlayer);
   bool _isSleepAlarmPlaying = false;
+  StreamSubscription<void>? _sleepAlarmStoppedSubscription;
 
   String get _userId =>
       AuthService.instance.currentSession?.id.toString() ?? 'guest';
@@ -58,12 +59,21 @@ class _SleepTrackerState extends State<SleepTracker>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _sleepAlarmStoppedSubscription =
+        FastingNotificationService.instance.onSleepAlarmStopped.listen((_) {
+      if (!mounted) return;
+      _goalReachedAlertShown = true;
+      _goalReachedTimer?.cancel();
+      unawaited(_stopSleepAlarmMusic());
+      unawaited(FastingNotificationService.instance.cancelSleepAlarmBurst());
+    });
     _loadSleepData();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _sleepAlarmStoppedSubscription?.cancel();
     _ticker?.cancel();
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
@@ -127,6 +137,7 @@ class _SleepTrackerState extends State<SleepTracker>
 
   Future<void> _syncInactiveSleepNotifications() async {
     await FastingNotificationService.instance.cancelSleepWakeNotification();
+    await FastingNotificationService.instance.cancelSleepAlarmBurst();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
   }
 
@@ -208,6 +219,7 @@ class _SleepTrackerState extends State<SleepTracker>
     _lastOngoingNotificationMinute = -1;
     await _stopSleepAlarmMusic();
     await FastingNotificationService.instance.cancelSleepWakeNotification();
+    await FastingNotificationService.instance.cancelSleepAlarmBurst();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
     await _scheduleBedtimeReminder();
 
@@ -274,6 +286,9 @@ class _SleepTrackerState extends State<SleepTracker>
     _lastOngoingNotificationMinute = -1;
     unawaited(
         FastingNotificationService.instance.cancelSleepOngoingNotification());
+    // The app is in the foreground playing the alarm live -- the
+    // background notification burst would just be redundant now.
+    unawaited(FastingNotificationService.instance.cancelSleepAlarmBurst());
     unawaited(_playCompletionAlarm());
     unawaited(_showGoalReachedDialog());
   }
@@ -405,12 +420,26 @@ class _SleepTrackerState extends State<SleepTracker>
     final start = _activeSleepStart;
     if (start == null) return;
 
+    final wakesAt = start.add(_selectedSleepGoal);
     await FastingNotificationService.instance.ensurePermissions();
-    await FastingNotificationService.instance.scheduleSleepWakeNotification(
-      wakesAt: start.add(_selectedSleepGoal),
-      goalHours: _selectedSleepGoal.inHours,
-      mode: _selectedMode,
-    );
+
+    if (_selectedMode == 'Alarm') {
+      // A single notification is too easy to sleep through and its sound
+      // can't loop -- the repeating alarm burst is what actually behaves
+      // like an alarm clock while the phone is locked or backgrounded.
+      await FastingNotificationService.instance.cancelSleepWakeNotification();
+      await FastingNotificationService.instance.scheduleSleepAlarmBurst(
+        wakesAt: wakesAt,
+        goalHours: _selectedSleepGoal.inHours,
+      );
+    } else {
+      await FastingNotificationService.instance.cancelSleepAlarmBurst();
+      await FastingNotificationService.instance.scheduleSleepWakeNotification(
+        wakesAt: wakesAt,
+        goalHours: _selectedSleepGoal.inHours,
+        mode: _selectedMode,
+      );
+    }
   }
 
   Future<void> _showSleepOngoingNotification() async {
