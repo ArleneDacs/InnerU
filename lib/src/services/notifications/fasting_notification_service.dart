@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -21,6 +23,12 @@ class FastingNotificationService {
   static const int dailySleepBedtimeReminderNotificationId = 7001;
   static const int sleepWakeNotificationId = 7002;
   static const int sleepOngoingNotificationId = 7003;
+  static const int sleepAlarmBurstBaseId = 7100;
+  static const int sleepAlarmBurstCount = 11;
+  static const Duration sleepAlarmBurstInterval = Duration(seconds: 28);
+  static const String sleepAlarmPayload = 'sleep_alarm';
+  static const String sleepAlarmCategoryId = 'SLEEP_ALARM';
+  static const String sleepAlarmStopActionId = 'STOP_ALARM';
   static const int _todoNotificationBaseId = 600000;
   static const String _channelId = 'fasting_complete_channel';
   static const String _channelName = 'Fasting reminders';
@@ -128,6 +136,10 @@ class FastingNotificationService {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
+  final _sleepAlarmStoppedController = StreamController<void>.broadcast();
+
+  Stream<void> get onSleepAlarmStopped => _sleepAlarmStoppedController.stream;
+
   bool _initialized = false;
 
   Future<void> initialize() async {
@@ -136,19 +148,50 @@ class FastingNotificationService {
     tz.initializeTimeZones();
     await _configureLocalTimezone();
 
-    const initializationSettings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+    final initializationSettings = InitializationSettings(
+      android: const AndroidInitializationSettings('@mipmap/launcher_icon'),
       iOS: DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
         requestSoundPermission: false,
+        notificationCategories: [
+          DarwinNotificationCategory(
+            sleepAlarmCategoryId,
+            actions: [
+              DarwinNotificationAction.plain(
+                sleepAlarmStopActionId,
+                'Stop',
+              ),
+            ],
+          ),
+        ],
       ),
     );
 
     await _notifications.initialize(
       settings: initializationSettings,
+      onDidReceiveNotificationResponse: _handleNotificationResponse,
     );
     _initialized = true;
+  }
+
+  void _handleNotificationResponse(NotificationResponse response) {
+    if (response.payload == sleepAlarmPayload) {
+      _sleepAlarmStoppedController.add(null);
+    }
+  }
+
+  /// Call once at app startup, after `initialize()`. Detects the case where
+  /// tapping the sleep alarm notification is what launched the app from
+  /// fully terminated -- `onDidReceiveNotificationResponse` alone doesn't
+  /// reliably cover that case, only taps while already running.
+  Future<void> checkLaunchNotification() async {
+    await initialize();
+    final launchDetails = await _notifications.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true &&
+        launchDetails?.notificationResponse?.payload == sleepAlarmPayload) {
+      _sleepAlarmStoppedController.add(null);
+    }
   }
 
   Future<void> ensurePermissions() async {
@@ -624,6 +667,75 @@ class FastingNotificationService {
     await _notifications.cancel(id: sleepWakeNotificationId);
   }
 
+  Future<void> scheduleSleepAlarmBurst({
+    required DateTime wakesAt,
+    required int goalHours,
+  }) async {
+    await initialize();
+    await cancelSleepAlarmBurst();
+
+    final schedule = computeSleepAlarmBurstSchedule(wakesAt: wakesAt);
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _sleepWakeAlarmChannelId,
+        'Sleep wake alarm',
+        channelDescription: _sleepWakeChannelDescription,
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        sound: const RawResourceAndroidNotificationSound('sleep_alarm'),
+        enableVibration: true,
+        category: AndroidNotificationCategory.alarm,
+        fullScreenIntent: true,
+      ),
+      iOS: DarwinNotificationDetails(
+        sound: 'sleep_alarm.wav',
+        presentSound: true,
+        interruptionLevel: InterruptionLevel.timeSensitive,
+        categoryIdentifier: sleepAlarmCategoryId,
+      ),
+    );
+
+    for (var i = 0; i < schedule.length; i++) {
+      final fireTime = schedule[i];
+      if (!fireTime.isAfter(DateTime.now())) continue;
+
+      try {
+        await _notifications.zonedSchedule(
+          id: sleepAlarmBurstBaseId + i,
+          title: 'Wake up',
+          body: 'Your $goalHours-hour sleep goal is complete.',
+          scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
+          notificationDetails: details,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          matchDateTimeComponents: null,
+          payload: sleepAlarmPayload,
+        );
+      } catch (error) {
+        debugPrint(
+          'Exact sleep alarm burst scheduling failed for index $i, retrying inexact: $error',
+        );
+        await _notifications.zonedSchedule(
+          id: sleepAlarmBurstBaseId + i,
+          title: 'Wake up',
+          body: 'Your $goalHours-hour sleep goal is complete.',
+          scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
+          notificationDetails: details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          matchDateTimeComponents: null,
+          payload: sleepAlarmPayload,
+        );
+      }
+    }
+  }
+
+  Future<void> cancelSleepAlarmBurst() async {
+    await initialize();
+    for (var i = 0; i < sleepAlarmBurstCount; i++) {
+      await _notifications.cancel(id: sleepAlarmBurstBaseId + i);
+    }
+  }
+
   Future<void> showSleepOngoingNotification({
     required Duration elapsed,
     required Duration remaining,
@@ -818,6 +930,14 @@ class FastingNotificationService {
     final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return '$hours:$minutes:$seconds';
+  }
+
+  static List<DateTime> computeSleepAlarmBurstSchedule({
+    required DateTime wakesAt,
+    int count = sleepAlarmBurstCount,
+    Duration interval = sleepAlarmBurstInterval,
+  }) {
+    return List<DateTime>.generate(count, (i) => wakesAt.add(interval * i));
   }
 
   Future<void> _configureLocalTimezone() async {

@@ -496,9 +496,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                   children: [
                     Text(
                       isActive ? 'Elapsed time ($percent%)' : 'Selected fast',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: Colors.black45,
+                        color: colors.onSurface.withValues(alpha: 0.6),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -518,9 +518,9 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                       isActive
                           ? 'Your fast ends on'
                           : 'Your plan is ready to start',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: Colors.black45,
+                        color: colors.onSurface.withValues(alpha: 0.6),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -528,10 +528,10 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                       isActive
                           ? DateFormat('MMM d, hh:mm a').format(_endTime!)
                           : '$_selectedHours hour fasting window',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF35302C),
+                        color: colors.onSurface,
                       ),
                     ),
                     if (isActive) ...[
@@ -569,7 +569,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                   side: BorderSide(
                     color: isActive
                         ? const Color(0xFFFF4663)
-                      : const Color(0xFF1B1B1B).withValues(alpha: 0.12),
+                      : colors.onSurface.withValues(alpha: 0.12),
                   ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(999),
@@ -582,7 +582,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                   fontWeight: FontWeight.w800,
                   color: isActive
                       ? const Color(0xFFFF4663)
-                      : const Color(0xFF2D2A28),
+                      : colors.onSurface,
                 ),
               ),
             ),

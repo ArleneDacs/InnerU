@@ -65,7 +65,14 @@ class MyEditProfileState extends State<EditProfile> {
       img.Image? originalImage = img.decodeImage(bytes);
 
       if (originalImage == null) {
-        print("Error decoding image.");
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                "Couldn't read that photo. Please try a different one."),
+            backgroundColor: Colors.red,
+          ),
+        );
         return;
       }
 
@@ -75,6 +82,14 @@ class MyEditProfileState extends State<EditProfile> {
       });
     } catch (e) {
       print("Error picking image: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              "Couldn't load that photo. Please try a different one."),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -165,11 +180,19 @@ class MyEditProfileState extends State<EditProfile> {
         }
       }
 
-      // Update user document
-      await FirebaseFirestore.instance
-          .collection("users")
-          .doc(userId)
-          .update(updatedData);
+      // Update the user profile through the API. UserService.getUserData()
+      // (which every screen, including this one, reads profile data from)
+      // reads from /api/me, not Firestore -- writing to the Firestore
+      // "users" collection here was a no-op from the user's perspective,
+      // since nothing ever read profile fields back from it.
+      await UserService.updateUserFields({
+        'name': newUsername,
+        'email': _emailController.text.trim(),
+        'number': _phoneController.text.trim(),
+        if (_isBirthdateChanged) 'birthdate': _dobController.text.trim(),
+        if (updatedData['profilePic'] != null)
+          'profile_pic': updatedData['profilePic'],
+      });
 
       // Update username in all notes where the userId matches
       QuerySnapshot notesSnapshot = await FirebaseFirestore.instance

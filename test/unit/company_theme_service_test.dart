@@ -68,5 +68,39 @@ void main() {
       expect(selectedTheme.backgroundColor.computeLuminance(), lessThan(0.1));
       expect(selectedTheme.isCompanyTheme, isFalse);
     });
+
+    test(
+        'a custom dark background is treated as dark even when themeIsDark/themeMode was never set',
+        () {
+      // Mirrors a company (e.g. GENCYS) whose admin picked a custom dark
+      // navy background/surface for branding but never separately toggled
+      // an "is dark" flag -- previously this left isDark=false, so ink/icon
+      // colors defaulted to light-theme values and became invisible against
+      // the actual dark background.
+      final resolved = CompanyThemeService.fromCompanyData({
+        'name': 'Gencys',
+        'code': 'GENCYS',
+        'themeSource': 'manual',
+        'themeEnabled': true,
+        'themeBackgroundColor': '#020B12',
+        'themeSurfaceColor': '#071A24',
+      });
+
+      expect(resolved.isDark, isTrue);
+      expect(
+        resolved.backgroundColor.computeLuminance(),
+        lessThan(0.1),
+      );
+      expect(
+        _contrastRatio(resolved.backgroundColor, resolved.inkColor),
+        greaterThanOrEqualTo(4.5),
+      );
+    });
   });
+}
+
+double _contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance() + 0.05;
+  final lb = b.computeLuminance() + 0.05;
+  return la > lb ? la / lb : lb / la;
 }

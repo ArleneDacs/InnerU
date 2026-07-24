@@ -308,12 +308,13 @@ class CompanyLoadingGate extends StatefulWidget {
 }
 
 class _CompanyLoadingGateState extends State<CompanyLoadingGate>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static final Set<String> _playedLoginSessions = <String>{};
 
   late final AnimationController _controller;
   bool _isChecking = true;
   bool _showLoading = false;
+  bool _isDisposed = false;
   String _loadingImageUrl = '';
   String _loadingVideoUrl = '';
   _CompanyLoadingBrand _loadingBrand = _CompanyLoadingBrand.gencys;
@@ -329,11 +330,35 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4200),
     );
     unawaited(_prepareLoadingScreen());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        // A video actively decoding while the app is backgrounded is a
+        // known source of native crashes on iOS once the GPU surface is
+        // invalidated -- pause playback rather than let it keep running.
+        unawaited(_videoController?.pause());
+        unawaited(_audioPlayer?.pause());
+        break;
+      case AppLifecycleState.resumed:
+        if (_showLoading) {
+          unawaited(_videoController?.play());
+          unawaited(_audioPlayer?.resume());
+        }
+        break;
+      case AppLifecycleState.detached:
+        break;
+    }
   }
 
   Future<void> _prepareLoadingScreen() async {
@@ -452,6 +477,14 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
                 : controller.value.duration;
       }
       await controller.play();
+      if (_isDisposed) {
+        // The widget was disposed while initialize()/play() were in
+        // flight. dispose() already ran and won't run again, so this
+        // controller would otherwise leak as an orphaned, still-playing
+        // native video player -- dispose it directly instead of storing it.
+        await controller.dispose();
+        return;
+      }
       _videoController = controller;
     } catch (_) {
       await controller.dispose();
@@ -492,6 +525,8 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
 
   @override
   void dispose() {
+    _isDisposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     unawaited(_disposeLoadingVideo());
     unawaited(_stopLoadingAudio());

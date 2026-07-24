@@ -595,6 +595,14 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   Future<void> _shareWithMemories() async {
     if (!mounted) return;
 
+    // Close the "Meditation complete" dialog first. Presenting the photo
+    // source sheet (and then the native image picker) while this dialog is
+    // still on screen can fail to open on iOS, since it isn't dismissed
+    // before the next modal tries to present.
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (!mounted) return;
+
     final source = await _showMemorySourceSheet();
     if (source == null || !mounted) return;
 

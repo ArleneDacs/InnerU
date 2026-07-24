@@ -112,7 +112,9 @@ class _StepTrackerState extends State<StepTracker>
     await _loadDailyGoal();
     await _loadSteps();
     if (widget.debugAutoGrantStepPermission) {
-      _hasStepPermission = true;
+      setState(() {
+        _hasStepPermission = true;
+      });
       _initStepCounter();
       return;
     }
@@ -120,7 +122,9 @@ class _StepTrackerState extends State<StepTracker>
     if (!mounted || _isDisposed) return;
 
     if (status.isGranted) {
-      _hasStepPermission = true;
+      setState(() {
+        _hasStepPermission = true;
+      });
       _initStepCounter();
       return;
     }
@@ -374,7 +378,9 @@ class _StepTrackerState extends State<StepTracker>
     final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
 
-    _stepCounterInitialized = true;
+    setState(() {
+      _stepCounterInitialized = true;
+    });
     if (!widget.debugSkipBackgroundService) {
       unawaited(StepBackgroundService.instance.startTracking());
     }

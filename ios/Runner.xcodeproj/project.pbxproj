@@ -13,6 +13,7 @@
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		33208DBE016D2DD8CDBB3E03 /* WatchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6F4A3BC494DF5D753786CF /* WatchState.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
+		3F9146948764E2FDA655C27B /* sleep_alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = C42F434387E10E1A38C95848 /* sleep_alarm.wav */; };
 		6AF0357F4F06EF77273C0BAF /* TrackMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1EB5361F9EA066AFE0F0A1 /* TrackMapView.swift */; };
 		6C49F1DA6A1704770EC6D217 /* WatchToPhoneSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A0B8E4FC023044FEE23184 /* WatchToPhoneSync.swift */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
@@ -126,6 +127,7 @@
 		A4E3004E279D57CC7809F84E /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		B1D92A842DF670D46761364C /* PhoneConnector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhoneConnector.swift; sourceTree = "<group>"; };
 		B4203D800292EAAA985FB9AE /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		C42F434387E10E1A38C95848 /* sleep_alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = sleep_alarm.wav; path = sleep_alarm.wav; sourceTree = SOURCE_ROOT; };
 		CA618DB3DBC4FF68E577A60E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		D08662274992881E6EEEBD61 /* WatchStepCounter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchStepCounter.swift; sourceTree = "<group>"; };
 		FD9E7BB4ACA4D49A12A458FA /* InnerUWatchWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InnerUWatchWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -190,6 +192,7 @@
 				ADC4B303152A9A7AA4A206E7 /* Pods */,
 				529AF3058A8873CFBCAE013B /* Frameworks */,
 				A595AA3B224BD33AE99688DC /* InnerUWatchWidget */,
+				C42F434387E10E1A38C95848 /* sleep_alarm.wav */,
 			);
 			sourceTree = "<group>";
 		};
@@ -406,6 +409,7 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+				3F9146948764E2FDA655C27B /* sleep_alarm.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

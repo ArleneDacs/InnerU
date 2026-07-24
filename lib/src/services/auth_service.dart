@@ -129,8 +129,11 @@ class AuthService {
       if (e.statusCode == 401) {
         await _sessionService.clear();
       }
-    } catch (_) {
-      await _sessionService.clear();
+    } catch (e) {
+      // Network/connectivity failure (e.g. no internet at launch) -- keep
+      // the cached session so the user stays logged in offline. Only a
+      // confirmed 401 from the server means the token is actually invalid.
+      debugPrint('Failed to refresh session on launch: $e');
     }
   }
 

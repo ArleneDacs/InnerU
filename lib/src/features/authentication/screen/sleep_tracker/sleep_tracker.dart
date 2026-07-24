@@ -25,16 +25,16 @@ class _SleepTrackerState extends State<SleepTracker>
     with WidgetsBindingObserver {
   static const _modeKey = 'sleep_tracker_mode';
   static const _goalKey = 'sleep_tracker_goal_hours';
+  static const _goalMinutesKey = 'sleep_tracker_goal_minutes';
   static const _bedtimeHourKey = 'sleep_tracker_bedtime_hour';
   static const _bedtimeMinuteKey = 'sleep_tracker_bedtime_minute';
   static const _activeStartKey = 'sleep_tracker_active_start';
   static const _historyKey = 'sleep_tracker_history';
 
   final List<String> _modeOptions = const ['Alarm', 'Vibrate', 'Silent'];
-  final List<int> _goalOptions = List<int>.generate(12, (index) => index + 1);
 
   String _selectedMode = 'Alarm';
-  int _selectedSleepGoal = 8;
+  Duration _selectedSleepGoal = const Duration(hours: 8);
   TimeOfDay _selectedBedtime = const TimeOfDay(hour: 22, minute: 0);
   DateTime? _activeSleepStart;
   List<_SleepSession> _history = const [];
@@ -85,8 +85,13 @@ class _SleepTrackerState extends State<SleepTracker>
 
     setState(() {
       _selectedMode = prefs.getString(_scopedKey(_modeKey)) ?? _selectedMode;
-      _selectedSleepGoal =
-          prefs.getInt(_scopedKey(_goalKey)) ?? _selectedSleepGoal;
+      final storedGoalHours = prefs.getInt(_scopedKey(_goalKey));
+      if (storedGoalHours != null) {
+        _selectedSleepGoal = Duration(
+          hours: storedGoalHours,
+          minutes: prefs.getInt(_scopedKey(_goalMinutesKey)) ?? 0,
+        );
+      }
       _selectedBedtime = TimeOfDay(
         hour:
             prefs.getInt(_scopedKey(_bedtimeHourKey)) ?? _selectedBedtime.hour,
@@ -138,7 +143,11 @@ class _SleepTrackerState extends State<SleepTracker>
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_scopedKey(_modeKey), _selectedMode);
-    await prefs.setInt(_scopedKey(_goalKey), _selectedSleepGoal);
+    await prefs.setInt(_scopedKey(_goalKey), _selectedSleepGoal.inHours);
+    await prefs.setInt(
+      _scopedKey(_goalMinutesKey),
+      _selectedSleepGoal.inMinutes % 60,
+    );
     await prefs.setInt(_scopedKey(_bedtimeHourKey), _selectedBedtime.hour);
     await prefs.setInt(_scopedKey(_bedtimeMinuteKey), _selectedBedtime.minute);
     if (_activeSleepStart == null) {
@@ -181,7 +190,7 @@ class _SleepTrackerState extends State<SleepTracker>
     final session = _SleepSession(
       start: start,
       end: end,
-      goalHours: _selectedSleepGoal,
+      goalHours: _selectedSleepGoal.inHours,
     );
 
     final updatedHistory = [session, ..._history].take(14).toList();
@@ -239,7 +248,7 @@ class _SleepTrackerState extends State<SleepTracker>
     if (start == null) return;
 
     final remaining =
-        Duration(hours: _selectedSleepGoal) - DateTime.now().difference(start);
+        _selectedSleepGoal - DateTime.now().difference(start);
     if (remaining <= Duration.zero) {
       _checkForGoalCompletion();
       return;
@@ -257,7 +266,7 @@ class _SleepTrackerState extends State<SleepTracker>
     if (start == null || _goalReachedAlertShown) return;
 
     final elapsed = DateTime.now().difference(start);
-    if (elapsed < Duration(hours: _selectedSleepGoal)) return;
+    if (elapsed < _selectedSleepGoal) return;
 
     _goalReachedAlertShown = true;
     _goalReachedTimer?.cancel();
@@ -364,7 +373,7 @@ class _SleepTrackerState extends State<SleepTracker>
         return AlertDialog(
           title: const Text('Wake up'),
           content: Text(
-            'Your $_selectedSleepGoal-hour sleep goal is complete.',
+            'Your ${_formatDuration(_selectedSleepGoal)} sleep goal is complete.',
           ),
           actions: [
             TextButton(
@@ -398,8 +407,8 @@ class _SleepTrackerState extends State<SleepTracker>
 
     await FastingNotificationService.instance.ensurePermissions();
     await FastingNotificationService.instance.scheduleSleepWakeNotification(
-      wakesAt: start.add(Duration(hours: _selectedSleepGoal)),
-      goalHours: _selectedSleepGoal,
+      wakesAt: start.add(_selectedSleepGoal),
+      goalHours: _selectedSleepGoal.inHours,
       mode: _selectedMode,
     );
   }
@@ -409,12 +418,12 @@ class _SleepTrackerState extends State<SleepTracker>
     if (start == null) return;
 
     final elapsed = DateTime.now().difference(start);
-    final remaining = Duration(hours: _selectedSleepGoal) - elapsed;
+    final remaining = _selectedSleepGoal - elapsed;
 
     await FastingNotificationService.instance.showSleepOngoingNotification(
       elapsed: elapsed.isNegative ? Duration.zero : elapsed,
       remaining: remaining.isNegative ? Duration.zero : remaining,
-      goalHours: _selectedSleepGoal,
+      goalHours: _selectedSleepGoal.inHours,
     );
   }
 
@@ -451,10 +460,10 @@ class _SleepTrackerState extends State<SleepTracker>
                 .map((session) => session.duration.inMinutes / 60)
                 .reduce((a, b) => a + b) /
             _history.take(7).length;
-    final progress = _activeSleepStart == null
+    final goalMinutes = _selectedSleepGoal.inMinutes;
+    final progress = _activeSleepStart == null || goalMinutes == 0
         ? 0.0
-        : (activeDuration.inMinutes / (_selectedSleepGoal * 60))
-            .clamp(0.0, 1.0);
+        : (activeDuration.inMinutes / goalMinutes).clamp(0.0, 1.0);
 
     return CompanyThemeBuilder(
       builder: (context, companyTheme) {
@@ -534,7 +543,7 @@ class _SleepTrackerState extends State<SleepTracker>
                                           _statChip(
                                             CupertinoIcons.moon_stars_fill,
                                             'Goal',
-                                            '${_selectedSleepGoal}h',
+                                            _formatDuration(_selectedSleepGoal),
                                           ),
                                           _statChip(
                                             CupertinoIcons.clock_fill,
@@ -604,18 +613,7 @@ class _SleepTrackerState extends State<SleepTracker>
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-                                _dropdownSettingTile<int>(
-                                  title: 'Sleep goal',
-                                  value: _selectedSleepGoal,
-                                  items: _goalOptions,
-                                  labelBuilder: (hours) => '$hours hours',
-                                  onChanged: (value) {
-                                    if (value == null) return;
-                                    setState(() {
-                                      _selectedSleepGoal = value;
-                                    });
-                                  },
-                                ),
+                                _sleepGoalSettingTile(companyTheme: companyTheme),
                                 const SizedBox(height: 16),
                                 SizedBox(
                                   width: double.infinity,
@@ -719,7 +717,7 @@ class _SleepTrackerState extends State<SleepTracker>
                                 Text(
                                   _activeSleepStart == null
                                       ? 'Goal progress will appear while tracking.'
-                                      : '${(progress * 100).round()}% of your ${_selectedSleepGoal}h goal',
+                                      : '${(progress * 100).round()}% of your ${_formatDuration(_selectedSleepGoal)} goal',
                                   style: TextStyle(
                                     color: theme.colorScheme.onSurface
                                         .withValues(alpha: 0.62),
@@ -998,6 +996,7 @@ class _SleepTrackerState extends State<SleepTracker>
     required String Function(T value) labelBuilder,
     required ValueChanged<T?> onChanged,
   }) {
+    final theme = Theme.of(context);
     return _settingContainer(
       title: title,
       child: DropdownButtonHideUnderline(
@@ -1005,9 +1004,10 @@ class _SleepTrackerState extends State<SleepTracker>
           value: value,
           isExpanded: true,
           isDense: true,
-          icon: const Icon(
+          dropdownColor: theme.colorScheme.surface,
+          icon: Icon(
             Icons.keyboard_arrow_down_rounded,
-            color: Colors.black54,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.54),
           ),
           selectedItemBuilder: (context) {
             return items.map((item) {
@@ -1018,10 +1018,10 @@ class _SleepTrackerState extends State<SleepTracker>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   softWrap: false,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
-                    color: Colors.black87,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               );
@@ -1034,6 +1034,7 @@ class _SleepTrackerState extends State<SleepTracker>
                 labelBuilder(item),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.colorScheme.onSurface),
               ),
             );
           }).toList(),
@@ -1058,10 +1059,10 @@ class _SleepTrackerState extends State<SleepTracker>
                 timeLabel,
                 maxLines: 1,
                 softWrap: false,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: Colors.black87,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
@@ -1069,6 +1070,81 @@ class _SleepTrackerState extends State<SleepTracker>
           const SizedBox(width: 8),
           TextButton(
             onPressed: _pickBedtime,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF3D4E73),
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text(
+              'Change',
+              maxLines: 1,
+              softWrap: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickSleepGoal(CompanyThemeData companyTheme) async {
+    Duration tempGoal = _selectedSleepGoal;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: companyTheme.surfaceColor,
+      builder: (sheetContext) {
+        return SizedBox(
+          height: 250,
+          child: CupertinoTheme(
+            data: CupertinoThemeData(
+              brightness:
+                  companyTheme.isDark ? Brightness.dark : Brightness.light,
+              primaryColor: companyTheme.primaryColor,
+            ),
+            child: CupertinoTimerPicker(
+              mode: CupertinoTimerPickerMode.hm,
+              initialTimerDuration: _selectedSleepGoal,
+              onTimerDurationChanged: (Duration newDuration) {
+                tempGoal = newDuration;
+              },
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _selectedSleepGoal = tempGoal;
+    });
+  }
+
+  Widget _sleepGoalSettingTile({required CompanyThemeData companyTheme}) {
+    return _settingContainer(
+      title: 'Sleep goal',
+      child: Row(
+        children: [
+          Expanded(
+            child: FittedBox(
+              alignment: Alignment.centerLeft,
+              fit: BoxFit.scaleDown,
+              child: Text(
+                _formatDuration(_selectedSleepGoal),
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => _pickSleepGoal(companyTheme),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF3D4E73),
               minimumSize: const Size(0, 34),
@@ -1119,7 +1195,7 @@ class _SleepTrackerState extends State<SleepTracker>
     final bedtime = bedtimeToday.isAfter(now)
         ? bedtimeToday
         : bedtimeToday.add(const Duration(days: 1));
-    final recommendedWake = bedtime.add(Duration(hours: _selectedSleepGoal));
+    final recommendedWake = bedtime.add(_selectedSleepGoal);
     return DateFormat('MMM d, h:mm a').format(recommendedWake);
   }
 

@@ -391,7 +391,7 @@ class CompanyThemeService {
     );
     final savedMode =
         (data['themeMode'] as String?)?.trim().toLowerCase() ?? '';
-    final isDark = savedMode == 'dark' ||
+    final requestedDark = savedMode == 'dark' ||
         (savedMode.isEmpty && data['themeIsDark'] == true) ||
         (savedMode.isEmpty && base.isDark);
 
@@ -405,12 +405,14 @@ class CompanyThemeService {
     );
     var background = parseColor(
       data['themeBackgroundColor'] as String?,
-      isDark ? const Color(0xFF020B12) : base.backgroundColor,
+      requestedDark ? const Color(0xFF020B12) : base.backgroundColor,
     );
     var surface = parseColor(
       data['themeSurfaceColor'] as String?,
-      isDark ? const Color(0xFF071A24) : base.surfaceColor,
+      requestedDark ? const Color(0xFF071A24) : base.surfaceColor,
     );
+
+    final bool isDark;
     if (savedMode == 'light') {
       if (background.computeLuminance() < 0.45) {
         background = base.backgroundColor;
@@ -418,6 +420,7 @@ class CompanyThemeService {
       if (surface.computeLuminance() < 0.55) {
         surface = base.surfaceColor;
       }
+      isDark = false;
     } else if (savedMode == 'dark') {
       if (background.computeLuminance() > 0.45) {
         background = const Color(0xFF020B12);
@@ -425,6 +428,15 @@ class CompanyThemeService {
       if (surface.computeLuminance() > 0.55) {
         surface = const Color(0xFF071A24);
       }
+      isDark = true;
+    } else {
+      // No explicit theme mode was configured. Trust the actual background
+      // color (custom or default) over the separate themeIsDark flag, which
+      // can drift out of sync when an admin only configures colors -- e.g. a
+      // custom dark themeBackgroundColor without also flipping themeIsDark,
+      // which previously left ink/icon colors defaulting to light-theme
+      // values and made text and icons invisible against the dark background.
+      isDark = requestedDark || background.computeLuminance() < 0.45;
     }
 
     final theme = base.copyWith(
