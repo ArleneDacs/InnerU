@@ -163,6 +163,27 @@ void main() {
             'arrive very late, while iOS fires them on time.',
       );
     });
+
+    test('sleep alarms can wake the device on Android', () {
+      expect(
+        manifest.contains('android.permission.ACCESS_NOTIFICATION_POLICY'),
+        isTrue,
+        reason: 'Sleep alarms need notification policy access to bypass '
+            'Do Not Disturb when the user enables alarm mode.',
+      );
+      expect(
+        manifest.contains('android:showWhenLocked="true"'),
+        isTrue,
+        reason: 'Full-screen alarm notifications should be allowed to show '
+            'on top of the lock screen.',
+      );
+      expect(
+        manifest.contains('android:turnScreenOn="true"'),
+        isTrue,
+        reason: 'Alarm notifications should turn the display on when they '
+            'arrive while the phone is asleep.',
+      );
+    });
   });
 
   group('Apple Watch companion app', () {

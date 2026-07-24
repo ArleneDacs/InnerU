@@ -227,6 +227,8 @@ class FastingNotificationService {
     final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestNotificationsPermission();
+    await androidPlugin?.requestFullScreenIntentPermission();
+    await androidPlugin?.requestNotificationPolicyAccess();
     // Android 13+ denies exact alarms by default; without this request every
     // "exact" schedule falls back to inexact and alerts can arrive late,
     // unlike iOS where the same notifications fire on time.
@@ -645,6 +647,9 @@ class FastingNotificationService {
       fullScreenIntent: !isSilent,
       ongoing: !isSilent,
       autoCancel: isSilent,
+      channelBypassDnd: !isSilent,
+      audioAttributesUsage:
+          isSilent ? AudioAttributesUsage.notification : AudioAttributesUsage.alarm,
     );
     final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -665,7 +670,7 @@ class FastingNotificationService {
           android: androidDetails,
           iOS: iosDetails,
         ),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.alarmClock,
         matchDateTimeComponents: null,
         payload: 'sleep_wake',
       );
@@ -714,6 +719,8 @@ class FastingNotificationService {
         enableVibration: true,
         category: AndroidNotificationCategory.alarm,
         fullScreenIntent: true,
+        channelBypassDnd: true,
+        audioAttributesUsage: AudioAttributesUsage.alarm,
       ),
       iOS: DarwinNotificationDetails(
         sound: 'sleep_alarm.wav',
@@ -734,7 +741,7 @@ class FastingNotificationService {
           body: 'Your $goalHours-hour sleep goal is complete.',
           scheduledDate: tz.TZDateTime.from(fireTime, tz.local),
           notificationDetails: details,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          androidScheduleMode: AndroidScheduleMode.alarmClock,
           matchDateTimeComponents: null,
           payload: sleepAlarmPayload,
         );
