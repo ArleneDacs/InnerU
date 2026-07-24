@@ -1693,6 +1693,12 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       height: 184,
+      // Without this, none of the Stack's decorative circles/icon badge
+      // (several positioned right at or past the card edges, like the big
+      // accent circle at top:-28/right:-18) get clipped to the card's
+      // rounded corners -- they render with their own sharp bounds, poking
+      // past the rounded shape instead of sitting inline with it.
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
         border: Border.all(color: borderColor),
@@ -1774,18 +1780,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                     ],
                   ),
                 ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 58,
-            right: 42,
-            child: Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: softOverlay.withValues(alpha: 0.34),
-                shape: BoxShape.circle,
               ),
             ),
           ),

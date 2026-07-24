@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -140,6 +141,7 @@ class _ProfilePageState extends State<ProfilePage> {
   int _todayTodoListScore = 0;
   int _todayTodoListScoreContribution = 0;
   bool _todayTodoListIncludedInTotal = false;
+  Future<void> _pendingTaskSync = Future<void>.value();
 
   @override
   void initState() {
@@ -498,62 +500,79 @@ class _ProfilePageState extends State<ProfilePage> {
     final session = AuthService.instance.currentSession;
     if (session == null) return;
 
-    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final membershipData =
-        await CompanyMembershipService.loadForUser(session.id.toString());
     setState(() {
       todayTasks[item.id] = value;
     });
 
+    // Each sync below POSTs the *entire* current checklist snapshot, not
+    // just this one field. Two rapid taps used to fire concurrently, so
+    // whichever request's response arrived last would win regardless of
+    // which tap actually happened last -- silently overwriting newer
+    // state with a stale snapshot. Chaining onto _pendingTaskSync forces
+    // syncs to run strictly in the order they were tapped.
+    final previous = _pendingTaskSync;
+    final completer = Completer<void>();
+    _pendingTaskSync = completer.future;
+    await previous;
+
     try {
-      await DailyTrackerApiService.instance.upsert(
-        date: todayDate,
-        username: username,
-        meditation: todayTasks['meditation'],
-        steps: todayTasks['steps'],
-        call: todayTasks['call'],
-        exercise: todayTasks['exercise'],
-        learning: todayTasks['learning'],
-        addValue: todayTasks['addValue'],
-        todoList: todayTasks['todoList'],
-        callCount: todayTasks['call'] == true ? 1 : 0,
-        exerciseCount: todayTasks['exercise'] == true ? 1 : 0,
-        exerciseMinutes: todayTasks['exercise'] == true ? 10 : 0,
-        learningCount: todayTasks['learning'] == true ? 1 : 0,
-        valueCount: todayTasks['addValue'] == true ? 1 : 0,
-        todoListCount: _todayTodoListScore,
-        todoListScore: _todayTodoListScore,
-        todoListScoreDailyContribution: _todayTodoListScoreContribution,
-        todoListIncludedInTotal: _todayTodoListIncludedInTotal,
-        userTotalScore: _combinedDailyAndTodoScore.round(),
-        customDailyTasks: {
-          for (final customItem
-              in dailyTrackerItems.where((task) => !task.isDefault))
-            customItem.id: {
-              'title': customItem.title,
-              'completed': todayTasks[customItem.id] == true,
-            },
-        },
-        meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
-        companyId: membershipData.activeMembership?.id,
-        companyCode: membershipData.activeMembership?.code,
-        companyName: membershipData.activeMembership?.name,
-      );
-      await _cacheDailyTrackerState();
-
-      await checkAndAssignPoints();
+      await _syncTodayTask(session.id.toString());
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        todayTasks[item.id] = !(value);
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to update ${item.title}. Please try again.'),
-        ),
-      );
+      if (mounted) {
+        setState(() {
+          todayTasks[item.id] = !(value);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text('Failed to update ${item.title}. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      completer.complete();
     }
+  }
+
+  Future<void> _syncTodayTask(String userId) async {
+    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final membershipData = await CompanyMembershipService.loadForUser(userId);
+
+    await DailyTrackerApiService.instance.upsert(
+      date: todayDate,
+      username: username,
+      meditation: todayTasks['meditation'],
+      steps: todayTasks['steps'],
+      call: todayTasks['call'],
+      exercise: todayTasks['exercise'],
+      learning: todayTasks['learning'],
+      addValue: todayTasks['addValue'],
+      todoList: todayTasks['todoList'],
+      callCount: todayTasks['call'] == true ? 1 : 0,
+      exerciseCount: todayTasks['exercise'] == true ? 1 : 0,
+      exerciseMinutes: todayTasks['exercise'] == true ? 10 : 0,
+      learningCount: todayTasks['learning'] == true ? 1 : 0,
+      valueCount: todayTasks['addValue'] == true ? 1 : 0,
+      todoListCount: _todayTodoListScore,
+      todoListScore: _todayTodoListScore,
+      todoListScoreDailyContribution: _todayTodoListScoreContribution,
+      todoListIncludedInTotal: _todayTodoListIncludedInTotal,
+      userTotalScore: _combinedDailyAndTodoScore.round(),
+      customDailyTasks: {
+        for (final customItem
+            in dailyTrackerItems.where((task) => !task.isDefault))
+          customItem.id: {
+            'title': customItem.title,
+            'completed': todayTasks[customItem.id] == true,
+          },
+      },
+      meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
+      companyId: membershipData.activeMembership?.id,
+      companyCode: membershipData.activeMembership?.code,
+      companyName: membershipData.activeMembership?.name,
+    );
+    await _cacheDailyTrackerState();
+    await checkAndAssignPoints();
   }
 
   Future<void> _showAddDailyTaskDialog() async {

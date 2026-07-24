@@ -149,6 +149,73 @@ class DailyTrackerController extends Controller
         ]);
     }
 
+    public function adminOverview(Request $request): JsonResponse
+    {
+        $admin = $request->user();
+        if ($admin === null || ! $this->isAdmin($admin)) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $validated = $request->validate([
+            'month' => ['nullable', 'date_format:Y-m'],
+        ]);
+
+        $month = $validated['month'] ?? now()->format('Y-m');
+        $parsed = Carbon::createFromFormat('Y-m', $month);
+        $todayKey = now()->toDateString();
+
+        $users = User::query()->orderBy('name')->get();
+
+        $trackers = DailyTracker::query()
+            ->whereYear('date', $parsed->year)
+            ->whereMonth('date', $parsed->month)
+            ->orderBy('date')
+            ->get()
+            ->groupBy(fn (DailyTracker $tracker) => (string) $tracker->user_id);
+
+        $result = $users
+            ->map(function (User $user) use ($trackers, $todayKey): array {
+                $userId = (string) $user->id;
+                $userTrackers = $trackers->get($userId) ?? collect();
+
+                $progress = [];
+                $todayTracker = null;
+                foreach ($userTrackers as $tracker) {
+                    $dateKey = $tracker->date?->toDateString();
+                    if ($dateKey === null) {
+                        continue;
+                    }
+                    $progress[$dateKey] = $this->trackerPayload($tracker);
+                    if ($dateKey === $todayKey) {
+                        $todayTracker = $tracker;
+                    }
+                }
+
+                return [
+                    'userId' => $userId,
+                    'username' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'companyId' => $user->company_id,
+                    'companyCode' => $user->company_code,
+                    'companyName' => $user->company_name,
+                    'todayCompletedCount' => $todayTracker
+                        ? collect($this->trackerPayload($todayTracker))->filter()->count()
+                        : 0,
+                    'todayTaskCount' => count($this->trackerPayload($todayTracker ?? new DailyTracker())),
+                    'todayUpdatedAt' => $todayTracker?->updated_at?->toIso8601String(),
+                    'progress' => $progress,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'month' => $month,
+            'date' => $todayKey,
+            'users' => $result,
+        ]);
+    }
+
     public function upsert(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -412,6 +479,12 @@ class DailyTrackerController extends Controller
     {
         $role = strtolower(trim((string) $user->role));
         return $role === 'coach' || (bool) $user->is_coach;
+    }
+
+    private function isAdmin(User $user): bool
+    {
+        $role = strtolower(trim((string) $user->role));
+        return $role === 'admin' || (bool) $user->is_admin;
     }
 
     private function activeCompanyValue(?string $primary, ?string $fallback): string

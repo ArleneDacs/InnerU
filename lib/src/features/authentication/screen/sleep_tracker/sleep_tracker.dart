@@ -49,6 +49,7 @@ class _SleepTrackerState extends State<SleepTracker>
     ..setPlayerMode(PlayerMode.mediaPlayer);
   bool _isSleepAlarmPlaying = false;
   StreamSubscription<void>? _sleepAlarmStoppedSubscription;
+  StreamSubscription<void>? _sleepEndRequestedSubscription;
 
   String get _userId =>
       AuthService.instance.currentSession?.id.toString() ?? 'guest';
@@ -67,6 +68,11 @@ class _SleepTrackerState extends State<SleepTracker>
       unawaited(_stopSleepAlarmMusic());
       unawaited(FastingNotificationService.instance.cancelSleepAlarmBurst());
     });
+    _sleepEndRequestedSubscription =
+        FastingNotificationService.instance.onSleepEndRequested.listen((_) {
+      if (!mounted || _activeSleepStart == null) return;
+      unawaited(_endSleepSession());
+    });
     _loadSleepData();
   }
 
@@ -74,6 +80,7 @@ class _SleepTrackerState extends State<SleepTracker>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sleepAlarmStoppedSubscription?.cancel();
+    _sleepEndRequestedSubscription?.cancel();
     _ticker?.cancel();
     _goalReachedTimer?.cancel();
     _completionAlarmTimer?.cancel();
@@ -301,11 +308,17 @@ class _SleepTrackerState extends State<SleepTracker>
       await _sleepAlarmPlayer.stop();
       await _sleepAlarmPlayer.setReleaseMode(ReleaseMode.loop);
       await _sleepAlarmPlayer.play(
-        AssetSource('audio/Night_Firepit.mp3'),
+        AssetSource('audio/SlowMorning.mp3'),
         volume: 1.0,
       );
       _isSleepAlarmPlaying = true;
       HapticFeedback.mediumImpact();
+      // Loop for a bounded 5 minutes rather than indefinitely -- without
+      // this, an unattended alarm (barrier-dismissed dialog, app just left
+      // open) would ring forever until something else stopped it.
+      _completionAlarmTimer = Timer(const Duration(minutes: 5), () {
+        unawaited(_stopSleepAlarmMusic());
+      });
     } catch (error) {
       debugPrint('Sleep alarm music failed: $error');
     }

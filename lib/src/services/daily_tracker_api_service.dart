@@ -108,6 +108,31 @@ class DailyTrackerApiService {
     return const [];
   }
 
+  Future<Map<String, dynamic>> fetchAdminOverview({String? month}) async {
+    final query = <String, String>{};
+    if (month != null && month.isNotEmpty) {
+      query['month'] = month;
+    }
+
+    final path = query.isEmpty
+        ? '/api/admin/daily-tracker'
+        : Uri(path: '/api/admin/daily-tracker', queryParameters: query)
+            .toString();
+
+    final response = await _api.getJson(path, token: _token);
+    final users = response['users'];
+    return {
+      'month': response['month']?.toString() ?? month ?? '',
+      'date': response['date']?.toString() ?? '',
+      'users': users is List
+          ? users
+              .whereType<Map>()
+              .map((user) => Map<String, dynamic>.from(user))
+              .toList()
+          : const <Map<String, dynamic>>[],
+    };
+  }
+
   Future<List<Map<String, dynamic>>> fetchFriends({String? month}) async {
     final query = <String, String>{};
     if (month != null && month.isNotEmpty) {

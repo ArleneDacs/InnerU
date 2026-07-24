@@ -24,11 +24,21 @@ class FastingNotificationService {
   static const int sleepWakeNotificationId = 7002;
   static const int sleepOngoingNotificationId = 7003;
   static const int sleepAlarmBurstBaseId = 7100;
-  static const int sleepAlarmBurstCount = 11;
-  static const Duration sleepAlarmBurstInterval = Duration(seconds: 28);
+  // sleep_alarm.{wav,mp3} is the user-provided "SlowMorning" track (24s;
+  // was a ~2s chime, which is why an earlier config packed 25 notifications
+  // 12s apart -- trying to paper over silence between short dings with
+  // sheer frequency). With a full-length track, each notification rings
+  // for nearly the whole gap to the next one instead: 12 notifications 25s
+  // apart (24s track + ~1s buffer so playback finishes before the next one
+  // fires) covers ~4m35s with almost no silence, well under iOS's
+  // 64-pending-notification cap.
+  static const int sleepAlarmBurstCount = 12;
+  static const Duration sleepAlarmBurstInterval = Duration(seconds: 25);
   static const String sleepAlarmPayload = 'sleep_alarm';
   static const String sleepAlarmCategoryId = 'SLEEP_ALARM';
   static const String sleepAlarmStopActionId = 'STOP_ALARM';
+  static const String sleepOngoingCategoryId = 'SLEEP_ONGOING';
+  static const String sleepEndSessionActionId = 'END_SLEEP';
   static const int _todoNotificationBaseId = 600000;
   static const String _channelId = 'fasting_complete_channel';
   static const String _channelName = 'Fasting reminders';
@@ -137,8 +147,10 @@ class FastingNotificationService {
       FlutterLocalNotificationsPlugin();
 
   final _sleepAlarmStoppedController = StreamController<void>.broadcast();
+  final _sleepEndRequestedController = StreamController<void>.broadcast();
 
   Stream<void> get onSleepAlarmStopped => _sleepAlarmStoppedController.stream;
+  Stream<void> get onSleepEndRequested => _sleepEndRequestedController.stream;
 
   bool _initialized = false;
 
@@ -164,6 +176,18 @@ class FastingNotificationService {
               ),
             ],
           ),
+          DarwinNotificationCategory(
+            sleepOngoingCategoryId,
+            actions: [
+              DarwinNotificationAction.plain(
+                sleepEndSessionActionId,
+                'End Sleep',
+                // Ends the session in the background -- shouldn't yank the
+                // user into the app just to tap a lock-screen button.
+                options: <DarwinNotificationActionOption>{},
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -178,6 +202,9 @@ class FastingNotificationService {
   void _handleNotificationResponse(NotificationResponse response) {
     if (response.payload == sleepAlarmPayload) {
       _sleepAlarmStoppedController.add(null);
+    }
+    if (response.actionId == sleepEndSessionActionId) {
+      _sleepEndRequestedController.add(null);
     }
   }
 
@@ -751,7 +778,7 @@ class FastingNotificationService {
         id: sleepOngoingNotificationId,
         title: 'Sleep in progress',
         body: body,
-        notificationDetails: const NotificationDetails(
+        notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             _sleepOngoingChannelId,
             _sleepOngoingChannelName,
@@ -764,12 +791,21 @@ class FastingNotificationService {
             showWhen: false,
             category: AndroidNotificationCategory.progress,
             visibility: NotificationVisibility.public,
+            actions: const [
+              AndroidNotificationAction(
+                sleepEndSessionActionId,
+                'End Sleep',
+                showsUserInterface: false,
+                cancelNotification: true,
+              ),
+            ],
           ),
-          iOS: DarwinNotificationDetails(
+          iOS: const DarwinNotificationDetails(
             presentAlert: true,
             presentBadge: false,
             presentSound: false,
             interruptionLevel: InterruptionLevel.passive,
+            categoryIdentifier: sleepOngoingCategoryId,
           ),
         ),
         payload: 'sleep_ongoing',

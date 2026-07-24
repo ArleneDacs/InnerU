@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/addcoach.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/admin_daily_tracker_overview.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/admin_profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/manage_companies.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/viewalluser.dart';
@@ -234,6 +235,15 @@ class _AdminDashboardContentState extends State<_AdminDashboardContent> {
     ).then((_) => _refresh());
   }
 
+  void _openDailyTrackerOverview() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const AdminDailyTrackerOverviewScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -462,6 +472,13 @@ class _AdminDashboardContentState extends State<_AdminDashboardContent> {
             title: 'Manage coaches',
             subtitle: 'View coach profiles and create your coach profile.',
             onTap: _openCoachCompanyManager,
+          ),
+          const Divider(height: 1),
+          _ActionTile(
+            icon: CupertinoIcons.checkmark_seal_fill,
+            title: 'Daily tracker overview',
+            subtitle: "Monitor every user's daily checklist progress.",
+            onTap: _openDailyTrackerOverview,
           ),
         ],
       ),

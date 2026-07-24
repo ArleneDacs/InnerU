@@ -111,6 +111,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/daily-tracker/history', [DailyTrackerController::class, 'history']);
     Route::get('/daily-tracker/friends', [DailyTrackerController::class, 'friends']);
     Route::post('/daily-tracker', [DailyTrackerController::class, 'upsert']);
+    Route::get('/admin/daily-tracker', [DailyTrackerController::class, 'adminOverview']);
     Route::post('/user-points', [UserPointController::class, 'upsert']);
     Route::get('/calorie', [CalorieController::class, 'show']);
     Route::get('/calorie/history', [CalorieController::class, 'history']);

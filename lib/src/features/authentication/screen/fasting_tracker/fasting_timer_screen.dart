@@ -877,10 +877,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
     required Color color,
     required bool unlocked,
   }) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
-        color: unlocked ? const Color(0xFFFFF8F2) : const Color(0xFFF7F5F3),
+        color: unlocked
+            ? colors.surfaceContainerHighest.withValues(alpha: 0.6)
+            : colors.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: unlocked ? color.withValues(alpha: 0.22) : Colors.transparent,
@@ -892,12 +895,12 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: unlocked ? color.withValues(alpha: 0.16) : Colors.white,
+              color: unlocked ? color.withValues(alpha: 0.16) : colors.surface,
               shape: BoxShape.circle,
             ),
             child: Icon(
               icon,
-              color: unlocked ? color : Colors.black26,
+              color: unlocked ? color : colors.onSurface.withValues(alpha: 0.26),
               size: 28,
             ),
           ),
@@ -906,16 +909,18 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
             title,
             style: TextStyle(
               fontWeight: FontWeight.w800,
-              color: unlocked ? const Color(0xFF2E2A28) : Colors.black45,
+              color: unlocked
+                  ? colors.onSurface
+                  : colors.onSurface.withValues(alpha: 0.45),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
-              color: Colors.black54,
+              color: colors.onSurface.withValues(alpha: 0.6),
             ),
           ),
           const SizedBox(height: 8),
@@ -924,7 +929,7 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: unlocked ? color : Colors.black38,
+              color: unlocked ? color : colors.onSurface.withValues(alpha: 0.38),
             ),
           ),
         ],
@@ -1041,11 +1046,16 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                   final finishedAt =
                       (data['finishedAt'] as Timestamp?)?.toDate();
 
+                  final statusColor = completedTarget
+                      ? const Color(0xFFFF4663)
+                      : const Color(0xFFFF9A31);
+
                   return Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9F8F6),
+                      color: colors.surfaceContainerHighest
+                          .withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(22),
                     ),
                     child: Row(
@@ -1054,18 +1064,14 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                           width: 46,
                           height: 46,
                           decoration: BoxDecoration(
-                            color: completedTarget
-                                ? const Color(0xFFFFEEF2)
-                                : const Color(0xFFFFF3E7),
+                            color: statusColor.withValues(alpha: 0.16),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Icon(
                             completedTarget
                                 ? Icons.check_rounded
                                 : Icons.schedule_rounded,
-                            color: completedTarget
-                                ? const Color(0xFFFF4663)
-                                : const Color(0xFFFF9A31),
+                            color: statusColor,
                           ),
                         ),
                         const SizedBox(width: 14),
@@ -1075,19 +1081,17 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                             children: [
                               Text(
                                 '${_formatHours(completedHours)} completed',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
+                                  color: colors.onSurface,
                                 ),
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 '${_formatShortDateTime(finishedAt)} • Goal ${targetHours}h',
                                 style: TextStyle(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withValues(alpha: 0.62),
+                                  color: colors.onSurface.withValues(alpha: 0.62),
                                 ),
                               ),
                             ],
@@ -1099,17 +1103,13 @@ class _FastingTimerScreenState extends State<FastingTimerScreen>
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: completedTarget
-                                ? const Color(0xFFFFEEF2)
-                                : const Color(0xFFFFF3E7),
+                            color: statusColor.withValues(alpha: 0.16),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
                             completedTarget ? 'Goal hit' : 'Ended early',
                             style: TextStyle(
-                              color: completedTarget
-                                  ? const Color(0xFFFF4663)
-                                  : const Color(0xFFFF9A31),
+                              color: statusColor,
                               fontWeight: FontWeight.w700,
                             ),
                           ),

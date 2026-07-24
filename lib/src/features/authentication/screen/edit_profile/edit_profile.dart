@@ -193,32 +193,29 @@ class MyEditProfileState extends State<EditProfile> {
           'profile_pic': updatedData['profilePic'],
       });
 
-      // Update username in all notes where the userId matches
+      // Update username in all notes owned by this user (batched: one
+      // round trip instead of one per note).
       QuerySnapshot notesSnapshot = await FirebaseFirestore.instance
           .collection("notes")
           .where("userId", isEqualTo: userId)
           .get();
 
-      for (var doc in notesSnapshot.docs) {
-        await doc.reference.update({"username": newUsername});
-      }
-
-      // Update username in all comments for the given user
-      QuerySnapshot allNotesSnapshot =
-          await FirebaseFirestore.instance.collection("notes").get();
-
-      for (var noteDoc in allNotesSnapshot.docs) {
-        QuerySnapshot commentsSnapshot = await noteDoc.reference
-            .collection("comments")
-            .where("username", isEqualTo: _oldUsername)
-            .get();
-
-        for (var commentDoc in commentsSnapshot.docs) {
-          await commentDoc.reference.update({"username": newUsername});
+      if (notesSnapshot.docs.isNotEmpty) {
+        final notesBatch = FirebaseFirestore.instance.batch();
+        for (var doc in notesSnapshot.docs) {
+          notesBatch.update(doc.reference, {"username": newUsername});
         }
+        await notesBatch.commit();
       }
 
-      // Make sure to call the updateUsernameInComments method as well
+      // Update username on every comment this user left, across all notes.
+      // (This used to also run an equivalent username-matched pass here
+      // before calling updateUsernameInComments below -- two full scans of
+      // every note in the app, each doing a sequential per-note comments
+      // query, which is what made profile saves take minutes. The userId
+      // match below is the reliable one (userId is immutable; matching by
+      // the old display name could miss or mismatch comments), so the
+      // duplicate pass was removed rather than fixed.
       await updateUsernameInComments(userId, newUsername);
 
       if (_oldUsername != null && _oldUsername != newUsername) {
@@ -227,8 +224,12 @@ class MyEditProfileState extends State<EditProfile> {
             .where("username", isEqualTo: _oldUsername)
             .get();
 
-        for (var doc in userPointsSnapshot.docs) {
-          await doc.reference.update({"username": newUsername});
+        if (userPointsSnapshot.docs.isNotEmpty) {
+          final pointsBatch = FirebaseFirestore.instance.batch();
+          for (var doc in userPointsSnapshot.docs) {
+            pointsBatch.update(doc.reference, {"username": newUsername});
+          }
+          await pointsBatch.commit();
         }
       }
 
@@ -269,22 +270,32 @@ class MyEditProfileState extends State<EditProfile> {
 
     QuerySnapshot notesSnapshot = await firestore.collection('notes').get();
 
-    for (QueryDocumentSnapshot noteDoc in notesSnapshot.docs) {
-      QuerySnapshot commentsSnapshot = await firestore
-          .collection('notes')
-          .doc(noteDoc.id)
-          .collection('comments')
-          .where('userId', isEqualTo: userId)
-          .get();
-
-      for (QueryDocumentSnapshot commentDoc in commentsSnapshot.docs) {
-        await firestore
-            .collection('notes')
-            .doc(noteDoc.id)
+    // One comments query per note, but fired concurrently instead of
+    // awaited one at a time -- with hundreds of notes in the app, doing
+    // this sequentially was the actual reason profile saves took minutes
+    // (this scan runs across every note in the app, not just this user's).
+    final commentsSnapshots = await Future.wait(
+      notesSnapshot.docs.map(
+        (noteDoc) => noteDoc.reference
             .collection('comments')
-            .doc(commentDoc.id)
-            .update({'username': newUsername});
+            .where('userId', isEqualTo: userId)
+            .get(),
+      ),
+    );
+
+    final matchingComments = commentsSnapshots
+        .expand((snapshot) => snapshot.docs)
+        .toList();
+    if (matchingComments.isEmpty) return;
+
+    // Firestore batched writes cap at 500 operations, so chunk defensively.
+    for (var i = 0; i < matchingComments.length; i += 500) {
+      final chunk = matchingComments.skip(i).take(500);
+      final batch = firestore.batch();
+      for (final commentDoc in chunk) {
+        batch.update(commentDoc.reference, {'username': newUsername});
       }
+      await batch.commit();
     }
   }
 

@@ -161,7 +161,18 @@ class CompanyThemeService {
   }
 
   static Future<CompanyThemeData> resolveForUser(String uid) async {
-    final companyTheme = await resolveCompanyThemeForUser(uid);
+    // If resolution fails (e.g. no network), fall back to this user's own
+    // last-known-good theme instead of the generic default -- otherwise
+    // every rebuild while offline (this runs fresh each time, it isn't
+    // memoized) would silently overwrite a correctly-loaded company theme
+    // with CompanyThemeData.standard the moment the fetch failed, and that
+    // wrong value would then itself get cached, making it "stick" until a
+    // later successful fetch happened to overwrite it again.
+    final lastKnownGood = _userThemeCache[uid];
+    final companyTheme = await resolveCompanyThemeForUser(
+      uid,
+      fallback: lastKnownGood,
+    );
     final themeChoice = await selectedThemeChoiceForUser(uid);
     final theme = _ensureReadableDarkTheme(
       applyThemeChoice(companyTheme, themeChoice),
@@ -170,7 +181,10 @@ class CompanyThemeService {
     return theme;
   }
 
-  static Future<CompanyThemeData> resolveCompanyThemeForUser(String uid) async {
+  static Future<CompanyThemeData> resolveCompanyThemeForUser(
+    String uid, {
+    CompanyThemeData? fallback,
+  }) async {
     try {
       final userData = await UserService.getUserData();
       if (userData.isNotEmpty) {
@@ -206,7 +220,7 @@ class CompanyThemeService {
     } catch (e) {
       debugPrint('Failed to resolve company theme from API: $e');
     }
-    return CompanyThemeData.standard;
+    return fallback ?? CompanyThemeData.standard;
   }
 
   static Future<String> selectedThemeChoiceForUser(String uid) async {
@@ -889,7 +903,10 @@ class CompanyThemeBuilder extends StatelessWidget {
         return FutureBuilder<CompanyThemeData>(
             future: applyUserPreference
                 ? CompanyThemeService.resolveForUser(userId)
-                : CompanyThemeService.resolveCompanyThemeForUser(userId),
+                : CompanyThemeService.resolveCompanyThemeForUser(
+                    userId,
+                    fallback: cachedTheme,
+                  ),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 if (cachedTheme != null) {

@@ -138,6 +138,68 @@ class DailyTrackerTest extends TestCase
         $this->assertEquals(100.0, $breakdown['coreTaskScore']);
     }
 
+    public function test_non_admin_cannot_view_admin_daily_tracker_overview(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/admin/daily-tracker');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_admin_can_view_daily_tracker_overview_for_all_users(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'is_admin' => true]);
+        $memberA = User::factory()->create([
+            'name' => 'Member A',
+            'email' => 'member-a@example.com',
+            'company_name' => 'ABC',
+        ]);
+        $memberB = User::factory()->create([
+            'name' => 'Member B',
+            'email' => 'member-b@example.com',
+            'company_name' => 'ABC',
+        ]);
+
+        $today = now()->toDateString();
+
+        DailyTracker::create([
+            'user_id' => (string) $memberA->id,
+            'username' => $memberA->name,
+            'date' => $today,
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => false,
+            'learning' => false,
+            'add_value' => false,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->getJson(
+            '/api/admin/daily-tracker?month='.now()->format('Y-m')
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('date', $today);
+
+        $users = collect($response->json('users'));
+        $this->assertCount(3, $users);
+
+        $memberAPayload = $users->firstWhere('userId', (string) $memberA->id);
+        $this->assertNotNull($memberAPayload);
+        $this->assertSame(3, $memberAPayload['todayCompletedCount']);
+        $this->assertSame(6, $memberAPayload['todayTaskCount']);
+        $this->assertTrue($memberAPayload['progress'][$today]['Call']);
+        $this->assertFalse($memberAPayload['progress'][$today]['Meditation']);
+
+        $memberBPayload = $users->firstWhere('userId', (string) $memberB->id);
+        $this->assertNotNull($memberBPayload);
+        $this->assertSame(0, $memberBPayload['todayCompletedCount']);
+    }
+
     protected function tearDown(): void
     {
         Mockery::close();
