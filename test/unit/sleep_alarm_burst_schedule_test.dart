@@ -3,17 +3,17 @@ import 'package:selfcare_projects/src/services/notifications/fasting_notificatio
 
 void main() {
   group('computeSleepAlarmBurstSchedule', () {
-    test('returns 11 fire times, 28 seconds apart, starting at wakesAt', () {
+    test('returns 12 fire times, 25 seconds apart, starting at wakesAt', () {
       final wakesAt = DateTime(2026, 7, 24, 7, 0, 0);
 
       final schedule = FastingNotificationService.computeSleepAlarmBurstSchedule(
         wakesAt: wakesAt,
       );
 
-      expect(schedule.length, 11);
+      expect(schedule.length, 12);
       expect(schedule.first, wakesAt);
-      expect(schedule[1], wakesAt.add(const Duration(seconds: 28)));
-      expect(schedule.last, wakesAt.add(const Duration(seconds: 280)));
+      expect(schedule[1], wakesAt.add(const Duration(seconds: 25)));
+      expect(schedule.last, wakesAt.add(const Duration(seconds: 275)));
     });
 
     test('supports a custom count and interval', () {
