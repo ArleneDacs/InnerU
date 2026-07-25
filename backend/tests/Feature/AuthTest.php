@@ -265,6 +265,32 @@ class AuthTest extends TestCase
         $this->assertTrue(Hash::check('NewPassword123', $user->fresh()->password));
     }
 
+    public function test_password_reset_web_form_clears_legacy_password_columns(): void
+    {
+        $user = User::factory()->create([
+            'password' => null,
+            'legacy_password_hash' => 'stored-hash',
+            'legacy_password_salt' => 'stored-salt',
+            'email_verified_at' => now(),
+        ]);
+
+        $token = Password::broker()->createToken($user);
+
+        $response = $this->post('/password-reset', [
+            'token' => $token,
+            'email' => $user->email,
+            'password' => 'NewPassword123',
+            'password_confirmation' => 'NewPassword123',
+        ]);
+
+        $response->assertOk();
+
+        $user->refresh();
+        $this->assertNull($user->legacy_password_hash);
+        $this->assertNull($user->legacy_password_salt);
+        $this->assertTrue(Hash::check('NewPassword123', $user->password));
+    }
+
     public function test_login_succeeds_for_a_migrated_account_via_legacy_password_verification(): void
     {
         $user = User::factory()->create([

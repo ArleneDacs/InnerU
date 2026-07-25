@@ -33,6 +33,8 @@ Route::post('/password-reset', function (Request $request) {
         function (User $user, string $password): void {
             $user->forceFill([
                 'password' => Hash::make($password),
+                'legacy_password_hash' => null,
+                'legacy_password_salt' => null,
             ])->save();
         }
     );
