@@ -98,4 +98,31 @@ class UserPointsImporterTest extends TestCase
         $this->assertSame(0, UserPoint::count());
         $this->assertNotEmpty($report->skippedRecords());
     }
+
+    public function test_rounds_fractional_values_for_integer_columns_instead_of_failing(): void
+    {
+        // Regression test: a real production userpoints record had
+        // userTotalScore: 55.5 (matching totalPoints) even though
+        // user_total_score is an integer column with no default cast -
+        // saving it as-is threw an uncaught Postgres type error.
+        $user = User::factory()->create(['firebase_uid' => 'uid-1']);
+
+        File::put("{$this->dir}/userpoints.json", json_encode([
+            ['id' => 'uid-1_2026-07-21', 'data' => [
+                'userId' => 'uid-1', 'date' => '2026-07-21', 'username' => 'Arlene1233',
+                'totalPoints' => 55.5, 'activityPoints' => 79.4, 'dailyTrackerScore' => 100,
+                'todoListScore' => 11, 'todoListScoreDailyContribution' => 11,
+                'todoListIncludedInTotal' => true, 'userTotalScore' => 55.5,
+            ]],
+        ]));
+
+        $importer = new UserPointsImporter(new SnapshotReader($this->dir), new ImportReport());
+        $importer->import(false);
+
+        $record = UserPoint::where('user_id', $user->id)->where('date', '2026-07-21')->first();
+        $this->assertNotNull($record);
+        $this->assertSame(56, $record->user_total_score);
+        $this->assertSame(79, $record->activity_points);
+        $this->assertEqualsWithDelta(55.5, (float) $record->total_points, 0.001);
+    }
 }

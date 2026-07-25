@@ -47,12 +47,19 @@ class UserPointsImporter
         $record->date = $date;
         $record->username = $data['username'] ?? '';
         $record->total_points = $data['totalPoints'] ?? 0;
-        $record->activity_points = $data['activityPoints'] ?? 0;
-        $record->daily_tracker_score = $data['dailyTrackerScore'] ?? 0;
-        $record->todo_list_score = $data['todoListScore'] ?? 0;
-        $record->todo_list_score_daily_contribution = $data['todoListScoreDailyContribution'] ?? 0;
+        // activity_points/daily_tracker_score/todo_list_score/
+        // todo_list_score_daily_contribution/user_total_score are all
+        // integer columns, but real historical Firestore records can carry
+        // fractional values (e.g. userTotalScore: 55.5) predating the
+        // current API's integer validation (UserPointController.php:35) -
+        // round rather than let a fractional value hit an integer column
+        // and abort the whole import batch with a Postgres type error.
+        $record->activity_points = (int) round($data['activityPoints'] ?? 0);
+        $record->daily_tracker_score = (int) round($data['dailyTrackerScore'] ?? 0);
+        $record->todo_list_score = (int) round($data['todoListScore'] ?? 0);
+        $record->todo_list_score_daily_contribution = (int) round($data['todoListScoreDailyContribution'] ?? 0);
         $record->todo_list_included_in_total = $data['todoListIncludedInTotal'] ?? false;
-        $record->user_total_score = $data['userTotalScore'] ?? 0;
+        $record->user_total_score = (int) round($data['userTotalScore'] ?? 0);
         $record->task_points = $data['taskPoints'] ?? null;
         $record->tasks = $data['tasks'] ?? null;
         $record->server = $data['server'] ?? null;
