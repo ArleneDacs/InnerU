@@ -3,9 +3,15 @@
 
 namespace App\Console\Commands;
 
+use App\Services\FirestoreImport\CoachRelationshipImporter;
 use App\Services\FirestoreImport\DryRunAbort;
+use App\Services\FirestoreImport\GoalImporter;
 use App\Services\FirestoreImport\ImportReport;
+use App\Services\FirestoreImport\NotesImporter;
 use App\Services\FirestoreImport\SnapshotReader;
+use App\Services\FirestoreImport\UserImporter;
+use App\Services\FirestoreImport\UserPointsImporter;
+use App\Services\FirestoreImport\WellnessImporter;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -48,10 +54,19 @@ class ImportFirestoreData extends Command
         return self::SUCCESS;
     }
 
-    /** @return array<int, object{import: callable(bool): void}> */
+    /** @return array<int, UserImporter|CoachRelationshipImporter|GoalImporter|NotesImporter|WellnessImporter|UserPointsImporter> */
     private function importers(SnapshotReader $reader, ImportReport $report): array
     {
-        // Populated in Task 15 once every Importer class exists.
-        return [];
+        // UserImporter must run first: every other importer resolves foreign
+        // keys via User::where('firebase_uid', ...). The rest may run in any
+        // order relative to each other.
+        return [
+            new UserImporter($reader, $report),
+            new CoachRelationshipImporter($reader, $report),
+            new GoalImporter($reader, $report),
+            new NotesImporter($reader, $report),
+            new WellnessImporter($reader, $report),
+            new UserPointsImporter($reader, $report),
+        ];
     }
 }
