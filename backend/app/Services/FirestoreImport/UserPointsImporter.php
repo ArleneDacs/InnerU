@@ -6,6 +6,13 @@ namespace App\Services\FirestoreImport;
 use App\Models\User;
 use App\Models\UserPoint;
 
+// Field mapping below is an unverified hypothesis, not a confirmed fact: no
+// Dart code in the live app reads Firestore `userpoints` fields back (the
+// only real interaction is a blind `username` rewrite on account rename),
+// so these names are inferred from the current Postgres schema and the
+// current API's upsert payload shape. Confirm against a real exported
+// snapshot (scripts/firestore-export/snapshot/userpoints.json) before
+// trusting this mapping in production.
 class UserPointsImporter
 {
     public function __construct(
