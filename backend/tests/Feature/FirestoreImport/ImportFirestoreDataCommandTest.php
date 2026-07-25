@@ -85,4 +85,42 @@ class ImportFirestoreDataCommandTest extends TestCase
 
         File::deleteDirectory($dir);
     }
+
+    public function test_dry_run_resolves_cross_importer_dependencies_within_the_same_run(): void
+    {
+        // Regression test: each importer previously ran in its own separate
+        // transaction even during --dry-run, so UserImporter's dry-run-created
+        // user was rolled back before GoalImporter (which resolves userId via
+        // User::where('firebase_uid', ...)) ever ran — making every downstream
+        // importer falsely report "no matching user" during a dry run, even
+        // though a real run (where writes actually persist between importers)
+        // would resolve the same user correctly.
+        $dir = sys_get_temp_dir().'/firestore-import-dryrun-crossdep-'.uniqid();
+        File::ensureDirectoryExists($dir);
+
+        File::put("$dir/users.json", json_encode([['id' => 'uid-1', 'data' => ['username' => 'Jane']]]));
+        foreach (['coaches', 'coach_groups', 'coach_requests', 'notes', 'userpoints'] as $name) {
+            File::put("$dir/{$name}.json", json_encode([]));
+        }
+        File::put("$dir/auth-users.json", json_encode([
+            'users' => [['localId' => 'uid-1', 'email' => 'jane@example.com', 'emailVerified' => true, 'providerUserInfo' => []]],
+        ]));
+        File::put("$dir/goals.json", json_encode([
+            ['id' => 'goal-1', 'data' => ['userId' => 'uid-1', 'title' => 'Read 12 books', 'category' => 'PERSONAL', 'status' => 'IN_PROGRESS', 'goalType' => 'MILESTONE', 'direction' => 'GAIN', 'targetPeriod' => 'NONE', 'startDate' => '2025-01-01', 'targetDate' => '2025-12-31']],
+        ]));
+        foreach (['tasks', 'updates', 'comments', 'merits', 'wellness', 'history'] as $group) {
+            File::put("$dir/_group_{$group}.json", json_encode([]));
+        }
+
+        $this->artisan('firestore:import', ['--path' => $dir, '--dry-run' => true])
+            ->expectsOutputToContain('goals: created=1')
+            ->doesntExpectOutputToContain('SKIPPED goals/goal-1')
+            ->assertExitCode(0);
+
+        // Still a dry run: nothing persisted after the command returns.
+        $this->assertSame(0, User::where('firebase_uid', 'uid-1')->count());
+        $this->assertSame(0, Goal::where('firestore_id', 'goal-1')->count());
+
+        File::deleteDirectory($dir);
+    }
 }

@@ -34,17 +34,33 @@ class ImportFirestoreData extends Command
         $dryRun = (bool) $this->option('dry-run');
         $reader = new SnapshotReader($path);
         $report = new ImportReport();
+        $importers = $this->importers($reader, $report);
 
-        foreach ($this->importers($reader, $report) as $importer) {
+        if ($dryRun) {
+            // All importers must share ONE transaction for a dry run to be a
+            // faithful preview: UserImporter's rows need to still exist when
+            // CoachRelationshipImporter/GoalImporter/etc. resolve foreign keys
+            // via User::where('firebase_uid', ...). Per-importer transactions
+            // (used below for a real run) would roll back UserImporter's rows
+            // before the next importer ever ran, making every downstream
+            // importer report false "no matching user" skips even though a
+            // real run - where each importer's writes actually persist for
+            // the next one to see - would resolve them correctly.
             try {
-                DB::transaction(function () use ($importer, $dryRun): void {
-                    $importer->import($dryRun);
-                    if ($dryRun) {
-                        throw new DryRunAbort();
+                DB::transaction(function () use ($importers, $dryRun): void {
+                    foreach ($importers as $importer) {
+                        $importer->import($dryRun);
                     }
+                    throw new DryRunAbort();
                 });
             } catch (DryRunAbort) {
-                // Expected for --dry-run: the transaction rolled back on purpose.
+                // Expected: the whole dry run rolled back on purpose.
+            }
+        } else {
+            foreach ($importers as $importer) {
+                DB::transaction(function () use ($importer, $dryRun): void {
+                    $importer->import($dryRun);
+                });
             }
         }
 
