@@ -14,6 +14,7 @@ class CoachRequest extends Model
 
     protected $fillable = [
         'id',
+        'firestore_id',
         'coach_id',
         'coach_name',
         'coach_email',

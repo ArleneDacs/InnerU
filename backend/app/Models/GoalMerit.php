@@ -14,6 +14,7 @@ class GoalMerit extends Model
 
     protected $fillable = [
         'id',
+        'firestore_id',
         'goal_id',
         'user_id',
         'date',

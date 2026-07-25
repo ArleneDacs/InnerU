@@ -14,6 +14,7 @@ class GoalComment extends Model
 
     protected $fillable = [
         'id',
+        'firestore_id',
         'goal_id',
         'author_id',
         'body',

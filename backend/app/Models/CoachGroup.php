@@ -14,6 +14,7 @@ class CoachGroup extends Model
 
     protected $fillable = [
         'id',
+        'firestore_id',
         'coach_id',
         'coach_ids',
         'name',

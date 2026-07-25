@@ -24,6 +24,10 @@ class User extends Authenticatable implements MustVerifyEmail
     protected $fillable = [
         'name',
         'email',
+        'firebase_uid',
+        'legacy_password_hash',
+        'legacy_password_salt',
+        'bio',
         'apple_user_id',
         'number',
         'role',
@@ -76,6 +80,8 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     protected $hidden = [
         'password',
+        'legacy_password_hash',
+        'legacy_password_salt',
         'remember_token',
     ];
 

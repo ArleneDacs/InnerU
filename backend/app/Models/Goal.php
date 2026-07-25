@@ -14,6 +14,7 @@ class Goal extends Model
 
     protected $fillable = [
         'id',
+        'firestore_id',
         'user_id',
         'company_id',
         'category',

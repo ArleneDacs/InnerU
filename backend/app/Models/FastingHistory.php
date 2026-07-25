@@ -9,6 +9,7 @@ class FastingHistory extends Model
     protected $table = 'fasting_history';
 
     protected $fillable = [
+        'firestore_id',
         'user_id',
         'target_hours',
         'start_time',

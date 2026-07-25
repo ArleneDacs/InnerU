@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class CommunityPost extends Model
 {
     protected $fillable = [
+        'firestore_id',
         'user_id',
         'username',
         'title',
