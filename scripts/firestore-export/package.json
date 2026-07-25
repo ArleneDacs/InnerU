@@ -4,7 +4,8 @@
   "type": "module",
   "version": "1.0.0",
   "dependencies": {
-    "firebase-admin": "^13.0.0"
+    "firebase-admin": "^13.0.0",
+    "google-auth-library": "^10.9.1"
   },
   "scripts": {
     "export": "node export-firestore.js",
