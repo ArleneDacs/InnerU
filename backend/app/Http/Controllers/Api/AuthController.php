@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Company;
 use App\Models\PendingRegistration;
 use App\Models\User;
 use App\Services\FirebaseScryptVerifier;
@@ -42,6 +43,7 @@ class AuthController extends Controller
         $role = strtolower($validated['role']);
         $companyCode = $validated['company_code'] ?? null;
         $companyName = $validated['company_name'] ?? null;
+        $company = $companyCode !== null ? Company::where('code', $companyCode)->first() : null;
 
         $pending = PendingRegistration::updateOrCreate(
             ['email' => $validated['email']],
@@ -54,8 +56,8 @@ class AuthController extends Controller
                 'company_code' => $companyCode,
                 'company_name' => $companyName,
                 'has_company' => filled($companyCode),
-                'company_id' => $companyCode,
-                'active_company_id' => $companyCode,
+                'company_id' => $company?->id,
+                'active_company_id' => $company?->id,
                 'active_company_code' => $companyCode,
                 'active_company_name' => $companyName,
                 'active_company_score_mode' => null,
@@ -224,18 +226,21 @@ class AuthController extends Controller
                     ], Response::HTTP_FORBIDDEN);
                 }
 
+                $pendingCompanyCode = $this->resolvedCompanyCode($validated);
+                $pendingCompany = $this->resolvedCompany($validated);
+
                 $pending->fill([
                     'name' => $name !== '' ? $name : Str::before($email, '@'),
                     'number' => null,
                     'role' => strtolower((string) ($validated['role'] ?? 'user')),
                     'is_coach' => strtolower((string) ($validated['role'] ?? 'user')) === 'coach',
-                    'company_code' => $this->resolvedCompanyCode($validated),
-                    'company_name' => $this->resolvedCompanyCode($validated),
-                    'has_company' => filled($this->resolvedCompanyCode($validated)),
-                    'company_id' => $this->resolvedCompanyCode($validated),
-                    'active_company_id' => $this->resolvedCompanyCode($validated),
-                    'active_company_code' => $this->resolvedCompanyCode($validated),
-                    'active_company_name' => $this->resolvedCompanyCode($validated),
+                    'company_code' => $pendingCompanyCode,
+                    'company_name' => $pendingCompany?->name ?? $pendingCompanyCode,
+                    'has_company' => filled($pendingCompanyCode),
+                    'company_id' => $pendingCompany?->id,
+                    'active_company_id' => $pendingCompany?->id,
+                    'active_company_code' => $pendingCompanyCode,
+                    'active_company_name' => $pendingCompany?->name ?? $pendingCompanyCode,
                     'profile_pic' => $picture,
                     'encrypted_password' => Crypt::encryptString(Str::random(64)),
                 ])->save();
@@ -261,7 +266,8 @@ class AuthController extends Controller
 
             $role = strtolower((string) ($validated['role'] ?? 'user'));
             $companyCode = $this->resolvedCompanyCode($validated);
-            $companyName = $companyCode;
+            $company = $this->resolvedCompany($validated);
+            $companyName = $company?->name ?? $companyCode;
             $displayName = $name !== '' ? $name : Str::before($email, '@');
 
             $pending = PendingRegistration::create([
@@ -273,8 +279,8 @@ class AuthController extends Controller
                 'company_code' => $companyCode,
                 'company_name' => $companyName,
                 'has_company' => filled($companyCode),
-                'company_id' => $companyCode,
-                'active_company_id' => $companyCode,
+                'company_id' => $company?->id,
+                'active_company_id' => $company?->id,
                 'active_company_code' => $companyCode,
                 'active_company_name' => $companyName,
                 'active_company_score_mode' => null,
@@ -444,7 +450,8 @@ class AuthController extends Controller
 
             $role = strtolower((string) ($validated['role'] ?? 'user'));
             $companyCode = $this->resolvedCompanyCode($validated);
-            $companyName = $companyCode;
+            $company = $this->resolvedCompany($validated);
+            $companyName = $company?->name ?? $companyCode;
             $displayName = $name !== '' ? $name : Str::before($email, '@');
 
             $pendingAttributes = [
@@ -457,8 +464,8 @@ class AuthController extends Controller
                 'company_code' => $companyCode,
                 'company_name' => $companyName,
                 'has_company' => filled($companyCode),
-                'company_id' => $companyCode,
-                'active_company_id' => $companyCode,
+                'company_id' => $company?->id,
+                'active_company_id' => $company?->id,
                 'active_company_code' => $companyCode,
                 'active_company_name' => $companyName,
                 'active_company_score_mode' => null,
@@ -905,6 +912,24 @@ class AuthController extends Controller
         }
 
         return $companyCode;
+    }
+
+    /**
+     * Looks up the real Company record for a resolved company code, so
+     * callers can use its actual UUID (company_id) and display name
+     * (company_name) instead of the raw code string. Returns null both when
+     * no code was given and when the code doesn't match a real company -
+     * callers should fall back to the raw code for company_name in that
+     * second case, matching existing behavior for ad-hoc codes.
+     */
+    private function resolvedCompany(array $validated): ?Company
+    {
+        $code = $this->resolvedCompanyCode($validated);
+        if ($code === null) {
+            return null;
+        }
+
+        return Company::where('code', $code)->first();
     }
 
 }

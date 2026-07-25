@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Company;
 use App\Models\PendingRegistration;
 use App\Models\User;
 use App\Notifications\PendingRegistrationVerificationNotification;
@@ -149,6 +150,34 @@ class AuthTest extends TestCase
         ]);
 
         $this->assertTrue(Crypt::decryptString($pending->encrypted_password) === 'Password123');
+    }
+
+    public function test_register_resolves_a_real_company_id_and_name_instead_of_the_raw_code(): void
+    {
+        Notification::fake();
+
+        $company = Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'Gencys',
+            'code' => 'GEN0KUS',
+        ]);
+
+        $this->postJson('/api/auth/register', [
+            'name' => 'Company Member',
+            'email' => 'company.member.inneru@gmail.com',
+            'password' => 'Password123',
+            'number' => '09171234567',
+            'role' => 'user',
+            'company_code' => 'GEN0KUS',
+            'company_name' => 'Gencys',
+        ])->assertCreated();
+
+        $pending = PendingRegistration::where('email', 'company.member.inneru@gmail.com')->firstOrFail();
+
+        // Regression: company_id used to be set to the raw code string
+        // ("GEN0KUS") instead of the company's real database id.
+        $this->assertSame($company->id, $pending->company_id);
+        $this->assertSame($company->id, $pending->active_company_id);
     }
 
     public function test_verifying_a_pending_registration_creates_the_user(): void
@@ -443,6 +472,44 @@ class AuthTest extends TestCase
         ]);
     }
 
+    public function test_google_signup_resolves_a_real_company_id_and_name_instead_of_the_raw_code(): void
+    {
+        Notification::fake();
+
+        $company = Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'Gencys',
+            'code' => 'GEN0KUS',
+        ]);
+
+        Http::fake([
+            'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
+                'email' => 'google-company.inneru@gmail.com',
+                'email_verified' => 'true',
+                'name' => 'Google Company User',
+                'picture' => 'https://example.com/avatar.png',
+                'aud' => config('services.google.web_client_id'),
+                'iss' => 'accounts.google.com',
+            ], 200),
+        ]);
+
+        $this->postJson('/api/auth/google', [
+            'id_token' => 'google-id-token',
+            'create_account' => true,
+            'role' => 'user',
+            'company_code' => 'GEN0KUS',
+        ])->assertCreated();
+
+        $pending = PendingRegistration::where('email', 'google-company.inneru@gmail.com')->firstOrFail();
+
+        // Regression: company_id/company_name used to be set to the raw
+        // code string ("GEN0KUS") instead of the company's real id/name.
+        $this->assertSame($company->id, $pending->company_id);
+        $this->assertSame($company->id, $pending->active_company_id);
+        $this->assertSame('Gencys', $pending->company_name);
+        $this->assertSame('Gencys', $pending->active_company_name);
+    }
+
     public function test_google_login_rejects_missing_accounts(): void
     {
         Http::fake([
@@ -554,6 +621,54 @@ class AuthTest extends TestCase
             'company_code' => 'ABC123',
             'company_name' => 'ABC123',
         ]);
+    }
+
+    public function test_apple_signup_resolves_a_real_company_id_and_name_instead_of_the_raw_code(): void
+    {
+        Notification::fake();
+        Cache::forget('apple.identity.keys');
+
+        $company = Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'Gencys',
+            'code' => 'GEN0KUS',
+        ]);
+
+        $rawNonce = bin2hex(random_bytes(16));
+        $tokenData = $this->makeAppleIdentityToken([
+            'sub' => 'apple-subject-company',
+            'email' => 'apple-company.inneru@icloud.com',
+            'iss' => 'https://appleid.apple.com',
+            'aud' => config('services.apple.bundle_id'),
+            'exp' => now()->addHour()->timestamp,
+            'iat' => now()->timestamp,
+            'nonce' => hash('sha256', $rawNonce),
+            'email_verified' => 'true',
+        ]);
+
+        Http::fake([
+            'https://appleid.apple.com/auth/keys*' => Http::response($tokenData['keys'], 200),
+        ]);
+
+        $this->postJson('/api/auth/apple', [
+            'identity_token' => $tokenData['token'],
+            'raw_nonce' => $rawNonce,
+            'create_account' => true,
+            'role' => 'user',
+            'company_code' => 'GEN0KUS',
+            'email' => 'apple-company.inneru@icloud.com',
+            'given_name' => 'Apple',
+            'family_name' => 'Company',
+        ])->assertCreated();
+
+        $pending = PendingRegistration::where('email', 'apple-company.inneru@icloud.com')->firstOrFail();
+
+        // Regression: company_id/company_name used to be set to the raw
+        // code string ("GEN0KUS") instead of the company's real id/name.
+        $this->assertSame($company->id, $pending->company_id);
+        $this->assertSame($company->id, $pending->active_company_id);
+        $this->assertSame('Gencys', $pending->company_name);
+        $this->assertSame('Gencys', $pending->active_company_name);
     }
 
     public function test_apple_login_rejects_missing_accounts(): void
