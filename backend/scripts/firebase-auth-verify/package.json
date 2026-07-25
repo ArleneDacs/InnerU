@@ -1,0 +1,9 @@
+{
+  "name": "firebase-auth-verify",
+  "private": true,
+  "type": "commonjs",
+  "version": "1.0.0",
+  "dependencies": {
+    "firebase-scrypt": "^2.2.0"
+  }
+}
