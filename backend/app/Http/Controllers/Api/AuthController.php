@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PendingRegistration;
 use App\Models\User;
+use App\Services\FirebaseScryptVerifier;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,8 +21,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService)
-    {
+    public function __construct(
+        private readonly UserScoreService $userScoreService,
+        private readonly FirebaseScryptVerifier $firebaseScryptVerifier,
+    ) {
     }
 
     public function register(Request $request): JsonResponse
@@ -96,7 +99,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $validated['email'])->first();
 
-        if (! $user || ! Hash::check($validated['password'], $user->password)) {
+        if (! $user || ! $this->passwordMatches($user, $validated['password'])) {
             return response()->json([
                 'message' => 'The provided credentials are incorrect.',
             ], Response::HTTP_UNAUTHORIZED);
@@ -628,6 +631,30 @@ class AuthController extends Controller
             'created_at' => optional($user->created_at)?->toIso8601String(),
             'updated_at' => optional($user->updated_at)?->toIso8601String(),
         ];
+    }
+
+    private function passwordMatches(User $user, string $plainPassword): bool
+    {
+        if ($user->legacy_password_hash !== null) {
+            $verified = $this->firebaseScryptVerifier->verify(
+                $plainPassword,
+                $user->legacy_password_hash,
+                $user->legacy_password_salt ?? '',
+            );
+
+            if (! $verified) {
+                return false;
+            }
+
+            $user->password = Hash::make($plainPassword);
+            $user->legacy_password_hash = null;
+            $user->legacy_password_salt = null;
+            $user->save();
+
+            return true;
+        }
+
+        return $user->password !== null && Hash::check($plainPassword, $user->password);
     }
 
     /**

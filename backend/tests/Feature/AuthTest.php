@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\PendingRegistration;
 use App\Models\User;
 use App\Notifications\PendingRegistrationVerificationNotification;
+use App\Services\FirebaseScryptVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Cache;
@@ -262,6 +263,57 @@ class AuthTest extends TestCase
             ->assertSee('Password updated');
 
         $this->assertTrue(Hash::check('NewPassword123', $user->fresh()->password));
+    }
+
+    public function test_login_succeeds_for_a_migrated_account_via_legacy_password_verification(): void
+    {
+        $user = User::factory()->create([
+            'password' => null,
+            'legacy_password_hash' => 'stored-hash',
+            'legacy_password_salt' => 'stored-salt',
+            'email_verified_at' => now(),
+        ]);
+
+        $this->mock(FirebaseScryptVerifier::class, function ($mock) {
+            $mock->shouldReceive('verify')
+                ->once()
+                ->with('their-old-password', 'stored-hash', 'stored-salt')
+                ->andReturn(true);
+        });
+
+        $response = $this->postJson('/api/auth/login', [
+            'email' => $user->email,
+            'password' => 'their-old-password',
+        ]);
+
+        $response->assertOk();
+        $user->refresh();
+        $this->assertNull($user->legacy_password_hash);
+        $this->assertNull($user->legacy_password_salt);
+        $this->assertTrue(Hash::check('their-old-password', $user->password));
+    }
+
+    public function test_login_fails_for_a_migrated_account_with_the_wrong_password(): void
+    {
+        $user = User::factory()->create([
+            'password' => null,
+            'legacy_password_hash' => 'stored-hash',
+            'legacy_password_salt' => 'stored-salt',
+            'email_verified_at' => now(),
+        ]);
+
+        $this->mock(FirebaseScryptVerifier::class, function ($mock) {
+            $mock->shouldReceive('verify')->once()->andReturn(false);
+        });
+
+        $response = $this->postJson('/api/auth/login', [
+            'email' => $user->email,
+            'password' => 'wrong-password',
+        ]);
+
+        $response->assertStatus(401);
+        $user->refresh();
+        $this->assertNotNull($user->legacy_password_hash, 'legacy hash must survive a failed attempt');
     }
 
     public function test_login_rejects_unverified_email_password_accounts(): void
