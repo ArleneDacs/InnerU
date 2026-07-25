@@ -96,4 +96,55 @@ class GoalImporterTest extends TestCase
         $this->assertSame(0, Goal::count());
         $this->assertNotEmpty($report->skippedRecords());
     }
+
+    public function test_skips_a_goal_with_no_start_date_or_target_date(): void
+    {
+        User::factory()->create(['firebase_uid' => 'owner-uid']);
+
+        File::put("{$this->dir}/goals.json", json_encode([
+            ['id' => 'goal-3', 'data' => ['userId' => 'owner-uid', 'title' => 'Missing dates', 'targetDate' => '2025-06-01']],
+        ]));
+        File::put("{$this->dir}/_group_tasks.json", json_encode([]));
+        File::put("{$this->dir}/_group_updates.json", json_encode([]));
+        File::put("{$this->dir}/_group_comments.json", json_encode([]));
+        File::put("{$this->dir}/_group_merits.json", json_encode([]));
+
+        $report = new ImportReport();
+        $importer = new GoalImporter(new SnapshotReader($this->dir), $report);
+        $importer->import(false);
+
+        $this->assertSame(0, Goal::count());
+        $this->assertNotEmpty($report->skippedRecords());
+    }
+
+    public function test_skips_a_merit_with_no_date(): void
+    {
+        $owner = User::factory()->create(['firebase_uid' => 'owner-uid']);
+
+        File::put("{$this->dir}/goals.json", json_encode([
+            ['id' => 'goal-4', 'data' => [
+                'userId' => 'owner-uid', 'title' => 'Run a marathon', 'category' => 'PERSONAL',
+                'status' => 'IN_PROGRESS', 'goalType' => 'MILESTONE', 'direction' => 'GAIN',
+                'targetPeriod' => 'WEEKLY', 'targetValue' => 26.2, 'currentValue' => 10, 'progress' => 40,
+                'startDate' => '2025-01-01', 'targetDate' => '2025-06-01',
+            ]],
+        ]));
+        File::put("{$this->dir}/_group_tasks.json", json_encode([]));
+        File::put("{$this->dir}/_group_updates.json", json_encode([]));
+        File::put("{$this->dir}/_group_comments.json", json_encode([]));
+        File::put("{$this->dir}/_group_merits.json", json_encode([
+            ['id' => 'merit-2', 'path' => 'goals/goal-4/merits/merit-2', 'data' => ['amount' => 3.1]],
+        ]));
+
+        $report = new ImportReport();
+        $importer = new GoalImporter(new SnapshotReader($this->dir), $report);
+        $importer->import(false);
+
+        $goal = Goal::where('firestore_id', 'goal-4')->first();
+        $this->assertNotNull($goal);
+        $this->assertSame($owner->id, $goal->user_id);
+
+        $this->assertSame(0, GoalMerit::where('firestore_id', 'merit-2')->count());
+        $this->assertNotEmpty($report->skippedRecords());
+    }
 }

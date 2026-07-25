@@ -66,6 +66,12 @@ class GoalImporter
             return;
         }
 
+        if (($data['startDate'] ?? null) === null || ($data['targetDate'] ?? null) === null) {
+            $this->report->skip('goals', $firestoreId, 'missing startDate or targetDate');
+
+            return;
+        }
+
         $goal = Goal::where('firestore_id', $firestoreId)->first() ?? new Goal(['id' => (string) Str::uuid()]);
         $goal->firestore_id = $firestoreId;
         $goal->user_id = $userId;
@@ -163,6 +169,12 @@ class GoalImporter
         $goal = Goal::where('firestore_id', $firestoreGoalId)->first();
         if ($goal === null) {
             $this->report->skip('goal_merits', $firestoreId, "no matching goal for {$firestoreGoalId}");
+
+            return;
+        }
+
+        if (($data['date'] ?? null) === null) {
+            $this->report->skip('goal_merits', $firestoreId, 'missing date');
 
             return;
         }
