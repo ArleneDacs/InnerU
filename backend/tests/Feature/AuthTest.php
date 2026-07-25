@@ -169,15 +169,22 @@ class AuthTest extends TestCase
             'number' => '09171234567',
             'role' => 'user',
             'company_code' => 'GEN0KUS',
-            'company_name' => 'Gencys',
+            // The client sends the code as company_name too (matching what
+            // the real app was observed sending) - the real company name
+            // must win over this, not the other way around.
+            'company_name' => 'GEN0KUS',
         ])->assertCreated();
 
         $pending = PendingRegistration::where('email', 'company.member.inneru@gmail.com')->firstOrFail();
 
         // Regression: company_id used to be set to the raw code string
-        // ("GEN0KUS") instead of the company's real database id.
+        // ("GEN0KUS") instead of the company's real database id, and
+        // company_name used to pass through whatever the client sent
+        // instead of the real company's display name.
         $this->assertSame($company->id, $pending->company_id);
         $this->assertSame($company->id, $pending->active_company_id);
+        $this->assertSame('Gencys', $pending->company_name);
+        $this->assertSame('Gencys', $pending->active_company_name);
     }
 
     public function test_verifying_a_pending_registration_creates_the_user(): void

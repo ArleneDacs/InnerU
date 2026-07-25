@@ -42,8 +42,8 @@ class AuthController extends Controller
 
         $role = strtolower($validated['role']);
         $companyCode = $validated['company_code'] ?? null;
-        $companyName = $validated['company_name'] ?? null;
         $company = $companyCode !== null ? Company::where('code', $companyCode)->first() : null;
+        $companyName = $company?->name ?? ($validated['company_name'] ?? null);
 
         $pending = PendingRegistration::updateOrCreate(
             ['email' => $validated['email']],
