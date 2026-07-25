@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\FirebaseScryptVerifier;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Schema;
@@ -13,7 +14,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(FirebaseScryptVerifier::class, function () {
+            return new FirebaseScryptVerifier(
+                config('services.firebase_scrypt.node_verifier_path'),
+                config('services.firebase_scrypt.hash_config_path'),
+            );
+        });
     }
 
     /**

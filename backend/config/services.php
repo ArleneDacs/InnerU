@@ -55,4 +55,9 @@ return [
         'service_id' => env('APPLE_SERVICE_ID', 'com.valenin.inneru'),
     ],
 
+    'firebase_scrypt' => [
+        'node_verifier_path' => base_path('scripts/firebase-auth-verify/verify.js'),
+        'hash_config_path' => env('FIREBASE_HASH_CONFIG_PATH', storage_path('app/firestore-snapshot/hash-config.json')),
+    ],
+
 ];
