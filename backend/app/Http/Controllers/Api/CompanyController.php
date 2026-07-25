@@ -39,10 +39,10 @@ class CompanyController extends Controller
             'code' => ['required', 'string', 'max:120'],
         ]);
 
-        $lookup = trim((string) $validated['code']);
+        $lookup = Str::lower(trim((string) $validated['code']));
         $company = Company::query()
-            ->where('code', $lookup)
-            ->orWhere('id', $lookup)
+            ->whereRaw('LOWER(code) = ?', [$lookup])
+            ->orWhereRaw('LOWER(id) = ?', [$lookup])
             ->first();
 
         if ($company === null) {
