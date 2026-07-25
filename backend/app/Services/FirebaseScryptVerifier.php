@@ -3,6 +3,8 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Exception\ExceptionInterface;
 use Symfony\Component\Process\Process;
 
 class FirebaseScryptVerifier
@@ -21,7 +23,16 @@ class FirebaseScryptVerifier
             'hash' => $base64Hash,
             'salt' => $base64Salt,
         ], JSON_THROW_ON_ERROR));
-        $process->run();
+
+        try {
+            $process->run();
+        } catch (ExceptionInterface $exception) {
+            Log::error('FirebaseScryptVerifier failed to run the node verifier process.', [
+                'exception' => $exception,
+            ]);
+
+            return false;
+        }
 
         return $process->getExitCode() === 0;
     }

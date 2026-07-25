@@ -316,6 +316,44 @@ class AuthTest extends TestCase
         $this->assertNotNull($user->legacy_password_hash, 'legacy hash must survive a failed attempt');
     }
 
+    public function test_password_reset_clears_legacy_password_columns_and_allows_login_with_the_new_password(): void
+    {
+        $user = User::factory()->create([
+            'password' => null,
+            'legacy_password_hash' => 'stored-hash',
+            'legacy_password_salt' => 'stored-salt',
+            'email_verified_at' => now(),
+        ]);
+
+        $token = Password::broker()->createToken($user);
+
+        $response = $this->postJson('/api/auth/password/reset', [
+            'token' => $token,
+            'email' => $user->email,
+            'password' => 'NewPassword123',
+            'password_confirmation' => 'NewPassword123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('message', 'Password updated successfully.');
+
+        $user->refresh();
+        $this->assertNull($user->legacy_password_hash);
+        $this->assertNull($user->legacy_password_salt);
+        $this->assertTrue(Hash::check('NewPassword123', $user->password));
+
+        $this->mock(FirebaseScryptVerifier::class, function ($mock) {
+            $mock->shouldNotReceive('verify');
+        });
+
+        $loginResponse = $this->postJson('/api/auth/login', [
+            'email' => $user->email,
+            'password' => 'NewPassword123',
+        ]);
+
+        $loginResponse->assertOk();
+    }
+
     public function test_login_rejects_unverified_email_password_accounts(): void
     {
         $user = User::factory()->create([

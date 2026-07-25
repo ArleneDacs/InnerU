@@ -56,6 +56,35 @@ class UserPointsImporterTest extends TestCase
         $this->assertTrue((bool) $record->todo_list_included_in_total);
     }
 
+    public function test_two_records_for_the_same_user_and_date_but_different_companies_produce_separate_rows(): void
+    {
+        $user = User::factory()->create(['firebase_uid' => 'uid-2']);
+
+        File::put("{$this->dir}/userpoints.json", json_encode([
+            ['id' => 'uid-2_2025-04-01_co-1', 'data' => [
+                'userId' => 'uid-2', 'date' => '2025-04-01', 'username' => 'Jane',
+                'totalPoints' => 10, 'companyId' => 'co-1', 'companyCode' => 'ABC', 'companyName' => 'Acme',
+            ]],
+            ['id' => 'uid-2_2025-04-01_co-2', 'data' => [
+                'userId' => 'uid-2', 'date' => '2025-04-01', 'username' => 'Jane',
+                'totalPoints' => 20, 'companyId' => 'co-2', 'companyCode' => 'XYZ', 'companyName' => 'Globex',
+            ]],
+        ]));
+
+        $importer = new UserPointsImporter(new SnapshotReader($this->dir), new ImportReport());
+        $importer->import(false);
+
+        $records = UserPoint::where('user_id', $user->id)->where('date', '2025-04-01')->get();
+        $this->assertCount(2, $records);
+
+        $co1 = $records->firstWhere('company_id', 'co-1');
+        $co2 = $records->firstWhere('company_id', 'co-2');
+        $this->assertNotNull($co1);
+        $this->assertNotNull($co2);
+        $this->assertEqualsWithDelta(10.0, (float) $co1->total_points, 0.001);
+        $this->assertEqualsWithDelta(20.0, (float) $co2->total_points, 0.001);
+    }
+
     public function test_skips_a_record_with_no_matching_user(): void
     {
         File::put("{$this->dir}/userpoints.json", json_encode([

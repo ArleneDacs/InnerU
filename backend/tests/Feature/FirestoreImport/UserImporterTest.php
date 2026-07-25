@@ -119,6 +119,48 @@ class UserImporterTest extends TestCase
         $this->assertSame(1, User::where('firebase_uid', 'uid-4')->count());
     }
 
+    public function test_rerunning_the_importer_does_not_reintroduce_a_legacy_hash_for_an_already_migrated_user(): void
+    {
+        File::put("{$this->dir}/users.json", json_encode([
+            ['id' => 'uid-5', 'data' => ['username' => 'Jane']],
+        ]));
+        File::put("{$this->dir}/coaches.json", json_encode([]));
+        File::put("{$this->dir}/auth-users.json", json_encode([
+            'users' => [[
+                'localId' => 'uid-5',
+                'email' => 'jane-migrated@example.com',
+                'emailVerified' => true,
+                'passwordHash' => 'base64hash',
+                'salt' => 'base64salt',
+                'providerUserInfo' => [['providerId' => 'password']],
+            ]],
+        ]));
+
+        $importer = new UserImporter(new SnapshotReader($this->dir), new ImportReport());
+        $importer->import(false);
+
+        $user = User::where('firebase_uid', 'uid-5')->firstOrFail();
+        $this->assertSame('base64hash', $user->legacy_password_hash);
+
+        // Simulate the user logging in and migrating to bcrypt: passwordMatches()
+        // sets a bcrypt password and clears both legacy columns.
+        $user->forceFill([
+            'password' => bcrypt('their-real-password'),
+            'legacy_password_hash' => null,
+            'legacy_password_salt' => null,
+        ])->save();
+
+        // Re-running the import (e.g. after fixing an unrelated mapping bug) must
+        // not reintroduce the stale legacy hash, even though the auth export
+        // fixture still contains a passwordHash for this user.
+        $importer->import(false);
+
+        $user->refresh();
+        $this->assertNull($user->legacy_password_hash);
+        $this->assertNull($user->legacy_password_salt);
+        $this->assertNotNull($user->password);
+    }
+
     public function test_skips_an_auth_record_missing_a_local_id(): void
     {
         File::put("{$this->dir}/users.json", json_encode([]));

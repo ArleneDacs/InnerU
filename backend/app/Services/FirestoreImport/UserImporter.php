@@ -64,7 +64,7 @@ class UserImporter
             }
 
             $passwordProvider = collect($authUser['providerUserInfo'] ?? [])->firstWhere('providerId', 'password');
-            if ($passwordProvider !== null && ! empty($authUser['passwordHash'])) {
+            if ($passwordProvider !== null && ! empty($authUser['passwordHash']) && $user->password === null) {
                 $user->legacy_password_hash = $authUser['passwordHash'];
                 $user->legacy_password_salt = $authUser['salt'] ?? null;
             }

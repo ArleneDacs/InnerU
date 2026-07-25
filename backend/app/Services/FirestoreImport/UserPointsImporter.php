@@ -38,7 +38,11 @@ class UserPointsImporter
             return;
         }
 
-        $record = UserPoint::where('user_id', $userId)->where('date', $date)->first() ?? new UserPoint();
+        $companyId = $data['companyId'] ?? null;
+        $query = UserPoint::where('user_id', $userId)->where('date', $date);
+        $query = $companyId === null ? $query->whereNull('company_id') : $query->where('company_id', $companyId);
+
+        $record = $query->first() ?? new UserPoint();
         $record->user_id = $userId;
         $record->date = $date;
         $record->username = $data['username'] ?? '';
@@ -52,7 +56,7 @@ class UserPointsImporter
         $record->task_points = $data['taskPoints'] ?? null;
         $record->tasks = $data['tasks'] ?? null;
         $record->server = $data['server'] ?? null;
-        $record->company_id = $data['companyId'] ?? null;
+        $record->company_id = $companyId;
         $record->company_code = $data['companyCode'] ?? null;
         $record->company_name = $data['companyName'] ?? null;
         $record->activity_counts = $data['activityCounts'] ?? null;

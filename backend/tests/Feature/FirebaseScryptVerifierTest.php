@@ -55,4 +55,29 @@ class FirebaseScryptVerifierTest extends TestCase
 
         $this->assertFalse($verifier->verify('wrong-password', 'known-hash', 'known-salt'));
     }
+
+    public function test_verify_returns_false_instead_of_throwing_when_the_process_cannot_be_launched(): void
+    {
+        // Symfony's Process resolves the working directory at construction time
+        // (inside verify()). If that directory has vanished out from under the
+        // worker — e.g. a deploy swaps the release symlink and prunes the old
+        // release while a request is still in flight — Process::run() throws a
+        // RuntimeException instead of yielding a normal exit code. Reproduce
+        // that by chdir()-ing into a directory and deleting it before verify()
+        // runs, then confirm verify() fails closed (false) rather than letting
+        // the exception surface as a 500.
+        $originalCwd = getcwd();
+        $vanishingDir = sys_get_temp_dir().'/vanishing-cwd-'.uniqid();
+        mkdir($vanishingDir);
+        chdir($vanishingDir);
+        rmdir($vanishingDir);
+
+        try {
+            $verifier = new FirebaseScryptVerifier($this->fakeVerifierPath, $this->fakeConfigPath);
+
+            $this->assertFalse($verifier->verify('correct-password', 'known-hash', 'known-salt'));
+        } finally {
+            chdir($originalCwd);
+        }
+    }
 }
