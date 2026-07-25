@@ -1,0 +1,13 @@
+{
+  "name": "firestore-export",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  },
+  "scripts": {
+    "export": "node export-firestore.js",
+    "test": "node --test"
+  }
+}
