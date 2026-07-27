@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -23,7 +24,7 @@ class UserPointTest extends TestCase
         ]);
 
         $scoreService = Mockery::mock(UserScoreService::class);
-        $scoreService->shouldReceive('resolveForUser')
+        $scoreService->shouldReceive('syncForUser')
             ->once()
             ->andThrow(new \RuntimeException('Score sync failed.'));
         app()->instance(UserScoreService::class, $scoreService);
@@ -66,6 +67,53 @@ class UserPointTest extends TestCase
             'username' => 'Point User',
             'company_id' => 'ABC',
         ]);
+    }
+
+    public function test_fractional_scores_are_rounded_before_being_stored(): void
+    {
+        // daily_tracker_score=50 and todo_list_score=25 with
+        // todo_list_included_in_total=true resolves to (50+25)/2 = 37.5 —
+        // deliberately fractional. user_points.user_total_score is an
+        // INTEGER column; writing the raw float here previously crashed
+        // against Postgres (SQLite silently tolerated it) because the
+        // controller wrote resolveForUser()'s raw float directly instead of
+        // the already-rounded value syncForUser() produces for users.score.
+        $user = User::factory()->create([
+            'name' => 'Fractional Point User',
+            'email' => 'fractional-point@example.com',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/user-points', [
+            'date' => '2026-07-21',
+            'username' => 'Fractional Point User',
+            'total_points' => 75,
+            'activity_points' => 30,
+            'daily_tracker_score' => 50,
+            'todo_list_score' => 25,
+            'todo_list_score_daily_contribution' => 25,
+            'todo_list_included_in_total' => true,
+            'user_total_score' => 75,
+            'task_points' => [],
+            'tasks' => [],
+            'server' => 'Default',
+            'company_id' => 'ABC',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+            'activity_counts' => [],
+        ]);
+
+        $response->assertOk();
+
+        $storedScore = DB::table('user_points')
+            ->where('user_id', $user->id)
+            ->where('date', '2026-07-21')
+            ->value('user_total_score');
+
+        $this->assertEquals(38, $storedScore);
     }
 
     protected function tearDown(): void

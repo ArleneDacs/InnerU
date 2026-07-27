@@ -66,24 +66,27 @@ class CompanyController extends Controller
 
         $name = trim((string) $validated['name']);
         $code = $this->generateUniqueCode($name);
-        $company = Company::create([
-            'id' => (string) Str::uuid(),
-            'name' => $name,
-            'code' => $code,
-            'is_active' => true,
-            'theme_enabled' => false,
-            'theme_source' => null,
-            'tagline' => null,
-            'theme_primary_color' => null,
-            'theme_accent_color' => null,
-            'theme_background_color' => null,
-            'theme_surface_color' => null,
-            'theme_ink_color' => null,
-            'theme_muted_ink_color' => null,
-            'theme_icon_color' => null,
-            'theme_mode' => null,
-            'theme_is_dark' => false,
-        ]);
+
+        $company = DB::transaction(function () use ($name, $code): Company {
+            return Company::create([
+                'id' => (string) Str::uuid(),
+                'name' => $name,
+                'code' => $code,
+                'is_active' => true,
+                'theme_enabled' => false,
+                'theme_source' => null,
+                'tagline' => null,
+                'theme_primary_color' => null,
+                'theme_accent_color' => null,
+                'theme_background_color' => null,
+                'theme_surface_color' => null,
+                'theme_ink_color' => null,
+                'theme_muted_ink_color' => null,
+                'theme_icon_color' => null,
+                'theme_mode' => null,
+                'theme_is_dark' => false,
+            ]);
+        });
 
         return response()->json([
             'company' => $this->payload($company),

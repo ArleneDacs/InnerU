@@ -67,11 +67,10 @@ class UserPointController extends Controller
         );
 
         try {
-            $resolvedScore = $this->userScoreService->resolveForUser($user);
+            $resolvedScore = $this->userScoreService->syncForUser($user);
             $point->forceFill([
                 'user_total_score' => $resolvedScore,
             ])->save();
-            $this->userScoreService->syncForUser($user, $resolvedScore);
         } catch (\Throwable $throwable) {
             report($throwable);
         }

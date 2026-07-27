@@ -6,6 +6,7 @@ use App\Models\DailyTracker;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Mockery;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -70,7 +71,7 @@ class DailyTrackerTest extends TestCase
         ]);
 
         $scoreService = Mockery::mock(UserScoreService::class);
-        $scoreService->shouldReceive('resolveForUser')
+        $scoreService->shouldReceive('syncForUser')
             ->once()
             ->andThrow(new \RuntimeException('Score sync failed.'));
         app()->instance(UserScoreService::class, $scoreService);
@@ -101,6 +102,48 @@ class DailyTrackerTest extends TestCase
             'step_goal' => 8200,
             'steps' => true,
         ]);
+    }
+
+    public function test_fractional_scores_are_rounded_before_being_stored(): void
+    {
+        // This exact fixture (a single tracker with only "steps" completed
+        // out of the 6 default daily-tracker tasks) is known to resolve to a
+        // repeating-decimal score (8.3333333333333) — real production data
+        // hits this routinely, not just this contrived case. daily_trackers
+        // .user_total_score is an unsigned INTEGER column; writing the raw
+        // float here previously crashed against Postgres (SQLite silently
+        // tolerated it) because the controller wrote resolveForUser()'s raw
+        // float directly instead of the already-rounded value syncForUser()
+        // produces for users.score.
+        $user = User::factory()->create([
+            'name' => 'Fractional Score User',
+            'email' => 'fractional-score@example.com',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $save = $this->postJson('/api/daily-tracker', [
+            'date' => '2026-07-21',
+            'step_count' => 1432,
+            'step_goal' => 8200,
+            'steps' => true,
+            'meditation' => false,
+            'username' => 'Fractional Score User',
+            'company_id' => 'ABC',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+        ]);
+
+        $save->assertOk();
+
+        $storedScore = DB::table('daily_trackers')
+            ->where('user_id', $user->id)
+            ->where('date', '2026-07-21')
+            ->value('user_total_score');
+
+        $this->assertEquals(8, $storedScore);
     }
 
     public function test_score_reflects_todays_completion_not_diluted_by_history(): void
