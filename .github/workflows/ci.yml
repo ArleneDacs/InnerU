@@ -100,7 +100,7 @@ jobs:
           php artisan key:generate --ansi
 
       - name: Run tests against Postgres
-        run: php artisan test --configuration=phpunit.pgsql.xml
+        run: ./vendor/bin/phpunit --configuration=phpunit.pgsql.xml
 
   flutter:
     name: Flutter checks
