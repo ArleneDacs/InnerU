@@ -25,6 +25,8 @@ class CompanyApiCompany {
     required this.loadingImageFileName,
     required this.loadingVideoUrl,
     required this.loadingVideoFileName,
+    this.leaderboardPeriodStart,
+    this.leaderboardPeriodEnd,
   });
 
   final String id;
@@ -49,6 +51,8 @@ class CompanyApiCompany {
   final String? loadingImageFileName;
   final String? loadingVideoUrl;
   final String? loadingVideoFileName;
+  final String? leaderboardPeriodStart;
+  final String? leaderboardPeriodEnd;
 
   factory CompanyApiCompany.fromJson(Map<String, dynamic> json) {
     return CompanyApiCompany(
@@ -74,6 +78,8 @@ class CompanyApiCompany {
       loadingImageFileName: json['loadingImageFileName']?.toString(),
       loadingVideoUrl: json['loadingVideoUrl']?.toString(),
       loadingVideoFileName: json['loadingVideoFileName']?.toString(),
+      leaderboardPeriodStart: json['leaderboardPeriodStart']?.toString(),
+      leaderboardPeriodEnd: json['leaderboardPeriodEnd']?.toString(),
     );
   }
 }

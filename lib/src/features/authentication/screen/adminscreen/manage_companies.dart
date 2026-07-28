@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
@@ -216,6 +217,199 @@ class _ManageCompaniesScreenState extends State<ManageCompaniesScreen> {
     await CompanyApiService.instance.updateCompany(
       company.id,
       {'name': name},
+    );
+  }
+
+  Future<void> _showLeaderboardPeriodDialog(_ManagedCompany company) async {
+    DateTime? startDate = company.leaderboardPeriodStart;
+    DateTime? endDate = company.leaderboardPeriodEnd;
+    var isSaving = false;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            Future<void> pickStartDate() async {
+              final picked = await showDatePicker(
+                context: dialogContext,
+                initialDate: startDate ?? DateTime.now(),
+                firstDate: DateTime(2020),
+                lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+              );
+              if (picked != null) {
+                setDialogState(() => startDate = picked);
+              }
+            }
+
+            Future<void> pickEndDate() async {
+              final picked = await showDatePicker(
+                context: dialogContext,
+                initialDate: endDate ?? (startDate ?? DateTime.now()),
+                firstDate: DateTime(2020),
+                lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+              );
+              if (picked != null) {
+                setDialogState(() => endDate = picked);
+              }
+            }
+
+            final formatter = DateFormat('MMM d, yyyy');
+
+            return AlertDialog(
+              title: const Text('Leaderboard Period'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Only activity within this date range counts toward "
+                    "this company's leaderboard.",
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Start date'),
+                    subtitle: Text(
+                      startDate == null
+                          ? 'Not set'
+                          : formatter.format(startDate!),
+                    ),
+                    trailing: const Icon(CupertinoIcons.calendar),
+                    onTap: isSaving ? null : pickStartDate,
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('End date'),
+                    subtitle: Text(
+                      endDate == null ? 'Not set' : formatter.format(endDate!),
+                    ),
+                    trailing: const Icon(CupertinoIcons.calendar),
+                    onTap: isSaving ? null : pickEndDate,
+                  ),
+                ],
+              ),
+              actions: [
+                if (company.leaderboardPeriodStart != null ||
+                    company.leaderboardPeriodEnd != null)
+                  TextButton(
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            setDialogState(() => isSaving = true);
+                            try {
+                              await CompanyApiService.instance.updateCompany(
+                                company.id,
+                                {'clearLeaderboardPeriod': true},
+                              );
+                              if (!dialogContext.mounted) return;
+                              Navigator.pop(dialogContext);
+                              _refreshCompanies();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Leaderboard period removed for '
+                                    '${company.name}.',
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Failed to remove leaderboard period: $e',
+                                  ),
+                                ),
+                              );
+                              if (dialogContext.mounted) {
+                                setDialogState(() => isSaving = false);
+                              }
+                            }
+                          },
+                    child: const Text('Remove period'),
+                  ),
+                TextButton(
+                  onPressed:
+                      isSaving ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final start = startDate;
+                          final end = endDate;
+                          if (start == null || end == null) {
+                            ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please set both a start and end date.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          if (end.isBefore(start)) {
+                            ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'End date must be on or after the start date.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          setDialogState(() => isSaving = true);
+                          try {
+                            final keyFormat = DateFormat('yyyy-MM-dd');
+                            await CompanyApiService.instance.updateCompany(
+                              company.id,
+                              {
+                                'leaderboardPeriodStart': keyFormat.format(start),
+                                'leaderboardPeriodEnd': keyFormat.format(end),
+                              },
+                            );
+                            if (!dialogContext.mounted) return;
+                            Navigator.pop(dialogContext);
+                            _refreshCompanies();
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Leaderboard period saved for '
+                                  '${company.name}.',
+                                ),
+                              ),
+                            );
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Failed to save leaderboard period: $e',
+                                ),
+                              ),
+                            );
+                            if (dialogContext.mounted) {
+                              setDialogState(() => isSaving = false);
+                            }
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1174,6 +1368,8 @@ class _ManageCompaniesScreenState extends State<ManageCompaniesScreen> {
                 ],
               ),
               onRemoveCompany: () => _showRemoveCompanyDialog(companies[index]),
+              onEditLeaderboardPeriod: () =>
+                  _showLeaderboardPeriodDialog(companies[index]),
               membersStream: _companyMembersStream(companies[index]),
             ),
           );
@@ -1250,6 +1446,7 @@ class _CompanyManagementCard extends StatelessWidget {
     required this.onUploadLoadingVideo,
     required this.onRemoveLoadingVideo,
     required this.onRemoveCompany,
+    required this.onEditLeaderboardPeriod,
     required this.membersStream,
   });
 
@@ -1267,6 +1464,7 @@ class _CompanyManagementCard extends StatelessWidget {
   final VoidCallback onUploadLoadingVideo;
   final VoidCallback onRemoveLoadingVideo;
   final VoidCallback onRemoveCompany;
+  final VoidCallback onEditLeaderboardPeriod;
   final Stream<List<_CompanyMember>> membersStream;
 
   @override
@@ -1414,6 +1612,25 @@ class _CompanyManagementCard extends StatelessWidget {
             subtitle:
                 const Text('Controls whether users see company branding.'),
             onChanged: onThemeChanged,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  company.leaderboardPeriodLabel,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Edit leaderboard period',
+                onPressed: onEditLeaderboardPeriod,
+                icon: Icon(CupertinoIcons.calendar, color: primaryColor),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           ClipRRect(
@@ -2254,6 +2471,8 @@ class _ManagedCompany {
     required this.themeMode,
     required this.loadingImageUrl,
     required this.loadingVideoUrl,
+    required this.leaderboardPeriodStart,
+    required this.leaderboardPeriodEnd,
   });
 
   factory _ManagedCompany.fromApi(CompanyApiCompany company) {
@@ -2272,6 +2491,12 @@ class _ManagedCompany {
       themeMode: company.themeMode?.trim() ?? '',
       loadingImageUrl: company.loadingImageUrl?.trim() ?? '',
       loadingVideoUrl: company.loadingVideoUrl?.trim() ?? '',
+      leaderboardPeriodStart: DateTime.tryParse(
+        company.leaderboardPeriodStart ?? '',
+      ),
+      leaderboardPeriodEnd: DateTime.tryParse(
+        company.leaderboardPeriodEnd ?? '',
+      ),
     );
   }
 
@@ -2289,6 +2514,19 @@ class _ManagedCompany {
   final String themeMode;
   final String loadingImageUrl;
   final String loadingVideoUrl;
+  final DateTime? leaderboardPeriodStart;
+  final DateTime? leaderboardPeriodEnd;
+
+  String get leaderboardPeriodLabel {
+    final start = leaderboardPeriodStart;
+    final end = leaderboardPeriodEnd;
+    if (start == null || end == null) {
+      return 'Leaderboard period: Not set';
+    }
+    final formatter = DateFormat('MMM d, yyyy');
+    return 'Leaderboard period: ${formatter.format(start)} - '
+        '${formatter.format(end)}';
+  }
 }
 
 class _ThemePalettePreset {

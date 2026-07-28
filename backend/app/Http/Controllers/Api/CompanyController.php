@@ -121,6 +121,9 @@ class CompanyController extends Controller
             'loadingVideoFileName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'clearLoadingImage' => ['sometimes', 'boolean'],
             'clearLoadingVideo' => ['sometimes', 'boolean'],
+            'leaderboardPeriodStart' => ['required_with:leaderboardPeriodEnd', 'date'],
+            'leaderboardPeriodEnd' => ['required_with:leaderboardPeriodStart', 'date', 'after_or_equal:leaderboardPeriodStart'],
+            'clearLeaderboardPeriod' => ['sometimes', 'boolean'],
         ]);
 
         $originalName = $company->name;
@@ -297,6 +300,14 @@ class CompanyController extends Controller
             $payload['loading_video_file_name'] = null;
             $payload['loading_video_updated_at'] = null;
         }
+        if (array_key_exists('leaderboardPeriodStart', $validated) && array_key_exists('leaderboardPeriodEnd', $validated)) {
+            $payload['leaderboard_period_start'] = $validated['leaderboardPeriodStart'];
+            $payload['leaderboard_period_end'] = $validated['leaderboardPeriodEnd'];
+        }
+        if (array_key_exists('clearLeaderboardPeriod', $validated) && $validated['clearLeaderboardPeriod']) {
+            $payload['leaderboard_period_start'] = null;
+            $payload['leaderboard_period_end'] = null;
+        }
 
         return $payload;
     }
@@ -334,6 +345,8 @@ class CompanyController extends Controller
             'loadingVideoUrl' => $company->loading_video_url,
             'loadingVideoFileName' => $company->loading_video_file_name,
             'loadingVideoUpdatedAt' => optional($company->loading_video_updated_at)?->toIso8601String(),
+            'leaderboardPeriodStart' => optional($company->leaderboard_period_start)?->toDateString(),
+            'leaderboardPeriodEnd' => optional($company->leaderboard_period_end)?->toDateString(),
             'createdAt' => optional($company->created_at)?->toIso8601String(),
             'updatedAt' => optional($company->updated_at)?->toIso8601String(),
         ];

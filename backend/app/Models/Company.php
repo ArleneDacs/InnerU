@@ -36,6 +36,8 @@ class Company extends Model
         'loading_video_url',
         'loading_video_file_name',
         'loading_video_updated_at',
+        'leaderboard_period_start',
+        'leaderboard_period_end',
     ];
 
     protected function casts(): array
@@ -47,6 +49,8 @@ class Company extends Model
             'logo_updated_at' => 'datetime',
             'loading_image_updated_at' => 'datetime',
             'loading_video_updated_at' => 'datetime',
+            'leaderboard_period_start' => 'date',
+            'leaderboard_period_end' => 'date',
         ];
     }
 }
