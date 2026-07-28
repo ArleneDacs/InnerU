@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\DailyTracker;
 use App\Models\Goal;
 use App\Models\GoalTask;
+use App\Models\TodoTask;
 use App\Models\User;
 use App\Models\UserPoint;
 use Illuminate\Support\Carbon;
@@ -731,6 +732,32 @@ class UserScoreService
      */
     private function resolveGoalScoresForUsers(Collection $users): array
     {
+        $scores = $this->resolveGoalScoresFromGoalModel($users);
+
+        // The Goal/GoalTask models are a newer, structured goals system
+        // that most users haven't adopted yet -- the "Goals" screen most
+        // users actually see (todo_list.dart) is backed by TodoTask
+        // instead. For any user with no Goal-model score, fall back to
+        // scoring their TodoTask rows the exact same way that screen's own
+        // "_todoScore" does, so the leaderboard matches what they see
+        // there rather than silently reporting 0/legacy data.
+        $usersWithoutGoalScore = $users->reject(
+            fn (User $user) => array_key_exists((string) $user->id, $scores)
+        );
+
+        if ($usersWithoutGoalScore->isNotEmpty()) {
+            $scores += $this->resolveGoalScoresFromTodoTasks($usersWithoutGoalScore);
+        }
+
+        return $scores;
+    }
+
+    /**
+     * @param  Collection<int, User>  $users
+     * @return array<string, float>
+     */
+    private function resolveGoalScoresFromGoalModel(Collection $users): array
+    {
         $userIds = $users
             ->pluck('id')
             ->map(static fn ($id) => (string) $id)
@@ -789,6 +816,79 @@ class UserScoreService
         }
 
         return $scores;
+    }
+
+    /**
+     * @param  Collection<int, User>  $users
+     * @return array<string, float>
+     */
+    private function resolveGoalScoresFromTodoTasks(Collection $users): array
+    {
+        $userIds = $users
+            ->pluck('id')
+            ->map(static fn ($id) => (string) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($userIds === []) {
+            return [];
+        }
+
+        $tasks = TodoTask::query()
+            ->whereIn('user_id', $userIds)
+            ->get(['user_id', 'is_completed', 'sub_tasks']);
+
+        if ($tasks->isEmpty()) {
+            return [];
+        }
+
+        $tasksByUserId = $tasks->groupBy(fn (TodoTask $task) => (string) $task->user_id);
+        $scores = [];
+
+        foreach ($users as $user) {
+            $userId = (string) $user->id;
+            $userTasks = $tasksByUserId->get($userId, collect());
+            if ($userTasks->isEmpty()) {
+                continue;
+            }
+
+            $scores[$userId] = $this->scoreTodoTasks($userTasks);
+        }
+
+        return $scores;
+    }
+
+    /**
+     * @param  Collection<int, TodoTask>  $tasks
+     */
+    private function scoreTodoTasks(Collection $tasks): float
+    {
+        if ($tasks->isEmpty()) {
+            return 0.0;
+        }
+
+        $totalProgress = $tasks->sum(fn (TodoTask $task) => $this->todoTaskProgress($task));
+
+        return round($totalProgress / $tasks->count());
+    }
+
+    private function todoTaskProgress(TodoTask $task): float
+    {
+        $subTasks = is_array($task->sub_tasks) ? $task->sub_tasks : [];
+
+        if ($subTasks !== []) {
+            $completed = 0;
+            foreach ($subTasks as $subTask) {
+                if (is_array($subTask) && ($subTask['isCompleted'] ?? false) === true) {
+                    $completed++;
+                }
+            }
+
+            return ($completed / count($subTasks)) * 100;
+        }
+
+        return $task->is_completed ? 100.0 : 0.0;
     }
 
     /**
