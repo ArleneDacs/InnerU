@@ -30,7 +30,7 @@ class LeaderboardController extends Controller
 
         $companyUsers = $this->companyUsersForScope($company, $user);
 
-        $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers);
+        $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers, $company);
         $companyLeaderboard = $companyUsers
             ->map(function (User $candidate) use ($companyScores): array {
                 $breakdown = $this->leaderboardBreakdownForUser($candidate, $companyScores);

@@ -537,4 +537,69 @@ class LeaderboardCompanyScopeTest extends TestCase
             $this->assertSame(0.0, (float) $entry['overallScore']);
         }
     }
+
+    public function test_a_users_score_still_respects_the_period_even_when_their_active_company_id_has_drifted_elsewhere(): void
+    {
+        // Regression test: LeaderboardController's own company-membership
+        // check (companyUsersForScope) includes a user if EITHER their
+        // company_id OR active_company_id matches -- so a user whose
+        // company_id still points here (even though their active_company_id
+        // has since drifted to some other, unrelated company) correctly
+        // appears in this company's leaderboard list. But
+        // UserScoreService::matchCompany prioritizes active_company_id
+        // over company_id entirely, so on its own it would resolve this
+        // same user into the OTHER company (or none) and skip the period
+        // gate, letting their legacy all-time-average score leak through.
+        $company = $this->makeCompany('Period Co', 'PERIODCO');
+        $company->update([
+            'leaderboard_period_start' => '2026-08-01',
+            'leaderboard_period_end' => '2026-12-31',
+        ]);
+        $otherCompany = $this->makeCompany('Somewhere Else', 'ELSEWHERE');
+
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $member = User::factory()->create([
+            'name' => 'Drifted Active Company User',
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+            'active_company_id' => $otherCompany->id,
+            'active_company_code' => $otherCompany->code,
+            'active_company_name' => $otherCompany->name,
+        ]);
+
+        // Old, unrelated data that would score highly under legacy
+        // (no-period) scoring, but must be ignored because the configured
+        // period hasn't started yet.
+        DailyTracker::create([
+            'user_id' => (string) $member->id,
+            'username' => $member->name,
+            'date' => '2026-01-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+            'todo_list_score' => 100,
+            'todo_list_included_in_total' => true,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+
+        $entry = collect($response->json('companyLeaderboard'))
+            ->firstWhere('name', 'Drifted Active Company User');
+
+        $this->assertNotNull($entry);
+        $this->assertSame(0.0, (float) $entry['overallScore']);
+    }
 }

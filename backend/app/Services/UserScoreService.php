@@ -151,9 +151,19 @@ class UserScoreService
 
     /**
      * @param  Collection<int, User>  $users
+     * @param  Company|null  $knownCompany  When the caller has already
+     *   resolved which company these users belong to (e.g. a company-scoped
+     *   leaderboard), pass it here so every user is scored against that
+     *   company instead of each user's own company fields being
+     *   independently re-derived via resolveCompaniesForUsers/matchCompany.
+     *   Those two resolvers don't always agree -- matchCompany prioritizes
+     *   active_company_id over company_id, so a user whose company_id
+     *   matches the caller's already-resolved company but whose
+     *   active_company_id has drifted elsewhere would otherwise silently
+     *   skip that company's configured leaderboard period.
      * @return array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}>
      */
-    public function resolveBreakdownForUsers(Collection $users): array
+    public function resolveBreakdownForUsers(Collection $users, ?Company $knownCompany = null): array
     {
         $userIds = $users
             ->pluck('id')
@@ -166,7 +176,9 @@ class UserScoreService
             return [];
         }
 
-        $companiesByUser = $this->resolveCompaniesForUsers($users);
+        $companiesByUser = $knownCompany !== null
+            ? array_fill_keys($userIds, $knownCompany)
+            : $this->resolveCompaniesForUsers($users);
         $goalScoresByUser = $this->resolveGoalScoresForUsers($users);
 
         $scores = [];
