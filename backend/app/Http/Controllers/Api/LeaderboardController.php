@@ -67,11 +67,7 @@ class LeaderboardController extends Controller
             ? $allGroups
                 ->filter(function (CoachGroup $group) use ($usersById): bool {
                     $coachIds = $this->groupCoachIds($group);
-                    $groupCoachIsInCompany = collect($coachIds)->contains(
-                        fn (string $coachId): bool => $usersById->has($coachId),
-                    );
-
-                    if ($groupCoachIsInCompany) {
+                    if (collect($coachIds)->contains(fn (string $coachId): bool => $usersById->has($coachId))) {
                         return true;
                     }
 

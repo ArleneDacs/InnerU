@@ -154,6 +154,30 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_a_coachs_group_still_shows_even_when_it_has_no_members_yet(): void
+    {
+        $company = $this->makeCompany('CompanyA', 'COMPA');
+
+        $coach = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+            'is_coach' => true,
+        ]);
+
+        $this->makeGroup($coach, 'Coach Only Group', []);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertEqualsCanonicalizing(
+            ['Coach Only Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
+    }
+
     public function test_a_company_with_a_future_period_keeps_everyones_scores_at_zero_until_the_start_date(): void
     {
         $company = $this->makeCompany('Future Company', 'FUT001');
