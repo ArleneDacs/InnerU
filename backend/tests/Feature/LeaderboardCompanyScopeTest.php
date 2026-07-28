@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\DailyTracker;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -15,6 +16,12 @@ use Tests\TestCase;
 class LeaderboardCompanyScopeTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow(null);
+        parent::tearDown();
+    }
 
     private function makeCompany(string $name, string $code): Company
     {
@@ -477,6 +484,54 @@ class LeaderboardCompanyScopeTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('company.leaderboardPeriodStart', '2026-08-01');
         $response->assertJsonPath('company.leaderboardPeriodEnd', '2026-12-31');
+
+        foreach ($response->json('companyLeaderboard') as $entry) {
+            $this->assertSame(0.0, (float) $entry['overallScore']);
+        }
+    }
+
+    public function test_a_tracker_row_dated_on_or_after_a_future_period_start_is_still_ignored_until_that_date_actually_arrives(): void
+    {
+        // Regression test: a device with a clock/timezone ahead of the
+        // server (or a manually-entered date) can create a DailyTracker
+        // row dated on/after the period's start date even though "today"
+        // hasn't reached it yet. The whereBetween query in
+        // scoreBreakdownForPeriod would happily match that row -- the
+        // score must stay at 0 until the period has actually started,
+        // regardless of what dates happen to exist in daily_trackers.
+        Carbon::setTestNow('2026-07-29');
+
+        $company = $this->makeCompany('Future Company Two', 'FUT002');
+        $company->update([
+            'leaderboard_period_start' => '2026-08-01',
+            'leaderboard_period_end' => '2026-12-31',
+        ]);
+
+        $user = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-08-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+            'todo_list_score' => 100,
+            'todo_list_included_in_total' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
 
         foreach ($response->json('companyLeaderboard') as $entry) {
             $this->assertSame(0.0, (float) $entry['overallScore']);

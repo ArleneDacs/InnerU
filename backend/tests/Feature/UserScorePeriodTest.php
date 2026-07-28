@@ -8,12 +8,19 @@ use App\Models\Goal;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class UserScorePeriodTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow(null);
+        parent::tearDown();
+    }
 
     private function makeCompanyWithPeriod(string $start, string $end): Company
     {
@@ -74,6 +81,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_only_activity_within_the_period_counts(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-05');
         $user = $this->makeUserInCompany($company);
 
@@ -134,6 +143,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_the_divisor_is_the_full_period_length_not_the_recorded_day_count(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-10');
         $user = $this->makeUserInCompany($company);
 
@@ -171,6 +182,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_goal_score_is_the_latest_within_period_record_not_averaged(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-31');
         $user = $this->makeUserInCompany($company);
 
@@ -198,6 +211,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_a_company_with_a_period_and_zero_records_in_it_scores_zero(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-31');
         $user = $this->makeUserInCompany($company);
 
@@ -225,6 +240,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_batch_resolution_applies_period_scoring_too(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-10');
         $userInPeriod = $this->makeUserInCompany($company);
         $otherCompany = Company::create([
@@ -270,6 +287,8 @@ class UserScorePeriodTest extends TestCase
 
     public function test_a_goal_predating_the_period_does_not_leak_into_the_period_score(): void
     {
+        Carbon::setTestNow('2030-01-01');
+
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-05');
         $user = $this->makeUserInCompany($company);
 

@@ -641,9 +641,29 @@ class UserScoreService
         ?float $goalScore = null
     ): array
     {
+        $today = Carbon::now()->startOfDay();
+        $start = $start->copy()->startOfDay();
+
+        // A period that hasn't started yet must score 0 even if a
+        // DailyTracker row happens to exist dated on/after $start (e.g. a
+        // device clock/timezone ahead of the server) -- the query below
+        // only excludes rows outside [start, end], it doesn't know what
+        // "today" actually is.
+        if ($today->lt($start)) {
+            return [
+                'goalScore' => 0.0,
+                'coreTaskScore' => 0.0,
+                'overallScore' => 0.0,
+            ];
+        }
+
+        // Never count rows dated beyond today, even within an active
+        // period, for the same reason.
+        $queryEnd = $end->copy()->startOfDay()->min($today);
+
         $trackers = DailyTracker::query()
             ->where('user_id', $user->id)
-            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereBetween('date', [$start->toDateString(), $queryEnd->toDateString()])
             ->orderBy('date')
             ->get();
 
