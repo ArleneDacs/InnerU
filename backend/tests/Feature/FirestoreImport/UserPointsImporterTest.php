@@ -99,6 +99,55 @@ class UserPointsImporterTest extends TestCase
         $this->assertNotEmpty($report->skippedRecords());
     }
 
+    public function test_skips_a_record_with_no_userid_field_instead_of_matching_a_null_firebase_uid_user(): void
+    {
+        // Regression test: 417 of 529 real production userpoints documents
+        // have no userId field at all. Eloquent's where('firebase_uid',
+        // null) compiles to "firebase_uid IS NULL", not "no match" - since
+        // firebase_uid is nullable (native registrations since the
+        // 2026-07-21 cutover have no Firebase account), an unguarded lookup
+        // would silently attach this record to an arbitrary NULL-firebase_uid
+        // user instead of skipping or recovering it. This doc id ("x")
+        // doesn't match the {firebaseUid}-{date} recovery pattern, so it
+        // must be skipped, not misattributed.
+        $nativeUser = User::factory()->create(['firebase_uid' => null]);
+
+        File::put("{$this->dir}/userpoints.json", json_encode([
+            ['id' => 'x', 'data' => ['date' => '2025-04-01', 'totalPoints' => 10]],
+        ]));
+
+        $report = new ImportReport();
+        $importer = new UserPointsImporter(new SnapshotReader($this->dir), $report);
+        $importer->import(false);
+
+        $this->assertSame(0, UserPoint::where('user_id', $nativeUser->id)->count());
+        $this->assertSame(0, UserPoint::count());
+        $this->assertNotEmpty($report->skippedRecords());
+    }
+
+    public function test_recovers_the_real_user_from_the_document_id_when_userid_field_is_missing(): void
+    {
+        // Every one of the 417 real documents missing userId has a document
+        // ID matching {firebaseUid}-{date} (e.g.
+        // "1FnRnpxZpMSblary0vBNXHuH1993-2026-07-20"), and 343 of those 417
+        // extracted UIDs are real, existing users - this is how their
+        // "vanished" historical points data is actually recovered, instead
+        // of being permanently skipped.
+        $user = User::factory()->create(['firebase_uid' => 'uid-1']);
+
+        File::put("{$this->dir}/userpoints.json", json_encode([
+            ['id' => 'uid-1-2025-04-01', 'data' => ['date' => '2025-04-01', 'username' => 'Jane', 'totalPoints' => 42]],
+        ]));
+
+        $importer = new UserPointsImporter(new SnapshotReader($this->dir), new ImportReport());
+        $importer->import(false);
+
+        $record = UserPoint::where('user_id', $user->id)->where('date', '2025-04-01')->first();
+        $this->assertNotNull($record);
+        $this->assertSame('Jane', $record->username);
+        $this->assertEqualsWithDelta(42.0, (float) $record->total_points, 0.001);
+    }
+
     public function test_rounds_fractional_values_for_integer_columns_instead_of_failing(): void
     {
         // Regression test: a real production userpoints record had

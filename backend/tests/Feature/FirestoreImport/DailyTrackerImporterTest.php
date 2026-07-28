@@ -114,6 +114,29 @@ class DailyTrackerImporterTest extends TestCase
         $this->assertNotEmpty($report->skippedRecords());
     }
 
+    public function test_recovers_the_real_user_from_the_document_id_when_userid_field_is_missing(): void
+    {
+        // Every one of the 97 real documents missing userId has a document
+        // ID matching {firebaseUid}-{date} (e.g.
+        // "0VjOoCOi7CcEydz07KmWoTiDoeX2-2026-07-21"), and 79 of those 97
+        // extracted UIDs are real, existing users - this is how their
+        // "vanished" historical data is actually recovered, instead of
+        // being permanently skipped.
+        $user = User::factory()->create(['firebase_uid' => 'uid-1']);
+
+        File::put("{$this->dir}/dailytracker.json", json_encode([
+            ['id' => 'uid-1-2025-03-01', 'data' => ['date' => '2025-03-01', 'stepCount' => 500, 'call' => true]],
+        ]));
+
+        $importer = new DailyTrackerImporter(new SnapshotReader($this->dir), new ImportReport());
+        $importer->import(false);
+
+        $record = DailyTracker::where('user_id', $user->id)->where('date', '2025-03-01')->first();
+        $this->assertNotNull($record);
+        $this->assertSame(500, $record->step_count);
+        $this->assertTrue($record->call);
+    }
+
     public function test_never_overwrites_an_existing_row_for_the_same_user_and_date(): void
     {
         // daily_trackers has a live production writer (DailyTrackerController)

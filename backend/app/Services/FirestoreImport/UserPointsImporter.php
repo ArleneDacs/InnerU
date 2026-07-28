@@ -6,13 +6,16 @@ namespace App\Services\FirestoreImport;
 use App\Models\User;
 use App\Models\UserPoint;
 
-// Field mapping below is an unverified hypothesis, not a confirmed fact: no
-// Dart code in the live app reads Firestore `userpoints` fields back (the
-// only real interaction is a blind `username` rewrite on account rename),
-// so these names are inferred from the current Postgres schema and the
-// current API's upsert payload shape. Confirm against a real exported
-// snapshot (scripts/firestore-export/snapshot/userpoints.json) before
-// trusting this mapping in production.
+// Field mapping confirmed against the real production export (529
+// documents): every field this class reads (userId, date, username,
+// totalPoints, activityPoints, dailyTrackerScore, todoListScore,
+// todoListScoreDailyContribution, todoListIncludedInTotal, userTotalScore,
+// taskPoints, tasks, server, companyId, companyCode, companyName,
+// activityCounts) is present in real data with no naming mismatches.
+// activeCompanyId/activeCompanyCode/activeCompanyName also appear
+// alongside companyId/companyCode/companyName (same pattern confirmed on
+// the sibling `dailytracker` collection); reading only the plain company*
+// fields loses no data.
 class UserPointsImporter
 {
     public function __construct(
@@ -30,9 +33,29 @@ class UserPointsImporter
 
     private function importRecord(string $firestoreId, array $data): void
     {
-        $userId = User::where('firebase_uid', $data['userId'] ?? null)->value('id');
+        // 417 of 529 real documents have no userId field at all - but every
+        // one of those document IDs matches the {firebaseUid}-{date}
+        // pattern the old app wrote (e.g. "1FnRnpxZpMSblary0vBNXHuH1993-
+        // 2026-07-20"), and 343 of the 417 extracted UIDs are real, existing
+        // users. Recovering the UID from the doc ID (rather than treating a
+        // missing field as "no match") is what actually restores this data
+        // for those users. This also fixes a real bug: Eloquent's
+        // where('firebase_uid', null) compiles to "firebase_uid IS NULL",
+        // not "no match" - since firebase_uid is nullable (native
+        // registrations since the 2026-07-21 cutover have no Firebase
+        // account), the previous unguarded lookup could silently attach a
+        // record to an arbitrary NULL-firebase_uid user instead of
+        // recovering or skipping it.
+        $firebaseUid = $data['userId'] ?? self::extractUidFromDocId($firestoreId);
         $date = $data['date'] ?? null;
-        if ($userId === null || $date === null) {
+        if ($firebaseUid === null || $date === null) {
+            $this->report->skip('user_points', $firestoreId, 'missing matching user or date');
+
+            return;
+        }
+
+        $userId = User::where('firebase_uid', $firebaseUid)->value('id');
+        if ($userId === null) {
             $this->report->skip('user_points', $firestoreId, 'missing matching user or date');
 
             return;
@@ -70,5 +93,15 @@ class UserPointsImporter
         $record->save();
 
         $this->report->increment('user_points', $record->wasRecentlyCreated ? 'created' : 'updated');
+    }
+
+    // Firebase UIDs are always 28 alphanumeric characters, never containing
+    // a hyphen (verified against all 188 real users in the production
+    // export), so splitting on the trailing "-YYYY-MM-DD" is unambiguous.
+    private static function extractUidFromDocId(string $firestoreId): ?string
+    {
+        return preg_match('/^(.+)-\d{4}-\d{2}-\d{2}$/', $firestoreId, $matches) === 1
+            ? $matches[1]
+            : null;
     }
 }

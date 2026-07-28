@@ -37,14 +37,20 @@ class DailyTrackerImporter
 
     private function importRecord(string $firestoreId, array $data): void
     {
-        // 97 of 634 real documents have no userId field at all. Guard for
-        // that explicitly before querying: Eloquent's where('firebase_uid',
-        // null) compiles to "firebase_uid IS NULL", not "no match" - since
+        // 97 of 634 real documents have no userId field at all - but every
+        // one of those document IDs matches the {firebaseUid}-{date}
+        // pattern the old app wrote (e.g. "0VjOoCOi7CcEydz07KmWoTiDoeX2-
+        // 2026-07-21"), and 79 of the 97 extracted UIDs are real, existing
+        // users. Recovering the UID from the doc ID (rather than skipping)
+        // is what actually restores this data for those users, instead of
+        // leaving it permanently missing. Guarding this explicitly also
+        // matters for correctness: Eloquent's where('firebase_uid', null)
+        // compiles to "firebase_uid IS NULL", not "no match" - since
         // firebase_uid is nullable (native registrations since the
         // 2026-07-21 cutover have no Firebase account), an unguarded lookup
-        // would silently attach this record to an arbitrary NULL-firebase_uid
-        // user instead of skipping it.
-        $firebaseUid = $data['userId'] ?? null;
+        // with no fallback would silently attach the record to an arbitrary
+        // NULL-firebase_uid user instead of skipping or recovering it.
+        $firebaseUid = $data['userId'] ?? self::extractUidFromDocId($firestoreId);
         // Matches the old Dart code's _resolveTrackerDate fallback order
         // exactly: lastUpdated takes priority over date.
         $date = $data['lastUpdated'] ?? $data['date'] ?? null;
@@ -102,5 +108,15 @@ class DailyTrackerImporter
         $record->save();
 
         $this->report->increment('daily_trackers', 'created');
+    }
+
+    // Firebase UIDs are always 28 alphanumeric characters, never containing
+    // a hyphen (verified against all 188 real users in the production
+    // export), so splitting on the trailing "-YYYY-MM-DD" is unambiguous.
+    private static function extractUidFromDocId(string $firestoreId): ?string
+    {
+        return preg_match('/^(.+)-\d{4}-\d{2}-\d{2}$/', $firestoreId, $matches) === 1
+            ? $matches[1]
+            : null;
     }
 }
