@@ -41,7 +41,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
     }
 
-    public function test_a_user_with_no_resolvable_company_only_sees_themselves_but_falls_back_to_all_groups(): void
+    public function test_a_user_with_no_resolvable_company_only_sees_themselves_and_no_groups(): void
     {
         $companyA = $this->makeCompany('CompanyA', 'COMPA');
         $companyB = $this->makeCompany('CompanyB', 'COMPB');
@@ -78,13 +78,7 @@ class LeaderboardCompanyScopeTest extends TestCase
             [(string) $blankCoach->id],
             collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
         );
-        // No company to scope by -- per spec, fall back to showing every
-        // group rather than an empty tab. Users/scores stay strictly
-        // scoped (asserted above); only groups get this fallback.
-        $this->assertEqualsCanonicalizing(
-            ['Alpha Group', 'Beta Group'],
-            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
-        );
+        $this->assertSame([], $response->json('groupLeaderboards'));
     }
 
     public function test_a_user_with_a_company_sees_only_their_companys_users_and_groups(): void
@@ -218,7 +212,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
-    public function test_groups_fall_back_to_showing_everyone_when_none_match_the_viewers_company(): void
+    public function test_groups_stay_empty_when_none_match_the_viewers_company_no_fallback(): void
     {
         $viewerCompany = $this->makeCompany('ViewerCo', 'VIEWCO');
         $otherCompany = $this->makeCompany('OtherCo', 'OTHERCO');
@@ -230,7 +224,9 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
 
         // Every existing group belongs to a DIFFERENT company than the
-        // viewer -- none should match, so the fallback should kick in.
+        // viewer -- none should match, and none should leak in as a
+        // fallback either. Groups are scoped exactly like users: strict,
+        // no "show everything" exception.
         $otherCoach = User::factory()->create([
             'company_id' => $otherCompany->id,
             'company_code' => $otherCompany->code,
@@ -244,10 +240,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         $response = $this->getJson('/api/leaderboard');
 
         $response->assertOk();
-        $this->assertEqualsCanonicalizing(
-            ['Other Group'],
-            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
-        );
+        $this->assertSame([], $response->json('groupLeaderboards'));
     }
 
     public function test_a_company_with_a_future_period_keeps_everyones_scores_at_zero_until_the_start_date(): void
