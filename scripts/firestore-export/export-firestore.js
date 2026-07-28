@@ -28,6 +28,7 @@ const TOP_LEVEL_COLLECTIONS = [
   'goals',
   'notes',
   'userpoints',
+  'dailytracker',
 ];
 
 const COLLECTION_GROUPS = ['tasks', 'updates', 'comments', 'merits', 'wellness', 'history'];
