@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\LeaderboardController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProfileController;
 use Illuminate\Support\Facades\Route;
 
@@ -143,4 +144,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/coach/requests', [CoachManagementController::class, 'storeRequest']);
     Route::patch('/coach/requests/{requestId}/accept', [CoachManagementController::class, 'acceptRequest']);
     Route::patch('/coach/requests/{requestId}/decline', [CoachManagementController::class, 'declineRequest']);
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+    Route::post('/notifications/streak', [NotificationController::class, 'store']);
 });

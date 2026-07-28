@@ -18,6 +18,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/dashboard/e
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
@@ -28,6 +29,7 @@ import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
+import 'package:selfcare_projects/src/services/notification_api_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -957,6 +959,58 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     );
   }
 
+  Widget _buildNotificationAction() {
+    return StreamBuilder<Map<String, dynamic>>(
+      stream: NotificationApiService.instance.watchNotifications(),
+      builder: (context, snapshot) {
+        final unreadCountRaw = snapshot.data?['unreadCount'];
+        final unreadCount = unreadCountRaw is int ? unreadCountRaw : 0;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              color: _companyTheme.iconColor,
+              icon: const Icon(CupertinoIcons.bell, size: 24),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        NotificationsScreen(userId: _userId),
+                  ),
+                );
+              },
+            ),
+            if (unreadCount > 0)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE56B6F),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   num _scoreFromUserPointData(Map<String, dynamic>? data) {
     return DailyScoreService.resolveDisplayTotalPoints(data);
   }
@@ -1119,6 +1173,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 ),
                 actions: [
                   _buildInboxAction(),
+                  _buildNotificationAction(),
                   Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: IconButton(
@@ -4016,7 +4071,7 @@ class CoachGroupCustomizationPage extends StatelessWidget {
     return summaries;
   }
 
-  Widget _buildEmptyGroupsCard(BuildContext context) {
+  Widget _buildEmptyGroupsCard(BuildContext context, {VoidCallback? onCreated}) {
     final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(22),
@@ -4052,7 +4107,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           ElevatedButton.icon(
-            onPressed: () => _showCreateGroupDialog(context),
+            onPressed: () =>
+                _showCreateGroupDialog(context).then((_) => onCreated?.call()),
             icon: const Icon(CupertinoIcons.plus),
             label: const Text('Create group'),
           ),
@@ -4545,21 +4601,26 @@ class _CoachGroupCustomizationBodyState
               ),
               const SizedBox(height: 16),
               if (sortedByName.isEmpty)
-                page._buildEmptyGroupsCard(context)
+                page._buildEmptyGroupsCard(context, onCreated: _refresh)
               else
                 ...sortedByName.map(
                   (summary) => _CoachApiGroupCard(
                     summary: summary,
                     onAddCoach: () =>
-                        page._showAddCoachDialog(context, summary),
-                    onAddMentee: () =>
-                        page._showAddMenteeToGroupDialog(context, summary),
-                    onDelete: () => page._confirmDeleteGroup(
-                      context: context,
-                      groupId: summary.groupId,
-                      groupName: summary.groupName,
-                      memberIds: summary.memberIds,
-                    ),
+                        page._showAddCoachDialog(context, summary).then(
+                              (_) => _refresh(),
+                            ),
+                    onAddMentee: () => page
+                        ._showAddMenteeToGroupDialog(context, summary)
+                        .then((_) => _refresh()),
+                    onDelete: () => page
+                        ._confirmDeleteGroup(
+                          context: context,
+                          groupId: summary.groupId,
+                          groupName: summary.groupName,
+                          memberIds: summary.memberIds,
+                        )
+                        .then((_) => _refresh()),
                   ),
                 ),
             ],
@@ -4575,21 +4636,26 @@ class _CoachGroupCustomizationBodyState
               ),
               const SizedBox(height: 16),
               if (summaries.isEmpty)
-                page._buildEmptyGroupsCard(context)
+                page._buildEmptyGroupsCard(context, onCreated: _refresh)
               else
                 ...summaries.map(
                   (summary) => _CoachApiGroupCard(
                     summary: summary,
                     onAddCoach: () =>
-                        page._showAddCoachDialog(context, summary),
-                    onAddMentee: () =>
-                        page._showAddMenteeToGroupDialog(context, summary),
-                    onDelete: () => page._confirmDeleteGroup(
-                      context: context,
-                      groupId: summary.groupId,
-                      groupName: summary.groupName,
-                      memberIds: summary.memberIds,
-                    ),
+                        page._showAddCoachDialog(context, summary).then(
+                              (_) => _refresh(),
+                            ),
+                    onAddMentee: () => page
+                        ._showAddMenteeToGroupDialog(context, summary)
+                        .then((_) => _refresh()),
+                    onDelete: () => page
+                        ._confirmDeleteGroup(
+                          context: context,
+                          groupId: summary.groupId,
+                          groupName: summary.groupName,
+                          memberIds: summary.memberIds,
+                        )
+                        .then((_) => _refresh()),
                   ),
                 ),
             ],
@@ -4614,7 +4680,10 @@ class _CoachGroupCustomizationBodyState
             ),
             actions: [
               IconButton(
-                onPressed: () => page._showCreateGroupDialog(context),
+                onPressed: () =>
+                    page._showCreateGroupDialog(context).then(
+                          (_) => _refresh(),
+                        ),
                 icon: const Icon(CupertinoIcons.plus),
               ),
             ],
@@ -5390,7 +5459,14 @@ class CoachManageMenteesPage extends StatelessWidget {
                               final email =
                                   (user['email'] as String?)?.toLowerCase() ??
                                       '';
+                              final isCoach = user['isCoach'] == true ||
+                                  ((user['role'] as String?)?.toLowerCase() ==
+                                      'coach');
+                              final isMyAcceptedMentee =
+                                  user['assignedToMe'] == true;
                               return userId != currentUserId &&
+                                  !isCoach &&
+                                  isMyAcceptedMentee &&
                                   (query.isEmpty ||
                                       username.contains(query) ||
                                       email.contains(query));
@@ -5605,7 +5681,14 @@ class CoachManageMenteesPage extends StatelessWidget {
                             final email =
                                 (user['email'] as String?)?.toLowerCase() ??
                                     '';
+                            final isCoach = user['isCoach'] == true ||
+                                ((user['role'] as String?)?.toLowerCase() ==
+                                    'coach');
+                            final isMyAcceptedMentee =
+                                user['assignedToMe'] == true;
                             return userId != currentUserId &&
+                                !isCoach &&
+                                isMyAcceptedMentee &&
                                 (query.isEmpty ||
                                     username.contains(query) ||
                                     email.contains(query));
@@ -5786,16 +5869,8 @@ class CoachManageMenteesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final autoRefresh = Stream<int>.periodic(
-      const Duration(seconds: 20),
-      (tick) => tick,
-    );
-    return StreamBuilder<int>(
-      stream: autoRefresh,
-      initialData: 0,
-      builder: (context, _) {
-        return CompanyThemeBuilder(
-          builder: (context, companyTheme) {
+    return CompanyThemeBuilder(
+      builder: (context, companyTheme) {
         return Theme(
           data: AppTheme.company(companyTheme),
           child: Scaffold(
@@ -5815,18 +5890,21 @@ class CoachManageMenteesPage extends StatelessWidget {
                 ),
               ],
             ),
-            body: FutureBuilder<List<dynamic>>(
-              future: Future.wait<dynamic>([
-                CoachApiService.instance.fetchRequests(),
-                CoachApiService.instance.fetchGroups(),
-                CoachApiService.instance.fetchLeaderboard(),
-              ]),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+            body: _ManageMenteesDataScope(
+              builder: (
+                context, {
+                required requests,
+                required groups,
+                required leaderboardPayload,
+                required isLoading,
+                required hasError,
+                required refresh,
+              }) {
+                if (isLoading) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (snapshot.hasError) {
+                if (hasError) {
                   return Center(
                     child: Text(
                       'Could not load mentee data.',
@@ -5835,18 +5913,6 @@ class CoachManageMenteesPage extends StatelessWidget {
                   );
                 }
 
-                final requests = (snapshot.data?[0] as List?)
-                        ?.whereType<Map>()
-                        .map((item) => Map<String, dynamic>.from(item))
-                        .toList() ??
-                    const <Map<String, dynamic>>[];
-                final groups = (snapshot.data?[1] as List?)
-                        ?.whereType<Map>()
-                        .map((item) => Map<String, dynamic>.from(item))
-                        .toList() ??
-                    const <Map<String, dynamic>>[];
-                final leaderboardPayload =
-                    Map<String, dynamic>.from(snapshot.data?[2] as Map? ?? {});
                 final mentees = (leaderboardPayload['menteeEntries'] as List?)
                         ?.whereType<Map>()
                         .map((item) => Map<String, dynamic>.from(item))
@@ -5866,6 +5932,7 @@ class CoachManageMenteesPage extends StatelessWidget {
                       teamName: teamName,
                       onAcceptRequest: onAcceptRequest,
                       onDeclineRequest: onDeclineRequest,
+                      onAccepted: refresh,
                     ),
                     const SizedBox(height: 12),
                     if (groups.isNotEmpty) ...[
@@ -6137,9 +6204,106 @@ class CoachManageMenteesPage extends StatelessWidget {
             ),
           ),
         );
-          },
-        );
       },
+    );
+  }
+}
+
+// Owns the "manage mentees" data fetch/refresh lifecycle so the page can
+// poll for updates without recreating its Future (and blanking to a
+// spinner) on every rebuild the way a bare Stream.periodic + inline
+// Future.wait did before. Only the very first load shows a spinner;
+// later ticks - and the immediate refresh() call fired right after a
+// mentee is accepted - swap in fresh data silently.
+class _ManageMenteesDataScope extends StatefulWidget {
+  const _ManageMenteesDataScope({required this.builder});
+
+  final Widget Function(
+    BuildContext context, {
+    required List<Map<String, dynamic>> requests,
+    required List<Map<String, dynamic>> groups,
+    required Map<String, dynamic> leaderboardPayload,
+    required bool isLoading,
+    required bool hasError,
+    required VoidCallback refresh,
+  }) builder;
+
+  @override
+  State<_ManageMenteesDataScope> createState() =>
+      _ManageMenteesDataScopeState();
+}
+
+class _ManageMenteesDataScopeState extends State<_ManageMenteesDataScope> {
+  List<Map<String, dynamic>>? _requests;
+  List<Map<String, dynamic>>? _groups;
+  Map<String, dynamic>? _leaderboardPayload;
+  bool _isLoading = true;
+  bool _hasError = false;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final results = await Future.wait<dynamic>([
+        CoachApiService.instance.fetchRequests(),
+        CoachApiService.instance.fetchGroups(),
+        CoachApiService.instance.fetchLeaderboard(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _requests = (results[0] as List?)
+                ?.whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList() ??
+            const <Map<String, dynamic>>[];
+        _groups = (results[1] as List?)
+                ?.whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList() ??
+            const <Map<String, dynamic>>[];
+        _leaderboardPayload =
+            Map<String, dynamic>.from(results[2] as Map? ?? {});
+        _hasError = false;
+        _isLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Failed to refresh manage-mentees data: $error');
+      if (!mounted) return;
+      // Only surface an error before the first successful load; a
+      // background refresh failure just keeps showing the last-good data.
+      if (_requests == null) {
+        setState(() {
+          _hasError = true;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(
+      context,
+      requests: _requests ?? const <Map<String, dynamic>>[],
+      groups: _groups ?? const <Map<String, dynamic>>[],
+      leaderboardPayload: _leaderboardPayload ?? const <String, dynamic>{},
+      isLoading: _isLoading,
+      hasError: _hasError,
+      refresh: _refresh,
     );
   }
 }
@@ -6152,6 +6316,7 @@ class CoachPendingApplicationsSection extends StatefulWidget {
     required this.teamName,
     required this.onAcceptRequest,
     required this.onDeclineRequest,
+    this.onAccepted,
   });
 
   final List<Map<String, dynamic>> initialRequests;
@@ -6165,6 +6330,12 @@ class CoachPendingApplicationsSection extends StatefulWidget {
     String? groupName,
   }) onAcceptRequest;
   final Future<void> Function(String requestId) onDeclineRequest;
+  // Called after a request has been accepted and this section has
+  // refreshed its own pending list, so the parent page can immediately
+  // refetch the accepted-mentees list instead of waiting for its next
+  // periodic refresh (previously the new mentee wouldn't show up until
+  // the coach navigated away and back).
+  final VoidCallback? onAccepted;
 
   @override
   State<CoachPendingApplicationsSection> createState() =>
@@ -6262,6 +6433,7 @@ class _CoachPendingApplicationsSectionState
         _hiddenRequestIds.add(requestId);
       });
       await _refreshRequests();
+      widget.onAccepted?.call();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -6433,22 +6605,8 @@ class _CoachPendingApplicationsSectionState
           (status == null || status == 'pending');
     }).toList();
 
-    if (visibleRequests.isEmpty && _requests.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
     if (visibleRequests.isEmpty) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFFE7E9E2)),
-        ),
-        child: const Text('No pending applications right now.'),
-      );
+      return const SizedBox.shrink();
     }
 
     return Column(
@@ -6548,8 +6706,6 @@ class CoachMenteeActivityCalendarPage extends StatefulWidget {
 
 class _CoachMenteeActivityCalendarPageState
     extends State<CoachMenteeActivityCalendarPage> {
-  Timer? _refreshTimer;
-
   DateTime _normalizeDate(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
@@ -6581,21 +6737,6 @@ class _CoachMenteeActivityCalendarPageState
       } catch (_) {}
     }
     return trackers;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (!mounted) return;
-      setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _refreshTimer?.cancel();
-    super.dispose();
   }
 
   Widget _buildActivityLegend() {
@@ -6710,7 +6851,6 @@ class _CoachMenteeActivityCalendarPageState
   Widget build(BuildContext context) {
     return CompanyThemeBuilder(
       builder: (context, companyTheme) {
-        final menteesFuture = CoachApiService.instance.fetchMentees();
         return Theme(
           data: AppTheme.company(companyTheme),
           child: Scaffold(
@@ -6724,15 +6864,27 @@ class _CoachMenteeActivityCalendarPageState
                 style: TextStyle(color: companyTheme.inkColor),
               ),
             ),
-            body: FutureBuilder<List<Map<String, dynamic>>>(
-              future: menteesFuture,
-              builder: (context, menteeSnapshot) {
-                if (menteeSnapshot.connectionState == ConnectionState.waiting) {
+            body: _MenteeActivityDataScope(
+              builder: (
+                context, {
+                required mentees,
+                required menteeTrackers,
+                required isLoading,
+                required hasError,
+              }) {
+                if (isLoading) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final mentees =
-                    menteeSnapshot.data ?? const <Map<String, dynamic>>[];
+                if (hasError) {
+                  return Center(
+                    child: Text(
+                      'Could not load mentee activity.',
+                      style: TextStyle(color: companyTheme.mutedInkColor),
+                    ),
+                  );
+                }
+
                 if (mentees.isEmpty) {
                   return Center(
                     child: Text(
@@ -6742,35 +6894,17 @@ class _CoachMenteeActivityCalendarPageState
                   );
                 }
 
-                return FutureBuilder<List<List<Map<String, dynamic>>>>(
-                  future: Future.wait(
-                    mentees.map((mentee) {
-                      return CoachApiService.instance.fetchMenteeTrackers(
-                        (mentee['menteeId'] as String?)?.trim() ?? '',
-                      );
-                    }),
-                  ),
-                  builder: (context, trackerSnapshot) {
-                    if (trackerSnapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    final trackerLists = trackerSnapshot.data ??
-                        const <List<Map<String, dynamic>>>[];
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: mentees.length,
-                      itemBuilder: (context, index) {
-                        final mentee = mentees[index];
-                        final menteeTrackers = index < trackerLists.length
-                            ? trackerLists[index]
-                            : const <Map<String, dynamic>>[];
-                        return _buildMenteeCalendarCard(
-                          mentee,
-                          menteeTrackers,
-                        );
-                      },
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: mentees.length,
+                  itemBuilder: (context, index) {
+                    final mentee = mentees[index];
+                    final trackersForMentee = index < menteeTrackers.length
+                        ? menteeTrackers[index]
+                        : const <Map<String, dynamic>>[];
+                    return _buildMenteeCalendarCard(
+                      mentee,
+                      trackersForMentee,
                     );
                   },
                 );
@@ -6779,6 +6913,97 @@ class _CoachMenteeActivityCalendarPageState
           ),
         );
       },
+    );
+  }
+}
+
+// Owns the mentees + per-mentee tracker fetch/refresh lifecycle. Previously
+// a bare Timer.periodic called setState() with no payload, forcing build()
+// to recreate both the mentees Future and the nested per-mentee trackers
+// Future.wait every 20s - flashing the whole list (and every mentee's
+// scroll position) to a spinner and back on a timer, even when nothing had
+// actually changed. Real state + "spinner only before the first load"
+// fixes that, matching the pattern already used for Manage Groups/Mentees.
+class _MenteeActivityDataScope extends StatefulWidget {
+  const _MenteeActivityDataScope({required this.builder});
+
+  final Widget Function(
+    BuildContext context, {
+    required List<Map<String, dynamic>> mentees,
+    required List<List<Map<String, dynamic>>> menteeTrackers,
+    required bool isLoading,
+    required bool hasError,
+  }) builder;
+
+  @override
+  State<_MenteeActivityDataScope> createState() =>
+      _MenteeActivityDataScopeState();
+}
+
+class _MenteeActivityDataScopeState extends State<_MenteeActivityDataScope> {
+  List<Map<String, dynamic>>? _mentees;
+  List<List<Map<String, dynamic>>>? _menteeTrackers;
+  bool _isLoading = true;
+  bool _hasError = false;
+  Timer? _refreshTimer;
+  bool _isRefreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final mentees = await CoachApiService.instance.fetchMentees();
+      final trackers = await Future.wait(
+        mentees.map((mentee) {
+          return CoachApiService.instance.fetchMenteeTrackers(
+            (mentee['menteeId'] as String?)?.trim() ?? '',
+          );
+        }),
+      );
+      if (!mounted) return;
+      setState(() {
+        _mentees = mentees;
+        _menteeTrackers = trackers;
+        _hasError = false;
+        _isLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Failed to refresh mentee activity data: $error');
+      if (!mounted) return;
+      if (_mentees == null) {
+        setState(() {
+          _hasError = true;
+          _isLoading = false;
+        });
+      }
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(
+      context,
+      mentees: _mentees ?? const <Map<String, dynamic>>[],
+      menteeTrackers: _menteeTrackers ?? const <List<Map<String, dynamic>>>[],
+      isLoading: _isLoading,
+      hasError: _hasError,
     );
   }
 }
@@ -6802,6 +7027,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   late DateTime _focusedDay;
   late DateTime _selectedDay;
   List<Map<String, dynamic>>? _goals;
+  bool _recentLogsExpanded = false;
 
   @override
   void initState() {
@@ -6991,6 +7217,109 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     }
   }
 
+  Widget _buildProgressOverview() {
+    final colors = Theme.of(context).colorScheme;
+    final goals = _goals ?? const <Map<String, dynamic>>[];
+    final completedGoals = goals.where((goal) {
+      final status = (goal['status'] as String?)?.trim().toLowerCase() ?? '';
+      final progress =
+          ((goal['progress'] as num?)?.toInt() ?? 0).clamp(0, 100);
+      return status == 'completed' || progress >= 100;
+    }).length;
+    final goalsPercent =
+        goals.isEmpty ? null : (completedGoals / goals.length * 100).round();
+
+    final trackerMap = _buildTrackerMap();
+    final latestTracker = trackerMap.entries.isEmpty
+        ? null
+        : (trackerMap.entries.toList()
+              ..sort((a, b) => b.key.compareTo(a.key)))
+            .first
+            .value;
+    final trackerPercent = latestTracker == null
+        ? null
+        : (_completedCount(latestTracker) / 5 * 100).round();
+
+    if (goalsPercent == null && trackerPercent == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Row(
+      children: [
+        if (goalsPercent != null)
+          Expanded(
+            child: _buildOverviewStat(
+              label: 'Goals completed',
+              percent: goalsPercent,
+              color: colors.primary,
+            ),
+          ),
+        if (goalsPercent != null && trackerPercent != null)
+          const SizedBox(width: 10),
+        if (trackerPercent != null)
+          Expanded(
+            child: _buildOverviewStat(
+              label: "Latest daily tracker",
+              percent: trackerPercent,
+              color: colors.secondary,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewStat({
+    required String label,
+    required int percent,
+    required Color color,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: colors.onSurface.withValues(alpha: 0.68),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: percent / 100,
+                    minHeight: 6,
+                    backgroundColor: colors.onSurface.withValues(alpha: 0.12),
+                    color: color,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '$percent%',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: colors.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGoalsSection() {
     final colors = Theme.of(context).colorScheme;
     final goals = _goals ?? const <Map<String, dynamic>>[];
@@ -7088,90 +7417,114 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
-        Text(
-          'Recent activity logs',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            color: colors.onSurface,
-          ),
-        ),
-        const SizedBox(height: 10),
-        ...visibleLogs.map((tracker) {
-          final logDate = _trackerDate(tracker);
-          final completedCount = _completedCount(tracker);
-          final tasks = _activityMap(tracker);
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerHighest.withValues(alpha: 0.38),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: colors.primary.withValues(alpha: 0.08),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => setState(() {
+            _recentLogsExpanded = !_recentLogsExpanded;
+          }),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        logDate == null
-                            ? 'Unknown date'
-                            : DateFormat.yMMMd().format(logDate),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: colors.onSurface,
-                        ),
-                      ),
+                Expanded(
+                  child: Text(
+                    'Recent activity logs (${visibleLogs.length})',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: colors.onSurface,
                     ),
-                    Text(
-                      '$completedCount/5 done',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: colors.onSurface.withValues(alpha: 0.72),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: tasks.entries.map((entry) {
-                    final isDone = entry.value;
-                    final detail = isDone
-                        ? _doneDetailLabel(tracker, entry.key)
-                        : 'Pending';
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDone
-                            ? colors.primary.withValues(alpha: 0.14)
-                            : colors.surface.withValues(alpha: 0.72),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${entry.key}: $detail',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: colors.onSurface,
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                Icon(
+                  _recentLogsExpanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  size: 18,
+                  color: colors.onSurface.withValues(alpha: 0.68),
                 ),
               ],
             ),
-          );
-        }),
+          ),
+        ),
+        if (_recentLogsExpanded) ...[
+          const SizedBox(height: 6),
+          ...visibleLogs.map((tracker) {
+            final logDate = _trackerDate(tracker);
+            final completedCount = _completedCount(tracker);
+            final tasks = _activityMap(tracker);
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerHighest.withValues(alpha: 0.38),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          logDate == null
+                              ? 'Unknown date'
+                              : DateFormat.yMMMd().format(logDate),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: colors.onSurface,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$completedCount/5 done',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: colors.onSurface.withValues(alpha: 0.72),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: tasks.entries.map((entry) {
+                      final isDone = entry.value;
+                      final detail = isDone
+                          ? _doneDetailLabel(tracker, entry.key)
+                          : 'Pending';
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDone
+                              ? colors.primary.withValues(alpha: 0.14)
+                              : colors.surface.withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${entry.key}: $detail',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: colors.onSurface,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ],
     );
   }
@@ -7312,6 +7665,8 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
               ),
             ],
           ),
+          const SizedBox(height: 14),
+          _buildProgressOverview(),
           if (_goals != null && _goals!.isNotEmpty) ...[
             const SizedBox(height: 14),
             _buildGoalsSection(),

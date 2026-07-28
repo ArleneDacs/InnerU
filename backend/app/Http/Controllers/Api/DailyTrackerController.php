@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\DailyTracker;
+use App\Models\Notification;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
@@ -307,6 +308,26 @@ class DailyTrackerController extends Controller
             ])->save();
         } catch (\Throwable $throwable) {
             report($throwable);
+        }
+
+        // Throttled: only notify on the first tracker row for this
+        // user+date, not on every subsequent field edit within the same
+        // day (upsert is called repeatedly as the mentee checks off
+        // individual tasks).
+        if ($existingTracker === null) {
+            foreach (CoachMentee::coachIdsForMentee((string) $user->id) as $coachId) {
+                Notification::createFor(
+                    $coachId,
+                    'mentee_progress_logged',
+                    sprintf('%s logged today\'s tracker', $user->name),
+                    null,
+                    [
+                        'menteeId' => (string) $user->id,
+                        'trackerId' => (string) $tracker->id,
+                        'date' => $date,
+                    ],
+                );
+            }
         }
 
         return response()->json([

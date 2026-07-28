@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/notification_api_service.dart';
 
 enum ActivityStreakType {
   meditation,
@@ -298,6 +301,18 @@ class ActivityStreakService {
       _backendFieldName(lastDateField): todayKey,
       _backendFieldName(rewardsField): rewards,
     });
+
+    for (final milestone in unlockedNow) {
+      unawaited(
+        NotificationApiService.instance
+            .reportStreakMilestone(
+              milestone: milestone.title,
+              days: milestone.days,
+              activity: type.label,
+            )
+            .catchError((_) {}),
+      );
+    }
 
     return unlockedNow;
   }

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\CoachMentee;
+use App\Models\Notification;
 use App\Models\TodoTask;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -91,6 +93,8 @@ class TodoTaskController extends Controller
             'sub_tasks' => ['nullable', 'array'],
         ]);
 
+        $wasCompleted = (bool) $todoTask->is_completed;
+
         if (array_key_exists('title', $validated)) {
             $todoTask->title = $validated['title'];
         }
@@ -121,6 +125,23 @@ class TodoTaskController extends Controller
         }
 
         $todoTask->save();
+
+        // Throttled: only on the NOT completed -> completed transition, not
+        // on every other edit and not when un-completing.
+        if (! $wasCompleted && $todoTask->is_completed) {
+            foreach (CoachMentee::coachIdsForMentee((string) $user->id) as $coachId) {
+                Notification::createFor(
+                    $coachId,
+                    'mentee_progress_logged',
+                    sprintf('%s completed a todo task', $user->name),
+                    $todoTask->title,
+                    [
+                        'menteeId' => (string) $user->id,
+                        'todoTaskId' => (string) $todoTask->id,
+                    ],
+                );
+            }
+        }
 
         return response()->json(['task' => $this->payload($todoTask->refresh())]);
     }

@@ -36,7 +36,7 @@ class _CoachCarouselState extends State<CoachCarousel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: 260,
+          height: 210,
           child: PageView.builder(
             controller: _pageController,
             // Without this, PageView reserves symmetric leading/trailing

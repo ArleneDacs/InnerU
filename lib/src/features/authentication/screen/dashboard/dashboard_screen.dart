@@ -17,6 +17,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/exercise/ex
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
@@ -30,6 +31,7 @@ import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
+import 'package:selfcare_projects/src/services/notification_api_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1173,6 +1175,63 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildNotificationAction() {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<Map<String, dynamic>>(
+      stream: NotificationApiService.instance.watchNotifications(),
+      builder: (context, snapshot) {
+        final unreadCountRaw = snapshot.data?['unreadCount'];
+        final unreadCount = unreadCountRaw is int ? unreadCountRaw : 0;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              icon: const Icon(CupertinoIcons.bell, size: 24),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => NotificationsScreen(
+                      userId: session.id.toString(),
+                    ),
+                  ),
+                );
+              },
+            ),
+            if (unreadCount > 0)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE56B6F),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildProfileAndPoints(BuildContext context) {
     final theme = _companyTheme;
     final session = AuthService.instance.currentSession;
@@ -1295,6 +1354,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         actions: [
           _buildInboxAction(),
+          _buildNotificationAction(),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: IconButton(
@@ -2639,6 +2699,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 4),
                     Text(
                       coach.bio.isEmpty ? 'Your support coach' : coach.bio,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
                         height: 1.35,

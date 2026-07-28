@@ -8,6 +8,7 @@ use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\CoachRequest;
 use App\Models\Goal;
+use App\Models\Notification;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Support\Carbon;
@@ -383,7 +384,8 @@ class CoachManagementController extends Controller
             }
         }
 
-        $relation = DB::transaction(function () use ($user, $validated, $groupId, $groupName): CoachMentee {
+        $previousGroupId = '';
+        $relation = DB::transaction(function () use ($user, $validated, $groupId, $groupName, &$previousGroupId): CoachMentee {
             $relation = CoachMentee::query()->firstOrNew([
                 'coach_id' => (string) $user->id,
                 'mentee_id' => trim((string) $validated['mentee_id']),
@@ -403,6 +405,25 @@ class CoachManagementController extends Controller
 
             return $relation->fresh();
         });
+
+        // Only a real, changing group assignment counts as "added to a
+        // group" — assignMentee is reused for the plain "assign new
+        // mentee" call (no group_id at all) and this same endpoint is also
+        // hit again harmlessly when a mentee is re-saved into the group
+        // they're already in.
+        if ($groupId !== '' && $groupId !== $previousGroupId) {
+            Notification::createFor(
+                (string) $relation->mentee_id,
+                'added_to_group',
+                sprintf('%s added you to the "%s" group', $user->name, $relation->group_name ?? $groupName),
+                null,
+                [
+                    'coachId' => (string) $user->id,
+                    'groupId' => $groupId,
+                    'groupName' => $relation->group_name,
+                ],
+            );
+        }
 
         return response()->json([
             'mentee' => $this->menteePayload($relation),
@@ -585,6 +606,17 @@ class CoachManagementController extends Controller
             ]
         );
 
+        Notification::createFor(
+            $coachId,
+            'mentee_request_received',
+            sprintf('%s applied to be your mentee', trim((string) ($validated['mentee_name'] ?? $user->name))),
+            null,
+            [
+                'menteeId' => (string) $user->id,
+                'requestId' => (string) $coachRequest->id,
+            ],
+        );
+
         return response()->json([
             'request' => $this->requestPayload($coachRequest->fresh()),
         ], Response::HTTP_CREATED);
@@ -648,6 +680,17 @@ class CoachManagementController extends Controller
             $coachRequest->updated_at = now();
             $coachRequest->save();
         });
+
+        Notification::createFor(
+            (string) $coachRequest->mentee_id,
+            'mentee_request_accepted',
+            sprintf('%s accepted your mentee request', $user->name),
+            null,
+            [
+                'coachId' => (string) $user->id,
+                'requestId' => (string) $coachRequest->id,
+            ],
+        );
 
         return response()->json([
             'request' => $this->requestPayload($coachRequest->fresh()),

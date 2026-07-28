@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\CoachMentee;
 use App\Models\Goal;
 use App\Models\GoalComment;
 use App\Models\GoalMerit;
 use App\Models\GoalTask;
 use App\Models\GoalUpdate;
+use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -358,6 +360,8 @@ class GoalController extends Controller
             'status' => ['required', 'string', 'max:32'],
         ]);
 
+        $wasComplete = (bool) $task->is_complete;
+
         $task->update([
             'status' => strtoupper((string) $validated['status']),
             'is_complete' => strtoupper((string) $validated['status']) === 'DONE',
@@ -365,6 +369,24 @@ class GoalController extends Controller
         ]);
 
         $this->syncMilestoneProgress($goal->refresh(), $user);
+
+        // Throttled: only on the NOT complete -> complete transition, not on
+        // every other status update and not when un-completing.
+        if (! $wasComplete && $task->is_complete) {
+            foreach (CoachMentee::coachIdsForMentee((string) $user->id) as $coachId) {
+                Notification::createFor(
+                    $coachId,
+                    'mentee_progress_logged',
+                    sprintf('%s completed a goal task', $user->name),
+                    $task->title,
+                    [
+                        'menteeId' => (string) $user->id,
+                        'goalId' => (string) $goal->id,
+                        'goalTaskId' => (string) $task->id,
+                    ],
+                );
+            }
+        }
 
         return response()->json(['task' => $this->mapTask($task->refresh())]);
     }

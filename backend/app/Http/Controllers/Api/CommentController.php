@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
 use App\Models\NoteComment;
+use App\Models\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 class CommentController extends Controller
@@ -44,6 +46,21 @@ class CommentController extends Controller
             'username' => $user->name,
             'comment' => $validated['comment'],
         ]);
+
+        // No self-notification when commenting on your own post.
+        if ((string) $post->user_id !== (string) $user->id) {
+            Notification::createFor(
+                (string) $post->user_id,
+                'community_comment',
+                sprintf('%s commented on your post', $user->name),
+                Str::limit(trim((string) $validated['comment']), 80),
+                [
+                    'postId' => (string) $post->id,
+                    'commentId' => (string) $comment->id,
+                    'commenterId' => (string) $user->id,
+                ],
+            );
+        }
 
         return response()->json([
             'comment' => $this->mapComment($comment),
