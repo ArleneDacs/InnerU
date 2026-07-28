@@ -21,6 +21,14 @@ class CoachCarousel extends StatefulWidget {
 
 class _CoachCarouselState extends State<CoachCarousel> {
   int _currentPage = 0;
+  final PageController _pageController =
+      PageController(viewportFraction: 0.88);
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +38,14 @@ class _CoachCarouselState extends State<CoachCarousel> {
         SizedBox(
           height: 260,
           child: PageView.builder(
-            controller: PageController(viewportFraction: 0.94),
+            controller: _pageController,
+            // Without this, PageView reserves symmetric leading/trailing
+            // space so even the first card sits inset from the edge and
+            // only half the leftover width peeks through on the right -
+            // combined with the card's 30dp corner radius, that leaves a
+            // sliver too narrow to read as a card edge, so it renders as a
+            // floating, disconnected blob instead of a "there's more" peek.
+            padEnds: false,
             itemCount: widget.cards.length,
             onPageChanged: (index) {
               setState(() {
@@ -39,7 +54,7 @@ class _CoachCarouselState extends State<CoachCarousel> {
             },
             itemBuilder: (context, index) => Padding(
               padding: EdgeInsets.only(
-                right: index == widget.cards.length - 1 ? 0 : 10,
+                right: index == widget.cards.length - 1 ? 0 : 14,
               ),
               child: widget.cards[index],
             ),
