@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\DailyTracker;
 use App\Models\Goal;
+use App\Models\GoalTask;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -330,5 +331,125 @@ class UserScorePeriodTest extends TestCase
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
         $this->assertEquals(33.3, $breakdown['goalScore']);
+    }
+
+    public function test_the_full_leaderboard_formula_matches_spec_for_a_configured_period(): void
+    {
+        // Locks in the exact formula for a period-configured company:
+        //   Period Days        = End - Start + 1
+        //   Daily Tracker Avg   = Total Daily Tracker Score / Period Days
+        //   Goals Avg           = (Personal + Professional + Contribution) / 3
+        //   Final Score         = (Daily Tracker Avg + Goals Avg) / 2
+        Carbon::setTestNow('2030-01-01');
+
+        $company = $this->makeCompanyWithPeriod('2026-01-01', '2026-01-10');
+        $user = $this->makeUserInCompany($company);
+
+        // Goals: Personal 100, Professional 75 (1 DONE + 1 IN_PROGRESS
+        // milestone task), Contribution 20 -> avg = (100+75+20)/3 = 65.
+        Goal::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => (string) $user->id,
+            'company_id' => (string) $company->id,
+            'category' => 'PERSONAL',
+            'title' => 'Completed goal',
+            'status' => 'COMPLETED',
+            'goal_type' => 'MERIT',
+            'direction' => 'GAIN',
+            'target_value' => 10,
+            'current_value' => 10,
+            'unit' => 'pts',
+            'target_period' => 'NONE',
+            'start_date' => '2026-01-01',
+            'target_date' => '2026-01-10',
+            'progress' => 100,
+        ]);
+
+        $milestone = Goal::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => (string) $user->id,
+            'company_id' => (string) $company->id,
+            'category' => 'PROFESSIONAL',
+            'title' => 'Milestone goal',
+            'status' => 'IN_PROGRESS',
+            'goal_type' => 'MILESTONE',
+            'direction' => 'GAIN',
+            'target_value' => 0,
+            'current_value' => 0,
+            'unit' => '',
+            'target_period' => 'NONE',
+            'start_date' => '2026-01-01',
+            'target_date' => '2026-01-10',
+            'progress' => 0,
+        ]);
+
+        GoalTask::create([
+            'id' => (string) Str::uuid(),
+            'goal_id' => (string) $milestone->id,
+            'title' => 'Task one',
+            'status' => 'DONE',
+            'is_complete' => true,
+            'sort_order' => 0,
+            'weight' => 1,
+        ]);
+        GoalTask::create([
+            'id' => (string) Str::uuid(),
+            'goal_id' => (string) $milestone->id,
+            'title' => 'Task two',
+            'status' => 'IN_PROGRESS',
+            'is_complete' => false,
+            'sort_order' => 1,
+            'weight' => 1,
+        ]);
+
+        Goal::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => (string) $user->id,
+            'company_id' => (string) $company->id,
+            'category' => 'CONTRIBUTION',
+            'title' => 'Merit goal',
+            'status' => 'IN_PROGRESS',
+            'goal_type' => 'MERIT',
+            'direction' => 'GAIN',
+            'target_value' => 100,
+            'current_value' => 20,
+            'unit' => 'pts',
+            'target_period' => 'NONE',
+            'start_date' => '2026-01-01',
+            'target_date' => '2026-01-10',
+            'progress' => 20,
+        ]);
+
+        // Daily tracker: day 1 fully complete (100), day 2 half complete
+        // (50) -> sum 150, divided by the FULL 10-day period (not just the
+        // 2 days with logs) = 15.
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-01-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-01-02',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => false,
+            'learning' => false,
+            'add_value' => false,
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        $this->assertEquals(65.0, $breakdown['goalScore']);
+        $this->assertEquals(15.0, $breakdown['coreTaskScore']);
+        $this->assertEquals(40.0, $breakdown['overallScore']);
     }
 }
