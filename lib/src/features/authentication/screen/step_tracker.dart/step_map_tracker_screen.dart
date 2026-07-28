@@ -23,6 +23,7 @@ import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_tracker_utils.dart';
 
 class _StepMapTrackingController extends ChangeNotifier {
   static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
@@ -330,11 +331,20 @@ class _StepMapTrackingController extends ChangeNotifier {
       return false;
     }
 
+    // The walk must keep recording if the app is backgrounded, which on
+    // iOS requires "Always" authorization, not just "while in use". Ask
+    // for the upgrade so background tracking actually engages, but don't
+    // block the walk from starting if the user keeps "while in use" — the
+    // session still records fine as long as the app stays foregrounded.
+    if (Platform.isIOS && permission == LocationPermission.whileInUse) {
+      permission = await Geolocator.requestPermission();
+    }
+
     return true;
   }
 
-  /// Route tracking is session-based and only needs active location updates
-  /// while the user is on the walk screen.
+  /// Tracking must survive screen-off and backgrounding: Android needs a
+  /// foreground service, iOS needs background location updates enabled.
   LocationSettings _trackingLocationSettings() {
     if (Platform.isAndroid) {
       return AndroidSettings(
@@ -352,6 +362,9 @@ class _StepMapTrackingController extends ChangeNotifier {
       return AppleSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
+        allowBackgroundLocationUpdates: true,
+        showBackgroundLocationIndicator: true,
+        pauseLocationUpdatesAutomatically: false,
       );
     }
     return const LocationSettings(
@@ -374,21 +387,15 @@ class _StepMapTrackingController extends ChangeNotifier {
       final hasActivityAccess = await _ensureActivityRecognitionAccess();
       if (!hasActivityAccess) return;
 
+      // A missing or slow initial GPS fix must not stop the walk from
+      // starting: step counting doesn't depend on location. The route
+      // simply starts empty and seeds itself from the first live position
+      // update once a fix arrives (see resolveInitialRoutePoints and the
+      // previousPoint == null branches in _handlePositionUpdate /
+      // _appendDirectPositionUpdate).
       final latestPosition = await _getInitialPosition();
-      if (latestPosition == null) {
-        statusText =
-            'We could not get your location yet. Step outside or turn on GPS, then try again.';
-        _emit();
-        return;
-      }
-
-      final startPoint = positionToLatLng(latestPosition);
-      if (startPoint == null) {
-        statusText =
-            'Your device returned an invalid location. Please wait a moment and try again.';
-        _emit();
-        return;
-      }
+      final startPoint =
+          latestPosition == null ? null : positionToLatLng(latestPosition);
 
       await _positionSubscription?.cancel();
       await _stepSubscription?.cancel();
@@ -400,15 +407,16 @@ class _StepMapTrackingController extends ChangeNotifier {
       _trackingGeneration++;
       isTracking = true;
       _consecutiveSpikeRejections = 0;
-      currentPosition = latestPosition;
-      routePoints = [startPoint];
+      currentPosition = startPoint == null ? null : latestPosition;
+      routePoints = resolveInitialRoutePoints(startPoint);
       distanceMeters = 0;
       sessionSteps = 0;
       stepBaseline = null;
       lastRawSessionSteps = 0;
       startedAt = DateTime.now();
       elapsed = Duration.zero;
-      statusText = 'Tracking your route...';
+      statusText =
+          resolveStartTrackingStatusText(hasInitialFix: startPoint != null);
       _emit();
       await FastingNotificationService.instance.ensurePermissions();
       await _updateWalkTrackingNotification(force: true);
@@ -1146,9 +1154,10 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     _loadInitialMapPreview();
   }
 
-  // Tracking is managed by the route screen itself. If the app is
-  // backgrounded, the session can be restored on the next launch by
-  // reconcileStaleSession.
+  // Tracking intentionally continues while the app is backgrounded or the
+  // screen is off (Android foreground service / iOS background location),
+  // so no lifecycle handling stops it. A session interrupted by a process
+  // kill is finalized by reconcileStaleSession on next launch.
 
   Future<void> _loadInitialMapPreview() async {
     await _trackingController.loadInitialMapPreview();
@@ -1186,6 +1195,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
   void _applyTrackingState({bool notify = true}) {
     final currentPosition = _trackingController.currentPosition;
+    final previousPosition = _currentPosition;
     void updateState() {
       _routePoints = List<LatLng>.from(_trackingController.routePoints);
       _currentPosition = currentPosition;
@@ -1206,8 +1216,15 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
     if (currentPosition != null) {
       final point = _positionToLatLng(currentPosition);
-      if (point != null) {
-        _moveCamera(point, zoom: _isTracking ? 17 : 16);
+      if (point != null &&
+          shouldAutoRecenterOnSelf(focusedMemberUserId: _selectedMarkerUserId)) {
+        _moveCamera(
+          point,
+          zoom: resolveAutoRecenterZoom(
+            isFirstFix: previousPosition == null,
+            isTracking: _isTracking,
+          ),
+        );
       }
     }
   }
@@ -1634,7 +1651,11 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     await _trackingController.startTracking();
   }
 
-  void _moveCamera(LatLng point, {double zoom = 16}) {
+  /// Moves the map to [point]. When [zoom] is omitted, the map's current
+  /// zoom level is preserved instead of being reset — this is read here,
+  /// inside the deferred post-frame callback, because `MapController.camera`
+  /// throws until the `FlutterMap` has rendered at least once.
+  void _moveCamera(LatLng point, {double? zoom}) {
     if (!_isValidLatitude(point.latitude) ||
         !_isValidLongitude(point.longitude)) {
       return;
@@ -1642,7 +1663,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _mapController.move(point, zoom);
+      final targetZoom = zoom ?? _mapController.camera.zoom;
+      _mapController.move(point, targetZoom);
     });
   }
 
@@ -2008,6 +2030,17 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     await _trackingController.stopTracking();
     if (shouldSave) {
       await _saveRecordedWalk();
+    } else if (mounted) {
+      // Otherwise stopping a walk with no usable route silently discards
+      // it, which looks identical to "saving is broken" from the user's
+      // side — say why instead.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Walk too short to save — it needs a GPS route to record.",
+          ),
+        ),
+      );
     }
   }
 
@@ -2284,6 +2317,12 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         'route_points': _serializeRoutePoints(_routePoints),
         'interrupted': false,
       });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Walk saved! Open History to view or share it.'),
+        ),
+      );
     } catch (error) {
       debugPrint('Failed to save recorded walk: $error');
       if (!mounted) return;

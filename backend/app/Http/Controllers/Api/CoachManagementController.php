@@ -273,6 +273,49 @@ class CoachManagementController extends Controller
         return response()->json(['mentees' => $mentees]);
     }
 
+    // The mentee-side mirror of mentees(): "who are my coaches", as opposed
+    // to mentees() which is "who are the mentees assigned to me as a
+    // coach". Both read the same coach_mentees table from opposite sides
+    // of the relationship. A mentee can have more than one row here (e.g.
+    // both coaches of a 2-coach group, or two separate individual
+    // assignments), so this returns a list, ordered by when each
+    // assignment was made.
+    public function myCoaches(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $coachIds = CoachMentee::query()
+            ->where('mentee_id', (string) $user->id)
+            ->orderBy('created_at')
+            ->pluck('coach_id')
+            ->map(static fn ($coachId) => (string) $coachId)
+            ->unique()
+            ->values();
+
+        $coachesById = User::query()
+            ->whereIn('id', $coachIds)
+            ->get()
+            ->keyBy(fn (User $coach) => (string) $coach->id);
+
+        $coaches = $coachIds
+            ->map(fn (string $coachId) => $coachesById->get($coachId))
+            ->filter()
+            ->map(fn (User $coach) => [
+                'id' => (string) $coach->id,
+                'name' => $coach->name,
+                'email' => $coach->email,
+                'number' => $coach->number,
+                'bio' => $coach->bio,
+                'profilePic' => $coach->profile_pic,
+            ])
+            ->values();
+
+        return response()->json(['coaches' => $coaches]);
+    }
+
     public function menteeGoals(Request $request, string $menteeId): JsonResponse
     {
         $user = $request->user();

@@ -12,6 +12,7 @@ import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/coach_carousel.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
@@ -27,7 +28,6 @@ import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
-import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -264,22 +264,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     return 'Coach';
   }
 
-  Future<Coach?> _loadAssignedCoach(String coachId) async {
-    final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
-    for (final coach in coaches) {
-      if (coach.id != coachId) continue;
-      return Coach(
-        id: coach.id,
-        name: coach.name.isNotEmpty ? coach.name : 'My Coach',
-        email: coach.email,
-        phone: coach.number ?? '',
-        bio: 'Your support coach',
-        profilePic: coach.profilePic ?? '',
-        backgroundColor: const Color(0xFFDCE5D4),
-      );
-    }
-    return null;
-  }
 
   Future<void> _openAssignedCoachChat({
     required BuildContext context,
@@ -645,78 +629,67 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     );
   }
 
-  List<String> _assignedCoachIds(Map<String, dynamic> userData) {
-    final coachIds = List<String>.from(
-      userData['coachIds'] as List? ?? const <String>[],
-    ).where((id) => id.trim().isNotEmpty && id != _userId).toList();
-    final legacyCoachId = (userData['coachId'] as String?)?.trim() ?? '';
+  // A coach can also be a mentee of another coach, so this mirrors the
+  // "My Coach" section on the regular dashboard. Assignment lives in the
+  // coach_mentees relationship table, not on the user's own profile — see
+  // CoachApiService.fetchMyCoaches().
+  Future<List<Coach>> _loadMyCoaches() async {
+    final coaches = await CoachApiService.instance.fetchMyCoaches();
+    return coaches
+        .where((data) => (data['id'] as String?) != _userId)
+        .map((data) {
+          final id = (data['id'] as String?)?.trim() ?? '';
+          if (id.isEmpty) return null;
 
-    return <String>[
-      ...coachIds,
-      if (legacyCoachId.isNotEmpty &&
-          legacyCoachId != _userId &&
-          !coachIds.contains(legacyCoachId))
-        legacyCoachId,
-    ];
+          final name = (data['name'] as String?)?.trim() ?? '';
+          return Coach(
+            id: id,
+            name: name.isNotEmpty ? name : 'My Coach',
+            email: (data['email'] as String?) ?? '',
+            phone: (data['number'] as String?) ?? '',
+            bio: 'Your support coach',
+            profilePic: (data['profilePic'] as String?) ?? '',
+            backgroundColor: const Color(0xFFDCE5D4),
+          );
+        })
+        .whereType<Coach>()
+        .toList();
   }
 
-  Future<List<Coach>> _loadAssignedCoaches(List<String> coachIds) async {
-    final coaches = <Coach>[];
-    for (final coachId in coachIds) {
-      final coach = await _loadAssignedCoach(coachId);
-      if (coach != null) {
-        coaches.add(coach);
-      }
-    }
-    return coaches;
-  }
+  Widget _buildMyCoachSection(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
 
-  Widget _buildMyCoachSection(
-    BuildContext context,
-    Map<String, dynamic> userData,
-  ) {
-    final activeCoachIds = _assignedCoachIds(userData);
+    return FutureBuilder<List<Coach>>(
+      future: _loadMyCoaches(),
+      builder: (context, coachSnapshot) {
+        final coaches = coachSnapshot.data ?? const <Coach>[];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-          'My Coach',
-          subtitle: 'You can coach others and still receive support.',
-        ),
-        const SizedBox(height: 14),
-        if (activeCoachIds.isEmpty)
-          _buildNoAssignedCoachCard(context)
-        else
-          FutureBuilder<List<Coach>>(
-            future: _loadAssignedCoaches(activeCoachIds),
-            builder: (context, coachSnapshot) {
-              if (coachSnapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final coaches = coachSnapshot.data ?? const <Coach>[];
-              if (coaches.isEmpty) {
-                return _buildNoAssignedCoachCard(
-                  context,
-                  title: 'Coach details unavailable',
-                  message:
-                      'Your assigned coaches could not be loaded yet. You can still browse coaches.',
-                );
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final coach in coaches) ...[
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeader(
+              'My Coach',
+              subtitle: 'You can coach others and still receive support.',
+            ),
+            const SizedBox(height: 14),
+            if (coachSnapshot.connectionState == ConnectionState.waiting)
+              const Center(child: CircularProgressIndicator())
+            else if (coaches.isEmpty)
+              _buildNoAssignedCoachCard(context)
+            else if (coaches.length == 1)
+              _buildAssignedCoachCard(context, coach: coaches.first)
+            else
+              CoachCarousel(
+                cards: [
+                  for (final coach in coaches)
                     _buildAssignedCoachCard(context, coach: coach),
-                    if (coach != coaches.last) const SizedBox(height: 12),
-                  ],
                 ],
-              );
-            },
-          ),
-      ],
+                activeDotColor: colors.primary,
+                inactiveDotColor: colors.primary.withValues(alpha: 0.25),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -1189,7 +1162,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                             const SizedBox(height: 22),
                             _buildScrollableFeatureRail(context),
                             const SizedBox(height: 28),
-                            _buildMyCoachSection(context, userData),
+                            _buildMyCoachSection(context),
                             const SizedBox(height: 28),
                             _buildSectionTitle('Coach tools'),
                             const SizedBox(height: 12),

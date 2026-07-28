@@ -169,6 +169,64 @@ class CoachManagementTest extends TestCase
         $this->assertTrue($ids->contains((string) $otherCompanyCoach->id));
     }
 
+    public function test_mentee_can_see_their_own_assigned_coaches(): void
+    {
+        $coachOne = User::factory()->create([
+            'name' => 'Coach Alpha',
+            'email' => 'alpha@example.com',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $coachTwo = User::factory()->create([
+            'name' => 'Coach Beta',
+            'email' => 'beta@example.com',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $mentee = User::factory()->create([
+            'name' => 'Mentee Four',
+            'email' => 'mentee4@example.com',
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $coachOne->id,
+            'mentee_id' => (string) $mentee->id,
+            'team_name' => 'Team A',
+        ]);
+        CoachMentee::create([
+            'coach_id' => (string) $coachTwo->id,
+            'mentee_id' => (string) $mentee->id,
+            'team_name' => 'Team B',
+        ]);
+
+        Sanctum::actingAs($mentee);
+
+        $response = $this->getJson('/api/coach/my-coaches');
+
+        $response->assertOk();
+        $ids = collect($response->json('coaches'))->pluck('id');
+
+        $this->assertSame(
+            [(string) $coachOne->id, (string) $coachTwo->id],
+            $ids->all(),
+        );
+    }
+
+    public function test_mentee_with_no_coach_sees_an_empty_list(): void
+    {
+        $mentee = User::factory()->create([
+            'name' => 'Mentee Five',
+            'email' => 'mentee5@example.com',
+        ]);
+
+        Sanctum::actingAs($mentee);
+
+        $response = $this->getJson('/api/coach/my-coaches');
+
+        $response->assertOk()
+            ->assertJson(['coaches' => []]);
+    }
+
     public function test_coach_can_list_company_users_to_add_as_mentees(): void
     {
         $coach = User::factory()->create([

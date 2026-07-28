@@ -10,7 +10,7 @@ import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
-import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
@@ -105,7 +105,7 @@ class _AbundanceDashboardSectionState extends State<AbundanceDashboardSection> {
         .where((goal) => goal.status != GoalStatus.abandoned)
         .toList()
       ..sort((a, b) => a.targetDate.compareTo(b.targetDate));
-    final coach = await _loadCoachProfile(userData: userData);
+    final coach = await _loadCoachProfile();
     final councilRank = await _loadCouncilRank(
       userData: userData,
       currentUserId: userId,
@@ -137,32 +137,26 @@ class _AbundanceDashboardSectionState extends State<AbundanceDashboardSection> {
     );
   }
 
-  Future<_AbundanceCoachProfile?> _loadCoachProfile({
-    required Map<String, dynamic> userData,
-  }) async {
-    final coachIds = <String>[
-      _stringValue(userData['coachId']),
-      ...List<String>.from(userData['coachIds'] as List? ?? const <String>[]),
-    ].where((id) => id.trim().isNotEmpty).toList();
-
-    if (coachIds.isEmpty) return null;
-
-    final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
-    final match = coaches.where((coach) => coachIds.contains(coach.id)).toList();
-    if (match.isEmpty) return null;
-    final coach = match.first;
+  // Coach assignment lives in the coach_mentees relationship table, not on
+  // the user's own profile — see CoachApiService.fetchMyCoaches(). This
+  // section only ever displays one coach, so the first assigned coach (if
+  // any) is used.
+  Future<_AbundanceCoachProfile?> _loadCoachProfile() async {
+    final coaches = await CoachApiService.instance.fetchMyCoaches();
+    if (coaches.isEmpty) return null;
+    final coach = coaches.first;
 
     return _AbundanceCoachProfile(
       name: _displayNameFrom(
         {
-          'fullName': coach.name,
-          'username': coach.name,
-          'email': coach.email,
+          'fullName': coach['name'],
+          'username': coach['name'],
+          'email': coach['email'],
         },
         fallback: 'Coach',
       ),
       headline: 'Your support coach',
-      profilePic: _stringValue(coach.profilePic),
+      profilePic: _stringValue(coach['profilePic']),
     );
   }
 

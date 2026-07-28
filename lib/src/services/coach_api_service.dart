@@ -245,6 +245,25 @@ class CoachApiService {
         .toList();
   }
 
+  // Mentee-side mirror of fetchMentees(): the coaches assigned to me, as
+  // opposed to fetchMentees() which is the mentees assigned to me as a
+  // coach.
+  Future<List<Map<String, dynamic>>> fetchMyCoaches() async {
+    final response = await _api.getJson(
+      '/api/coach/my-coaches',
+      token: _token,
+    );
+    final coaches = response['coaches'];
+    if (coaches is! List) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    return coaches
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
   Future<Map<String, dynamic>?> fetchLatestTracker(String menteeId) async {
     final response = await _api.getJson(
       '/api/coach/mentees/$menteeId/latest-tracker',

@@ -12,6 +12,7 @@ import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/user_point_api_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_day_score.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const customColor1 = Color(0xFF6D849A); // Example primary color
@@ -1348,6 +1349,7 @@ class _ProfilePageState extends State<ProfilePage> {
     Map<String, bool> selectedDateTasks = {
       for (final item in dailyTrackerItems) item.title: false,
     };
+    int? dayScorePercent;
 
     try {
       final response = await DailyTrackerApiService.instance.fetch(
@@ -1359,6 +1361,7 @@ class _ProfilePageState extends State<ProfilePage> {
           for (final item in dailyTrackerItems)
             item.title: _readTaskCompletion(data, item),
         };
+        dayScorePercent = resolveDayScorePercent(data);
 
         final customTasks = data['customDailyTasks'];
         if (customTasks is Map) {
@@ -1379,6 +1382,10 @@ class _ProfilePageState extends State<ProfilePage> {
       print("Error fetching tracker data for $selectedDate: $e");
     }
 
+    // Captured as a `final` local so it promotes to non-null inside the
+    // dialog builder closure below.
+    final resolvedScorePercent = dayScorePercent;
+
     // Show the dialog with fetched data
     if (!mounted) return;
     showDialog(
@@ -1388,16 +1395,66 @@ class _ProfilePageState extends State<ProfilePage> {
           title: Text("Tracker for $selectedMonth/$day/$selectedYear"),
           content: StatefulBuilder(
             builder: (context, setState) {
+              final colors = Theme.of(context).colorScheme;
               return Column(
                 mainAxisSize: MainAxisSize.min,
-                children: selectedDateTasks.keys.map((task) {
-                  return CheckboxListTile(
-                    title: Text(task),
-                    value: selectedDateTasks[task],
-                    onChanged:
-                        null, // Checkboxes are not interactive in this dialog
-                  );
-                }).toList(),
+                children: [
+                  if (resolvedScorePercent != null) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Score',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: colors.onSurface,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '$resolvedScorePercent%',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            color: colors.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 8,
+                        value: (resolvedScorePercent / 100)
+                            .clamp(0.0, 1.0)
+                            .toDouble(),
+                        backgroundColor: colors.onSurface.withValues(alpha: 0.12),
+                        valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'No tracker data recorded for this day.',
+                        style: TextStyle(
+                          color: colors.onSurface.withValues(alpha: 0.7),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ...selectedDateTasks.keys.map((task) {
+                    return CheckboxListTile(
+                      title: Text(task),
+                      value: selectedDateTasks[task],
+                      onChanged:
+                          null, // Checkboxes are not interactive in this dialog
+                    );
+                  }),
+                ],
               );
             },
           ),

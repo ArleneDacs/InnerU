@@ -13,7 +13,7 @@ import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_for
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
-import 'package:selfcare_projects/src/services/coach_directory_api_service.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
@@ -83,9 +83,7 @@ class _AbundanceMenteeDashboardScreenState
     final trackerDocs = await DailyTrackerApiService.instance.fetchHistory();
     final emotionDocs = await EmotionService().fetchHistory();
 
-    final coach = await _loadCoachProfile(
-      userData: userData,
-    );
+    final coach = await _loadCoachProfile();
 
     final displayName = _displayNameFrom(userData, fallback: session.email);
     final joinedAt = _dateFrom(
@@ -113,32 +111,24 @@ class _AbundanceMenteeDashboardScreenState
     );
   }
 
-  Future<_CoachProfile?> _loadCoachProfile({
-    required Map<String, dynamic> userData,
-  }) async {
-    final coachIds = <String>[
-      _stringValue(userData['coachId']),
-      ...List<String>.from(userData['coachIds'] as List? ?? const <String>[]),
-    ].where((id) => id.trim().isNotEmpty).toList();
-
-    if (coachIds.isEmpty) {
+  // Coach assignment lives in the coach_mentees relationship table, not on
+  // the user's own profile — see CoachApiService.fetchMyCoaches(). This
+  // screen only ever displays one coach, so the first assigned coach (if
+  // any) is used.
+  Future<_CoachProfile?> _loadCoachProfile() async {
+    final coaches = await CoachApiService.instance.fetchMyCoaches();
+    if (coaches.isEmpty) {
       return null;
     }
 
-    final coachId = coachIds.first;
-    final coaches = await CoachDirectoryApiService.instance.fetchCoaches();
-    for (final coach in coaches) {
-      if (coach.id == coachId) {
-        return _CoachProfile(
-          id: coach.id,
-          name: coach.name.isNotEmpty ? coach.name : 'Coach',
-          headline: 'Your support coach',
-          profilePic: coach.profilePic ?? '',
-        );
-      }
-    }
-
-    return null;
+    final coach = coaches.first;
+    final name = (coach['name'] as String?) ?? '';
+    return _CoachProfile(
+      id: (coach['id'] as String?) ?? '',
+      name: name.isNotEmpty ? name : 'Coach',
+      headline: 'Your support coach',
+      profilePic: (coach['profilePic'] as String?) ?? '',
+    );
   }
 
   List<_DailyLog> _buildDailyLogs(
