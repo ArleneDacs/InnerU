@@ -2030,7 +2030,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
     for (final entry in entries) {
       if (entry.userId == currentUserId) return entry;
     }
-    return entries.isEmpty ? null : entries.first;
+    return null;
   }
 
   Widget _buildHeaderCard(A12LeaderboardEntry? entry) {
@@ -2101,9 +2101,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    entry?.name.isNotEmpty == true
-                        ? entry!.name
-                        : 'Company score',
+                    entry?.name.isNotEmpty == true ? entry!.name : 'You',
                     style: TextStyle(
                       color: theme.inkColor,
                       fontSize: 18,
@@ -2187,9 +2185,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry?.name.isNotEmpty == true
-                      ? entry!.name
-                      : 'Company score',
+                  entry?.name.isNotEmpty == true ? entry!.name : 'You',
                   style: TextStyle(
                     color: theme.inkColor,
                     fontSize: 18,
