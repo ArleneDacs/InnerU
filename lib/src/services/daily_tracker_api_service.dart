@@ -95,6 +95,7 @@ class DailyTrackerApiService {
     int? learningCount,
     int? valueCount,
     int? todoListCount,
+    int? dailyTrackerScore,
     int? todoListScore,
     int? todoListScoreDailyContribution,
     bool? todoListIncludedInTotal,
@@ -123,6 +124,7 @@ class DailyTrackerApiService {
       if (learningCount != null) 'learning_count': learningCount,
       if (valueCount != null) 'value_count': valueCount,
       if (todoListCount != null) 'todo_list_count': todoListCount,
+      if (dailyTrackerScore != null) 'daily_tracker_score': dailyTrackerScore,
       if (todoListScore != null) 'todo_list_score': todoListScore,
       if (todoListScoreDailyContribution != null)
         'todo_list_score_daily_contribution':
