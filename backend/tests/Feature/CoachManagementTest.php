@@ -14,6 +14,33 @@ class CoachManagementTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_creating_a_group_stamps_the_coachs_own_company_id(): void
+    {
+        $coach = User::factory()->create([
+            'name' => 'Coach Company',
+            'email' => 'coachcompany@example.com',
+            'company_id' => 'company-uuid-123',
+            'company_code' => 'ABC',
+            'company_name' => 'ABC',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $createGroup = $this->postJson('/api/coach/groups', [
+            'name' => 'Stamped Group',
+        ]);
+
+        $createGroup->assertCreated();
+        $groupId = $createGroup->json('group.id');
+
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $groupId,
+            'company_id' => 'company-uuid-123',
+        ]);
+    }
+
     public function test_coach_can_manage_groups_and_mentees(): void
     {
         $coach = User::factory()->create([

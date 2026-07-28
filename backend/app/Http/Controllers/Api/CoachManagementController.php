@@ -167,9 +167,15 @@ class CoachManagementController extends Controller
             'name' => ['required', 'string', 'max:255'],
         ]);
 
+        $companyId = trim((string) ($user->active_company_id ?? ''));
+        if ($companyId === '') {
+            $companyId = trim((string) ($user->company_id ?? ''));
+        }
+
         $group = CoachGroup::create([
             'id' => (string) Str::uuid(),
             'coach_id' => (string) $user->id,
+            'company_id' => $companyId !== '' ? $companyId : null,
             'coach_ids' => [(string) $user->id],
             'name' => trim($validated['name']),
             'member_ids' => [],

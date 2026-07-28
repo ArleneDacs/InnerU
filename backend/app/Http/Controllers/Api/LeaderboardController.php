@@ -65,7 +65,20 @@ class LeaderboardController extends Controller
         $allGroups = CoachGroup::query()->orderBy('name')->get();
         $groupLeaderboards = $company !== null
             ? $allGroups
-                ->filter(function (CoachGroup $group) use ($usersById): bool {
+                ->filter(function (CoachGroup $group) use ($company, $usersById): bool {
+                    // The group's own stored company_id (stamped at
+                    // creation time from its coach's company) is the
+                    // primary signal -- it doesn't drift if the coach's
+                    // own record later changes. Fall back to checking
+                    // whether the coach/members currently resolve into
+                    // the viewer's company, for groups created before
+                    // company_id existed or where it's still null.
+                    if ($group->company_id !== null
+                        && (string) $group->company_id === (string) $company->id
+                    ) {
+                        return true;
+                    }
+
                     $coachIds = $this->groupCoachIds($group);
                     if (collect($coachIds)->contains(fn (string $coachId): bool => $usersById->has($coachId))) {
                         return true;

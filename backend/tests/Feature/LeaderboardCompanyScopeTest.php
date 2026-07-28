@@ -28,10 +28,12 @@ class LeaderboardCompanyScopeTest extends TestCase
         User $coach,
         string $name,
         array $memberIds,
+        ?string $companyId = null,
     ): CoachGroup {
         return CoachGroup::create([
             'id' => (string) Str::uuid(),
             'coach_id' => (string) $coach->id,
+            'company_id' => $companyId ?? $coach->company_id,
             'coach_ids' => [(string) $coach->id],
             'name' => $name,
             'member_ids' => array_values($memberIds),
@@ -174,6 +176,42 @@ class LeaderboardCompanyScopeTest extends TestCase
         $response->assertOk();
         $this->assertEqualsCanonicalizing(
             ['Coach Only Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
+    }
+
+    public function test_a_group_matches_by_its_stored_company_id_even_if_the_coachs_own_data_has_since_drifted(): void
+    {
+        $company = $this->makeCompany('CompanyA', 'COMPA');
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        // The coach's OWN current company fields point somewhere else
+        // entirely now (simulating a coach who has since moved
+        // companies, or whose record has drifted) -- the dynamic
+        // "is this coach currently in my company" check would fail for
+        // them. The group itself still remembers what company it was
+        // created under via its own stored company_id, which is what
+        // should govern visibility, not the coach's present-day data.
+        $driftedCoach = User::factory()->create([
+            'company_id' => 'some-other-company-id',
+            'company_code' => 'OTHER',
+            'company_name' => 'Other Co',
+            'is_coach' => true,
+        ]);
+
+        $this->makeGroup($driftedCoach, 'Stamped Group', [], companyId: $company->id);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertEqualsCanonicalizing(
+            ['Stamped Group'],
             collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
         );
     }

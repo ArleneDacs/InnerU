@@ -16,6 +16,7 @@ class CoachGroup extends Model
         'id',
         'firestore_id',
         'coach_id',
+        'company_id',
         'coach_ids',
         'name',
         'member_ids',
