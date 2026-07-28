@@ -146,11 +146,15 @@ class DailyTrackerTest extends TestCase
         $this->assertEquals(8, $storedScore);
     }
 
-    public function test_score_reflects_todays_completion_not_diluted_by_history(): void
+    public function test_score_averages_daily_tracker_completion_across_all_recorded_days(): void
     {
+        // Leaderboard score must not reset to today's completion alone.
+        // Every recorded day's daily-tracker score is added up, then
+        // divided by the number of recorded days — a running average,
+        // not a single day's snapshot.
         $user = User::factory()->create();
 
-        for ($i = 1; $i <= 20; $i++) {
+        for ($i = 1; $i <= 3; $i++) {
             DailyTracker::create([
                 'user_id' => (string) $user->id,
                 'username' => $user->name,
@@ -178,7 +182,54 @@ class DailyTrackerTest extends TestCase
 
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
-        $this->assertEquals(100.0, $breakdown['coreTaskScore']);
+        // 3 zero-completion days + 1 perfect day = 100 / 4 recorded days.
+        $this->assertEquals(25.0, $breakdown['coreTaskScore']);
+    }
+
+    public function test_daily_tracker_score_is_sum_of_days_divided_by_day_count(): void
+    {
+        $user = User::factory()->create();
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => now()->subDays(2)->toDateString(),
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => now()->subDays(1)->toDateString(),
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => false,
+            'learning' => false,
+            'add_value' => false,
+        ]);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => now()->toDateString(),
+            'call' => false,
+            'steps' => false,
+            'exercise' => false,
+            'meditation' => false,
+            'learning' => false,
+            'add_value' => false,
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        // Day 1: 100%, Day 2: 50%, Day 3: 0% -> (100 + 50 + 0) / 3 = 50.
+        $this->assertEquals(50.0, $breakdown['coreTaskScore']);
     }
 
     public function test_non_admin_cannot_view_admin_daily_tracker_overview(): void
