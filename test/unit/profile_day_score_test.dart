@@ -45,4 +45,53 @@ void main() {
       );
     });
   });
+
+  group('resolveDayTrackerTasks', () {
+    test('uses the saved snapshot task ids when present', () {
+      final tasks = resolveDayTrackerTasks({
+        'call': true,
+        'steps': true,
+        'exercise': false,
+        'meditation': true,
+        'learning': true,
+        'addValue': false,
+        'customDailyTasks': {
+          '__snapshotTaskIds': ['call', 'steps', 'meditation', 'learning'],
+          'call': {'title': 'Call', 'completed': true},
+          'steps': {'title': 'Steps', 'completed': true},
+          'meditation': {'title': 'Meditation', 'completed': true},
+          'learning': {'title': 'Learning', 'completed': true},
+        },
+      });
+
+      expect(tasks.map((task) => task.title), [
+        'Call',
+        'Steps',
+        'Meditation',
+        'Learning',
+      ]);
+      expect(tasks.every((task) => task.completed), isTrue);
+    });
+
+    test('falls back to tracker fields when no snapshot exists', () {
+      final tasks = resolveDayTrackerTasks({
+        'call': true,
+        'steps': true,
+        'exercise': true,
+        'meditation': true,
+        'learning': true,
+        'addValue': false,
+      });
+
+      expect(tasks.map((task) => task.title), [
+        'Call',
+        'Steps',
+        'Exercise',
+        'Meditation',
+        'Learning',
+        'Add Value',
+      ]);
+      expect(tasks.last.completed, isFalse);
+    });
+  });
 }

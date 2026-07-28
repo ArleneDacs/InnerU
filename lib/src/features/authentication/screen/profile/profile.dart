@@ -226,6 +226,25 @@ class _ProfilePageState extends State<ProfilePage> {
     return false;
   }
 
+  Map<String, dynamic> _dailyTrackerSnapshotTasks() {
+    return {
+      '__snapshotTaskIds': dailyTrackerItems.map((item) => item.id).toList(),
+      for (final item in dailyTrackerItems)
+        item.id: {
+          'title': item.title,
+          'completed': todayTasks[item.id] == true,
+          'isDefault': item.isDefault,
+        },
+    };
+  }
+
+  bool _trackerHasSnapshot(Map<String, dynamic> tracker) {
+    final raw = tracker['customDailyTasks'];
+    if (raw is! Map) return false;
+    final snapshotTaskIds = raw['__snapshotTaskIds'];
+    return snapshotTaskIds is List && snapshotTaskIds.isNotEmpty;
+  }
+
   int get _dailyTrackerTaskCount => dailyTrackerItems.length;
 
   double _dailyTrackerTaskProgress(_DailyTaskItem item) {
@@ -362,13 +381,7 @@ class _ProfilePageState extends State<ProfilePage> {
       todoListScoreDailyContribution: _todayTodoListScoreContribution,
       todoListIncludedInTotal: _todayTodoListIncludedInTotal,
       userTotalScore: _combinedDailyAndTodoScore.round(),
-      customDailyTasks: {
-        for (final item in dailyTrackerItems.where((item) => !item.isDefault))
-          item.id: {
-            'title': item.title,
-            'completed': todayTasks[item.id] == true,
-          },
-      },
+      customDailyTasks: _dailyTrackerSnapshotTasks(),
       meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
@@ -417,6 +430,9 @@ class _ProfilePageState extends State<ProfilePage> {
         isLoading = false;
       });
       await _cacheDailyTrackerState();
+      if (!_trackerHasSnapshot(tracker)) {
+        await _syncDailyTrackerScore();
+      }
       await checkAndAssignPoints();
     } catch (e) {
       print("Error fetching tracker data: $e");
@@ -461,13 +477,7 @@ class _ProfilePageState extends State<ProfilePage> {
       todoListScoreDailyContribution: 0,
       todoListIncludedInTotal: false,
       userTotalScore: 0,
-      customDailyTasks: {
-        for (final item in dailyTrackerItems.where((item) => !item.isDefault))
-          item.id: {
-            'title': item.title,
-            'completed': false,
-          },
-      },
+      customDailyTasks: _dailyTrackerSnapshotTasks(),
       meditationMinutes: 0,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
@@ -562,14 +572,7 @@ class _ProfilePageState extends State<ProfilePage> {
       todoListScoreDailyContribution: _todayTodoListScoreContribution,
       todoListIncludedInTotal: _todayTodoListIncludedInTotal,
       userTotalScore: _combinedDailyAndTodoScore.round(),
-      customDailyTasks: {
-        for (final customItem
-            in dailyTrackerItems.where((task) => !task.isDefault))
-          customItem.id: {
-            'title': customItem.title,
-            'completed': todayTasks[customItem.id] == true,
-          },
-      },
+      customDailyTasks: _dailyTrackerSnapshotTasks(),
       meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
