@@ -114,14 +114,8 @@ class LeaderboardController extends Controller
             : collect();
 
         $groupLeaderboards = $groupLeaderboards
-            ->map(function (CoachGroup $group) use ($usersById, $companyScores, $company) {
+            ->map(function (CoachGroup $group) use ($companyScores, $company) {
                 $coachIds = $this->groupCoachIds($group);
-                $coachNames = collect($coachIds)
-                    ->map(fn (string $coachId) => $usersById->get($coachId)?->name)
-                    ->filter()
-                    ->values()
-                    ->all();
-                $coachName = $coachNames === [] ? 'Coach' : implode(', ', $coachNames);
                 $memberIds = CoachMentee::query()
                     ->whereIn('coach_id', $coachIds)
                     ->where('group_id', $group->id)
@@ -138,9 +132,29 @@ class LeaderboardController extends Controller
                     )));
                 }
 
+                // The group itself has already been confirmed to belong to
+                // the viewer's company (see the filter above). Its coach and
+                // members are trusted by that association, so look them up
+                // directly instead of requiring their own company fields to
+                // independently resolve into $usersById -- otherwise a coach
+                // or member with blank/messy company data (the same pattern
+                // already fixed for the viewer) would be silently dropped
+                // even though the group they belong to matched correctly.
+                $groupUsersById = User::query()
+                    ->whereIn('id', array_unique(array_merge($coachIds, $memberIds)))
+                    ->get()
+                    ->keyBy(fn (User $candidate) => (string) $candidate->id);
+
+                $coachNames = collect($coachIds)
+                    ->map(fn (string $coachId) => $groupUsersById->get($coachId)?->name)
+                    ->filter()
+                    ->values()
+                    ->all();
+                $coachName = $coachNames === [] ? 'Coach' : implode(', ', $coachNames);
+
                 $entries = collect($memberIds)
-                    ->map(function (string $memberId) use ($usersById, $group, $companyScores): ?array {
-                        $member = $usersById->get($memberId);
+                    ->map(function (string $memberId) use ($groupUsersById, $group, $companyScores): ?array {
+                        $member = $groupUsersById->get($memberId);
                         if ($member === null) {
                             return null;
                         }
