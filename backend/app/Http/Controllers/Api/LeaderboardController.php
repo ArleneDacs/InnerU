@@ -25,19 +25,10 @@ class LeaderboardController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $companyId = $this->activeCompanyValue($user->active_company_id, $user->company_id);
-        $companyCode = $this->activeCompanyValue($user->active_company_code, $user->company_code);
-        $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
         $company = $this->resolveCompany($user);
         $isCoach = (bool) $user->is_coach;
-        $hasResolvedCompany = $companyId !== '' || $companyCode !== '' || $companyName !== '';
 
-        $companyUsers = $this->companyUsersForScope(
-            companyId: $companyId,
-            companyCode: $companyCode,
-            companyName: $companyName,
-            fallback: $hasResolvedCompany ? null : User::query()->orderBy('name')->get(),
-        );
+        $companyUsers = $this->companyUsersForScope($company, $user);
 
         $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers);
         $companyLeaderboard = $companyUsers
@@ -72,42 +63,23 @@ class LeaderboardController extends Controller
         $usersById = $companyUsers->keyBy(fn (User $candidate) => (string) $candidate->id);
 
         $allGroups = CoachGroup::query()->orderBy('name')->get();
-        $groupLeaderboards = $hasResolvedCompany
+        $groupLeaderboards = $company !== null
             ? $allGroups
-                ->filter(function (CoachGroup $group) use ($companyId, $companyCode, $companyName, $usersById): bool {
+                ->filter(function (CoachGroup $group) use ($company, $usersById): bool {
                     $coachIds = $this->groupCoachIds($group);
-                    $groupCoachIsInCompany = collect($coachIds)->contains(function (string $coachId) use ($usersById, $companyId, $companyCode, $companyName): bool {
+                    $groupCoachIsInCompany = collect($coachIds)->contains(function (string $coachId) use ($usersById, $company): bool {
                         $coach = $usersById->get($coachId);
                         if ($coach === null) {
                             return false;
                         }
 
-                        return $this->belongsToCompany(
-                            $coach->company_id ?? null,
-                            $coach->company_code ?? '',
-                            $coach->company_name ?? '',
-                            $companyId,
-                            $companyCode,
-                            $companyName,
-                        );
+                        return $this->userBelongsToCompany($coach, $company);
                     });
 
-                    return $this->belongsToCompany(
-                        $group->company_id ?? null,
-                        $group->company_code ?? '',
-                        $group->company_name ?? '',
-                        $companyId,
-                        $companyCode,
-                        $companyName,
-                    ) || $groupCoachIsInCompany;
+                    return $this->groupBelongsToCompany($group, $company) || $groupCoachIsInCompany;
                 })
                 ->values()
-            : $allGroups
-                ->values();
-
-        if ($hasResolvedCompany && $groupLeaderboards->isEmpty()) {
-            $groupLeaderboards = $allGroups->values();
-        }
+            : collect();
 
         $groupLeaderboards = $groupLeaderboards
             ->map(function (CoachGroup $group) use ($usersById, $companyScores) {
@@ -227,9 +199,9 @@ class LeaderboardController extends Controller
 
         return response()->json([
             'company' => [
-                'companyId' => $companyId,
-                'companyCode' => $companyCode,
-                'companyName' => $companyName,
+                'companyId' => $company?->id ?? '',
+                'companyCode' => $company?->code ?? '',
+                'companyName' => $company?->name ?? '',
                 'leaderboardPeriodStart' => optional($company?->leaderboard_period_start)->toDateString(),
                 'leaderboardPeriodEnd' => optional($company?->leaderboard_period_end)->toDateString(),
             ],
@@ -290,95 +262,110 @@ class LeaderboardController extends Controller
             return null;
         }
 
-        $companyId = $this->activeCompanyValue($user->active_company_id, $user->company_id);
-        $companyCode = $this->activeCompanyValue($user->active_company_code, $user->company_code);
-        $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
+        foreach ($this->companyLookupCandidates($user) as $candidate) {
+            $company = Company::query()
+                ->where('id', $candidate)
+                ->orWhere('code', $candidate)
+                ->orWhere('name', $candidate)
+                ->first();
 
-        if ($companyId === '' && $companyCode === '' && $companyName === '') {
-            return null;
+            if ($company !== null) {
+                return $company;
+            }
         }
 
-        $companies = Company::query()
-            ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
-                if ($companyId !== '') {
-                    $builder->where('id', $companyId);
-                }
-                if ($companyCode !== '') {
-                    $builder->orWhere('code', $companyCode);
-                }
-                if ($companyName !== '') {
-                    $builder->orWhere('name', $companyName);
-                }
-            })
-            ->get();
-
-        return $companies->first(function (Company $company) use ($companyId, $companyCode, $companyName): bool {
-            return ($companyId !== '' && (string) $company->id === $companyId)
-                || ($companyCode !== '' && (string) $company->code === $companyCode)
-                || ($companyName !== '' && (string) $company->name === $companyName);
-        });
+        return null;
     }
 
     /**
-     * @param ?\Illuminate\Support\Collection<int, User> $fallback
      * @return \Illuminate\Support\Collection<int, User>
      */
-    private function companyUsersForScope(
-        string $companyId,
-        string $companyCode,
-        string $companyName,
-        ?\Illuminate\Support\Collection $fallback = null,
-    ): \Illuminate\Support\Collection {
-        if ($companyId === '' && $companyCode === '' && $companyName === '') {
-            return $fallback ?? User::query()->orderBy('name')->get();
+    private function companyUsersForScope(?Company $company, User $viewer): \Illuminate\Support\Collection {
+        if ($company === null) {
+            return collect([$viewer]);
         }
 
-        $scopedUsers = User::query()
-            ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
-                if ($companyId !== '') {
-                    $builder->where('company_id', $companyId)
-                        ->orWhere('active_company_id', $companyId);
-                }
-                if ($companyCode !== '') {
-                    $builder->orWhere('company_code', $companyCode)
-                        ->orWhere('active_company_code', $companyCode);
-                }
-                if ($companyName !== '') {
-                    $builder->orWhere('company_name', $companyName)
-                        ->orWhere('active_company_name', $companyName);
-                }
+        return User::query()
+            ->where(function ($builder) use ($company): void {
+                $builder->where('company_id', $company->id)
+                    ->orWhere('active_company_id', $company->id)
+                    ->orWhere('company_code', $company->code)
+                    ->orWhere('active_company_code', $company->code)
+                    ->orWhere('company_name', $company->name)
+                    ->orWhere('active_company_name', $company->name);
             })
             ->orderBy('name')
             ->get();
-
-        if ($scopedUsers->isNotEmpty()) {
-            return $scopedUsers;
-        }
-
-        return $fallback ?? User::query()->orderBy('name')->get();
     }
 
-    private function belongsToCompany(
-        ?string $companyId,
-        string $companyCode,
-        string $companyName,
-        string $targetCompanyId,
-        string $targetCompanyCode,
-        string $targetCompanyName,
-    ): bool {
-        if ($targetCompanyId !== '' && $companyId !== null && trim($companyId) === $targetCompanyId) {
+    private function userBelongsToCompany(User $user, Company $company): bool
+    {
+        if ((string) $user->company_id === (string) $company->id) {
             return true;
         }
 
-        if ($targetCompanyCode !== '' && $companyCode !== '' && trim($companyCode) === $targetCompanyCode) {
+        if ((string) $user->active_company_id === (string) $company->id) {
             return true;
         }
 
-        if ($targetCompanyName !== '' && $companyName !== '' && trim($companyName) === $targetCompanyName) {
+        if ((string) $user->company_code === (string) $company->code) {
             return true;
         }
 
-        return false;
+        if ((string) $user->active_company_code === (string) $company->code) {
+            return true;
+        }
+
+        if ((string) $user->company_name === (string) $company->name) {
+            return true;
+        }
+
+        return (string) $user->active_company_name === (string) $company->name;
+    }
+
+    private function groupBelongsToCompany(CoachGroup $group, Company $company): bool
+    {
+        if ((string) $group->company_id === (string) $company->id) {
+            return true;
+        }
+
+        if ((string) $group->company_code === (string) $company->code) {
+            return true;
+        }
+
+        return (string) $group->company_name === (string) $company->name;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function companyLookupCandidates(User $user): array
+    {
+        $candidates = [
+            $this->activeCompanyValue($user->active_company_id, $user->company_id),
+            $this->activeCompanyValue($user->active_company_code, $user->company_code),
+            $this->activeCompanyValue($user->active_company_name, $user->company_name),
+        ];
+
+        foreach (is_array($user->company_ids) ? $user->company_ids : [] as $companyId) {
+            $candidates[] = trim((string) $companyId);
+        }
+
+        foreach (is_array($user->company_codes) ? $user->company_codes : [] as $companyCode) {
+            $candidates[] = trim((string) $companyCode);
+        }
+
+        foreach (is_array($user->company_memberships) ? $user->company_memberships : [] as $membership) {
+            if (! is_array($membership)) {
+                continue;
+            }
+
+            $candidates[] = trim((string) ($membership['companyId'] ?? $membership['id'] ?? ''));
+            $candidates[] = trim((string) ($membership['companyCode'] ?? $membership['code'] ?? ''));
+            $candidates[] = trim((string) ($membership['companyName'] ?? $membership['name'] ?? ''));
+        }
+
+        return array_values(array_unique(array_filter($candidates)));
     }
 
     /**

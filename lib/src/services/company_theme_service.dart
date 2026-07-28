@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as image_lib;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
@@ -557,6 +558,11 @@ class CompanyThemeService {
           'loadingImageUrl': company.loadingImageUrl,
           'loadingVideoUrl': company.loadingVideoUrl,
         };
+      } on ApiException catch (e) {
+        if (e.statusCode == 401) {
+          return null;
+        }
+        debugPrint('Failed to resolve company theme lookup [$lookupKey]: $e');
       } catch (e) {
         debugPrint('Failed to resolve company theme lookup [$lookupKey]: $e');
       }

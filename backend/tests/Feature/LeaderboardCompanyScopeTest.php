@@ -41,7 +41,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
     }
 
-    public function test_a_user_with_no_resolvable_company_sees_all_users_and_groups(): void
+    public function test_a_user_with_no_resolvable_company_only_sees_themselves_and_no_groups(): void
     {
         $companyA = $this->makeCompany('CompanyA', 'COMPA');
         $companyB = $this->makeCompany('CompanyB', 'COMPB');
@@ -75,17 +75,10 @@ class LeaderboardCompanyScopeTest extends TestCase
 
         $response->assertOk();
         $this->assertEqualsCanonicalizing(
-            [
-                (string) $blankCoach->id,
-                (string) $companyAUser->id,
-                (string) $companyBUser->id,
-            ],
+            [(string) $blankCoach->id],
             collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
         );
-        $this->assertEqualsCanonicalizing(
-            ['Alpha Group', 'Beta Group'],
-            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
-        );
+        $this->assertSame([], $response->json('groupLeaderboards'));
     }
 
     public function test_a_user_with_a_company_sees_only_their_companys_users_and_groups(): void
