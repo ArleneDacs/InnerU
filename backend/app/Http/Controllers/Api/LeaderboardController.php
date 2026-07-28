@@ -28,24 +28,33 @@ class LeaderboardController extends Controller
         $companyCode = $this->activeCompanyValue($user->active_company_code, $user->company_code);
         $companyName = $this->activeCompanyValue($user->active_company_name, $user->company_name);
         $isCoach = (bool) $user->is_coach;
+        $hasResolvedCompany = $companyId !== '' || $companyCode !== '' || $companyName !== '';
 
-        $companyUsers = User::query()
-            ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
-                if ($companyId !== '') {
-                    $builder->where('company_id', $companyId)
-                        ->orWhere('active_company_id', $companyId);
-                }
-                if ($companyCode !== '') {
-                    $builder->orWhere('company_code', $companyCode)
-                        ->orWhere('active_company_code', $companyCode);
-                }
-                if ($companyName !== '') {
-                    $builder->orWhere('company_name', $companyName)
-                        ->orWhere('active_company_name', $companyName);
-                }
-            })
-            ->orderBy('name')
-            ->get();
+        // When none of a viewer's company identifiers can be resolved, the
+        // matching closure below would add zero conditions, and an
+        // unconstrained nested `where` matches every row — i.e. every user
+        // on the platform, leaking every other company's names, scores,
+        // and profile pictures. Fail closed (the viewer only sees
+        // themselves) instead of fail open.
+        $companyUsers = $hasResolvedCompany
+            ? User::query()
+                ->where(function ($builder) use ($companyId, $companyCode, $companyName): void {
+                    if ($companyId !== '') {
+                        $builder->where('company_id', $companyId)
+                            ->orWhere('active_company_id', $companyId);
+                    }
+                    if ($companyCode !== '') {
+                        $builder->orWhere('company_code', $companyCode)
+                            ->orWhere('active_company_code', $companyCode);
+                    }
+                    if ($companyName !== '') {
+                        $builder->orWhere('company_name', $companyName)
+                            ->orWhere('active_company_name', $companyName);
+                    }
+                })
+                ->orderBy('name')
+                ->get()
+            : collect([$user]);
 
         $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers);
         $companyLeaderboard = $companyUsers

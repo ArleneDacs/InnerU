@@ -1641,7 +1641,7 @@ SPEC CHECKSUMS:
   sign_in_with_apple: c5dcc141574c8c54d5ac99dd2163c0c72ad22418
   spotify_sdk: a48400bb29f70c4fe251ebfdc9135c37097ac5ca
   url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
-  video_player_avfoundation: 2cef49524dd1f16c5300b9cd6efd9611ce03639b
+  video_player_avfoundation: 3453f792138786248960ca029747fcd9f318ef52
   watch_connectivity: 208552a93286b3307a5359212a6bcaa44c4deaec
   webview_flutter_wkwebview: 8ebf4fded22593026f7dbff1fbff31ea98573c8d
 
