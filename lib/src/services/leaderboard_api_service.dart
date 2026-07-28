@@ -102,6 +102,7 @@ class LeaderboardApiGroup {
     required this.groupId,
     required this.groupName,
     required this.coachName,
+    required this.companyName,
     required this.totalScore,
     required this.entries,
   });
@@ -109,6 +110,7 @@ class LeaderboardApiGroup {
   final String groupId;
   final String groupName;
   final String coachName;
+  final String companyName;
   final num totalScore;
   final List<LeaderboardApiGroupMember> entries;
 
@@ -117,6 +119,7 @@ class LeaderboardApiGroup {
       groupId: json['groupId']?.toString() ?? '',
       groupName: json['groupName']?.toString() ?? 'Group',
       coachName: json['coachName']?.toString() ?? 'Coach',
+      companyName: json['companyName']?.toString() ?? '',
       totalScore: json['totalScore'] is num
           ? json['totalScore'] as num
           : num.tryParse(json['totalScore']?.toString() ?? '') ?? 0,

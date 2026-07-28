@@ -144,6 +144,7 @@ class GroupLeaderboardSummary {
     required this.groupId,
     required this.groupName,
     required this.coachName,
+    required this.companyName,
     required this.totalScore,
     required this.entries,
   });
@@ -151,6 +152,7 @@ class GroupLeaderboardSummary {
   final String groupId;
   final String groupName;
   final String coachName;
+  final String companyName;
   final num totalScore;
   final List<LeaderboardEntry> entries;
 }
@@ -308,6 +310,7 @@ class _LeaderboardState extends State<Leaderboard>
               groupId: group.groupId,
               groupName: group.groupName,
               coachName: group.coachName,
+              companyName: group.companyName,
               totalScore: group.totalScore,
               entries: group.entries
                   .map(
@@ -1159,7 +1162,9 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
     final theme = widget.theme;
     final subtitle = group == null
         ? 'Leaderboard of every accepted mentee under this coach.'
-        : 'Coach ${group.coachName} • ${group.entries.length} mentees in this group.';
+        : group.companyName.isNotEmpty
+            ? 'Coach ${group.coachName} • ${group.entries.length} mentees in this group • ${group.companyName}.'
+            : 'Coach ${group.coachName} • ${group.entries.length} mentees in this group.';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -1442,7 +1447,9 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
             ),
           ),
           subtitle: Text(
-            'Coach ${group.coachName} · ${group.entries.length} mentees',
+            group.companyName.isNotEmpty
+                ? 'Coach ${group.coachName} · ${group.entries.length} mentees · ${group.companyName}'
+                : 'Coach ${group.coachName} · ${group.entries.length} mentees',
             style: TextStyle(color: theme.mutedInkColor),
           ),
           trailing: Text(

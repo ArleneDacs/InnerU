@@ -99,7 +99,7 @@ class LeaderboardController extends Controller
             : collect();
 
         $groupLeaderboards = $groupLeaderboards
-            ->map(function (CoachGroup $group) use ($usersById, $companyScores) {
+            ->map(function (CoachGroup $group) use ($usersById, $companyScores, $company) {
                 $coachIds = $this->groupCoachIds($group);
                 $coachNames = collect($coachIds)
                     ->map(fn (string $coachId) => $usersById->get($coachId)?->name)
@@ -167,6 +167,8 @@ class LeaderboardController extends Controller
                     'coachName' => $coachName,
                     'coachIds' => $coachIds,
                     'coachNames' => $coachNames,
+                    'companyId' => $company?->id,
+                    'companyName' => $company?->name,
                     'totalScore' => $totalScore,
                     'entries' => $entries,
                 ];

@@ -116,6 +116,27 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_each_group_reports_the_viewers_own_company_id_and_name(): void
+    {
+        $company = $this->makeCompany('CompanyA', 'COMPA');
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+        $this->makeGroup($viewer, 'Alpha Group', [(string) $viewer->id]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $group = collect($response->json('groupLeaderboards'))->firstWhere('groupName', 'Alpha Group');
+
+        $this->assertSame($company->id, $group['companyId']);
+        $this->assertSame('CompanyA', $group['companyName']);
+    }
+
     public function test_shared_company_codes_or_names_do_not_leak_other_company_members(): void
     {
         $companyA = $this->makeCompany('Shared Company', 'SHARED-A');
