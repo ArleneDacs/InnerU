@@ -207,7 +207,7 @@ class _LeaderboardState extends State<Leaderboard>
     _bootstrap();
     _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted) return;
-      unawaited(_refreshLeaderboard());
+      unawaited(_refreshLeaderboard(silent: true));
     });
   }
 
@@ -364,13 +364,22 @@ class _LeaderboardState extends State<Leaderboard>
     }
   }
 
-  Future<void> _refreshLeaderboard() async {
+  // [silent] skips the loading-skeleton flags for refreshes the user
+  // didn't ask for (the periodic timer, returning to this screen,
+  // resuming the app) -- toggling them back to true swaps the real
+  // content out for a skeleton and back again, which resets whatever the
+  // user was scrolled to. A user-initiated refresh (the refresh button,
+  // pull-to-refresh) still shows the loading state, since that's expected
+  // feedback for a deliberate action.
+  Future<void> _refreshLeaderboard({bool silent = false}) async {
     if (_isRefreshing) return;
     _isRefreshing = true;
-    setState(() {
-      _isLoading = true;
-      _isA12Loading = true;
-    });
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _isA12Loading = true;
+      });
+    }
     try {
       await _loadLeaderboardFromApi();
     } finally {
@@ -380,13 +389,13 @@ class _LeaderboardState extends State<Leaderboard>
 
   @override
   void didPopNext() {
-    unawaited(_refreshLeaderboard());
+    unawaited(_refreshLeaderboard(silent: true));
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_refreshLeaderboard());
+      unawaited(_refreshLeaderboard(silent: true));
     }
   }
 

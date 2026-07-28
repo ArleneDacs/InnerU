@@ -178,6 +178,40 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_the_viewer_always_appears_in_their_own_company_leaderboard_even_with_messy_company_id(): void
+    {
+        // A same-company user with a clean company_id, so the "exact id
+        // match" branch finds something and would otherwise short-circuit
+        // before ever falling back to the code/name-based query.
+        $company = $this->makeCompany('MessyCo', 'MESSY01');
+        User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        // The viewer: only resolvable via company_code/company_name,
+        // company_id itself is blank -- a realistic data-quality gap.
+        $viewer = User::factory()->create([
+            'company_id' => null,
+            'active_company_id' => null,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $ids = collect($response->json('companyLeaderboard'))->pluck('userId');
+
+        $this->assertTrue(
+            $ids->contains((string) $viewer->id),
+            'The viewer must always see their own entry in their own company leaderboard.',
+        );
+    }
+
     public function test_a_company_with_a_future_period_keeps_everyones_scores_at_zero_until_the_start_date(): void
     {
         $company = $this->makeCompany('Future Company', 'FUT001');

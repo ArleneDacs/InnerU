@@ -297,11 +297,19 @@ class LeaderboardController extends Controller
             ->orderBy('name')
             ->get();
 
-        if ($exactCompanyUsers->isNotEmpty()) {
-            return $exactCompanyUsers;
-        }
-
-        return User::query()
+        // Code/name is only a valid signal for a user with no definitive
+        // company_id at all. A user whose company_id already points at a
+        // DIFFERENT company must never be pulled in just because their
+        // company_name/company_code happens to collide with this one
+        // (e.g. two different companies sharing a display name) -- their
+        // own id is authoritative and wins over a name coincidence.
+        $codeOrNameUsers = User::query()
+            ->where(function ($builder): void {
+                $builder->whereNull('company_id')->orWhere('company_id', '');
+            })
+            ->where(function ($builder): void {
+                $builder->whereNull('active_company_id')->orWhere('active_company_id', '');
+            })
             ->where(function ($builder) use ($company): void {
                 $builder->where('company_code', $company->code)
                     ->orWhere('active_company_code', $company->code)
@@ -310,6 +318,24 @@ class LeaderboardController extends Controller
             })
             ->orderBy('name')
             ->get();
+
+        // Union both, don't short-circuit on the exact-id match alone: a
+        // user resolved into this company only via code/name (e.g. their
+        // own company_id is blank) must not be hidden just because some
+        // OTHER user in the same company happens to have a clean
+        // company_id. Without this, the viewer themselves could vanish
+        // from their own company's leaderboard whenever anyone else in
+        // the company has tidier data than they do.
+        $combined = $exactCompanyUsers
+            ->concat($codeOrNameUsers)
+            ->unique(fn (User $candidate) => (string) $candidate->id)
+            ->values();
+
+        if (! $combined->contains(fn (User $candidate) => (string) $candidate->id === (string) $viewer->id)) {
+            $combined = $combined->push($viewer)->values();
+        }
+
+        return $combined;
     }
 
     private function userBelongsToCompany(User $user, Company $company): bool
