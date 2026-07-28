@@ -38,17 +38,18 @@ class UserScoreService
         $goalScore = $this->resolveGoalScoreForUser($user);
         $company = $this->resolveCompaniesForUsers(collect([$user]))[(string) $user->id] ?? null;
         if ($this->hasConfiguredPeriod($company)) {
-            // A leaderboard period must exclude everything before its start
-            // date, including goals — the new Goals-based score is a single
-            // date-independent value (all of a user's current goals,
-            // regardless of when they started), so it isn't passed here.
-            // The period path falls back to the per-day legacy todo-list
-            // score instead, which is already correctly date-bounded since
-            // it only reads DailyTracker rows within the period.
+            // The Goals-based score is a date-independent "current status"
+            // snapshot -- the Goals page shows the same percentage
+            // regardless of any configured leaderboard period, so it's
+            // passed straight through here rather than being replaced by a
+            // DailyTracker's legacy per-day todo-list score. Only
+            // coreTaskScore stays period-bound (it only reads DailyTracker
+            // rows within the period).
             return $this->scoreBreakdownForPeriod(
                 $user,
                 $company->leaderboard_period_start,
                 $company->leaderboard_period_end,
+                $goalScore,
             );
         }
 
@@ -189,14 +190,14 @@ class UserScoreService
             $company = $companiesByUser[$userId] ?? null;
 
             if ($this->hasConfiguredPeriod($company)) {
-                // See resolveBreakdownForUser: the period path deliberately
-                // does not receive $goalScore, so it falls back to the
-                // per-day legacy todo-list score instead of the
-                // date-independent Goals-based score.
+                // See resolveBreakdownForUser: the Goals-based score is
+                // passed straight through since it's date-independent and
+                // must match the Goals page regardless of period.
                 $scores[$userId] = $this->scoreBreakdownForPeriod(
                     $user,
                     $company->leaderboard_period_start,
                     $company->leaderboard_period_end,
+                    $goalScoresByUser[$userId] ?? null,
                 );
                 $periodUserIds[] = $userId;
             }

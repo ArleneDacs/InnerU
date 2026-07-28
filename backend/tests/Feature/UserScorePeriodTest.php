@@ -285,16 +285,20 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(100.0, $breakdowns[(string) $userWithoutPeriod->id]['coreTaskScore']);
     }
 
-    public function test_a_goal_predating_the_period_does_not_leak_into_the_period_score(): void
+    public function test_the_goals_based_score_still_applies_even_when_a_leaderboard_period_is_configured(): void
     {
         Carbon::setTestNow('2030-01-01');
 
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-05');
         $user = $this->makeUserInCompany($company);
 
-        // An old, already-completed goal from well before the period. The
-        // new Goals-based scorer would score this 100 -- it must NOT be
-        // used for a period-configured company.
+        // Goals are a date-independent "current status" snapshot -- the
+        // Goals page shows the exact same percentage no matter what
+        // leaderboard period is configured, so goalScore must match it
+        // exactly rather than falling back to a DailyTracker's legacy
+        // todo-list score. One PERSONAL goal at 100%, PROFESSIONAL and
+        // CONTRIBUTION empty at 0% each -> (100+0+0)/3 = 33.3, the same
+        // math the Goals page itself uses.
         Goal::create([
             'id' => (string) Str::uuid(),
             'user_id' => (string) $user->id,
@@ -313,8 +317,8 @@ class UserScorePeriodTest extends TestCase
             'progress' => 100,
         ]);
 
-        // Within the period: distinctive todo-list score, so we can tell
-        // it's the one actually used.
+        // A DailyTracker todo-list score must NOT override the real
+        // Goals-based score.
         DailyTracker::create([
             'user_id' => (string) $user->id,
             'username' => $user->name,
@@ -325,8 +329,6 @@ class UserScorePeriodTest extends TestCase
 
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
-        // Must be the in-period daily-tracker value (40), not the old
-        // goal's 100.
-        $this->assertEquals(40.0, $breakdown['goalScore']);
+        $this->assertEquals(33.3, $breakdown['goalScore']);
     }
 }
