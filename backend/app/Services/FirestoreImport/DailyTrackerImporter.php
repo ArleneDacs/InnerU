@@ -6,13 +6,20 @@ namespace App\Services\FirestoreImport;
 use App\Models\DailyTracker;
 use App\Models\User;
 
-// Confirmed-real fields (from the removed pre-cutover Dart code in commit
-// 8d8948b): userId, username, call, steps, exercise, meditation, learning,
-// addValue, date/lastUpdated. Every other field below is inferred from the
-// current Postgres schema and the current API's upsert payload shape
-// (daily_tracker_api_service.dart) - confirm against a real exported
-// snapshot (scripts/firestore-export/snapshot/dailytracker.json, produced
-// by Task 4) before trusting this mapping in production.
+// Field mapping confirmed against the real production export (Task 4,
+// scripts/firestore-export/snapshot/dailytracker.json, 634 documents):
+// userId, username, call, steps, exercise, meditation, learning, addValue,
+// todoList, date, lastUpdated (always a plain "YYYY-MM-DD" string, never a
+// Firestore Timestamp - safe for the date:Y-m-d cast), stepCount, stepGoal,
+// exerciseCount, exerciseMinutes, todoListCount, todoListScore,
+// todoListScoreDailyContribution, todoListIncludedInTotal, userTotalScore,
+// customDailyTasks, meditationMinutes, companyId, companyCode, companyName.
+// callCount/learningCount/valueCount never appear in any real document -
+// they default to 0 via the `?? 0` below, which is correct, not a bug.
+// activeCompanyId/activeCompanyCode/activeCompanyName also appear on the 34
+// documents that have company data at all, always identical in value to
+// companyId/companyCode/companyName on the same document - reading the
+// plain company* fields loses no data.
 class DailyTrackerImporter
 {
     public function __construct(
@@ -30,11 +37,25 @@ class DailyTrackerImporter
 
     private function importRecord(string $firestoreId, array $data): void
     {
-        $userId = User::where('firebase_uid', $data['userId'] ?? null)->value('id');
+        // 97 of 634 real documents have no userId field at all. Guard for
+        // that explicitly before querying: Eloquent's where('firebase_uid',
+        // null) compiles to "firebase_uid IS NULL", not "no match" - since
+        // firebase_uid is nullable (native registrations since the
+        // 2026-07-21 cutover have no Firebase account), an unguarded lookup
+        // would silently attach this record to an arbitrary NULL-firebase_uid
+        // user instead of skipping it.
+        $firebaseUid = $data['userId'] ?? null;
         // Matches the old Dart code's _resolveTrackerDate fallback order
         // exactly: lastUpdated takes priority over date.
         $date = $data['lastUpdated'] ?? $data['date'] ?? null;
-        if ($userId === null || $date === null) {
+        if ($firebaseUid === null || $date === null) {
+            $this->report->skip('daily_trackers', $firestoreId, 'missing matching user or date');
+
+            return;
+        }
+
+        $userId = User::where('firebase_uid', $firebaseUid)->value('id');
+        if ($userId === null) {
             $this->report->skip('daily_trackers', $firestoreId, 'missing matching user or date');
 
             return;

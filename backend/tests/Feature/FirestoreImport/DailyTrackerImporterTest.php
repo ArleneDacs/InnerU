@@ -90,6 +90,30 @@ class DailyTrackerImporterTest extends TestCase
         $this->assertNotEmpty($report->skippedRecords());
     }
 
+    public function test_skips_a_record_with_no_userid_field_instead_of_matching_a_null_firebase_uid_user(): void
+    {
+        // Regression test found via Task 4's real-data verification: 97 of
+        // 634 real production documents have no userId field at all.
+        // Eloquent's where('firebase_uid', null) compiles to "firebase_uid
+        // IS NULL", not "no match" - since firebase_uid is nullable (native
+        // registrations since the 2026-07-21 cutover have no Firebase
+        // account), an unguarded lookup would silently attach this record
+        // to an arbitrary NULL-firebase_uid user instead of skipping it.
+        $nativeUser = User::factory()->create(['firebase_uid' => null]);
+
+        File::put("{$this->dir}/dailytracker.json", json_encode([
+            ['id' => 'x', 'data' => ['date' => '2025-03-01', 'stepCount' => 500]],
+        ]));
+
+        $report = new ImportReport();
+        $importer = new DailyTrackerImporter(new SnapshotReader($this->dir), $report);
+        $importer->import(false);
+
+        $this->assertSame(0, DailyTracker::where('user_id', $nativeUser->id)->count());
+        $this->assertSame(0, DailyTracker::count());
+        $this->assertNotEmpty($report->skippedRecords());
+    }
+
     public function test_never_overwrites_an_existing_row_for_the_same_user_and_date(): void
     {
         // daily_trackers has a live production writer (DailyTrackerController)
