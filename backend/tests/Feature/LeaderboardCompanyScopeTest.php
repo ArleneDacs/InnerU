@@ -201,6 +201,57 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_a_group_matches_by_its_stored_company_code_when_company_id_was_never_backfilled(): void
+    {
+        // This is the real-world case: a group created long ago already
+        // has company_code/company_name stamped (that's been happening
+        // since the group-creation feature was built), but its NEW
+        // company_id column is null because the coach's own company_id
+        // field is blank -- the backfill migration has nothing to copy
+        // from. The coach's other company fields are blank too, so the
+        // dynamic "is this coach currently in my company" check also
+        // can't resolve them. company_code is the one signal that's
+        // reliably been there since the group was first created.
+        $company = $this->makeCompany('Gencys', 'GENTIKG');
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $coach = User::factory()->create([
+            'company_id' => null,
+            'active_company_id' => null,
+            'company_code' => null,
+            'active_company_code' => null,
+            'company_name' => null,
+            'active_company_name' => null,
+            'is_coach' => true,
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'company_id' => null,
+            'coach_ids' => [(string) $coach->id],
+            'name' => "Maychell's Circle",
+            'member_ids' => [],
+            'member_count' => 0,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertEqualsCanonicalizing(
+            ["Maychell's Circle"],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
+    }
+
     public function test_a_group_matches_by_its_stored_company_id_even_if_the_coachs_own_data_has_since_drifted(): void
     {
         $company = $this->makeCompany('CompanyA', 'COMPA');

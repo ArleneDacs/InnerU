@@ -69,16 +69,31 @@ class LeaderboardController extends Controller
                     // The group's own stored company_id (stamped at
                     // creation time from its coach's company) is the
                     // primary signal -- it doesn't drift if the coach's
-                    // own record later changes. Fall back to checking
-                    // whether the coach/members currently resolve into
-                    // the viewer's company, for groups created before
-                    // company_id existed or where it's still null.
+                    // own record later changes.
                     if ($group->company_id !== null
                         && (string) $group->company_id === (string) $company->id
                     ) {
                         return true;
                     }
 
+                    // company_code has been stamped on every group since
+                    // the group-creation feature was first built (long
+                    // before company_id existed), so it's reliably
+                    // present even when company_id was never backfilled
+                    // (e.g. the coach's own company_id is blank, so there
+                    // was nothing to copy). Codes are unique per company
+                    // (see CompanyController::generateUniqueCode), unlike
+                    // company_name, which two different companies could
+                    // share -- deliberately not matching on name here to
+                    // avoid re-opening that leak.
+                    $groupCode = trim((string) ($group->company_code ?? ''));
+                    if ($groupCode !== '' && $groupCode === trim((string) $company->code)) {
+                        return true;
+                    }
+
+                    // Fall back to checking whether the coach/members
+                    // currently resolve into the viewer's company, for
+                    // groups with no company_id/code/name stamped at all.
                     $coachIds = $this->groupCoachIds($group);
                     if (collect($coachIds)->contains(fn (string $coachId): bool => $usersById->has($coachId))) {
                         return true;
