@@ -63,7 +63,7 @@ class LeaderboardController extends Controller
         $usersById = $companyUsers->keyBy(fn (User $candidate) => (string) $candidate->id);
 
         $allGroups = CoachGroup::query()->orderBy('name')->get();
-        $groupLeaderboards = $company !== null
+        $sameCompanyGroups = $company !== null
             ? $allGroups
                 ->filter(function (CoachGroup $group) use ($usersById): bool {
                     $coachIds = $this->groupCoachIds($group);
@@ -85,11 +85,23 @@ class LeaderboardController extends Controller
                 ->values()
             : collect();
 
+        // When no group's coach/members belong to the viewer's own
+        // company (or the viewer's company couldn't be resolved at all),
+        // fall back to showing every group rather than an empty tab.
+        // Resolve coach/member names against every user in that case,
+        // since $usersById is scoped to the viewer's own company and
+        // wouldn't know about a group's real coach/members otherwise.
+        $showingAllGroups = $sameCompanyGroups->isEmpty();
+        $groupLeaderboards = $showingAllGroups ? $allGroups : $sameCompanyGroups;
+        $usersForGroups = $showingAllGroups
+            ? User::query()->get()->keyBy(fn (User $candidate) => (string) $candidate->id)
+            : $usersById;
+
         $groupLeaderboards = $groupLeaderboards
-            ->map(function (CoachGroup $group) use ($usersById, $companyScores) {
+            ->map(function (CoachGroup $group) use ($usersForGroups, $companyScores) {
                 $coachIds = $this->groupCoachIds($group);
                 $coachNames = collect($coachIds)
-                    ->map(fn (string $coachId) => $usersById->get($coachId)?->name)
+                    ->map(fn (string $coachId) => $usersForGroups->get($coachId)?->name)
                     ->filter()
                     ->values()
                     ->all();
@@ -111,8 +123,8 @@ class LeaderboardController extends Controller
                 }
 
                 $entries = collect($memberIds)
-                    ->map(function (string $memberId) use ($usersById, $group, $companyScores): ?array {
-                        $member = $usersById->get($memberId);
+                    ->map(function (string $memberId) use ($usersForGroups, $group, $companyScores): ?array {
+                        $member = $usersForGroups->get($memberId);
                         if ($member === null) {
                             return null;
                         }

@@ -41,7 +41,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
     }
 
-    public function test_a_user_with_no_resolvable_company_only_sees_themselves_and_no_groups(): void
+    public function test_a_user_with_no_resolvable_company_only_sees_themselves_but_falls_back_to_all_groups(): void
     {
         $companyA = $this->makeCompany('CompanyA', 'COMPA');
         $companyB = $this->makeCompany('CompanyB', 'COMPB');
@@ -78,7 +78,13 @@ class LeaderboardCompanyScopeTest extends TestCase
             [(string) $blankCoach->id],
             collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
         );
-        $this->assertSame([], $response->json('groupLeaderboards'));
+        // No company to scope by -- per spec, fall back to showing every
+        // group rather than an empty tab. Users/scores stay strictly
+        // scoped (asserted above); only groups get this fallback.
+        $this->assertEqualsCanonicalizing(
+            ['Alpha Group', 'Beta Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
     }
 
     public function test_a_user_with_a_company_sees_only_their_companys_users_and_groups(): void
@@ -209,6 +215,38 @@ class LeaderboardCompanyScopeTest extends TestCase
         $this->assertTrue(
             $ids->contains((string) $viewer->id),
             'The viewer must always see their own entry in their own company leaderboard.',
+        );
+    }
+
+    public function test_groups_fall_back_to_showing_everyone_when_none_match_the_viewers_company(): void
+    {
+        $viewerCompany = $this->makeCompany('ViewerCo', 'VIEWCO');
+        $otherCompany = $this->makeCompany('OtherCo', 'OTHERCO');
+
+        $viewer = User::factory()->create([
+            'company_id' => $viewerCompany->id,
+            'company_code' => $viewerCompany->code,
+            'company_name' => $viewerCompany->name,
+        ]);
+
+        // Every existing group belongs to a DIFFERENT company than the
+        // viewer -- none should match, so the fallback should kick in.
+        $otherCoach = User::factory()->create([
+            'company_id' => $otherCompany->id,
+            'company_code' => $otherCompany->code,
+            'company_name' => $otherCompany->name,
+            'is_coach' => true,
+        ]);
+        $this->makeGroup($otherCoach, 'Other Group', [(string) $otherCoach->id]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertEqualsCanonicalizing(
+            ['Other Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
         );
     }
 
