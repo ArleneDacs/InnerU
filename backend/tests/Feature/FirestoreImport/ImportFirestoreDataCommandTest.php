@@ -3,6 +3,7 @@
 
 namespace Tests\Feature\FirestoreImport;
 
+use App\Models\DailyTracker;
 use App\Models\Goal;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -59,6 +60,36 @@ class ImportFirestoreDataCommandTest extends TestCase
         $user = User::where('firebase_uid', 'uid-1')->first();
         $this->assertNotNull($user);
         $this->assertSame(1, Goal::where('user_id', $user->id)->count());
+
+        File::deleteDirectory($dir);
+    }
+
+    public function test_full_run_also_imports_daily_tracker_records(): void
+    {
+        $dir = sys_get_temp_dir().'/firestore-import-dailytracker-'.uniqid();
+        File::ensureDirectoryExists($dir);
+
+        File::put("$dir/users.json", json_encode([['id' => 'uid-1', 'data' => ['username' => 'Jane']]]));
+        foreach (['coaches', 'coach_groups', 'coach_requests', 'notes', 'userpoints', 'goals'] as $name) {
+            File::put("$dir/{$name}.json", json_encode([]));
+        }
+        File::put("$dir/dailytracker.json", json_encode([
+            ['id' => 'uid-1_2025-03-01', 'data' => ['userId' => 'uid-1', 'date' => '2025-03-01', 'username' => 'Jane', 'call' => true]],
+        ]));
+        File::put("$dir/auth-users.json", json_encode([
+            'users' => [['localId' => 'uid-1', 'email' => 'jane@example.com', 'emailVerified' => true, 'providerUserInfo' => []]],
+        ]));
+        foreach (['tasks', 'updates', 'comments', 'merits', 'wellness', 'history'] as $group) {
+            File::put("$dir/_group_{$group}.json", json_encode([]));
+        }
+
+        $this->artisan('firestore:import', ['--path' => $dir])
+            ->expectsOutputToContain('daily_trackers: created=1')
+            ->assertExitCode(0);
+
+        $user = User::where('firebase_uid', 'uid-1')->first();
+        $this->assertNotNull($user);
+        $this->assertSame(1, DailyTracker::where('user_id', $user->id)->count());
 
         File::deleteDirectory($dir);
     }

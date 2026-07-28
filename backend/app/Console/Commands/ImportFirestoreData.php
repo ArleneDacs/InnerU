@@ -4,6 +4,7 @@
 namespace App\Console\Commands;
 
 use App\Services\FirestoreImport\CoachRelationshipImporter;
+use App\Services\FirestoreImport\DailyTrackerImporter;
 use App\Services\FirestoreImport\DryRunAbort;
 use App\Services\FirestoreImport\GoalImporter;
 use App\Services\FirestoreImport\ImportReport;
@@ -70,7 +71,7 @@ class ImportFirestoreData extends Command
         return self::SUCCESS;
     }
 
-    /** @return array<int, UserImporter|CoachRelationshipImporter|GoalImporter|NotesImporter|WellnessImporter|UserPointsImporter> */
+    /** @return array<int, UserImporter|CoachRelationshipImporter|GoalImporter|NotesImporter|WellnessImporter|UserPointsImporter|DailyTrackerImporter> */
     private function importers(SnapshotReader $reader, ImportReport $report): array
     {
         // UserImporter must run first: every other importer resolves foreign
@@ -83,6 +84,7 @@ class ImportFirestoreData extends Command
             new NotesImporter($reader, $report),
             new WellnessImporter($reader, $report),
             new UserPointsImporter($reader, $report),
+            new DailyTrackerImporter($reader, $report),
         ];
     }
 }
