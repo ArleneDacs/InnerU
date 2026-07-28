@@ -65,18 +65,26 @@ class LeaderboardController extends Controller
         $allGroups = CoachGroup::query()->orderBy('name')->get();
         $groupLeaderboards = $company !== null
             ? $allGroups
-                ->filter(function (CoachGroup $group) use ($company, $usersById): bool {
+                ->filter(function (CoachGroup $group) use ($usersById): bool {
                     $coachIds = $this->groupCoachIds($group);
-                    $groupCoachIsInCompany = collect($coachIds)->contains(function (string $coachId) use ($usersById, $company): bool {
-                        $coach = $usersById->get($coachId);
-                        if ($coach === null) {
-                            return false;
-                        }
+                    $groupCoachIsInCompany = collect($coachIds)->contains(
+                        fn (string $coachId): bool => $usersById->has($coachId),
+                    );
 
-                        return $this->userBelongsToCompany($coach, $company);
-                    });
+                    if ($groupCoachIsInCompany) {
+                        return true;
+                    }
 
-                    return $this->groupBelongsToCompany($group, $company) || $groupCoachIsInCompany;
+                    $memberIds = is_array($group->member_ids)
+                        ? array_values(array_filter(array_map(
+                            static fn ($id) => (string) $id,
+                            $group->member_ids,
+                        )))
+                        : [];
+
+                    return collect($memberIds)->contains(
+                        fn (string $memberId): bool => $usersById->has($memberId),
+                    );
                 })
                 ->values()
             : collect();
@@ -285,11 +293,21 @@ class LeaderboardController extends Controller
             return collect([$viewer]);
         }
 
-        return User::query()
+        $exactCompanyUsers = User::query()
             ->where(function ($builder) use ($company): void {
                 $builder->where('company_id', $company->id)
-                    ->orWhere('active_company_id', $company->id)
-                    ->orWhere('company_code', $company->code)
+                    ->orWhere('active_company_id', $company->id);
+            })
+            ->orderBy('name')
+            ->get();
+
+        if ($exactCompanyUsers->isNotEmpty()) {
+            return $exactCompanyUsers;
+        }
+
+        return User::query()
+            ->where(function ($builder) use ($company): void {
+                $builder->where('company_code', $company->code)
                     ->orWhere('active_company_code', $company->code)
                     ->orWhere('company_name', $company->name)
                     ->orWhere('active_company_name', $company->name);

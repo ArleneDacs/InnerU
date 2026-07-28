@@ -114,6 +114,46 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_shared_company_codes_or_names_do_not_leak_other_company_members(): void
+    {
+        $companyA = $this->makeCompany('Shared Company', 'SHARED-A');
+        $companyB = $this->makeCompany('Shared Company', 'SHARED-B');
+
+        $userA = User::factory()->create([
+            'company_id' => $companyA->id,
+            'active_company_id' => $companyA->id,
+            'company_code' => $companyA->code,
+            'active_company_code' => $companyA->code,
+            'company_name' => $companyA->name,
+            'active_company_name' => $companyA->name,
+        ]);
+        $userB = User::factory()->create([
+            'company_id' => $companyB->id,
+            'active_company_id' => $companyB->id,
+            'company_code' => $companyB->code,
+            'active_company_code' => $companyB->code,
+            'company_name' => $companyB->name,
+            'active_company_name' => $companyB->name,
+        ]);
+
+        $this->makeGroup($userA, 'Alpha Group', [(string) $userA->id]);
+        $this->makeGroup($userB, 'Beta Group', [(string) $userB->id]);
+
+        Sanctum::actingAs($userA);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+
+        $ids = collect($response->json('companyLeaderboard'))->pluck('userId');
+        $this->assertTrue($ids->contains((string) $userA->id));
+        $this->assertFalse($ids->contains((string) $userB->id));
+        $this->assertEqualsCanonicalizing(
+            ['Alpha Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
+    }
+
     public function test_a_company_with_a_future_period_keeps_everyones_scores_at_zero_until_the_start_date(): void
     {
         $company = $this->makeCompany('Future Company', 'FUT001');
