@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
@@ -46,6 +47,16 @@ String _formatLeaderboardScore(num score) {
   return roundedToTenth == roundedToTenth.roundToDouble()
       ? roundedToTenth.toStringAsFixed(0)
       : roundedToTenth.toStringAsFixed(1);
+}
+
+String _formatLeaderboardDate(DateTime date) {
+  return DateFormat('MMM d, yyyy').format(date.toLocal());
+}
+
+bool _isBeforeDate(DateTime left, DateTime right) {
+  final normalizedLeft = DateTime(left.year, left.month, left.day);
+  final normalizedRight = DateTime(right.year, right.month, right.day);
+  return normalizedLeft.isBefore(normalizedRight);
 }
 
 class LeaderboardEntry {
@@ -168,6 +179,8 @@ class _LeaderboardState extends State<Leaderboard>
   bool _isRefreshing = false;
   bool _isAbundance12Company = false;
   bool _isCoachUser = false;
+  DateTime? _leaderboardPeriodStart;
+  DateTime? _leaderboardPeriodEnd;
   ModalRoute<dynamic>? _route;
 
   bool _isAbundance12CompanyByIdentity({
@@ -256,6 +269,8 @@ class _LeaderboardState extends State<Leaderboard>
         _isA12Loading = false;
         _isAbundance12Company = false;
         _isCoachUser = false;
+        _leaderboardPeriodStart = null;
+        _leaderboardPeriodEnd = null;
       });
       return;
     }
@@ -331,6 +346,8 @@ class _LeaderboardState extends State<Leaderboard>
           code: snapshot.companyCode,
         );
         _isCoachUser = session.isCoach;
+        _leaderboardPeriodStart = snapshot.leaderboardPeriodStart;
+        _leaderboardPeriodEnd = snapshot.leaderboardPeriodEnd;
         _a12Entries = a12Entries;
         _allEntries = rankedCompany;
         _menteeEntries = menteeEntries.isEmpty ? rankedCompany : menteeEntries;
@@ -437,37 +454,58 @@ class _LeaderboardState extends State<Leaderboard>
                   ],
                 ),
               ),
-              body: RefreshIndicator(
-                key: _refreshKey,
-                onRefresh: _refreshLeaderboard,
-                child: TabBarView(
-                  children: [
-                    _A12LeaderboardBoard(
-                      key: const ValueKey('company'),
-                      entries: _a12Entries,
-                      isLoading: _isA12Loading,
+              body: Column(
+                children: [
+                  if (_leaderboardPeriodStart != null &&
+                      _leaderboardPeriodEnd != null)
+                    _LeaderboardPeriodBanner(
+                      start: _leaderboardPeriodStart!,
+                      end: _leaderboardPeriodEnd!,
+                      userCount: _a12Entries.length,
                       theme: companyTheme,
-                      currentUserId:
-                          AuthService.instance.currentSession?.id.toString() ??
-                              '',
-                      showRankLabels: _isAbundance12Company,
-                      title: 'Company leaderboard',
-                      onEntryTap: (entry) =>
-                          _showScoreBreakdown(context, entry, companyTheme),
                     ),
-                    _GroupLeaderboardsBoard(
-                      groups: _groupLeaderboards,
-                      allMenteeEntries:
-                          _isCoachUser ? _menteeEntries : _allEntries,
-                      isLoading: _isLoading,
-                      isCoachUser: _isCoachUser,
-                      view: _CoachLeaderboardView.groups,
-                      theme: companyTheme,
-                      onEntryTap: (entry) =>
-                          _showPointsBreakdown(context, entry, companyTheme),
+                  Expanded(
+                    child: RefreshIndicator(
+                      key: _refreshKey,
+                      onRefresh: _refreshLeaderboard,
+                      child: TabBarView(
+                        children: [
+                          _A12LeaderboardBoard(
+                            key: const ValueKey('company'),
+                            entries: _a12Entries,
+                            isLoading: _isA12Loading,
+                            theme: companyTheme,
+                            currentUserId: AuthService
+                                    .instance.currentSession?.id
+                                    .toString() ??
+                                '',
+                            showRankLabels: _isAbundance12Company,
+                            title: 'Company leaderboard',
+                            onEntryTap: (entry) => _showScoreBreakdown(
+                              context,
+                              entry,
+                              companyTheme,
+                            ),
+                          ),
+                          _GroupLeaderboardsBoard(
+                            groups: _groupLeaderboards,
+                            allMenteeEntries:
+                                _isCoachUser ? _menteeEntries : _allEntries,
+                            isLoading: _isLoading,
+                            isCoachUser: _isCoachUser,
+                            view: _CoachLeaderboardView.groups,
+                            theme: companyTheme,
+                            onEntryTap: (entry) => _showPointsBreakdown(
+                              context,
+                              entry,
+                              companyTheme,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -841,6 +879,143 @@ Widget _buildScoreBreakdownRow(
       ],
     ),
   );
+}
+
+class _LeaderboardPeriodBanner extends StatelessWidget {
+  const _LeaderboardPeriodBanner({
+    required this.start,
+    required this.end,
+    required this.userCount,
+    required this.theme,
+  });
+
+  final DateTime start;
+  final DateTime end;
+  final int userCount;
+  final CompanyThemeData theme;
+
+  Widget _buildPill({
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.16 : 0.1),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: theme.mutedInkColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              color: theme.inkColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isUpcoming = _isBeforeDate(DateTime.now(), start);
+    final subtitle = isUpcoming
+        ? 'Scores stay at 0% until the start date.'
+        : 'Scores count only inside this date window.';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.surfaceColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.2 : 0.14),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.primaryColor.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: theme.primaryColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              CupertinoIcons.calendar,
+              color: theme.primaryColor,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Leaderboard period',
+                  style: TextStyle(
+                    color: theme.inkColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: theme.mutedInkColor,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildPill(
+                      label: 'Total users',
+                      value: userCount.toString(),
+                    ),
+                    _buildPill(
+                      label: 'Starts',
+                      value: _formatLeaderboardDate(start),
+                    ),
+                    _buildPill(
+                      label: 'Ends',
+                      value: _formatLeaderboardDate(end),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 Color _rankColor(GoalRank rank) {

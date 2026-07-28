@@ -134,6 +134,8 @@ class LeaderboardApiSnapshot {
   const LeaderboardApiSnapshot({
     required this.companyCode,
     required this.companyName,
+    required this.leaderboardPeriodStart,
+    required this.leaderboardPeriodEnd,
     required this.entries,
     required this.groups,
     required this.menteeEntries,
@@ -141,6 +143,8 @@ class LeaderboardApiSnapshot {
 
   final String companyCode;
   final String companyName;
+  final DateTime? leaderboardPeriodStart;
+  final DateTime? leaderboardPeriodEnd;
   final List<LeaderboardApiCompanyEntry> entries;
   final List<LeaderboardApiGroup> groups;
   final List<LeaderboardApiGroupMember> menteeEntries;
@@ -169,6 +173,8 @@ class LeaderboardApiSnapshot {
     return LeaderboardApiSnapshot(
       companyCode: company['companyCode']?.toString() ?? '',
       companyName: company['companyName']?.toString() ?? '',
+      leaderboardPeriodStart: _parseApiDate(company['leaderboardPeriodStart']),
+      leaderboardPeriodEnd: _parseApiDate(company['leaderboardPeriodEnd']),
       entries: dedupedEntries,
       groups: (json['groupLeaderboards'] as List?)
               ?.whereType<Map>()
@@ -210,4 +216,17 @@ num _parseApiNumber(dynamic value, {num fallback = 0}) {
 
   final parsed = num.tryParse(value?.toString() ?? '');
   return parsed ?? fallback;
+}
+
+DateTime? _parseApiDate(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  final raw = value.toString().trim();
+  if (raw.isEmpty) {
+    return null;
+  }
+
+  return DateTime.tryParse(raw);
 }
