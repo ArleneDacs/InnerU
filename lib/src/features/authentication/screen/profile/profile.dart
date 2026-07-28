@@ -357,6 +357,7 @@ class _ProfilePageState extends State<ProfilePage> {
       learningCount: todayTasks['learning'] == true ? 1 : 0,
       valueCount: todayTasks['addValue'] == true ? 1 : 0,
       todoListCount: _todayTodoListScore,
+      dailyTrackerScore: _dailyTrackerScore.round(),
       todoListScore: _todayTodoListScore,
       todoListScoreDailyContribution: _todayTodoListScoreContribution,
       todoListIncludedInTotal: _todayTodoListIncludedInTotal,
@@ -455,6 +456,7 @@ class _ProfilePageState extends State<ProfilePage> {
       learningCount: 0,
       valueCount: 0,
       todoListCount: 0,
+      dailyTrackerScore: 0,
       todoListScore: 0,
       todoListScoreDailyContribution: 0,
       todoListIncludedInTotal: false,
@@ -555,6 +557,7 @@ class _ProfilePageState extends State<ProfilePage> {
       learningCount: todayTasks['learning'] == true ? 1 : 0,
       valueCount: todayTasks['addValue'] == true ? 1 : 0,
       todoListCount: _todayTodoListScore,
+      dailyTrackerScore: _dailyTrackerScore.round(),
       todoListScore: _todayTodoListScore,
       todoListScoreDailyContribution: _todayTodoListScoreContribution,
       todoListIncludedInTotal: _todayTodoListIncludedInTotal,
@@ -1346,9 +1349,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final selectedDate = DateFormat('yyyy-MM-dd')
         .format(DateTime(selectedYear, selectedMonth, day));
 
-    Map<String, bool> selectedDateTasks = {
-      for (final item in dailyTrackerItems) item.title: false,
-    };
+    List<DailyTrackerHistoryTask> selectedDateTasks = const [];
     int? dayScorePercent;
 
     try {
@@ -1357,24 +1358,8 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       final data = response['tracker'];
       if (data is Map<String, dynamic>) {
-        selectedDateTasks = {
-          for (final item in dailyTrackerItems)
-            item.title: _readTaskCompletion(data, item),
-        };
+        selectedDateTasks = resolveDayTrackerTasks(data);
         dayScorePercent = resolveDayScorePercent(data);
-
-        final customTasks = data['customDailyTasks'];
-        if (customTasks is Map) {
-          for (final entry in customTasks.entries) {
-            final value = entry.value;
-            if (value is Map) {
-              final title = value['title'];
-              if (title is String && title.trim().isNotEmpty) {
-                selectedDateTasks[title.trim()] = value['completed'] == true;
-              }
-            }
-          }
-        }
       } else {
         print("No data found for $selectedDate.");
       }
@@ -1446,10 +1431,10 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       ),
                     ),
-                  ...selectedDateTasks.keys.map((task) {
+                  ...selectedDateTasks.map((task) {
                     return CheckboxListTile(
-                      title: Text(task),
-                      value: selectedDateTasks[task],
+                      title: Text(task.title),
+                      value: task.completed,
                       onChanged:
                           null, // Checkboxes are not interactive in this dialog
                     );

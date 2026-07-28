@@ -1186,6 +1186,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
       date: todayDate,
       todoList: completedCount > 0,
       todoListCount: completedCount,
+      dailyTrackerScore: dailyTrackerScoreFields['dailyTrackerScore'] as int?,
       todoListScore: score,
       todoListScoreDailyContribution: todoListScoreContribution,
       todoListIncludedInTotal: includeTodoListScore,
