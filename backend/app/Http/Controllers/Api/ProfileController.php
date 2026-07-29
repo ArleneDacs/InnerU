@@ -97,7 +97,7 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'max:20480'],
-            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'community', 'video', 'step_proof'])],
+            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'community', 'video', 'step_proof', 'group_photo'])],
         ]);
 
         $file = $validated['file'];
@@ -200,6 +200,7 @@ class ProfileController extends Controller
             'community' => "users/{$userId}/community-images",
             'video' => "users/{$userId}/videos",
             'step_proof' => "users/{$userId}/step-proofs",
+            'group_photo' => "users/{$userId}/group-photos",
             default => "users/{$userId}/images",
         };
         $prefix = trim((string) config('filesystems.media_upload_path', ''), '/');

@@ -19,6 +19,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/exercise/ex
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_accountability_meetings_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_mentee_goals_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/edit_group_dialog.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/schedule_meeting_dialog.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
@@ -29,6 +30,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/todo_list.d
     show Task, taskProgress;
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/coach_api_service.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 import 'package:selfcare_projects/src/services/chat_api_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/daily_score_service.dart';
@@ -4171,6 +4173,10 @@ class CoachGroupCustomizationPage extends StatelessWidget {
         memberIds: memberIds,
         coachIds: coachIds,
         coachNames: coachNames,
+        ownerCoachId: (groupMeta['coachId'] as String?)?.trim() ?? '',
+        photoUrl: (groupMeta['photoUrl'] as String?)?.trim().isNotEmpty == true
+            ? (groupMeta['photoUrl'] as String).trim()
+            : null,
       );
     }).toList();
 
@@ -4739,6 +4745,31 @@ class _CoachGroupCustomizationBodyState
                       groupId: summary.groupId,
                       groupName: summary.groupName,
                     ),
+                    onEdit: () => showEditGroupDialog(
+                      context,
+                      groupId: summary.groupId,
+                      currentName: summary.groupName,
+                      currentPhotoUrl: summary.photoUrl,
+                    ).then((_) => _refresh()),
+                    onRemoveCoach: (coachId) {
+                      final remaining = summary.coachIds
+                          .where((id) => id != coachId)
+                          .toList();
+                      CoachApiService.instance
+                          .updateGroupCoaches(
+                            groupId: summary.groupId,
+                            coachIds: remaining,
+                          )
+                          .then((_) => _refresh());
+                    },
+                    onRemoveMentee: (menteeId) {
+                      CoachApiService.instance
+                          .removeMenteeFromGroup(
+                            groupId: summary.groupId,
+                            menteeId: menteeId,
+                          )
+                          .then((_) => _refresh());
+                    },
                   ),
                 ),
             ],
@@ -4779,6 +4810,31 @@ class _CoachGroupCustomizationBodyState
                       groupId: summary.groupId,
                       groupName: summary.groupName,
                     ),
+                    onEdit: () => showEditGroupDialog(
+                      context,
+                      groupId: summary.groupId,
+                      currentName: summary.groupName,
+                      currentPhotoUrl: summary.photoUrl,
+                    ).then((_) => _refresh()),
+                    onRemoveCoach: (coachId) {
+                      final remaining = summary.coachIds
+                          .where((id) => id != coachId)
+                          .toList();
+                      CoachApiService.instance
+                          .updateGroupCoaches(
+                            groupId: summary.groupId,
+                            coachIds: remaining,
+                          )
+                          .then((_) => _refresh());
+                    },
+                    onRemoveMentee: (menteeId) {
+                      CoachApiService.instance
+                          .removeMenteeFromGroup(
+                            groupId: summary.groupId,
+                            menteeId: menteeId,
+                          )
+                          .then((_) => _refresh());
+                    },
                   ),
                 ),
             ],
@@ -5975,6 +6031,10 @@ class CoachManageMenteesPage extends StatelessWidget {
         memberIds: memberIds,
         coachIds: coachIds,
         coachNames: coachNames,
+        ownerCoachId: (groupMeta['coachId'] as String?)?.trim() ?? '',
+        photoUrl: (groupMeta['photoUrl'] as String?)?.trim().isNotEmpty == true
+            ? (groupMeta['photoUrl'] as String).trim()
+            : null,
       );
     }).toList();
 
@@ -6791,6 +6851,8 @@ class _CoachApiGroupSummary {
     required this.memberIds,
     required this.coachIds,
     required this.coachNames,
+    required this.ownerCoachId,
+    required this.photoUrl,
   });
 
   final String groupId;
@@ -6801,6 +6863,8 @@ class _CoachApiGroupSummary {
   final List<String> memberIds;
   final List<String> coachIds;
   final List<String> coachNames;
+  final String ownerCoachId;
+  final String? photoUrl;
 }
 
 class CoachMenteeActivityCalendarPage extends StatefulWidget {
@@ -7776,6 +7840,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
         memberIds: memberIds,
         coachIds: coachIds,
         coachNames: coachNames,
+        ownerCoachId: (groupMeta['coachId'] as String?)?.trim() ?? '',
+        photoUrl: (groupMeta['photoUrl'] as String?)?.trim().isNotEmpty == true
+            ? (groupMeta['photoUrl'] as String).trim()
+            : null,
       );
     }).toList();
 
@@ -8138,6 +8206,9 @@ class _CoachApiGroupCard extends StatefulWidget {
     required this.onAddMentee,
     required this.onDelete,
     required this.onScheduleMeeting,
+    required this.onEdit,
+    required this.onRemoveCoach,
+    required this.onRemoveMentee,
   });
 
   final _CoachApiGroupSummary summary;
@@ -8145,6 +8216,9 @@ class _CoachApiGroupCard extends StatefulWidget {
   final VoidCallback onAddMentee;
   final VoidCallback onDelete;
   final VoidCallback onScheduleMeeting;
+  final VoidCallback onEdit;
+  final void Function(String coachId) onRemoveCoach;
+  final void Function(String menteeId) onRemoveMentee;
 
   @override
   State<_CoachApiGroupCard> createState() => _CoachApiGroupCardState();
@@ -8183,11 +8257,23 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
               decoration: BoxDecoration(
                 color: colors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16),
+                image: summary.photoUrl != null
+                    ? DecorationImage(
+                        image: NetworkImage(
+                          ImageStorageService.normalizeMediaUrl(
+                            summary.photoUrl,
+                          ),
+                        ),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
-              child: Icon(
-                CupertinoIcons.rectangle_grid_2x2_fill,
-                color: colors.primary,
-              ),
+              child: summary.photoUrl == null
+                  ? Icon(
+                      CupertinoIcons.rectangle_grid_2x2_fill,
+                      color: colors.primary,
+                    )
+                  : null,
             ),
             title: Text(
               summary.groupName,
@@ -8205,11 +8291,25 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
             ),
-            trailing: Icon(
-              _expanded
-                  ? CupertinoIcons.chevron_up
-                  : CupertinoIcons.chevron_down,
-              color: colors.onSurface.withValues(alpha: 0.7),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Edit group',
+                  onPressed: widget.onEdit,
+                  icon: Icon(
+                    CupertinoIcons.pencil,
+                    size: 20,
+                    color: colors.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+                Icon(
+                  _expanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  color: colors.onSurface.withValues(alpha: 0.7),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -8288,10 +8388,12 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
               )
             else
               ...List.generate(summary.coachIds.length, (index) {
+                final coachId = summary.coachIds[index];
                 final name = index < summary.coachNames.length
                     ? summary.coachNames[index].trim()
                     : '';
                 final displayName = name.isNotEmpty ? name : 'Coach';
+                final isOwner = coachId == summary.ownerCoachId;
 
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(
@@ -8303,7 +8405,18 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
                     child: Text(displayName[0].toUpperCase()),
                   ),
                   title: Text(displayName),
-                  subtitle: const Text('Coach'),
+                  subtitle: Text(isOwner ? 'Coach • Owner' : 'Coach'),
+                  trailing: isOwner
+                      ? null
+                      : IconButton(
+                          tooltip: 'Remove coach',
+                          icon: const Icon(
+                            CupertinoIcons.person_badge_minus,
+                            size: 20,
+                          ),
+                          color: const Color(0xFFE56B6F),
+                          onPressed: () => widget.onRemoveCoach(coachId),
+                        ),
                 );
               }),
             const Divider(height: 1),
@@ -8334,6 +8447,7 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             else
               ...summary.entries.asMap().entries.map((entry) {
                 final data = entry.value;
+                final menteeId = (data['userId'] as String?)?.trim() ?? '';
                 final name =
                     (data['name'] as String?)?.trim().isNotEmpty == true
                         ? (data['name'] as String).trim()
@@ -8357,11 +8471,18 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
                         : null,
                   ),
                   title: Text(name),
-                  subtitle: Text('Rank #${entry.key + 1}'),
-                  trailing: Text(
-                    '$score pts',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  subtitle: Text('Rank #${entry.key + 1} • $score pts'),
+                  trailing: menteeId.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Remove from group',
+                          icon: const Icon(
+                            CupertinoIcons.person_badge_minus,
+                            size: 20,
+                          ),
+                          color: const Color(0xFFE56B6F),
+                          onPressed: () => widget.onRemoveMentee(menteeId),
+                        ),
                 );
               }),
             const SizedBox(height: 6),

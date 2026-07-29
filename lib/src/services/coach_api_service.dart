@@ -213,6 +213,32 @@ class CoachApiService {
     );
   }
 
+  Future<void> updateGroup({
+    required String groupId,
+    String? name,
+    String? photoUrl,
+  }) async {
+    await _api.patchJson(
+      '/api/coach/groups/$groupId',
+      {
+        if (name != null) 'name': name,
+        if (photoUrl != null) 'photo_url': photoUrl,
+      },
+      token: _token,
+    );
+  }
+
+  Future<void> removeMenteeFromGroup({
+    required String groupId,
+    required String menteeId,
+  }) async {
+    await _api.postJson(
+      '/api/coach/groups/$groupId/remove-mentee',
+      {'mentee_id': menteeId},
+      token: _token,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> fetchUsers() async {
     final response = await _api.getJson(
       '/api/coach/users',

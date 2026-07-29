@@ -354,4 +354,340 @@ class CoachManagementTest extends TestCase
 
         $response->assertStatus(401);
     }
+
+    public function test_coach_can_rename_a_group_they_manage(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Original Name',
+            'photo_url' => 'https://example.com/original.png',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->patchJson('/api/coach/groups/'.$group->id, [
+            'name' => 'Renamed Group',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('group.name', 'Renamed Group')
+            ->assertJsonPath('group.photoUrl', 'https://example.com/original.png');
+
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $group->id,
+            'name' => 'Renamed Group',
+            'photo_url' => 'https://example.com/original.png',
+        ]);
+    }
+
+    public function test_coach_can_set_group_photo_without_changing_name(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Untouched Name',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->patchJson('/api/coach/groups/'.$group->id, [
+            'photo_url' => 'https://example.com/new-photo.png',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('group.name', 'Untouched Name')
+            ->assertJsonPath('group.photoUrl', 'https://example.com/new-photo.png');
+
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $group->id,
+            'name' => 'Untouched Name',
+            'photo_url' => 'https://example.com/new-photo.png',
+        ]);
+    }
+
+    public function test_unrelated_coach_cannot_update_a_group(): void
+    {
+        $owner = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $stranger = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $owner->id,
+            'coach_ids' => [(string) $owner->id],
+            'name' => 'Guarded Group',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($stranger);
+
+        $response = $this->patchJson('/api/coach/groups/'.$group->id, [
+            'name' => 'Hijacked Name',
+        ]);
+
+        $response->assertStatus(401);
+
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $group->id,
+            'name' => 'Guarded Group',
+        ]);
+    }
+
+    public function test_updating_a_group_without_name_or_photo_fails_validation(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Untouched',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->patchJson('/api/coach/groups/'.$group->id, []);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_removing_a_mentee_from_a_group_ungroups_but_keeps_the_mentee_relation(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $mentee = User::factory()->create();
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Removal Group',
+            'member_ids' => [],
+            'member_count' => 1,
+        ]);
+
+        $relation = CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'team_name' => 'Removal Group',
+            'group_id' => $group->id,
+            'group_name' => $group->name,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->postJson('/api/coach/groups/'.$group->id.'/remove-mentee', [
+            'mentee_id' => (string) $mentee->id,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('message', 'Removed from group.');
+
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => null,
+            'group_name' => null,
+        ]);
+
+        // Still a mentee of this coach -- just ungrouped.
+        $mentees = $this->getJson('/api/coach/mentees');
+        $mentees->assertOk();
+        $menteeEntry = collect($mentees->json('mentees'))
+            ->firstWhere('menteeId', (string) $mentee->id);
+        $this->assertNotNull($menteeEntry);
+        $this->assertNull($menteeEntry['groupId']);
+
+        $groups = $this->getJson('/api/coach/groups');
+        $groups->assertOk()
+            ->assertJsonPath('groups.0.memberCount', 0)
+            ->assertJsonPath('groups.0.memberIds', []);
+
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $group->id,
+            'member_count' => 0,
+        ]);
+    }
+
+    public function test_removing_a_mentee_not_in_the_group_returns_404_and_makes_no_changes(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $otherCoach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $menteeInOtherGroup = User::factory()->create();
+        $unaffiliatedMentee = User::factory()->create();
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Target Group',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        $otherGroup = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Other Group',
+            'member_ids' => [],
+            'member_count' => 1,
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $menteeInOtherGroup->id,
+            'team_name' => 'Other Group',
+            'group_id' => $otherGroup->id,
+            'group_name' => $otherGroup->name,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        // Mentee belongs to a different group of the same coach.
+        $responseA = $this->postJson('/api/coach/groups/'.$group->id.'/remove-mentee', [
+            'mentee_id' => (string) $menteeInOtherGroup->id,
+        ]);
+        $responseA->assertStatus(404);
+
+        // Mentee is not a mentee of this coach at all.
+        $responseB = $this->postJson('/api/coach/groups/'.$group->id.'/remove-mentee', [
+            'mentee_id' => (string) $unaffiliatedMentee->id,
+        ]);
+        $responseB->assertStatus(404);
+
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $menteeInOtherGroup->id,
+            'group_id' => $otherGroup->id,
+        ]);
+        $this->assertDatabaseHas('coach_groups', [
+            'id' => $otherGroup->id,
+            'member_count' => 1,
+        ]);
+    }
+
+    public function test_unrelated_coach_cannot_remove_a_mentee_from_a_group_they_dont_manage(): void
+    {
+        $owner = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $stranger = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $mentee = User::factory()->create();
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $owner->id,
+            'coach_ids' => [(string) $owner->id],
+            'name' => 'Owned Group',
+            'member_ids' => [],
+            'member_count' => 1,
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $owner->id,
+            'mentee_id' => (string) $mentee->id,
+            'team_name' => 'Owned Group',
+            'group_id' => $group->id,
+            'group_name' => $group->name,
+        ]);
+
+        Sanctum::actingAs($stranger);
+
+        $response = $this->postJson('/api/coach/groups/'.$group->id.'/remove-mentee', [
+            'mentee_id' => (string) $mentee->id,
+        ]);
+
+        $response->assertStatus(401);
+
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $owner->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => $group->id,
+        ]);
+    }
+
+    public function test_update_group_coaches_removes_omitted_co_coach_but_keeps_owner(): void
+    {
+        $owner = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $coCoach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $owner->id,
+            'coach_ids' => [(string) $owner->id, (string) $coCoach->id],
+            'name' => 'Two Coach Group',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($owner);
+
+        // Submit a coach_ids list that omits the co-coach -- they should be removed.
+        $response = $this->patchJson('/api/coach/groups/'.$group->id.'/coaches', [
+            'coach_ids' => [(string) $owner->id],
+        ]);
+
+        $response->assertOk();
+        $coachIds = collect($response->json('group.coachIds'));
+        $this->assertTrue($coachIds->contains((string) $owner->id));
+        $this->assertFalse($coachIds->contains((string) $coCoach->id));
+
+        // Submit a coach_ids list that omits the owner -- the owner should
+        // still be force-included in the result.
+        $response2 = $this->patchJson('/api/coach/groups/'.$group->id.'/coaches', [
+            'coach_ids' => [(string) $coCoach->id],
+        ]);
+
+        $response2->assertOk();
+        $coachIds2 = collect($response2->json('group.coachIds'));
+        $this->assertTrue($coachIds2->contains((string) $owner->id));
+        $this->assertTrue($coachIds2->contains((string) $coCoach->id));
+    }
 }

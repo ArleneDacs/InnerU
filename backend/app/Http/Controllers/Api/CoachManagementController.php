@@ -191,6 +191,42 @@ class CoachManagementController extends Controller
         ], Response::HTTP_CREATED);
     }
 
+    public function updateGroup(Request $request, CoachGroup $group): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null || ! $this->userCanManageGroup($user, $group)) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if (! $request->has('name') && ! $request->has('photo_url')) {
+            return response()->json([
+                'message' => 'At least one of name or photo_url is required.',
+                'errors' => [
+                    'name' => ['At least one of name or photo_url is required.'],
+                ],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'photo_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        if (array_key_exists('name', $validated)) {
+            $group->name = trim($validated['name']);
+        }
+
+        if (array_key_exists('photo_url', $validated)) {
+            $group->photo_url = $validated['photo_url'];
+        }
+
+        $group->save();
+
+        return response()->json([
+            'group' => $this->groupPayload($group->fresh()),
+        ]);
+    }
+
     public function updateGroupCoaches(Request $request, CoachGroup $group): JsonResponse
     {
         $user = $request->user();
@@ -252,6 +288,40 @@ class CoachManagementController extends Controller
         });
 
         return response()->json(['message' => 'Deleted.']);
+    }
+
+    public function removeMenteeFromGroup(Request $request, CoachGroup $group): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null || ! $this->userCanManageGroup($user, $group)) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $validated = $request->validate([
+            'mentee_id' => ['required', 'string'],
+        ]);
+
+        $menteeId = trim((string) $validated['mentee_id']);
+
+        $relation = CoachMentee::query()
+            ->where('mentee_id', $menteeId)
+            ->whereIn('coach_id', $this->groupCoachIds($group))
+            ->where('group_id', $group->id)
+            ->first();
+
+        if ($relation === null) {
+            return response()->json(['message' => 'Mentee not found in this group.'], Response::HTTP_NOT_FOUND);
+        }
+
+        DB::transaction(function () use ($relation, $group): void {
+            $relation->group_id = null;
+            $relation->group_name = null;
+            $relation->save();
+
+            $this->syncGroupCounters($group->id, '');
+        });
+
+        return response()->json(['message' => 'Removed from group.']);
     }
 
     public function mentees(Request $request): JsonResponse
@@ -794,6 +864,7 @@ class CoachManagementController extends Controller
             'coachNames' => $coachNames,
             'coachCount' => count($coachIds),
             'name' => $group->name,
+            'photoUrl' => $group->photo_url,
             'memberIds' => $memberIds,
             'memberCount' => count($memberIds),
             'companyCode' => $group->company_code,

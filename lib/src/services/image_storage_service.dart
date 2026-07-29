@@ -46,6 +46,17 @@ class ImageStorageService {
     );
   }
 
+  static Future<String?> uploadGroupPhotoBytes(
+    Uint8List bytes, {
+    String fileName = 'group-photo.jpg',
+  }) async {
+    return _uploadBytes(
+      bytes,
+      fileName: fileName,
+      kind: 'group_photo',
+    );
+  }
+
   static Future<String?> uploadVideoFile(File file) async {
     final bytes = await file.readAsBytes();
     return _uploadBytes(

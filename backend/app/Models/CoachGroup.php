@@ -23,6 +23,7 @@ class CoachGroup extends Model
         'member_count',
         'company_code',
         'company_name',
+        'photo_url',
     ];
 
     protected function casts(): array
