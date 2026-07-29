@@ -8146,7 +8146,7 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
         children: [
           ListTile(
             onTap: () => setState(() => _expanded = !_expanded),
-            contentPadding: const EdgeInsets.fromLTRB(18, 10, 12, 10),
+            contentPadding: const EdgeInsets.fromLTRB(18, 10, 12, 0),
             leading: Container(
               width: 48,
               height: 48,
@@ -8175,8 +8175,16 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+            trailing: Icon(
+              _expanded
+                  ? CupertinoIcons.chevron_up
+                  : CupertinoIcons.chevron_down,
+              color: colors.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
+            child: Row(
               children: [
                 Tooltip(
                   message: summary.coachIds.length >= 2
@@ -8198,6 +8206,7 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 4),
                 TextButton(
                   onPressed: widget.onAddMentee,
                   style: TextButton.styleFrom(
@@ -8211,17 +8220,12 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
+                const Spacer(),
                 IconButton(
                   tooltip: 'Delete group',
                   onPressed: widget.onDelete,
                   icon: const Icon(CupertinoIcons.trash),
                   color: const Color(0xFFE56B6F),
-                ),
-                Icon(
-                  _expanded
-                      ? CupertinoIcons.chevron_up
-                      : CupertinoIcons.chevron_down,
-                  color: colors.onSurface.withValues(alpha: 0.7),
                 ),
               ],
             ),
