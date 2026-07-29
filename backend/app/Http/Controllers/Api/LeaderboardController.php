@@ -193,6 +193,7 @@ class LeaderboardController extends Controller
                 return [
                     'groupId' => $group->id,
                     'groupName' => $group->name,
+                    'photoUrl' => $group->photo_url,
                     'coachName' => $coachName,
                     'coachIds' => $coachIds,
                     'coachNames' => $coachNames,

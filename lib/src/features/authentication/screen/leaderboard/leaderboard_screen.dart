@@ -10,6 +10,7 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class UserActivity {
   const UserActivity({
@@ -147,6 +148,7 @@ class GroupLeaderboardSummary {
     required this.companyName,
     required this.totalScore,
     required this.entries,
+    required this.photoUrl,
   });
 
   final String groupId;
@@ -155,6 +157,7 @@ class GroupLeaderboardSummary {
   final String companyName;
   final num totalScore;
   final List<LeaderboardEntry> entries;
+  final String? photoUrl;
 }
 
 class Leaderboard extends StatefulWidget {
@@ -312,16 +315,17 @@ class _LeaderboardState extends State<Leaderboard>
               coachName: group.coachName,
               companyName: group.companyName,
               totalScore: group.totalScore,
+              photoUrl: group.photoUrl,
               entries: group.entries
                   .map(
-                  (member) => LeaderboardEntry(
-                    userId: member.userId,
-                    name: member.name,
-                    score: member.overallScore,
-                    rank: member.rank,
-                    activity: const UserActivity(),
-                    profilePic: member.profilePic,
-                    teamName: member.teamName,
+                    (member) => LeaderboardEntry(
+                      userId: member.userId,
+                      name: member.name,
+                      score: member.overallScore,
+                      rank: member.rank,
+                      activity: const UserActivity(),
+                      profilePic: member.profilePic,
+                      teamName: member.teamName,
                     ),
                   )
                   .toList(),
@@ -956,7 +960,8 @@ class _LeaderboardPeriodBanner extends StatelessWidget {
         color: theme.surfaceColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.2 : 0.14),
+          color:
+              theme.primaryColor.withValues(alpha: theme.isDark ? 0.2 : 0.14),
         ),
         boxShadow: [
           BoxShadow(
@@ -1144,6 +1149,15 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
+                avatar: group.photoUrl != null
+                    ? CircleAvatar(
+                        backgroundImage: NetworkImage(
+                          ImageStorageService.normalizeMediaUrl(
+                            group.photoUrl,
+                          ),
+                        ),
+                      )
+                    : null,
                 label: Text(group.groupName),
                 selected: _selectedGroupId == group.groupId,
                 onSelected: (_) {
@@ -1194,14 +1208,27 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
                   ? theme.primaryColor.withValues(alpha: 0.16)
                   : const Color(0xFFF4E6C8),
               borderRadius: BorderRadius.circular(16),
+              image: group?.photoUrl != null
+                  ? DecorationImage(
+                      image: NetworkImage(
+                        ImageStorageService.normalizeMediaUrl(
+                          group!.photoUrl,
+                        ),
+                      ),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            child: Icon(
-              group == null
-                  ? CupertinoIcons.person_2_fill
-                  : CupertinoIcons.rectangle_grid_2x2_fill,
-              color:
-                  theme.isDark ? theme.primaryColor : const Color(0xFF6F7B5C),
-            ),
+            child: group?.photoUrl != null
+                ? null
+                : Icon(
+                    group == null
+                        ? CupertinoIcons.person_2_fill
+                        : CupertinoIcons.rectangle_grid_2x2_fill,
+                    color: theme.isDark
+                        ? theme.primaryColor
+                        : const Color(0xFF6F7B5C),
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1252,16 +1279,51 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          CircleAvatar(
-            radius: rank == 1 ? 27 : 23,
-            backgroundColor: color.withValues(alpha: 0.18),
-            child: Text(
-              '#$rank',
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w900,
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              CircleAvatar(
+                radius: rank == 1 ? 27 : 23,
+                backgroundColor: color.withValues(alpha: 0.18),
+                backgroundImage: group.photoUrl != null
+                    ? NetworkImage(
+                        ImageStorageService.normalizeMediaUrl(
+                          group.photoUrl,
+                        ),
+                      )
+                    : null,
+                child: group.photoUrl == null
+                    ? Text(
+                        '#$rank',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      )
+                    : null,
               ),
-            ),
+              if (group.photoUrl != null)
+                Positioned(
+                  bottom: -2,
+                  right: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    child: Text(
+                      '$rank',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Container(
@@ -1436,6 +1498,21 @@ class _GroupLeaderboardsBoardState extends State<_GroupLeaderboardsBoard> {
           collapsedIconColor: theme.mutedInkColor,
           iconColor: theme.primaryColor,
           maintainState: true,
+          leading: CircleAvatar(
+            backgroundColor: theme.primaryColor.withValues(alpha: 0.14),
+            backgroundImage: group.photoUrl != null
+                ? NetworkImage(
+                    ImageStorageService.normalizeMediaUrl(group.photoUrl),
+                  )
+                : null,
+            child: group.photoUrl == null
+                ? Icon(
+                    CupertinoIcons.rectangle_grid_2x2_fill,
+                    size: 18,
+                    color: theme.primaryColor,
+                  )
+                : null,
+          ),
           title: Text(
             group.groupName,
             maxLines: 1,
@@ -2175,12 +2252,12 @@ class _A12LeaderboardBoard extends StatelessWidget {
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _formatLeaderboardScore(score),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
+              children: [
+                Text(
+                  _formatLeaderboardScore(score),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -2209,13 +2286,13 @@ class _A12LeaderboardBoard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                  Text(
-                    'Combined goal and daily tracker score.',
-                    style: TextStyle(
-                      color: theme.mutedInkColor,
-                      height: 1.35,
-                    ),
+                Text(
+                  'Combined goal and daily tracker score.',
+                  style: TextStyle(
+                    color: theme.mutedInkColor,
+                    height: 1.35,
                   ),
+                ),
                 const SizedBox(height: 12),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 360),
@@ -2507,11 +2584,11 @@ class _A12LeaderboardBoard extends StatelessWidget {
     }
 
     final sorted = [...entries]..sort((a, b) {
-      if (a.score.overallScore != b.score.overallScore) {
-        return b.score.overallScore.compareTo(a.score.overallScore);
-      }
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-    });
+        if (a.score.overallScore != b.score.overallScore) {
+          return b.score.overallScore.compareTo(a.score.overallScore);
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
     final currentUserEntry = _currentUserEntry;
     final remainingEntries = sorted.length > 3
         ? sorted.skip(3).toList()

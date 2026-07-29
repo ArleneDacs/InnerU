@@ -105,6 +105,7 @@ class LeaderboardApiGroup {
     required this.companyName,
     required this.totalScore,
     required this.entries,
+    required this.photoUrl,
   });
 
   final String groupId;
@@ -113,6 +114,7 @@ class LeaderboardApiGroup {
   final String companyName;
   final num totalScore;
   final List<LeaderboardApiGroupMember> entries;
+  final String? photoUrl;
 
   factory LeaderboardApiGroup.fromJson(Map<String, dynamic> json) {
     return LeaderboardApiGroup(
@@ -129,6 +131,9 @@ class LeaderboardApiGroup {
                   Map<String, dynamic>.from(entry)))
               .toList() ??
           const <LeaderboardApiGroupMember>[],
+      photoUrl: (json['photoUrl'] as String?)?.trim().isNotEmpty == true
+          ? (json['photoUrl'] as String).trim()
+          : null,
     );
   }
 }
@@ -181,8 +186,8 @@ class LeaderboardApiSnapshot {
       entries: dedupedEntries,
       groups: (json['groupLeaderboards'] as List?)
               ?.whereType<Map>()
-              .map((group) =>
-                  LeaderboardApiGroup.fromJson(Map<String, dynamic>.from(group)))
+              .map((group) => LeaderboardApiGroup.fromJson(
+                  Map<String, dynamic>.from(group)))
               .toList() ??
           const <LeaderboardApiGroup>[],
       menteeEntries: (json['menteeEntries'] as List?)
