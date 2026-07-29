@@ -8161,6 +8161,8 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             ),
             title: Text(
               summary.groupName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w900,
@@ -8169,28 +8171,44 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             ),
             subtitle: Text(
               '${summary.memberCount} mentees • ${summary.coachIds.length} coaches • ${summary.totalScore} pts total',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: colors.onSurface.withValues(alpha: 0.68)),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  tooltip: summary.coachIds.length >= 2
+                Tooltip(
+                  message: summary.coachIds.length >= 2
                       ? 'Coach limit reached'
                       : 'Add coach',
-                  onPressed:
-                      summary.coachIds.length >= 2 ? null : widget.onAddCoach,
-                  icon: Icon(
-                    CupertinoIcons.person_badge_plus,
-                    color: colors.primary,
+                  child: TextButton(
+                    onPressed:
+                        summary.coachIds.length >= 2 ? null : widget.onAddCoach,
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Add coach',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Add mentee',
+                TextButton(
                   onPressed: widget.onAddMentee,
-                  icon: Icon(
-                    CupertinoIcons.person_2_fill,
-                    color: colors.primary,
+                  style: TextButton.styleFrom(
+                    foregroundColor: colors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'Add mentee',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
                 IconButton(
