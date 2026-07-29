@@ -298,7 +298,6 @@ class Task {
       case 'MILESTONE':
       case 'LONGTERMTASK':
       case 'LONGTERMGOALS':
-      case 'LONGTERM':
         return GoalType.longTerm;
       default:
         return GoalType.longTerm;
@@ -1286,10 +1285,6 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final borderColor = companyTheme.isDark
         ? companyTheme.iconColor.withValues(alpha: 0.24)
         : companyTheme.mutedInkColor.withValues(alpha: 0.18);
-
-    Widget buildEmptyCell() {
-      return const SizedBox(height: 48);
-    }
 
     Widget buildDayCell(DateTime day) {
       final isSelected = taskHasCompletionOnDate(task, day);
