@@ -932,11 +932,8 @@ class UserScoreService
             return 0.0;
         }
 
-        $today = Carbon::today();
         $rangeStart = $startDate->copy()->startOfDay();
-        $rangeEnd = $dueDate->copy()->startOfDay()->isBefore($today->startOfDay())
-            ? $dueDate->copy()->startOfDay()
-            : $today->copy()->startOfDay();
+        $rangeEnd = $dueDate->copy()->startOfDay();
 
         if ($rangeEnd->lt($rangeStart)) {
             return 0.0;

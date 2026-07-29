@@ -58,6 +58,42 @@ void main() {
       expect(taskScoreProgress(task), closeTo(66.666, 0.01));
     });
 
+    test('everyday goals stay pending until the due date arrives', () {
+      final today = DateUtils.dateOnly(DateTime.now());
+      final task = _task(
+        goalType: GoalType.everyday,
+        startDate: today.subtract(const Duration(days: 1)),
+        dueDate: today.add(const Duration(days: 1)),
+        completionDates: [
+          today.subtract(const Duration(days: 1)),
+          today,
+        ],
+      );
+
+      expect(taskProgress(task), closeTo(66.666, 0.01));
+      expect(taskIsEffectivelyCompleted(task), isFalse);
+      syncTaskCompletion(task, completedAt: today);
+      expect(task.isCompleted, isFalse);
+    });
+
+    test('everyday goals complete on the due date when all days are done', () {
+      final today = DateUtils.dateOnly(DateTime.now());
+      final task = _task(
+        goalType: GoalType.everyday,
+        startDate: today.subtract(const Duration(days: 1)),
+        dueDate: today,
+        completionDates: [
+          today.subtract(const Duration(days: 1)),
+          today,
+        ],
+      );
+
+      expect(taskProgress(task), 100);
+      expect(taskIsEffectivelyCompleted(task), isTrue);
+      syncTaskCompletion(task, completedAt: today);
+      expect(task.isCompleted, isTrue);
+    });
+
     test('calendar day matcher includes tasks within the date range', () {
       final task = _task(
         startDate: DateTime(2026, 7, 18),

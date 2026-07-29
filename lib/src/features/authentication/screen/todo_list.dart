@@ -345,11 +345,8 @@ class Task {
 
 double taskProgress(Task task) {
   if (task.goalType == GoalType.everyday) {
-    final today = DateUtils.dateOnly(DateTime.now());
     final rangeStart = DateUtils.dateOnly(task.startDate);
-    final rangeEnd = DateUtils.dateOnly(task.dueDate).isBefore(today)
-        ? DateUtils.dateOnly(task.dueDate)
-        : today;
+    final rangeEnd = DateUtils.dateOnly(task.dueDate);
 
     if (rangeEnd.isBefore(rangeStart)) return 0;
 
@@ -376,7 +373,15 @@ double taskProgress(Task task) {
   return task.isCompleted ? 100 : 0;
 }
 
-bool taskIsEffectivelyCompleted(Task task) => taskProgress(task) >= 100;
+bool taskIsEffectivelyCompleted(Task task) {
+  if (task.goalType == GoalType.everyday) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final dueDate = DateUtils.dateOnly(task.dueDate);
+    return !today.isBefore(dueDate) && taskProgress(task) >= 100;
+  }
+
+  return taskProgress(task) >= 100;
+}
 
 double taskScoreProgress(Task task) {
   if (task.goalType == GoalType.everyday) {
@@ -1097,7 +1102,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 final isSelected = taskHasCompletionOnDate(task, day);
                 final isFuture = day.isAfter(today);
                 final backgroundColor = isSelected
-                    ? companyTheme.primaryColor.withValues(alpha: 0.18)
+                    ? companyTheme.primaryColor.withValues(alpha: 0.12)
                     : companyTheme.surfaceColor;
                 final cellBorderColor = isSelected
                     ? companyTheme.primaryColor
@@ -1185,14 +1190,31 @@ class _TodoListScreenState extends State<TodoListScreen> {
   Widget _buildTaskCalendarPanel({
     required Task task,
     required CompanyThemeData companyTheme,
+    required DateTime visibleMonth,
     required VoidCallback onDayChanged,
+    required VoidCallback onPreviousMonth,
+    required VoidCallback onNextMonth,
   }) {
     final months = _taskCalendarMonthStarts(task);
     if (months.isEmpty) return const SizedBox.shrink();
+    final selectedMonth = months.firstWhere(
+      (month) =>
+          month.year == visibleMonth.year && month.month == visibleMonth.month,
+      orElse: () => months.first,
+    );
+    final monthIndex = months.indexWhere(
+      (month) =>
+          month.year == selectedMonth.year &&
+          month.month == selectedMonth.month,
+    );
+    final canGoPrevious = monthIndex > 0;
+    final canGoNext = monthIndex < months.length - 1;
 
     final borderColor = companyTheme.isDark
         ? companyTheme.iconColor.withValues(alpha: 0.24)
         : companyTheme.mutedInkColor.withValues(alpha: 0.18);
+    final completedDays = taskCalendarCompletedDays(task);
+    final totalDays = taskCalendarTotalDays(task);
 
     return Container(
       width: double.infinity,
@@ -1222,29 +1244,59 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 ),
               ),
               const Spacer(),
-              Text(
-                'Tap a day to mark it done',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: companyTheme.mutedInkColor,
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: canGoPrevious ? onPreviousMonth : null,
+                    icon: const Icon(Icons.chevron_left_rounded),
+                    color: companyTheme.inkColor,
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Previous month',
+                  ),
+                  Text(
+                    DateFormat('MMMM yyyy').format(selectedMonth),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: companyTheme.inkColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: canGoNext ? onNextMonth : null,
+                    icon: const Icon(Icons.chevron_right_rounded),
+                    color: companyTheme.inkColor,
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Next month',
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Column(
-            children: [
-              for (var index = 0; index < months.length; index++) ...[
-                _buildTaskCalendarMonthSection(
-                  task: task,
-                  companyTheme: companyTheme,
-                  monthStart: months[index],
-                  onDayChanged: onDayChanged,
-                ),
-                if (index != months.length - 1) const SizedBox(height: 12),
-              ],
-            ],
+          const SizedBox(height: 6),
+          Text(
+            '$completedDays/$totalDays days done',
+            style: TextStyle(
+              fontSize: 11,
+              color: companyTheme.mutedInkColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Tap a day to mark it done',
+            style: TextStyle(
+              fontSize: 11,
+              color: companyTheme.mutedInkColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildTaskCalendarMonthSection(
+            task: task,
+            companyTheme: companyTheme,
+            monthStart: selectedMonth,
+            onDayChanged: onDayChanged,
           ),
         ],
       ),
@@ -1266,6 +1318,18 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     return months;
   }
+
+  int taskCalendarCompletedDays(Task task) {
+    final rangeStart = DateUtils.dateOnly(task.startDate);
+    final rangeEnd = DateUtils.dateOnly(task.dueDate);
+    return task.completionDates
+        .map(DateUtils.dateOnly)
+        .where((day) => !day.isBefore(rangeStart) && !day.isAfter(rangeEnd))
+        .toSet()
+        .length;
+  }
+
+  int taskCalendarTotalDays(Task task) => taskCalendarDays(task).length;
 
   Widget _buildTaskCalendarMonthSection({
     required Task task,
@@ -1292,7 +1356,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
       final isFuture = day.isAfter(today);
       final isOutsideRange = day.isBefore(rangeStart) || day.isAfter(rangeEnd);
       final backgroundColor = isSelected
-          ? companyTheme.primaryColor.withValues(alpha: 0.18)
+          ? companyTheme.primaryColor.withValues(alpha: 0.12)
           : companyTheme.surfaceColor;
       final cellBorderColor = isSelected
           ? companyTheme.primaryColor
@@ -3199,6 +3263,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final completedDate = task.completedAt == null
         ? null
         : DateFormat('EEE, MMM d, yyyy • h:mm a').format(task.completedAt!);
+    DateTime visibleMonth = DateTime(task.startDate.year, task.startDate.month);
 
     showDialog(
       context: context,
@@ -3263,7 +3328,20 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     _buildTaskCalendarPanel(
                       task: task,
                       companyTheme: companyTheme,
+                      visibleMonth: visibleMonth,
                       onDayChanged: () => setDialogState(() {}),
+                      onPreviousMonth: () {
+                        setDialogState(() {
+                          visibleMonth = DateTime(
+                              visibleMonth.year, visibleMonth.month - 1);
+                        });
+                      },
+                      onNextMonth: () {
+                        setDialogState(() {
+                          visibleMonth = DateTime(
+                              visibleMonth.year, visibleMonth.month + 1);
+                        });
+                      },
                     ),
                   ],
                   const SizedBox(height: 16),
