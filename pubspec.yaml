@@ -162,3 +162,5 @@ dependency_overrides:
     path: third_party/google_mlkit_commons
   google_mlkit_image_labeling:
     path: third_party/google_mlkit_image_labeling
+  onesignal_flutter:
+    path: third_party/onesignal_flutter_stub
