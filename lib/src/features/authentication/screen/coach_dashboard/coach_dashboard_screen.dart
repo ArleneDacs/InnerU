@@ -8186,39 +8186,24 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
             child: Row(
               children: [
-                Tooltip(
-                  message: summary.coachIds.length >= 2
+                _buildPillButton(
+                  colors: colors,
+                  icon: CupertinoIcons.person_badge_plus,
+                  label: 'Add coach',
+                  color: colors.primary,
+                  tooltip: summary.coachIds.length >= 2
                       ? 'Coach limit reached'
-                      : 'Add coach',
-                  child: TextButton(
-                    onPressed:
-                        summary.coachIds.length >= 2 ? null : widget.onAddCoach,
-                    style: TextButton.styleFrom(
-                      foregroundColor: colors.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text(
-                      'Add coach',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                    ),
-                  ),
+                      : null,
+                  onPressed:
+                      summary.coachIds.length >= 2 ? null : widget.onAddCoach,
                 ),
-                const SizedBox(width: 4),
-                TextButton(
+                const SizedBox(width: 8),
+                _buildPillButton(
+                  colors: colors,
+                  icon: CupertinoIcons.person_2_fill,
+                  label: 'Add mentee',
+                  color: colors.tertiary,
                   onPressed: widget.onAddMentee,
-                  style: TextButton.styleFrom(
-                    foregroundColor: colors.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'Add mentee',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
                 ),
                 const Spacer(),
                 IconButton(
@@ -8232,9 +8217,65 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
           ),
           if (_expanded) ...[
             const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+              child: Text(
+                'Coaches',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: colors.onSurface.withValues(alpha: 0.68),
+                ),
+              ),
+            ),
+            if (summary.coachIds.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'No coaches added yet.',
+                    style: TextStyle(
+                      color: colors.onSurface.withValues(alpha: 0.68),
+                    ),
+                  ),
+                ),
+              )
+            else
+              ...List.generate(summary.coachIds.length, (index) {
+                final name = index < summary.coachNames.length
+                    ? summary.coachNames[index].trim()
+                    : '';
+                final displayName = name.isNotEmpty ? name : 'Coach';
+
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 2,
+                  ),
+                  leading: CircleAvatar(
+                    backgroundColor: colors.primary.withValues(alpha: 0.16),
+                    child: Text(displayName[0].toUpperCase()),
+                  ),
+                  title: Text(displayName),
+                  subtitle: const Text('Coach'),
+                );
+              }),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+              child: Text(
+                'Mentees',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: colors.onSurface.withValues(alpha: 0.68),
+                ),
+              ),
+            ),
             if (summary.entries.isEmpty)
               Padding(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
@@ -8283,5 +8324,51 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
         ],
       ),
     );
+  }
+
+  Widget _buildPillButton({
+    required ColorScheme colors,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+    String? tooltip,
+  }) {
+    final isEnabled = onPressed != null;
+    final content = Material(
+      color: color.withValues(alpha: isEnabled ? 0.14 : 0.06),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isEnabled ? color : color.withValues(alpha: 0.4),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isEnabled ? color : color.withValues(alpha: 0.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (tooltip == null) {
+      return content;
+    }
+    return Tooltip(message: tooltip, child: content);
   }
 }
