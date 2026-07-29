@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\LeaderboardController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\StepSubmissionController;
+use App\Http\Controllers\Api\AccountabilityMeetingController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json([
@@ -155,4 +156,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/coach/step-submissions', [StepSubmissionController::class, 'index']);
     Route::patch('/coach/step-submissions/{stepSubmission}/approve', [StepSubmissionController::class, 'approve']);
     Route::patch('/coach/step-submissions/{stepSubmission}/decline', [StepSubmissionController::class, 'decline']);
+    Route::post('/accountability-meetings', [AccountabilityMeetingController::class, 'store']);
+    Route::get('/accountability-meetings/mine', [AccountabilityMeetingController::class, 'mine']);
+    Route::post('/accountability-meetings/{accountabilityMeeting}/join', [AccountabilityMeetingController::class, 'join']);
+    Route::get('/coach/accountability-meetings', [AccountabilityMeetingController::class, 'index']);
 });

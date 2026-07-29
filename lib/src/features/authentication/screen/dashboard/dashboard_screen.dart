@@ -11,6 +11,7 @@ import 'package:selfcare_projects/src/features/abundance/services/goals_service.
 import 'package:selfcare_projects/src/features/authentication/screen/calorie_tracker/calorie_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/chat_room.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coach_carousel.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coaches/my_accountability_meetings_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
@@ -1222,6 +1223,15 @@ class _DashboardScreenState extends State<DashboardScreen>
           context,
           MaterialPageRoute(
             builder: (context) => const MyStepSubmissionsScreen(),
+          ),
+        );
+        break;
+      case 'meeting_reminder_day_before':
+      case 'meeting_reminder_day_of':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const MyAccountabilityMeetingsScreen(),
           ),
         );
         break;
@@ -2643,6 +2653,47 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ? theme.primaryColor.withValues(alpha: 0.25)
                     : const Color(0xFFD8D4C9),
               ),
+            if (coaches.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          const MyAccountabilityMeetingsScreen(),
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(
+                        CupertinoIcons.calendar_badge_plus,
+                        size: 18,
+                        color: theme.primaryColor,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Accountability meetings',
+                        style: TextStyle(
+                          color: theme.primaryColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(
+                        CupertinoIcons.chevron_right,
+                        size: 16,
+                        color: theme.primaryColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         );
       },

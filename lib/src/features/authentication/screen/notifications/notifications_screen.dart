@@ -86,6 +86,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return CupertinoIcons.checkmark_circle_fill;
       case 'step_submission_declined':
         return CupertinoIcons.xmark_circle_fill;
+      case 'meeting_reminder_day_before':
+      case 'meeting_reminder_day_of':
+        return CupertinoIcons.calendar_badge_plus;
       default:
         return CupertinoIcons.bell_fill;
     }

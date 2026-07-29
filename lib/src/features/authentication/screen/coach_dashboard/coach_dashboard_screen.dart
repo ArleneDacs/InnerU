@@ -17,7 +17,9 @@ import 'package:selfcare_projects/src/features/authentication/screen/coaches/coa
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_accountability_meetings_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_mentee_goals_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/schedule_meeting_dialog.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
@@ -2391,6 +2393,22 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
             );
           },
         ),
+        const SizedBox(height: 12),
+        _buildNavigationCard(
+          title: 'Accountability meetings',
+          subtitle: 'Schedule Zoom check-ins and see who has joined.',
+          icon: CupertinoIcons.calendar_badge_plus,
+          color: const Color(0xFFDCE6F0),
+          actionLabel: 'Schedule',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const CoachAccountabilityMeetingsScreen(),
+              ),
+            );
+          },
+        ),
       ],
     );
   }
@@ -4716,6 +4734,11 @@ class _CoachGroupCustomizationBodyState
                           memberIds: summary.memberIds,
                         )
                         .then((_) => _refresh()),
+                    onScheduleMeeting: () => showScheduleMeetingDialog(
+                      context,
+                      groupId: summary.groupId,
+                      groupName: summary.groupName,
+                    ),
                   ),
                 ),
             ],
@@ -4751,6 +4774,11 @@ class _CoachGroupCustomizationBodyState
                           memberIds: summary.memberIds,
                         )
                         .then((_) => _refresh()),
+                    onScheduleMeeting: () => showScheduleMeetingDialog(
+                      context,
+                      groupId: summary.groupId,
+                      groupName: summary.groupName,
+                    ),
                   ),
                 ),
             ],
@@ -8109,12 +8137,14 @@ class _CoachApiGroupCard extends StatefulWidget {
     required this.onAddCoach,
     required this.onAddMentee,
     required this.onDelete,
+    required this.onScheduleMeeting,
   });
 
   final _CoachApiGroupSummary summary;
   final VoidCallback onAddCoach;
   final VoidCallback onAddMentee;
   final VoidCallback onDelete;
+  final VoidCallback onScheduleMeeting;
 
   @override
   State<_CoachApiGroupCard> createState() => _CoachApiGroupCardState();
@@ -8186,26 +8216,41 @@ class _CoachApiGroupCardState extends State<_CoachApiGroupCard> {
             padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
             child: Row(
               children: [
-                _buildPillButton(
-                  colors: colors,
-                  icon: CupertinoIcons.person_badge_plus,
-                  label: 'Add coach',
-                  color: colors.primary,
-                  tooltip: summary.coachIds.length >= 2
-                      ? 'Coach limit reached'
-                      : null,
-                  onPressed:
-                      summary.coachIds.length >= 2 ? null : widget.onAddCoach,
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _buildPillButton(
+                        colors: colors,
+                        icon: CupertinoIcons.person_badge_plus,
+                        label: 'Add coach',
+                        color: colors.primary,
+                        tooltip: summary.coachIds.length >= 2
+                            ? 'Coach limit reached'
+                            : null,
+                        onPressed: summary.coachIds.length >= 2
+                            ? null
+                            : widget.onAddCoach,
+                      ),
+                      _buildPillButton(
+                        colors: colors,
+                        icon: CupertinoIcons.person_2_fill,
+                        label: 'Add mentee',
+                        color: colors.tertiary,
+                        onPressed: widget.onAddMentee,
+                      ),
+                      _buildPillButton(
+                        colors: colors,
+                        icon: CupertinoIcons.calendar_badge_plus,
+                        label: 'Schedule meeting',
+                        color: colors.secondary,
+                        onPressed: widget.onScheduleMeeting,
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                _buildPillButton(
-                  colors: colors,
-                  icon: CupertinoIcons.person_2_fill,
-                  label: 'Add mentee',
-                  color: colors.tertiary,
-                  onPressed: widget.onAddMentee,
-                ),
-                const Spacer(),
                 IconButton(
                   tooltip: 'Delete group',
                   onPressed: widget.onDelete,

@@ -40,6 +40,8 @@ class FastingNotificationService {
   static const String sleepOngoingCategoryId = 'SLEEP_ONGOING';
   static const String sleepEndSessionActionId = 'END_SLEEP';
   static const int _todoNotificationBaseId = 600000;
+  static const int _meetingDayBeforeNotificationBaseId = 700000;
+  static const int _meetingDayOfNotificationBaseId = 800000;
   static const String _channelId = 'fasting_complete_channel';
   static const String _channelName = 'Fasting reminders';
   static const String _channelDescription =
@@ -112,6 +114,10 @@ class FastingNotificationService {
   static const String _todoChannelName = 'To-do reminders';
   static const String _todoChannelDescription =
       'Reminds you when a to-do task is due.';
+  static const String _meetingChannelId = 'accountability_meeting_channel';
+  static const String _meetingChannelName = 'Accountability meetings';
+  static const String _meetingChannelDescription =
+      'Reminds you before a scheduled accountability meeting.';
   static const String _sleepBedtimeChannelId = 'sleep_bedtime_channel';
   static const String _sleepBedtimeChannelName = 'Sleep bedtime reminders';
   static const String _sleepBedtimeChannelDescription =
@@ -214,7 +220,8 @@ class FastingNotificationService {
   /// reliably cover that case, only taps while already running.
   Future<void> checkLaunchNotification() async {
     await initialize();
-    final launchDetails = await _notifications.getNotificationAppLaunchDetails();
+    final launchDetails =
+        await _notifications.getNotificationAppLaunchDetails();
     if (launchDetails?.didNotificationLaunchApp == true &&
         launchDetails?.notificationResponse?.payload == sleepAlarmPayload) {
       _sleepAlarmStoppedController.add(null);
@@ -527,6 +534,88 @@ class FastingNotificationService {
     await _notifications.cancel(id: _todoNotificationId(taskId));
   }
 
+  // Schedules the "day before" and "day of" on-device reminders for an
+  // accountability meeting. There is no server push in this app (no
+  // Firebase Cloud Messaging / APNs setup), so these are the actual
+  // mechanism behind "notified on device" - the OS fires them at the
+  // scheduled time even if the app is closed, without needing a network
+  // round-trip. The trade-off: the client has to have learned about the
+  // meeting (fetched it at least once) for these to have been scheduled
+  // in the first place, since there's no server waking the app up.
+  Future<void> scheduleMeetingReminders({
+    required String meetingId,
+    required String title,
+    required DateTime scheduledAt,
+  }) async {
+    await initialize();
+
+    final now = tz.TZDateTime.now(tz.local);
+    final meetingTime = tz.TZDateTime.from(scheduledAt, tz.local);
+
+    final dayBeforeTime = tz.TZDateTime(
+      tz.local,
+      meetingTime.year,
+      meetingTime.month,
+      meetingTime.day,
+      9,
+    ).subtract(const Duration(days: 1));
+
+    if (dayBeforeTime.isAfter(now)) {
+      await _notifications.zonedSchedule(
+        id: _meetingNotificationId(meetingId, dayBefore: true),
+        title: 'Accountability meeting tomorrow',
+        body: title,
+        scheduledDate: dayBeforeTime,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _meetingChannelId,
+            _meetingChannelName,
+            channelDescription: _meetingChannelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'meeting_day_before:$meetingId',
+      );
+    }
+
+    final dayOfTime = meetingTime.subtract(const Duration(hours: 1));
+    if (dayOfTime.isAfter(now)) {
+      await _notifications.zonedSchedule(
+        id: _meetingNotificationId(meetingId, dayBefore: false),
+        title: 'Accountability meeting today',
+        body: '$title starts in about an hour.',
+        scheduledDate: dayOfTime,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _meetingChannelId,
+            _meetingChannelName,
+            channelDescription: _meetingChannelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: null,
+        payload: 'meeting_day_of:$meetingId',
+      );
+    }
+  }
+
+  Future<void> cancelMeetingReminders(String meetingId) async {
+    await initialize();
+    await _notifications.cancel(
+      id: _meetingNotificationId(meetingId, dayBefore: true),
+    );
+    await _notifications.cancel(
+      id: _meetingNotificationId(meetingId, dayBefore: false),
+    );
+  }
+
   Future<void> scheduleDailySleepBedtimeReminder({
     required int hour,
     required int minute,
@@ -648,8 +737,9 @@ class FastingNotificationService {
       ongoing: !isSilent,
       autoCancel: isSilent,
       channelBypassDnd: !isSilent,
-      audioAttributesUsage:
-          isSilent ? AudioAttributesUsage.notification : AudioAttributesUsage.alarm,
+      audioAttributesUsage: isSilent
+          ? AudioAttributesUsage.notification
+          : AudioAttributesUsage.alarm,
     );
     final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -966,6 +1056,17 @@ class FastingNotificationService {
       hash = ((hash * 31) + codeUnit) & 0x7fffffff;
     }
     return _todoNotificationBaseId + (hash % 1000000);
+  }
+
+  int _meetingNotificationId(String meetingId, {required bool dayBefore}) {
+    var hash = 0;
+    for (final codeUnit in meetingId.codeUnits) {
+      hash = ((hash * 31) + codeUnit) & 0x7fffffff;
+    }
+    final base = dayBefore
+        ? _meetingDayBeforeNotificationBaseId
+        : _meetingDayOfNotificationBaseId;
+    return base + (hash % 100000);
   }
 
   String _formatDuration(Duration duration) {
