@@ -132,6 +132,7 @@ class GoalController extends Controller
             'current_value' => ['nullable', 'numeric', 'min:0'],
             'unit' => ['nullable', 'string', 'max:120'],
             'target_period' => ['nullable', 'string', 'max:32'],
+            'start_date' => ['nullable', 'date'],
             'target_date' => ['required', 'date'],
             'plan_titles' => ['nullable', 'array'],
             'plan_titles.*' => ['string', 'max:255'],
@@ -144,9 +145,11 @@ class GoalController extends Controller
         $status = strtoupper((string) ($validated['status'] ?? 'IN_PROGRESS'));
         $direction = $isMilestone ? 'GAIN' : strtoupper((string) ($validated['direction'] ?? 'GAIN'));
         $targetPeriod = $isMilestone ? 'NONE' : strtoupper((string) ($validated['target_period'] ?? 'NONE'));
+        $startDate = Carbon::parse($validated['start_date'] ?? now())->toDateString();
+        $targetDate = Carbon::parse($validated['target_date'])->toDateString();
         $progress = $this->progressForValues($status, $goalType, $targetValue, $currentValue, []);
 
-        $goal = DB::transaction(function () use ($user, $validated, $goalType, $isMilestone, $targetValue, $currentValue, $status, $direction, $targetPeriod, $progress): Goal {
+        $goal = DB::transaction(function () use ($user, $validated, $goalType, $isMilestone, $targetValue, $currentValue, $status, $direction, $targetPeriod, $progress, $startDate, $targetDate): Goal {
             $goal = Goal::create([
                 'id' => (string) Str::uuid(),
                 'user_id' => $user->id,
@@ -162,8 +165,8 @@ class GoalController extends Controller
                 'current_value' => $currentValue,
                 'unit' => $isMilestone ? null : trim((string) ($validated['unit'] ?? '')),
                 'target_period' => $targetPeriod,
-                'start_date' => now()->toDateString(),
-                'target_date' => Carbon::parse($validated['target_date'])->toDateString(),
+                'start_date' => $startDate,
+                'target_date' => $targetDate,
                 'completed_at' => $status === 'COMPLETED' ? now() : null,
                 'progress' => $progress,
             ]);
@@ -212,6 +215,7 @@ class GoalController extends Controller
             'unit' => ['sometimes', 'nullable', 'string', 'max:120'],
             'goal_type' => ['sometimes', 'string', 'max:32'],
             'target_period' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'start_date' => ['sometimes', 'nullable', 'date'],
         ]);
 
         $goalType = strtoupper((string) ($validated['goal_type'] ?? $goal->goal_type));
@@ -246,6 +250,9 @@ class GoalController extends Controller
                 'description' => array_key_exists('description', $validated) ? $validated['description'] : $goal->description,
                 'notes' => array_key_exists('notes', $validated) ? $validated['notes'] : $goal->notes,
                 'status' => $statusTo,
+                'start_date' => isset($validated['start_date'])
+                    ? Carbon::parse($validated['start_date'])->toDateString()
+                    : $goal->start_date?->toDateString(),
                 'target_date' => isset($validated['target_date'])
                     ? Carbon::parse($validated['target_date'])->toDateString()
                     : $goal->target_date?->toDateString(),

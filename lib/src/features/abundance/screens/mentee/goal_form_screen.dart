@@ -40,6 +40,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   late GoalDirection _direction;
   late TargetPeriod _targetPeriod;
   late GoalStatus _status;
+  late DateTime _startDate;
   late DateTime _targetDate;
   final List<String> _planTitles = [];
   bool _saving = false;
@@ -63,7 +64,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     _direction = g?.direction ?? GoalDirection.gain;
     _targetPeriod = g?.targetPeriod ?? TargetPeriod.none;
     _status = g?.status ?? GoalStatus.inProgress;
-    _targetDate = g?.targetDate ?? addDays(DateTime.now(), 90);
+    _startDate = _dateOnly(g?.startDate ?? DateTime.now());
+    _targetDate = _dateOnly(g?.targetDate ?? addDays(DateTime.now(), 90));
   }
 
   @override
@@ -83,10 +85,34 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _targetDate,
-      firstDate: DateTime.now(),
+      firstDate: _startDate,
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
-    if (picked != null) setState(() => _targetDate = picked);
+    if (picked == null) return;
+    setState(() {
+      final normalized = _dateOnly(picked);
+      _targetDate = normalized;
+      if (_startDate.isAfter(normalized)) {
+        _startDate = normalized;
+      }
+    });
+  }
+
+  Future<void> _pickStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+    );
+    if (picked == null) return;
+    setState(() {
+      final normalized = _dateOnly(picked);
+      _startDate = normalized;
+      if (_targetDate.isBefore(normalized)) {
+        _targetDate = normalized;
+      }
+    });
   }
 
   Future<void> _save() async {
@@ -102,6 +128,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           title: _title.text.trim(),
           description: _description.text.trim(),
           notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+          startDate: _startDate,
           targetDate: _targetDate,
           goalType: _goalType,
           direction: _direction,
@@ -118,6 +145,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           title: _title.text.trim(),
           description: _description.text.trim(),
           notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+          startDate: _startDate,
           targetDate: _targetDate,
           goalType: _goalType,
           direction: _direction,
@@ -223,63 +251,87 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       },
     );
 
-    final targetDateField = InkWell(
-      onTap: _pickTargetDate,
-      borderRadius: BorderRadius.circular(16),
-      child: InputDecorator(
-        decoration: _fieldDecoration(isoDay(_targetDate)),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                isoDay(_targetDate),
-                style: const TextStyle(
-                  color: Color(0xFFF7F5EC),
-                  fontSize: 16,
-                ),
+    Widget dateField({
+      required Key key,
+      required String label,
+      required DateTime value,
+      required VoidCallback onTap,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFFD7DCF4),
+              fontSize: 15.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          InkWell(
+            key: key,
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: InputDecorator(
+              decoration: _fieldDecoration(isoDay(value)),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      isoDay(value),
+                      style: const TextStyle(
+                        color: Color(0xFFF7F5EC),
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  const Icon(
+                    Icons.calendar_today_outlined,
+                    color: Color(0xFFB7C0E5),
+                    size: 20,
+                  ),
+                ],
               ),
             ),
-            const Icon(
-              Icons.calendar_today_outlined,
-              color: Color(0xFFB7C0E5),
-              size: 20,
-            ),
-          ],
-        ),
-      ),
+          ),
+        ],
+      );
+    }
+
+    final startDateField = dateField(
+      key: const Key('goal-start-date'),
+      label: 'Start date',
+      value: _startDate,
+      onTap: _pickStartDate,
+    );
+
+    final targetDateField = dateField(
+      key: const Key('goal-target-date'),
+      label: 'End date',
+      value: _targetDate,
+      onTap: _pickTargetDate,
     );
 
     final topMetaFields = _isEdit
-        ? (wide
-            ? Row(
-                children: [
-                  Expanded(child: statusField),
-                  const SizedBox(width: 18),
-                  Expanded(child: targetDateField),
-                ],
-              )
-            : Column(
-                children: [
-                  statusField,
-                  const SizedBox(height: 18),
-                  targetDateField,
-                ],
-              ))
-        : (wide
-            ? Row(
-                children: [
-                  Expanded(child: categoryField),
-                  const SizedBox(width: 18),
-                  Expanded(child: targetDateField),
-                ],
-              )
-            : Column(
-                children: [
-                  categoryField,
-                  const SizedBox(height: 18),
-                  targetDateField,
-                ],
-              ));
+        ? Column(
+            children: [
+              statusField,
+              const SizedBox(height: 18),
+              startDateField,
+              const SizedBox(height: 18),
+              targetDateField,
+            ],
+          )
+        : Column(
+            children: [
+              categoryField,
+              const SizedBox(height: 18),
+              startDateField,
+              const SizedBox(height: 18),
+              targetDateField,
+            ],
+          );
 
     final meritFields = Column(
       children: [
@@ -294,7 +346,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                       const TextInputType.numberWithOptions(decimal: true),
                   style: const TextStyle(
                     color: Color(0xFFF7F5EC),
-                  fontSize: 16,
+                    fontSize: 16,
                   ),
                   decoration: _fieldDecoration('10'),
                 ),
@@ -308,7 +360,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                       const TextInputType.numberWithOptions(decimal: true),
                   style: const TextStyle(
                     color: Color(0xFFF7F5EC),
-                  fontSize: 16,
+                    fontSize: 16,
                   ),
                   decoration: _fieldDecoration('0'),
                 ),
@@ -319,23 +371,21 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           TextFormField(
             key: const Key('goal-target-value'),
             controller: _targetValue,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(
-                  color: Color(0xFFF7F5EC),
-                  fontSize: 16,
-                ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(
+              color: Color(0xFFF7F5EC),
+              fontSize: 16,
+            ),
             decoration: _fieldDecoration('10'),
           ),
           const SizedBox(height: 18),
           TextFormField(
             key: const Key('goal-current-value'),
             controller: _currentValue,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: const TextStyle(
               color: Color(0xFFF7F5EC),
-                  fontSize: 16,
+              fontSize: 16,
             ),
             decoration: _fieldDecoration('0'),
           ),
@@ -468,7 +518,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
         child: SafeArea(
           child: SingleChildScrollView(
             controller: _scrollController,
-            padding: EdgeInsets.fromLTRB(wide ? 16 : 14, 14, wide ? 16 : 14, 20),
+            padding:
+                EdgeInsets.fromLTRB(wide ? 16 : 14, 14, wide ? 16 : 14, 20),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 760),
@@ -501,7 +552,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFF10183F),
                                 borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: const Color(0xFF243169)),
+                                border:
+                                    Border.all(color: const Color(0xFF243169)),
                               ),
                               child: const Text(
                                 'A12 only',
@@ -525,10 +577,13 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        _isEdit ? 'Edit goal' : 'Set a new goal',
+                                        _isEdit
+                                            ? 'Edit goal'
+                                            : 'Set a new goal',
                                         style: const TextStyle(
                                           color: Color(0xFFF6EAD0),
                                           fontSize: 24,
@@ -542,7 +597,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                                       Text(
                                         _isEdit
                                             ? 'Update the goal details, score, and status.'
-                                            : 'Build a focused goal for personal, professional, or contribution progress.',
+                                            : 'Build a focused goal and set both the start date and end date.',
                                         style: const TextStyle(
                                           color: Color(0xFFB7C0E5),
                                           fontSize: 13.5,
@@ -596,10 +651,9 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                                 fontSize: 16,
                               ),
                               decoration: _fieldDecoration('Goal title'),
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty)
-                                      ? 'Title is required'
-                                      : null,
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Title is required'
+                                  : null,
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
@@ -659,7 +713,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                               onPressed: () => Navigator.pop(context),
                               style: TextButton.styleFrom(
                                 foregroundColor: const Color(0xFFB7C0E5),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
                               ),
                               child: const Text(
                                 'Cancel',
@@ -721,464 +776,474 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
           children: [
             Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1240),
-              child: Container(
-                    padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0E1539),
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(color: const Color(0xFF25336A)),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x66000000),
-                          blurRadius: 30,
-                          offset: Offset(0, 14),
-                        ),
-                      ],
-                    ),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  headerTitle,
-                                  style: const TextStyle(
-                                    color: Color(0xFFF0E6CF),
-                                    fontSize: 34,
-                                    height: 1.05,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.3,
-                                    fontFamily: 'Georgia',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  headerSubtitle,
-                                  style: const TextStyle(
-                                    color: Color(0xFFB7C0E5),
-                                    fontSize: 18,
-                                    height: 1.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () => Navigator.pop(context),
-                            iconSize: 30,
-                            color: const Color(0xFFB7C0E5),
-                            icon: const Icon(Icons.close),
-                          ),
-                        ],
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1240),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0E1539),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: const Color(0xFF25336A)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x66000000),
+                        blurRadius: 30,
+                        offset: Offset(0, 14),
                       ),
-                      const SizedBox(height: 28),
-                      const Text(
-                        'Goal type',
-                        style: TextStyle(
-                          color: Color(0xFFD7DCF4),
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final stacked = constraints.maxWidth < 860;
-                          final meritCard = Expanded(
-                            child: _GoalTypeCard(
-                              selected: _goalType == GoalType.merit,
-                              title: 'Merit',
-                              subtitle: 'A number you chip away at over time.',
-                              onTap: () =>
-                                  setState(() => _goalType = GoalType.merit),
-                            ),
-                          );
-                          final milestoneCard = Expanded(
-                            child: _GoalTypeCard(
-                              selected: _goalType == GoalType.milestone,
-                              title: 'Milestone',
-                              subtitle: 'Done when its action plans are done.',
-                              onTap: () =>
-                                  setState(() => _goalType = GoalType.milestone),
-                            ),
-                          );
-
-                          if (stacked) {
-                            return Column(
-                              children: [
-                                meritCard,
-                                const SizedBox(height: 16),
-                                milestoneCard,
-                              ],
-                            );
-                          }
-
-                          return Row(
-                            children: [
-                              meritCard,
-                              const SizedBox(width: 16),
-                              milestoneCard,
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 28),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          Widget titleField = TextFormField(
-                            key: const Key('goal-title'),
-                            controller: _title,
-                            style: const TextStyle(
-                              color: Color(0xFFF7F5EC),
-                              fontSize: 18,
-                            ),
-                            decoration: _fieldDecoration('Enter a goal title'),
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Title is required'
-                                : null,
-                          );
-
-                          Widget descriptionField = TextFormField(
-                            controller: _description,
-                            style: const TextStyle(
-                              color: Color(0xFFF7F5EC),
-                              fontSize: 18,
-                            ),
-                            decoration:
-                                _fieldDecoration('The outcome you are committing to...'),
-                            maxLines: 4,
-                          );
-
-                          Widget categoryField = DropdownButtonFormField<GoalCategory>(
-                            initialValue: _category,
-                            dropdownColor: const Color(0xFF111A45),
-                            decoration:
-                                _fieldDecoration('Choose a category'),
-                            style: const TextStyle(
-                              color: Color(0xFFF7F5EC),
-                              fontSize: 18,
-                            ),
-                            items: [
-                              for (final c in GoalCategory.values)
-                                DropdownMenuItem(
-                                  value: c,
-                                  child: Text(c.label),
-                                ),
-                            ],
-                            onChanged: (v) => setState(() => _category = v!),
-                          );
-
-                          Widget targetDateField = InkWell(
-                            onTap: _pickTargetDate,
-                            borderRadius: BorderRadius.circular(18),
-                            child: InputDecorator(
-                              decoration:
-                                  _fieldDecoration(isoDay(_targetDate)),
-                              child: Row(
+                    ],
+                  ),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      isoDay(_targetDate),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
+                                  Text(
+                                    headerTitle,
+                                    style: const TextStyle(
+                                      color: Color(0xFFF0E6CF),
+                                      fontSize: 34,
+                                      height: 1.05,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.3,
+                                      fontFamily: 'Georgia',
                                     ),
                                   ),
-                                  const Icon(
-                                    Icons.calendar_today_outlined,
-                                    color: Color(0xFFB7C0E5),
-              size: 18,
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    headerSubtitle,
+                                    style: const TextStyle(
+                                      color: Color(0xFFB7C0E5),
+                                      fontSize: 18,
+                                      height: 1.5,
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
-                          );
+                            IconButton(
+                              onPressed: () => Navigator.pop(context),
+                              iconSize: 30,
+                              color: const Color(0xFFB7C0E5),
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
+                        const Text(
+                          'Goal type',
+                          style: TextStyle(
+                            color: Color(0xFFD7DCF4),
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final stacked = constraints.maxWidth < 860;
+                            final meritCard = Expanded(
+                              child: _GoalTypeCard(
+                                selected: _goalType == GoalType.merit,
+                                title: 'Merit',
+                                subtitle:
+                                    'A number you chip away at over time.',
+                                onTap: () =>
+                                    setState(() => _goalType = GoalType.merit),
+                              ),
+                            );
+                            final milestoneCard = Expanded(
+                              child: _GoalTypeCard(
+                                selected: _goalType == GoalType.milestone,
+                                title: 'Milestone',
+                                subtitle:
+                                    'Done when its action plans are done.',
+                                onTap: () => setState(
+                                    () => _goalType = GoalType.milestone),
+                              ),
+                            );
 
-                          Widget topMetaFields;
-                          if (_isEdit) {
-                            topMetaFields = Row(
+                            if (stacked) {
+                              return Column(
+                                children: [
+                                  meritCard,
+                                  const SizedBox(height: 16),
+                                  milestoneCard,
+                                ],
+                              );
+                            }
+
+                            return Row(
                               children: [
-                                Expanded(
-                                  child: DropdownButtonFormField<GoalStatus>(
-                                    initialValue: _status,
-                                    dropdownColor: const Color(0xFF111A45),
-                                    decoration: _fieldDecoration('In progress'),
-                                    style: const TextStyle(
-                                      color: Color(0xFFF7F5EC),
-                                      fontSize: 18,
-                                    ),
-                                    items: [
-                                      for (final status in GoalStatus.values)
-                                        DropdownMenuItem(
-                                          value: status,
-                                          child: Text(status.label),
+                                meritCard,
+                                const SizedBox(width: 16),
+                                milestoneCard,
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 28),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            Widget titleField = TextFormField(
+                              key: const Key('goal-title'),
+                              controller: _title,
+                              style: const TextStyle(
+                                color: Color(0xFFF7F5EC),
+                                fontSize: 18,
+                              ),
+                              decoration:
+                                  _fieldDecoration('Enter a goal title'),
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Title is required'
+                                  : null,
+                            );
+
+                            Widget descriptionField = TextFormField(
+                              controller: _description,
+                              style: const TextStyle(
+                                color: Color(0xFFF7F5EC),
+                                fontSize: 18,
+                              ),
+                              decoration: _fieldDecoration(
+                                  'The outcome you are committing to...'),
+                              maxLines: 4,
+                            );
+
+                            Widget categoryField =
+                                DropdownButtonFormField<GoalCategory>(
+                              initialValue: _category,
+                              dropdownColor: const Color(0xFF111A45),
+                              decoration: _fieldDecoration('Choose a category'),
+                              style: const TextStyle(
+                                color: Color(0xFFF7F5EC),
+                                fontSize: 18,
+                              ),
+                              items: [
+                                for (final c in GoalCategory.values)
+                                  DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c.label),
+                                  ),
+                              ],
+                              onChanged: (v) => setState(() => _category = v!),
+                            );
+
+                            Widget targetDateField = InkWell(
+                              onTap: _pickTargetDate,
+                              borderRadius: BorderRadius.circular(18),
+                              child: InputDecorator(
+                                decoration:
+                                    _fieldDecoration(isoDay(_targetDate)),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        isoDay(_targetDate),
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
                                         ),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setState(() => _status = value);
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.calendar_today_outlined,
+                                      color: Color(0xFFB7C0E5),
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+
+                            Widget topMetaFields;
+                            if (_isEdit) {
+                              topMetaFields = Row(
+                                children: [
+                                  Expanded(
+                                    child: DropdownButtonFormField<GoalStatus>(
+                                      initialValue: _status,
+                                      dropdownColor: const Color(0xFF111A45),
+                                      decoration:
+                                          _fieldDecoration('In progress'),
+                                      style: const TextStyle(
+                                        color: Color(0xFFF7F5EC),
+                                        fontSize: 18,
+                                      ),
+                                      items: [
+                                        for (final status in GoalStatus.values)
+                                          DropdownMenuItem(
+                                            value: status,
+                                            child: Text(status.label),
+                                          ),
+                                      ],
+                                      onChanged: (value) {
+                                        if (value == null) return;
+                                        setState(() => _status = value);
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 18),
+                                  Expanded(child: targetDateField),
+                                ],
+                              );
+                            } else {
+                              topMetaFields = Row(
+                                children: [
+                                  Expanded(child: categoryField),
+                                  const SizedBox(width: 18),
+                                  Expanded(child: targetDateField),
+                                ],
+                              );
+                            }
+
+                            return Column(
+                              children: [
+                                titleField,
+                                const SizedBox(height: 20),
+                                descriptionField,
+                                const SizedBox(height: 20),
+                                topMetaFields,
+                                if (!_isEdit && !isMerit) ...[
+                                  const SizedBox(height: 20),
+                                  _ActionPlansPanel(
+                                    planTitles: _planTitles,
+                                    planEntry: _planEntry,
+                                    onAdd: () {
+                                      final t = _planEntry.text.trim();
+                                      if (t.isEmpty) return;
+                                      setState(() {
+                                        _planTitles.add(t);
+                                        _planEntry.clear();
+                                      });
+                                    },
+                                    onRemove: (title) => setState(
+                                      () => _planTitles.remove(title),
+                                    ),
+                                  ),
+                                ],
+                                if (isMerit) ...[
+                                  const SizedBox(height: 20),
+                                  LayoutBuilder(
+                                    builder: (context, innerConstraints) {
+                                      final wideInner =
+                                          innerConstraints.maxWidth >= 900;
+                                      final targetValueField = TextFormField(
+                                        key: const Key('goal-target-value'),
+                                        controller: _targetValue,
+                                        keyboardType: const TextInputType
+                                            .numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
+                                        ),
+                                        decoration: _fieldDecoration('10'),
+                                      );
+                                      final currentValueField = TextFormField(
+                                        key: const Key('goal-current-value'),
+                                        controller: _currentValue,
+                                        keyboardType: const TextInputType
+                                            .numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
+                                        ),
+                                        decoration: _fieldDecoration('0'),
+                                      );
+                                      final directionField =
+                                          DropdownButtonFormField<
+                                              GoalDirection>(
+                                        initialValue: _direction,
+                                        dropdownColor: const Color(0xFF111A45),
+                                        decoration: _fieldDecoration('Gain'),
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
+                                        ),
+                                        items: [
+                                          for (final d in GoalDirection.values)
+                                            DropdownMenuItem(
+                                              value: d,
+                                              child: Text(d.label),
+                                            ),
+                                        ],
+                                        onChanged: (v) =>
+                                            setState(() => _direction = v!),
+                                      );
+                                      final unitField = TextFormField(
+                                        controller: _unit,
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
+                                        ),
+                                        decoration: _fieldDecoration(
+                                          'Kg',
+                                          helper: 'e.g. Kg, M, books',
+                                        ),
+                                      );
+                                      final periodField =
+                                          DropdownButtonFormField<TargetPeriod>(
+                                        initialValue: _targetPeriod,
+                                        dropdownColor: const Color(0xFF111A45),
+                                        decoration: _fieldDecoration('Daily'),
+                                        style: const TextStyle(
+                                          color: Color(0xFFF7F5EC),
+                                          fontSize: 18,
+                                        ),
+                                        items: [
+                                          for (final p in TargetPeriod.values)
+                                            DropdownMenuItem(
+                                              value: p,
+                                              child: Text(p.label),
+                                            ),
+                                        ],
+                                        onChanged: (v) =>
+                                            setState(() => _targetPeriod = v!),
+                                      );
+
+                                      return Column(
+                                        children: [
+                                          if (wideInner)
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                    child: targetValueField),
+                                                const SizedBox(width: 18),
+                                                Expanded(
+                                                  child: currentValueField,
+                                                ),
+                                              ],
+                                            )
+                                          else ...[
+                                            targetValueField,
+                                            const SizedBox(height: 18),
+                                            currentValueField,
+                                          ],
+                                          const SizedBox(height: 18),
+                                          if (wideInner)
+                                            Row(
+                                              children: [
+                                                Expanded(child: directionField),
+                                                const SizedBox(width: 18),
+                                                Expanded(child: unitField),
+                                              ],
+                                            )
+                                          else ...[
+                                            directionField,
+                                            const SizedBox(height: 18),
+                                            unitField,
+                                          ],
+                                          const SizedBox(height: 18),
+                                          periodField,
+                                        ],
+                                      );
                                     },
                                   ),
-                                ),
-                                const SizedBox(width: 18),
-                                Expanded(child: targetDateField),
-                              ],
-                            );
-                          } else {
-                            topMetaFields = Row(
-                              children: [
-                                Expanded(child: categoryField),
-                                const SizedBox(width: 18),
-                                Expanded(child: targetDateField),
-                              ],
-                            );
-                          }
-
-                          return Column(
-                            children: [
-                              titleField,
-                              const SizedBox(height: 20),
-                              descriptionField,
-                              const SizedBox(height: 20),
-                              topMetaFields,
-                              if (!_isEdit && !isMerit) ...[
+                                ],
                                 const SizedBox(height: 20),
-                                _ActionPlansPanel(
-                                  planTitles: _planTitles,
-                                  planEntry: _planEntry,
-                                  onAdd: () {
-                                    final t = _planEntry.text.trim();
-                                    if (t.isEmpty) return;
-                                    setState(() {
-                                      _planTitles.add(t);
-                                      _planEntry.clear();
-                                    });
-                                  },
-                                  onRemove: (title) => setState(
-                                    () => _planTitles.remove(title),
+                                TextFormField(
+                                  controller: _notes,
+                                  style: const TextStyle(
+                                    color: Color(0xFFF7F5EC),
+                                    fontSize: 18,
                                   ),
+                                  decoration: _fieldDecoration(
+                                    'Notes',
+                                    helper:
+                                        'Anything you want your coach to know.',
+                                  ),
+                                  maxLines: 4,
                                 ),
-                              ],
-                              if (isMerit) ...[
-                                const SizedBox(height: 20),
+                                const SizedBox(height: 24),
                                 LayoutBuilder(
-                                  builder: (context, innerConstraints) {
-                                    final wideInner =
-                                        innerConstraints.maxWidth >= 900;
-                                    final targetValueField = TextFormField(
-                                      key: const Key('goal-target-value'),
-                                      controller: _targetValue,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                        decimal: true,
+                                  builder: (context, constraints) {
+                                    final compact = constraints.maxWidth < 420;
+                                    final saveLabel = _saving
+                                        ? 'Saving...'
+                                        : _isEdit
+                                            ? 'Save changes'
+                                            : 'Create goal';
+                                    final saveButton = FilledButton(
+                                      onPressed: _saving ? null : _save,
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFFF0B93C),
+                                        foregroundColor: Colors.black,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 12,
+                                        ),
+                                        minimumSize: const Size(0, 42),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
                                       ),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
-                                      decoration: _fieldDecoration('10'),
-                                    );
-                                    final currentValueField = TextFormField(
-                                      key: const Key('goal-current-value'),
-                                      controller: _currentValue,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
-                                      decoration: _fieldDecoration('0'),
-                                    );
-                                    final directionField =
-                                        DropdownButtonFormField<GoalDirection>(
-                                      initialValue: _direction,
-                                      dropdownColor: const Color(0xFF111A45),
-                                      decoration: _fieldDecoration('Gain'),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
-                                      items: [
-                                        for (final d in GoalDirection.values)
-                                          DropdownMenuItem(
-                                            value: d,
-                                            child: Text(d.label),
-                                          ),
-                                      ],
-                                      onChanged: (v) =>
-                                          setState(() => _direction = v!),
-                                    );
-                                    final unitField = TextFormField(
-                                      controller: _unit,
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
-                                      decoration: _fieldDecoration(
-                                        'Kg',
-                                        helper: 'e.g. Kg, M, books',
+                                      child: Text(
+                                        saveLabel,
+                                        style: const TextStyle(fontSize: 15),
                                       ),
                                     );
-                                    final periodField =
-                                        DropdownButtonFormField<TargetPeriod>(
-                                      initialValue: _targetPeriod,
-                                      dropdownColor: const Color(0xFF111A45),
-                                      decoration: _fieldDecoration('Daily'),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
+                                    final cancelButton = TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor:
+                                            const Color(0xFFD7DCF4),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 10,
+                                        ),
+                                        minimumSize: const Size(0, 38),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
                                       ),
-                                      items: [
-                                        for (final p in TargetPeriod.values)
-                                          DropdownMenuItem(
-                                            value: p,
-                                            child: Text(p.label),
-                                          ),
-                                      ],
-                                      onChanged: (v) =>
-                                          setState(() => _targetPeriod = v!),
+                                      child: const Text(
+                                        'Cancel',
+                                        style: TextStyle(fontSize: 15),
+                                      ),
                                     );
-
-                                    return Column(
+                                    if (compact) {
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          saveButton,
+                                          const SizedBox(height: 10),
+                                          cancelButton,
+                                        ],
+                                      );
+                                    }
+                                    return Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
-                                        if (wideInner)
-                                          Row(
-                                            children: [
-                                              Expanded(child: targetValueField),
-                                              const SizedBox(width: 18),
-                                              Expanded(
-                                                child: currentValueField,
-                                              ),
-                                            ],
-                                          )
-                                        else ...[
-                                          targetValueField,
-                                          const SizedBox(height: 18),
-                                          currentValueField,
-                                        ],
-                                        const SizedBox(height: 18),
-                                        if (wideInner)
-                                          Row(
-                                            children: [
-                                              Expanded(child: directionField),
-                                              const SizedBox(width: 18),
-                                              Expanded(child: unitField),
-                                            ],
-                                          )
-                                        else ...[
-                                          directionField,
-                                          const SizedBox(height: 18),
-                                          unitField,
-                                        ],
-                                        const SizedBox(height: 18),
-                                        periodField,
+                                        cancelButton,
+                                        const SizedBox(width: 12),
+                                        saveButton,
                                       ],
                                     );
                                   },
                                 ),
                               ],
-                              const SizedBox(height: 20),
-                              TextFormField(
-                                controller: _notes,
-                                style: const TextStyle(
-                                  color: Color(0xFFF7F5EC),
-                                  fontSize: 18,
-                                ),
-                                decoration: _fieldDecoration(
-                                  'Notes',
-                                  helper: 'Anything you want your coach to know.',
-                                ),
-                                maxLines: 4,
-                              ),
-                              const SizedBox(height: 24),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final compact = constraints.maxWidth < 420;
-                                  final saveLabel = _saving
-                                      ? 'Saving...'
-                                      : _isEdit
-                                          ? 'Save changes'
-                                          : 'Create goal';
-                                  final saveButton = FilledButton(
-                                    onPressed: _saving ? null : _save,
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: const Color(0xFFF0B93C),
-                                      foregroundColor: Colors.black,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 12,
-                                      ),
-                                      minimumSize: const Size(0, 42),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      saveLabel,
-                                      style: const TextStyle(fontSize: 15),
-                                    ),
-                                  );
-                                  final cancelButton = TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: const Color(0xFFD7DCF4),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      minimumSize: const Size(0, 38),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: const Text(
-                                      'Cancel',
-                                      style: TextStyle(fontSize: 15),
-                                    ),
-                                  );
-                                  if (compact) {
-                                    return Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        saveButton,
-                                        const SizedBox(height: 10),
-                                        cancelButton,
-                                      ],
-                                    );
-                                  }
-                                  return Row(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      cancelButton,
-                                      const SizedBox(width: 12),
-                                      saveButton,
-                                    ],
-                                  );
-                                },
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
             ),
           ],
         ),
@@ -1212,6 +1277,9 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
+
+  DateTime _dateOnly(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
 }
 
 class _GoalTypeCard extends StatelessWidget {
@@ -1340,9 +1408,9 @@ class _ActionPlansPanel extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           for (final title in planTitles) ...[
-              Row(
-                children: [
-                  Container(
+            Row(
+              children: [
+                Container(
                   width: 18,
                   height: 18,
                   decoration: BoxDecoration(
@@ -1353,7 +1421,8 @@ class _ActionPlansPanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: const Color(0xFF10183F),
                       borderRadius: BorderRadius.circular(14),
@@ -1375,7 +1444,8 @@ class _ActionPlansPanel extends StatelessWidget {
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  constraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 28),
                   icon: const Icon(Icons.close, color: Color(0xFF8390C0)),
                 ),
               ],
@@ -1411,8 +1481,8 @@ class _ActionPlansPanel extends StatelessWidget {
                         width: 1.4,
                       ),
                     ),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
                   ),
                 ),
               ),

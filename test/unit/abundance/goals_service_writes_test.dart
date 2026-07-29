@@ -32,6 +32,20 @@ void main() {
         planTitles: ['A', 'B'],
       );
 
+  test('createGoal persists the provided start date', () async {
+    final id = await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.personal,
+      title: 'Plan the launch',
+      startDate: DateTime(2026, 7, 1),
+      targetDate: DateTime(2026, 9, 1),
+    );
+
+    final data = (await firestore.collection('goals').doc(id).get()).data()!;
+    expect(data['startDate'], '2026-07-01');
+    expect(data['targetDate'], '2026-09-01');
+  });
+
   test('updateGoal completing pins progress to 100 and stamps completedAt',
       () async {
     final id = await meritGoal();
@@ -63,11 +77,8 @@ void main() {
       actorId: 'u1',
       currentValue: 2500,
     );
-    final updates = await firestore
-        .collection('goals')
-        .doc(id)
-        .collection('updates')
-        .get();
+    final updates =
+        await firestore.collection('goals').doc(id).collection('updates').get();
     expect(updates.docs.length, 1);
     final entry = updates.docs.first.data();
     expect(entry['progressFrom'], 20);
@@ -156,11 +167,8 @@ void main() {
     await service.addComment(goalId: id, authorId: 'u1', body: 'hi');
     await service.deleteGoal(id);
     expect((await firestore.collection('goals').doc(id).get()).exists, false);
-    final plans = await firestore
-        .collection('goals')
-        .doc(id)
-        .collection('tasks')
-        .get();
+    final plans =
+        await firestore.collection('goals').doc(id).collection('tasks').get();
     expect(plans.docs, isEmpty);
   });
 }

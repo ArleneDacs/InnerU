@@ -281,6 +281,7 @@ class GoalsService {
     required double currentValue,
     required String unit,
     required TargetPeriod targetPeriod,
+    required DateTime startDate,
     required DateTime targetDate,
     required int progress,
     required DateTime? completedAt,
@@ -301,7 +302,7 @@ class GoalsService {
       'targetValue': targetValue,
       'currentValue': currentValue,
       'unit': unit,
-      'startDate': DateTime.now().toIso8601String(),
+      'startDate': isoDay(startDate),
       'targetDate': isoDay(targetDate),
       'completedAt': completedAt?.toIso8601String(),
     };
@@ -326,12 +327,11 @@ class GoalsService {
   }
 
   Future<int> _calculateMilestoneProgress(String goalId) async {
-    final plansSnapshot = await _goalDoc(goalId)
-        .collection('tasks')
-        .orderBy('sortOrder')
-        .get();
+    final plansSnapshot =
+        await _goalDoc(goalId).collection('tasks').orderBy('sortOrder').get();
     final plans = plansSnapshot.docs
-        .map((doc) => ActionPlanStatus.fromCode(doc.data()['status']?.toString()))
+        .map((doc) =>
+            ActionPlanStatus.fromCode(doc.data()['status']?.toString()))
         .toList();
     if (plans.isEmpty) {
       return 0;
@@ -422,9 +422,8 @@ class GoalsService {
                 'id': doc.id,
               }))
           .toList()
-        ..sort((a, b) =>
-            (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-                .compareTo(b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+        ..sort((a, b) => (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
       return updates;
     });
   }
@@ -501,6 +500,7 @@ class GoalsService {
     required String title,
     String? description,
     String? notes,
+    DateTime? startDate,
     required DateTime targetDate,
     GoalType goalType = GoalType.merit,
     GoalDirection direction = GoalDirection.gain,
@@ -535,9 +535,8 @@ class GoalsService {
         companyId: companyId,
         category: category,
         title: title.trim(),
-        description: description?.trim().isEmpty == true
-            ? null
-            : description?.trim(),
+        description:
+            description?.trim().isEmpty == true ? null : description?.trim(),
         notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
         status: status,
         goalType: goalType,
@@ -546,6 +545,7 @@ class GoalsService {
         currentValue: effectiveCurrentValue,
         unit: unit.trim(),
         targetPeriod: effectiveTargetPeriod,
+        startDate: startDate ?? DateTime.now(),
         targetDate: targetDate,
         progress: progress,
         completedAt: null,
@@ -580,6 +580,7 @@ class GoalsService {
     String? description,
     String? notes,
     GoalStatus? status,
+    DateTime? startDate,
     DateTime? targetDate,
     GoalDirection? direction,
     double? targetValue,
@@ -606,6 +607,7 @@ class GoalsService {
       updated['notes'] = notes.trim();
     }
     if (status != null) updated['status'] = status.code;
+    if (startDate != null) updated['startDate'] = isoDay(startDate);
     if (targetDate != null) updated['targetDate'] = isoDay(targetDate);
     if (direction != null) updated['direction'] = direction.code;
     if (targetValue != null) updated['targetValue'] = targetValue;
@@ -619,8 +621,7 @@ class GoalsService {
 
     final effectiveGoalType =
         GoalType.fromCode(updated['goalType']?.toString());
-    final effectiveStatus =
-        GoalStatus.fromCode(updated['status']?.toString());
+    final effectiveStatus = GoalStatus.fromCode(updated['status']?.toString());
     final effectiveTargetValue =
         (updated['targetValue'] as num?)?.toDouble() ?? 0;
     final effectiveCurrentValue =
@@ -774,13 +775,15 @@ class GoalsService {
     if (goalType != GoalType.merit) {
       throw StateError('Target logs are only available for merit goals.');
     }
-    final targetPeriod = TargetPeriod.fromCode(data['targetPeriod']?.toString());
+    final targetPeriod =
+        TargetPeriod.fromCode(data['targetPeriod']?.toString());
     if (targetPeriod == TargetPeriod.none) {
       throw StateError('This goal does not have a recurring target.');
     }
 
     final targetDate =
-        DateTime.tryParse(data['targetDate']?.toString() ?? '') ?? DateTime.now();
+        DateTime.tryParse(data['targetDate']?.toString() ?? '') ??
+            DateTime.now();
     final currentProgress = (data['progress'] as num?)?.toInt() ?? 0;
     final currentValue = (data['currentValue'] as num?)?.toDouble() ?? 0;
     final targetValue = (data['targetValue'] as num?)?.toDouble() ?? 0;
@@ -908,7 +911,8 @@ class GoalsService {
   }
 
   Future<List<ActionPlanItem>> _fetchPlans(String goalId) async {
-    final response = await _api.getJson('/api/goals/$goalId/tasks', token: _token);
+    final response =
+        await _api.getJson('/api/goals/$goalId/tasks', token: _token);
     final raw = response['tasks'];
     if (raw is! List) return const <ActionPlanItem>[];
     return raw
@@ -919,27 +923,32 @@ class GoalsService {
   }
 
   Future<List<GoalUpdateEntry>> _fetchUpdates(String goalId) async {
-    final response = await _api.getJson('/api/goals/$goalId/updates', token: _token);
+    final response =
+        await _api.getJson('/api/goals/$goalId/updates', token: _token);
     final raw = response['updates'];
     if (raw is! List) return const <GoalUpdateEntry>[];
     return raw
         .whereType<Map>()
-        .map((item) => GoalUpdateEntry.fromJson(Map<String, dynamic>.from(item)))
+        .map(
+            (item) => GoalUpdateEntry.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 
   Future<List<GoalCommentItem>> _fetchComments(String goalId) async {
-    final response = await _api.getJson('/api/goals/$goalId/comments', token: _token);
+    final response =
+        await _api.getJson('/api/goals/$goalId/comments', token: _token);
     final raw = response['comments'];
     if (raw is! List) return const <GoalCommentItem>[];
     return raw
         .whereType<Map>()
-        .map((item) => GoalCommentItem.fromJson(Map<String, dynamic>.from(item)))
+        .map(
+            (item) => GoalCommentItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 
   Future<List<MeritLogItem>> _fetchMerits(String goalId) async {
-    final response = await _api.getJson('/api/goals/$goalId/merits', token: _token);
+    final response =
+        await _api.getJson('/api/goals/$goalId/merits', token: _token);
     final raw = response['merits'];
     if (raw is! List) return const <MeritLogItem>[];
     return raw
@@ -948,35 +957,34 @@ class GoalsService {
         .toList();
   }
 
-  Stream<List<GoalSummary>> watchGoals(String uid) =>
-      _usesLegacyFirestore
-          ? _legacyWatchGoals(uid)
-          : _poll(() => _fetchGoals(uid), fallback: const <GoalSummary>[]);
+  Stream<List<GoalSummary>> watchGoals(String uid) => _usesLegacyFirestore
+      ? _legacyWatchGoals(uid)
+      : _poll(() => _fetchGoals(uid), fallback: const <GoalSummary>[]);
 
-  Stream<GoalSummary?> watchGoal(String goalId) =>
-      _usesLegacyFirestore
-          ? _legacyWatchGoal(goalId)
-          : _poll(() => _fetchGoal(goalId), fallback: null);
+  Stream<GoalSummary?> watchGoal(String goalId) => _usesLegacyFirestore
+      ? _legacyWatchGoal(goalId)
+      : _poll(() => _fetchGoal(goalId), fallback: null);
 
-  Stream<List<ActionPlanItem>> watchPlans(String goalId) =>
-      _usesLegacyFirestore
-          ? _legacyWatchPlans(goalId)
-          : _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
+  Stream<List<ActionPlanItem>> watchPlans(String goalId) => _usesLegacyFirestore
+      ? _legacyWatchPlans(goalId)
+      : _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
 
   Stream<List<GoalUpdateEntry>> watchUpdates(String goalId) =>
       _usesLegacyFirestore
           ? _legacyWatchUpdates(goalId)
-          : _poll(() => _fetchUpdates(goalId), fallback: const <GoalUpdateEntry>[]);
+          : _poll(() => _fetchUpdates(goalId),
+              fallback: const <GoalUpdateEntry>[]);
 
-  Stream<List<GoalCommentItem>> watchComments(String goalId) =>
+  Stream<List<GoalCommentItem>> watchComments(
+          String goalId) =>
       _usesLegacyFirestore
           ? _legacyWatchComments(goalId)
-          : _poll(() => _fetchComments(goalId), fallback: const <GoalCommentItem>[]);
+          : _poll(() => _fetchComments(goalId),
+              fallback: const <GoalCommentItem>[]);
 
-  Stream<List<MeritLogItem>> watchMerits(String goalId) =>
-      _usesLegacyFirestore
-          ? _legacyWatchMerits(goalId)
-          : _poll(() => _fetchMerits(goalId), fallback: const <MeritLogItem>[]);
+  Stream<List<MeritLogItem>> watchMerits(String goalId) => _usesLegacyFirestore
+      ? _legacyWatchMerits(goalId)
+      : _poll(() => _fetchMerits(goalId), fallback: const <MeritLogItem>[]);
 
   Future<String> createGoal({
     required String uid,
@@ -984,6 +992,7 @@ class GoalsService {
     required String title,
     String? description,
     String? notes,
+    DateTime? startDate,
     required DateTime targetDate,
     GoalType goalType = GoalType.merit,
     GoalDirection direction = GoalDirection.gain,
@@ -1000,6 +1009,7 @@ class GoalsService {
         title: title,
         description: description,
         notes: notes,
+        startDate: startDate,
         targetDate: targetDate,
         goalType: goalType,
         direction: direction,
@@ -1025,6 +1035,7 @@ class GoalsService {
         'current_value': currentValue,
         'unit': unit.trim(),
         'target_period': targetPeriod.code,
+        'start_date': isoDay(startDate ?? DateTime.now()),
         'target_date': isoDay(targetDate),
         'plan_titles': planTitles,
       },
@@ -1044,6 +1055,7 @@ class GoalsService {
     String? description,
     String? notes,
     GoalStatus? status,
+    DateTime? startDate,
     DateTime? targetDate,
     GoalDirection? direction,
     double? targetValue,
@@ -1060,6 +1072,7 @@ class GoalsService {
         description: description,
         notes: notes,
         status: status,
+        startDate: startDate,
         targetDate: targetDate,
         direction: direction,
         targetValue: targetValue,
@@ -1076,6 +1089,7 @@ class GoalsService {
       if (description != null || notes != null) 'description': description,
       if (notes != null) 'notes': notes,
       if (status != null) 'status': status.code,
+      if (startDate != null) 'start_date': isoDay(startDate),
       if (targetDate != null) 'target_date': isoDay(targetDate),
       if (direction != null) 'direction': direction.code,
       if (targetValue != null) 'target_value': targetValue,

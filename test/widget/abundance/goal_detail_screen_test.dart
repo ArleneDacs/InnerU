@@ -30,6 +30,10 @@ void main() {
     expect(find.text('WALK 300 KM'), findsOneWidget);
     expect(find.textContaining('60'), findsWidgets); // current value shown
     expect(find.textContaining('300'), findsWidgets); // target shown
+    expect(
+      find.textContaining('finished by the target date'),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byType(TextField).first, '100');
     await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));

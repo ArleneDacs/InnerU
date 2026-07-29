@@ -5,8 +5,7 @@ import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_for
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 
 void main() {
-  testWidgets('form requires a title and creates a merit goal',
-      (tester) async {
+  testWidgets('form requires a title and creates a merit goal', (tester) async {
     final firestore = FakeFirebaseFirestore();
     final service = GoalsService(firestore);
     await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
@@ -25,6 +24,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    expect(find.text('Start date'), findsOneWidget);
+    expect(find.text('End date'), findsOneWidget);
+
     // Saving with no title trips the validator.
     await tester.tap(find.text('Create goal'));
     await tester.pumpAndSettle();
@@ -40,5 +42,7 @@ void main() {
     expect(goals.docs.length, 1);
     expect(goals.docs.first.data()['title'], 'Read 12 books');
     expect(goals.docs.first.data()['targetValue'], 12);
+    expect(goals.docs.first.data()['startDate'], isNotNull);
+    expect(goals.docs.first.data()['targetDate'], isNotNull);
   });
 }

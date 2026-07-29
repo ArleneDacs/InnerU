@@ -562,6 +562,11 @@ class _GoalScoreCard extends StatelessWidget {
             'How far your current value has come toward the target.',
             style: TextStyle(color: _muted, fontSize: 14.5, height: 1.45),
           ),
+          const SizedBox(height: 6),
+          const Text(
+            'Goals only earn full score when they\'re finished by the target date.',
+            style: TextStyle(color: _muted, fontSize: 13.5, height: 1.4),
+          ),
           const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, constraints) {
