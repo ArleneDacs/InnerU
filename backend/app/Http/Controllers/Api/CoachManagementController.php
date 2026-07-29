@@ -448,10 +448,18 @@ class CoachManagementController extends Controller
                 'id' => (string) $task->id,
                 'title' => $task->title,
                 'description' => $task->description,
+                'goalType' => $task->goal_type,
                 'isCompleted' => (bool) $task->is_completed,
+                'startDate' => $task->start_date?->toDateString(),
                 'dueDate' => $task->due_date?->toDateString(),
                 'tag' => $task->tag,
                 'completedAt' => $task->completed_at?->toIso8601String(),
+                'completionDates' => collect($task->completion_dates ?? [])
+                    ->map(fn ($date) => $date instanceof \DateTimeInterface
+                        ? $date->format('Y-m-d')
+                        : \Illuminate\Support\Carbon::parse($date)->toDateString())
+                    ->values()
+                    ->all(),
                 'subTasks' => $task->sub_tasks ?? [],
             ]);
 

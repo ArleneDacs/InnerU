@@ -38,6 +38,8 @@ Color _onSurfaceFor(Color background) {
 // Task model
 enum TaskTag { personal, professional, contribution, none }
 
+enum GoalType { longTerm, everyday }
+
 const List<String> _defaultDailyTrackerTaskIds = [
   'call',
   'steps',
@@ -99,6 +101,26 @@ extension TaskTagExtension on TaskTag {
         return Color(0xFFBBD1A2);
       case TaskTag.none:
         return Color(0xFFF5F5F5);
+    }
+  }
+}
+
+extension GoalTypeExtension on GoalType {
+  String get displayName {
+    switch (this) {
+      case GoalType.longTerm:
+        return 'Long Term Goal';
+      case GoalType.everyday:
+        return 'Everyday Goal';
+    }
+  }
+
+  String get storageValue {
+    switch (this) {
+      case GoalType.longTerm:
+        return 'LONG_TERM';
+      case GoalType.everyday:
+        return 'EVERYDAY';
     }
   }
 }
@@ -166,25 +188,32 @@ class Task {
   String title;
   String description;
   bool isCompleted;
+  GoalType goalType;
+  DateTime startDate;
   DateTime dueDate;
   TaskTag tag;
   DateTime createdAt;
   DateTime? updatedAt;
   DateTime? completedAt;
+  List<DateTime> completionDates;
   List<TaskSubItem> subTasks;
 
   Task({
     required this.id,
     required this.title,
     this.description = '',
+    this.goalType = GoalType.longTerm,
+    required this.startDate,
     required this.dueDate,
     this.isCompleted = false,
     this.tag = TaskTag.none,
     DateTime? createdAt,
     this.updatedAt,
     this.completedAt,
+    List<DateTime>? completionDates,
     List<TaskSubItem>? subTasks,
   })  : createdAt = createdAt ?? DateTime.now(),
+        completionDates = completionDates ?? <DateTime>[],
         subTasks = subTasks ?? <TaskSubItem>[];
 
   // Convert to and from JSON
@@ -193,12 +222,16 @@ class Task {
         'title': title,
         'description': description,
         'isCompleted': isCompleted,
+        'goalType': goalType.storageValue,
+        'startDate': startDate.toIso8601String(),
         'dueDate': dueDate.toIso8601String(),
         'tag': tag.index,
         'tagIndex': tag.index,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt?.toIso8601String(),
         'completedAt': completedAt?.toIso8601String(),
+        'completionDates':
+            completionDates.map((date) => date.toIso8601String()).toList(),
         'subTasks': subTasks.map((subTask) => subTask.toJson()).toList(),
       };
 
@@ -212,9 +245,7 @@ class Task {
 
   static TaskTag _tagFromValue(dynamic value) {
     if (value is num) {
-      return TaskTag.values[
-        value.toInt().clamp(0, TaskTag.values.length - 1)
-      ];
+      return TaskTag.values[value.toInt().clamp(0, TaskTag.values.length - 1)];
     }
 
     final raw = value?.toString().trim().toLowerCase() ?? '';
@@ -240,9 +271,8 @@ class Task {
       default:
         final parsed = int.tryParse(raw);
         if (parsed != null) {
-          return TaskTag.values[
-            parsed.clamp(0, TaskTag.values.length - 1).toInt()
-          ];
+          return TaskTag
+              .values[parsed.clamp(0, TaskTag.values.length - 1).toInt()];
         }
 
         if (normalized.contains('personal')) return TaskTag.personal;
@@ -256,17 +286,56 @@ class Task {
     }
   }
 
+  static GoalType _goalTypeFromValue(dynamic value) {
+    final raw = value?.toString().trim().toUpperCase() ?? '';
+    final normalized = raw.replaceAll(RegExp(r'[\s_\-]+'), '');
+    switch (normalized) {
+      case 'EVERYDAY':
+      case 'DAILY':
+        return GoalType.everyday;
+      case 'LONGTERM':
+      case 'LONGTERMGOAL':
+      case 'MILESTONE':
+      case 'LONGTERMTASK':
+      case 'LONGTERMGOALS':
+      case 'LONGTERM':
+        return GoalType.longTerm;
+      default:
+        return GoalType.longTerm;
+    }
+  }
+
+  static List<DateTime> _dateListFromValue(dynamic value) {
+    if (value is! List) return <DateTime>[];
+    return value
+        .whereType<Object>()
+        .map((item) => DateTime.tryParse(item.toString()))
+        .whereType<DateTime>()
+        .map(DateUtils.dateOnly)
+        .toList();
+  }
+
   factory Task.fromJson(Map<String, dynamic> json) => Task(
         id: (json['id'] ?? '').toString(),
         title: (json['title'] ?? '').toString(),
         description: (json['description'] ?? '').toString(),
         isCompleted: json['isCompleted'] == true,
-        dueDate: DateTime.tryParse(json['dueDate'].toString()) ?? DateTime.now(),
+        goalType: _goalTypeFromValue(json['goalType']),
+        startDate: DateTime.tryParse(
+              (json['startDate'] ?? json['start_date'])?.toString() ?? '',
+            ) ??
+            DateTime.tryParse(json['dueDate']?.toString() ?? '') ??
+            DateTime.now(),
+        dueDate: DateTime.tryParse(json['dueDate']?.toString() ?? '') ??
+            DateTime.now(),
         tag: _tagFromValue(json['tag'] ?? json['tagIndex']),
         createdAt: _dateFromValue(json['createdAt']) ??
             DateTime.fromMillisecondsSinceEpoch(0),
         updatedAt: _dateFromValue(json['updatedAt']),
         completedAt: _dateFromValue(json['completedAt']),
+        completionDates: _dateListFromValue(
+          json['completionDates'] ?? json['completion_dates'],
+        ),
         subTasks: (json['subTasks'] as List<dynamic>? ?? const [])
             .whereType<Map>()
             .map((subTask) =>
@@ -276,10 +345,32 @@ class Task {
 }
 
 double taskProgress(Task task) {
+  if (task.goalType == GoalType.everyday) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final rangeStart = DateUtils.dateOnly(task.startDate);
+    final rangeEnd = DateUtils.dateOnly(task.dueDate).isBefore(today)
+        ? DateUtils.dateOnly(task.dueDate)
+        : today;
+
+    if (rangeEnd.isBefore(rangeStart)) return 0;
+
+    final eligibleDays = rangeEnd.difference(rangeStart).inDays + 1;
+    if (eligibleDays <= 0) return 0;
+
+    final completedDays = task.completionDates
+        .map(DateUtils.dateOnly)
+        .where((day) => !day.isBefore(rangeStart) && !day.isAfter(rangeEnd))
+        .toSet()
+        .length;
+
+    return (completedDays / eligibleDays) * 100;
+  }
+
   if (task.subTasks.isNotEmpty) {
     final total = task.subTasks.length;
     if (total == 0) return task.isCompleted ? 100 : 0;
-    final completed = task.subTasks.where((subTask) => subTask.isCompleted).length;
+    final completed =
+        task.subTasks.where((subTask) => subTask.isCompleted).length;
     return (completed / total) * 100;
   }
 
@@ -287,6 +378,59 @@ double taskProgress(Task task) {
 }
 
 bool taskIsEffectivelyCompleted(Task task) => taskProgress(task) >= 100;
+
+double taskScoreProgress(Task task) {
+  if (task.goalType == GoalType.everyday) {
+    return taskProgress(task);
+  }
+
+  if (!taskIsEffectivelyCompleted(task)) return 0;
+
+  final completedAt = DateUtils.dateOnly(task.completedAt ?? DateTime.now());
+  final dueDate = DateUtils.dateOnly(task.dueDate);
+
+  return completedAt.isAfter(dueDate) ? 0 : 100;
+}
+
+bool taskOccursOnDate(Task task, DateTime day) {
+  final selectedDay = DateUtils.dateOnly(day);
+  final startDate = DateUtils.dateOnly(task.startDate);
+  final dueDate = DateUtils.dateOnly(task.dueDate);
+  final rangeStart = startDate.isAfter(dueDate) ? dueDate : startDate;
+  final rangeEnd = dueDate.isBefore(startDate) ? startDate : dueDate;
+
+  return !selectedDay.isBefore(rangeStart) && !selectedDay.isAfter(rangeEnd);
+}
+
+List<DateTime> taskCalendarDays(Task task) {
+  final startDate = DateUtils.dateOnly(task.startDate);
+  final dueDate = DateUtils.dateOnly(task.dueDate);
+  final rangeStart = startDate.isAfter(dueDate) ? dueDate : startDate;
+  final rangeEnd = dueDate.isBefore(startDate) ? startDate : dueDate;
+  final days = <DateTime>[];
+
+  for (var day = rangeStart;
+      !day.isAfter(rangeEnd);
+      day = day.add(const Duration(days: 1))) {
+    days.add(DateUtils.dateOnly(day));
+  }
+
+  return days;
+}
+
+bool taskHasCompletionOnDate(Task task, DateTime day) {
+  final selectedDay = DateUtils.dateOnly(day);
+  return task.completionDates
+      .map(DateUtils.dateOnly)
+      .any((completedDay) => completedDay == selectedDay);
+}
+
+bool taskCalendarDayIsEnabled(Task task, DateTime day, {DateTime? today}) {
+  final selectedDay = DateUtils.dateOnly(day);
+  final currentDay = DateUtils.dateOnly(today ?? DateTime.now());
+  return taskOccursOnDate(task, selectedDay) &&
+      !selectedDay.isAfter(currentDay);
+}
 
 Task syncTaskCompletion(Task task, {DateTime? completedAt}) {
   final progress = taskProgress(task);
@@ -334,11 +478,15 @@ class FirestoreRepository {
         'id': task.id.isEmpty ? null : task.id,
         'title': task.title,
         'description': task.description,
+        'goal_type': task.goalType.storageValue,
+        'start_date': task.startDate.toIso8601String(),
         'due_date': task.dueDate.toIso8601String(),
         'tag': task.tag.name,
         'tag_index': task.tag.index,
         'is_completed': task.isCompleted,
         'completed_at': task.completedAt?.toIso8601String(),
+        'completion_dates':
+            task.completionDates.map((date) => date.toIso8601String()).toList(),
         'sub_tasks': task.subTasks.map((subTask) => subTask.toJson()).toList(),
       });
       task.id = (taskData['id'] as String?) ?? task.id;
@@ -353,11 +501,15 @@ class FirestoreRepository {
       await _api.updateTask(task.id, {
         'title': task.title,
         'description': task.description,
+        'goal_type': task.goalType.storageValue,
+        'start_date': task.startDate.toIso8601String(),
         'due_date': task.dueDate.toIso8601String(),
         'tag': task.tag.name,
         'tag_index': task.tag.index,
         'is_completed': task.isCompleted,
         'completed_at': task.completedAt?.toIso8601String(),
+        'completion_dates':
+            task.completionDates.map((date) => date.toIso8601String()).toList(),
         'sub_tasks': task.subTasks.map((subTask) => subTask.toJson()).toList(),
       });
     } catch (e) {
@@ -499,7 +651,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
     try {
       final membershipData =
           await CompanyMembershipService.loadForUser(session.id.toString());
-      final useGoalsHub = _isAbundance12Company(membershipData.activeMembership);
+      final useGoalsHub =
+          _isAbundance12Company(membershipData.activeMembership);
 
       if (!mounted) return;
       setState(() {
@@ -607,6 +760,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
       if (index != -1) {
         // Create a local copy of the task
         final task = _tasks[index];
+        if (task.goalType == GoalType.everyday) {
+          _toggleTaskCompletionDate(task.id, DateTime.now());
+          return;
+        }
         final shouldComplete = !taskIsEffectivelyCompleted(task);
         if (task.subTasks.isNotEmpty) {
           for (final subTask in task.subTasks) {
@@ -644,6 +801,54 @@ class _TodoListScreenState extends State<TodoListScreen> {
     } catch (e) {
       print('Error toggling task completion: $e');
       // If the update fails, reload all tasks to ensure UI is in sync
+      await _loadTasks();
+    }
+  }
+
+  void _toggleTaskCompletionDate(String id, DateTime selectedDay) async {
+    try {
+      final index = _tasks.indexWhere((task) => task.id == id);
+      if (index == -1) {
+        print('Task not found with ID: $id');
+        return;
+      }
+
+      final task = _tasks[index];
+      final normalizedSelectedDay = DateUtils.dateOnly(selectedDay);
+      final completionKeys = task.completionDates
+          .map(DateUtils.dateOnly)
+          .map((date) => DateFormat('yyyy-MM-dd').format(date))
+          .toSet();
+      final selectedKey =
+          DateFormat('yyyy-MM-dd').format(normalizedSelectedDay);
+
+      if (completionKeys.contains(selectedKey)) {
+        completionKeys.remove(selectedKey);
+      } else {
+        completionKeys.add(selectedKey);
+      }
+
+      task.completionDates = completionKeys
+          .map((date) => DateTime.parse(date))
+          .toList()
+        ..sort((a, b) => a.compareTo(b));
+      task.updatedAt = DateTime.now();
+      syncTaskCompletion(task, completedAt: normalizedSelectedDay);
+
+      await _repository.updateTask(task);
+      if (task.isCompleted) {
+        await _cancelTaskNotification(task.id);
+      } else {
+        await _scheduleTaskNotification(task);
+      }
+
+      setState(() {
+        _tasks[index] = task;
+      });
+
+      await _syncTodoListScore();
+    } catch (e) {
+      print('Error toggling task completion date: $e');
       await _loadTasks();
     }
   }
@@ -750,7 +955,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   value: progress / 100,
                   backgroundColor: mutedColor.withValues(alpha: 0.18),
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    isCompleted ? accentColor : accentColor.withValues(alpha: 0.7),
+                    isCompleted
+                        ? accentColor
+                        : accentColor.withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -822,7 +1029,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                       shape: const CircleBorder(),
                       checkColor: Colors.white,
                       activeColor: accentColor,
-                      side: BorderSide(color: mutedColor.withValues(alpha: 0.8)),
+                      side:
+                          BorderSide(color: mutedColor.withValues(alpha: 0.8)),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),
@@ -846,6 +1054,366 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTaskDateStrip({
+    required Task task,
+    required CompanyThemeData companyTheme,
+    VoidCallback? onDayChanged,
+  }) {
+    final days = taskCalendarDays(task);
+    if (days.isEmpty) return const SizedBox.shrink();
+
+    final today = DateUtils.dateOnly(DateTime.now());
+    final borderColor = companyTheme.isDark
+        ? companyTheme.iconColor.withValues(alpha: 0.24)
+        : companyTheme.mutedInkColor.withValues(alpha: 0.18);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Check day',
+            style: TextStyle(
+              fontSize: 12,
+              color: companyTheme.mutedInkColor,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: days.map((day) {
+                final isEnabled = taskCalendarDayIsEnabled(
+                  task,
+                  day,
+                  today: today,
+                );
+                final isSelected = taskHasCompletionOnDate(task, day);
+                final isFuture = day.isAfter(today);
+                final backgroundColor = isSelected
+                    ? companyTheme.primaryColor.withValues(alpha: 0.18)
+                    : companyTheme.surfaceColor;
+                final cellBorderColor = isSelected
+                    ? companyTheme.primaryColor
+                    : isFuture
+                        ? borderColor.withValues(alpha: 0.4)
+                        : borderColor;
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: isEnabled
+                        ? () {
+                            _toggleTaskCompletionDate(task.id, day);
+                            onDayChanged?.call();
+                          }
+                        : null,
+                    child: Container(
+                      width: 56,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: backgroundColor,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: cellBorderColor),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            DateFormat('EEE').format(day),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: isFuture
+                                  ? companyTheme.mutedInkColor.withValues(
+                                      alpha: 0.55,
+                                    )
+                                  : companyTheme.inkColor,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${day.day}',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: isFuture
+                                  ? companyTheme.mutedInkColor.withValues(
+                                      alpha: 0.55,
+                                    )
+                                  : companyTheme.inkColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Icon(
+                            isSelected
+                                ? Icons.check_circle
+                                : isFuture
+                                    ? Icons.lock_outline
+                                    : Icons.circle_outlined,
+                            size: 15,
+                            color: isSelected
+                                ? companyTheme.primaryColor
+                                : isFuture
+                                    ? companyTheme.mutedInkColor.withValues(
+                                        alpha: 0.5,
+                                      )
+                                    : companyTheme.mutedInkColor,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTaskCalendarPanel({
+    required Task task,
+    required CompanyThemeData companyTheme,
+    required VoidCallback onDayChanged,
+  }) {
+    final months = _taskCalendarMonthStarts(task);
+    if (months.isEmpty) return const SizedBox.shrink();
+
+    final borderColor = companyTheme.isDark
+        ? companyTheme.iconColor.withValues(alpha: 0.24)
+        : companyTheme.mutedInkColor.withValues(alpha: 0.18);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: companyTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.calendar_month_outlined,
+                size: 18,
+                color: companyTheme.primaryColor,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Calendar',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: companyTheme.inkColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Tap a day to mark it done',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: companyTheme.mutedInkColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Column(
+            children: [
+              for (var index = 0; index < months.length; index++) ...[
+                _buildTaskCalendarMonthSection(
+                  task: task,
+                  companyTheme: companyTheme,
+                  monthStart: months[index],
+                  onDayChanged: onDayChanged,
+                ),
+                if (index != months.length - 1) const SizedBox(height: 12),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<DateTime> _taskCalendarMonthStarts(Task task) {
+    final rangeStart = DateUtils.dateOnly(task.startDate);
+    final rangeEnd = DateUtils.dateOnly(task.dueDate);
+    final firstMonth = DateTime(rangeStart.year, rangeStart.month);
+    final lastMonth = DateTime(rangeEnd.year, rangeEnd.month);
+    final months = <DateTime>[];
+
+    for (var month = firstMonth;
+        !month.isAfter(lastMonth);
+        month = DateTime(month.year, month.month + 1)) {
+      months.add(DateTime(month.year, month.month));
+    }
+
+    return months;
+  }
+
+  Widget _buildTaskCalendarMonthSection({
+    required Task task,
+    required CompanyThemeData companyTheme,
+    required DateTime monthStart,
+    required VoidCallback onDayChanged,
+  }) {
+    final rangeStart = DateUtils.dateOnly(task.startDate);
+    final rangeEnd = DateUtils.dateOnly(task.dueDate);
+    final today = DateUtils.dateOnly(DateTime.now());
+    final firstOfMonth = DateTime(monthStart.year, monthStart.month);
+    final daysInMonth =
+        DateUtils.getDaysInMonth(monthStart.year, monthStart.month);
+    final leadingEmptyCells = firstOfMonth.weekday % 7;
+    final totalCells = leadingEmptyCells + daysInMonth;
+    final rows = (totalCells / 7).ceil();
+    final borderColor = companyTheme.isDark
+        ? companyTheme.iconColor.withValues(alpha: 0.24)
+        : companyTheme.mutedInkColor.withValues(alpha: 0.18);
+
+    Widget buildEmptyCell() {
+      return const SizedBox(height: 48);
+    }
+
+    Widget buildDayCell(DateTime day) {
+      final isSelected = taskHasCompletionOnDate(task, day);
+      final isEnabled = taskCalendarDayIsEnabled(task, day, today: today);
+      final isFuture = day.isAfter(today);
+      final isOutsideRange = day.isBefore(rangeStart) || day.isAfter(rangeEnd);
+      final backgroundColor = isSelected
+          ? companyTheme.primaryColor.withValues(alpha: 0.18)
+          : companyTheme.surfaceColor;
+      final cellBorderColor = isSelected
+          ? companyTheme.primaryColor
+          : isFuture || isOutsideRange
+              ? borderColor.withValues(alpha: 0.4)
+              : borderColor;
+      final textColor = isFuture || isOutsideRange
+          ? companyTheme.mutedInkColor.withValues(alpha: 0.55)
+          : companyTheme.inkColor;
+      final iconColor = isSelected
+          ? companyTheme.primaryColor
+          : isFuture || isOutsideRange
+              ? companyTheme.mutedInkColor.withValues(alpha: 0.5)
+              : companyTheme.mutedInkColor;
+
+      return GestureDetector(
+        onTap: isEnabled
+            ? () {
+                _toggleTaskCompletionDate(task.id, day);
+                onDayChanged();
+              }
+            : null,
+        child: Container(
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cellBorderColor),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '${day.day}',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Icon(
+                isSelected
+                    ? Icons.check_circle
+                    : isFuture
+                        ? Icons.lock_outline
+                        : Icons.circle_outlined,
+                size: 14,
+                color: iconColor,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: companyTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            DateFormat('MMMM yyyy').format(monthStart),
+            style: TextStyle(
+              fontSize: 14,
+              color: companyTheme.inkColor,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: const [
+              Expanded(child: Center(child: Text('S'))),
+              Expanded(child: Center(child: Text('M'))),
+              Expanded(child: Center(child: Text('T'))),
+              Expanded(child: Center(child: Text('W'))),
+              Expanded(child: Center(child: Text('T'))),
+              Expanded(child: Center(child: Text('F'))),
+              Expanded(child: Center(child: Text('S'))),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (var row = 0; row < rows; row++) ...[
+            Row(
+              children: List.generate(7, (column) {
+                final cellIndex = row * 7 + column;
+                final dayNumber = cellIndex - leadingEmptyCells + 1;
+                if (cellIndex < leadingEmptyCells ||
+                    dayNumber < 1 ||
+                    dayNumber > daysInMonth) {
+                  return const Expanded(
+                      child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                    child: SizedBox(height: 48),
+                  ));
+                }
+
+                final day =
+                    DateTime(monthStart.year, monthStart.month, dayNumber);
+                return Expanded(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                    child: buildDayCell(day),
+                  ),
+                );
+              }),
+            ),
+          ],
         ],
       ),
     );
@@ -999,7 +1567,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   int _completedGoalsForCategory(TaskTag category) {
     return _tasks
-        .where((task) => task.tag == category && taskIsEffectivelyCompleted(task))
+        .where((task) => task.tag == category && taskScoreProgress(task) >= 100)
         .length;
   }
 
@@ -1015,14 +1583,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
     if (total == 0) return 0;
     final totalProgress = categoryTasks.fold<double>(
       0,
-      (runningTotal, task) => runningTotal + taskProgress(task),
+      (runningTotal, task) => runningTotal + taskScoreProgress(task),
     );
     return (totalProgress / total).round();
   }
 
-  int get _completedGoalCount => _tasks
-      .where((task) => taskIsEffectivelyCompleted(task))
-      .length;
+  int get _completedGoalCount =>
+      _tasks.where((task) => taskScoreProgress(task) >= 100).length;
 
   int get _totalGoalCount => _tasks.length;
 
@@ -1031,7 +1598,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     final totalProgress = _tasks.fold<double>(
       0,
-      (runningTotal, task) => runningTotal + taskProgress(task),
+      (runningTotal, task) => runningTotal + taskScoreProgress(task),
     );
 
     return (totalProgress / _tasks.length).round();
@@ -1073,10 +1640,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
     required num todoListScoreContribution,
     required bool includeTodoListScore,
   }) {
-    final clampedTodoListContribution =
-        includeTodoListScore
-            ? todoListScoreContribution.clamp(0, 100).toInt()
-            : 0;
+    final clampedTodoListContribution = includeTodoListScore
+        ? todoListScoreContribution.clamp(0, 100).toInt()
+        : 0;
     final scoreSummary = DailyScoreService.summarizeTracker(
       {
         ...tracker,
@@ -1151,8 +1717,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
         ? previousTracker
         : <String, dynamic>{};
     final previousTodoListScore =
-        _readInt(previousTrackerData['todoListScore'])
-            .clamp(0, 100);
+        _readInt(previousTrackerData['todoListScore']).clamp(0, 100);
     final todoListScoreContribution =
         (score - previousTodoListScore).clamp(0, 100).toInt();
     final includeTodoListScore = score > 0;
@@ -1170,9 +1735,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final trackerResponse =
         await DailyTrackerApiService.instance.fetch(date: todayDate);
     final trackerData = trackerResponse['tracker'];
-    final trackerMap = trackerData is Map<String, dynamic>
-        ? trackerData
-        : <String, dynamic>{};
+    final trackerMap =
+        trackerData is Map<String, dynamic> ? trackerData : <String, dynamic>{};
     final dailyTrackerIds = _dailyTrackerIdsFromUserData(userData);
     final dailyTrackerScoreFields = _dailyTrackerScoreFields(
       dailyTrackerIds: dailyTrackerIds,
@@ -1190,15 +1754,15 @@ class _TodoListScreenState extends State<TodoListScreen> {
       todoListScore: score,
       todoListScoreDailyContribution: todoListScoreContribution,
       todoListIncludedInTotal: includeTodoListScore,
-      userTotalScore: (dailyTrackerScoreFields['userTotalScore'] as num?)?.round(),
+      userTotalScore:
+          (dailyTrackerScoreFields['userTotalScore'] as num?)?.round(),
       username: trackerUsername,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
       companyName: membershipData.activeMembership?.name,
-      customDailyTasks:
-          trackerMap['customDailyTasks'] is Map<String, dynamic>
-              ? trackerMap['customDailyTasks'] as Map<String, dynamic>
-              : null,
+      customDailyTasks: trackerMap['customDailyTasks'] is Map<String, dynamic>
+          ? trackerMap['customDailyTasks'] as Map<String, dynamic>
+          : null,
     );
 
     await _syncUserPoints(
@@ -1234,9 +1798,12 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 : 'User');
     final dailyTrackerScore =
         _readInt(trackerData['dailyTrackerScore']).clamp(0, 100).toInt();
-    final todoListScore = _readInt(trackerData['todoListScore']).clamp(0, 100).toInt();
+    final todoListScore =
+        _readInt(trackerData['todoListScore']).clamp(0, 100).toInt();
     final todoListContribution =
-        _readInt(trackerData['todoListScoreDailyContribution']).clamp(0, 100).toInt();
+        _readInt(trackerData['todoListScoreDailyContribution'])
+            .clamp(0, 100)
+            .toInt();
     final includeTodoListScore = trackerData['todoListIncludedInTotal'] == true;
     final effectiveTodoListScore =
         todoListScore > 0 ? todoListScore : todoListContribution;
@@ -1527,7 +2094,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final descriptionController = TextEditingController();
     final subTaskController = TextEditingController();
     final List<TaskSubItem> subTasks = [];
-    DateTime selectedDate = DateTime.now();
+    DateTime selectedStartDate = DateTime.now();
+    DateTime selectedDueDate = DateTime.now();
+    GoalType selectedGoalType = GoalType.longTerm;
     TaskTag selectedTag = TaskTag.personal;
 
     showDialog(
@@ -1629,6 +2198,52 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   const SizedBox(height: 16),
 
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.flag_outlined,
+                          color: companyTheme.iconColor, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: GoalType.values.map((goalType) {
+                            final isSelected = goalType == selectedGoalType;
+                            return ChoiceChip(
+                              label: Text(goalType.displayName),
+                              selected: isSelected,
+                              onSelected: (_) {
+                                setState(() {
+                                  selectedGoalType = goalType;
+                                  if (goalType == GoalType.everyday) {
+                                    subTasks.clear();
+                                  }
+                                });
+                              },
+                              selectedColor: companyTheme.primaryColor
+                                  .withValues(alpha: 0.18),
+                              backgroundColor: companyTheme.surfaceColor,
+                              labelStyle: TextStyle(
+                                color: isSelected
+                                    ? companyTheme.inkColor
+                                    : companyTheme.mutedInkColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              side: BorderSide(
+                                color: isSelected
+                                    ? companyTheme.primaryColor
+                                    : companyTheme.mutedInkColor
+                                        .withValues(alpha: 0.25),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Icon(Icons.local_offer_outlined,
@@ -1707,56 +2322,125 @@ class _TodoListScreenState extends State<TodoListScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  _buildSubtaskEditor(
-                    subTasks: subTasks,
-                    controller: subTaskController,
-                    setDialogState: setState,
-                    companyTheme: companyTheme,
-                  ),
-                  const SizedBox(height: 16),
+                  if (selectedGoalType == GoalType.longTerm) ...[
+                    _buildSubtaskEditor(
+                      subTasks: subTasks,
+                      controller: subTaskController,
+                      setDialogState: setState,
+                      companyTheme: companyTheme,
+                    ),
+                    const SizedBox(height: 16),
+                  ] else ...[
+                    Text(
+                      'Everyday goals use the calendar inside the task card to mark each day done.',
+                      style: TextStyle(
+                        color: companyTheme.mutedInkColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
-                  // Due date selection
+                  // Goal date selection
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.calendar_today,
                           color: companyTheme.iconColor, size: 28),
                       const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Due Date',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: companyTheme.inkColor,
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () async {
-                              final DateTime? picked = await showDatePicker(
-                                context: context,
-                                initialDate: selectedDate,
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime(2100),
-                              );
-                              if (picked != null && picked != selectedDate) {
-                                setState(() {
-                                  selectedDate = picked;
-                                });
-                              }
-                            },
-                            child: Text(
-                              DateFormat('EEE, MMM d, yyyy')
-                                  .format(selectedDate),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Start Date',
                               style: TextStyle(
                                 fontSize: 16,
-                                color: companyTheme.mutedInkColor,
+                                fontWeight: FontWeight.w500,
+                                color: companyTheme.inkColor,
                               ),
                             ),
-                          ),
-                        ],
+                            GestureDetector(
+                              onTap: () async {
+                                final DateTime? picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: selectedStartDate,
+                                  firstDate: DateTime(2000),
+                                  lastDate: DateTime(2100),
+                                );
+                                if (picked != null &&
+                                    picked != selectedStartDate) {
+                                  setState(() {
+                                    selectedStartDate = picked;
+                                    if (selectedDueDate.isBefore(picked)) {
+                                      selectedDueDate = picked;
+                                    }
+                                  });
+                                }
+                              },
+                              child: Text(
+                                DateFormat('EEE, MMM d, yyyy')
+                                    .format(selectedStartDate),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: companyTheme.mutedInkColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.event_available,
+                          color: companyTheme.iconColor, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'End Date',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: companyTheme.inkColor,
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () async {
+                                final DateTime? picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: selectedDueDate,
+                                  firstDate: selectedStartDate,
+                                  lastDate: DateTime(2100),
+                                );
+                                if (picked != null &&
+                                    picked != selectedDueDate) {
+                                  setState(() {
+                                    selectedDueDate = picked;
+                                    if (selectedStartDate.isAfter(picked)) {
+                                      selectedStartDate = picked;
+                                    }
+                                  });
+                                }
+                              },
+                              child: Text(
+                                DateFormat('EEE, MMM d, yyyy')
+                                    .format(selectedDueDate),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: companyTheme.mutedInkColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1783,7 +2467,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                   title: titleController.text.trim(),
                                   description:
                                       descriptionController.text.trim(),
-                                  dueDate: selectedDate,
+                                  goalType: selectedGoalType,
+                                  startDate: selectedStartDate,
+                                  dueDate: selectedDueDate,
                                   tag: selectedTag,
                                   subTasks: List<TaskSubItem>.from(subTasks),
                                 ),
@@ -2036,7 +2722,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    '$_completedGoalCount of $_totalGoalCount goals completed',
+                                    '$_completedGoalCount of $_totalGoalCount goals completed on time',
                                     style: TextStyle(
                                       fontSize: 15,
                                       color: companyTheme.inkColor,
@@ -2076,22 +2762,24 @@ class _TodoListScreenState extends State<TodoListScreen> {
                       child: filteredTasks.isEmpty
                           ? Center(
                               child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(
                                     Icons.check_circle_outline,
-                                    size: 80,
+                                    size: 28,
                                     color: companyTheme.mutedInkColor,
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 6),
                                   Text(
                                     _searchQuery.isNotEmpty
                                         ? 'No matching goals found'
                                         : _currentTabIndex == 2
                                             ? 'No completed goals yet'
                                             : 'No goals yet',
+                                    textAlign: TextAlign.center,
                                     style: TextStyle(
-                                      fontSize: 18,
+                                      fontSize: 13,
                                       color: companyTheme.mutedInkColor,
                                     ),
                                   ),
@@ -2189,13 +2877,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                 vertical: 8,
                                               ),
                                               leading: Checkbox(
-                                                value: task.subTasks.isNotEmpty &&
-                                                        progress > 0 &&
-                                                        progress < 100
-                                                    ? null
-                                                    : isCompleted,
-                                                tristate: task.subTasks
-                                                    .isNotEmpty,
+                                                value:
+                                                    task.subTasks.isNotEmpty &&
+                                                            progress > 0 &&
+                                                            progress < 100
+                                                        ? null
+                                                        : isCompleted,
+                                                tristate:
+                                                    task.subTasks.isNotEmpty,
                                                 onChanged: (value) {
                                                   _toggleTaskCompletion(
                                                       task.id);
@@ -2231,7 +2920,8 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.start,
                                                 children: [
-                                                  if (task.description.isNotEmpty)
+                                                  if (task
+                                                      .description.isNotEmpty)
                                                     Padding(
                                                       padding:
                                                           const EdgeInsets.only(
@@ -2263,30 +2953,65 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                         const EdgeInsets.only(
                                                             top: 4.0,
                                                             bottom: 4.0),
-                                                    child: Row(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
                                                       children: [
-                                                        Icon(
-                                                          Icons.calendar_today,
-                                                          size: 16,
-                                                          color: companyTheme
-                                                              .mutedInkColor,
+                                                        Row(
+                                                          children: [
+                                                            Icon(
+                                                              Icons
+                                                                  .calendar_today,
+                                                              size: 16,
+                                                              color: companyTheme
+                                                                  .mutedInkColor,
+                                                            ),
+                                                            const SizedBox(
+                                                                width: 4),
+                                                            Text(
+                                                              'Start ${DateFormat('MMM d, yyyy').format(task.startDate)}',
+                                                              style: TextStyle(
+                                                                color: companyTheme
+                                                                    .mutedInkColor,
+                                                                fontSize: 14,
+                                                              ),
+                                                            ),
+                                                          ],
                                                         ),
                                                         const SizedBox(
-                                                            width: 4),
-                                                        Text(
-                                                          DateFormat(
-                                                                  'MMM d, yyyy')
-                                                              .format(
-                                                                  task.dueDate),
-                                                          style: TextStyle(
-                                                            color: companyTheme
-                                                                .mutedInkColor,
-                                                            fontSize: 14,
-                                                          ),
+                                                            height: 4),
+                                                        Row(
+                                                          children: [
+                                                            Icon(
+                                                              Icons
+                                                                  .event_available,
+                                                              size: 16,
+                                                              color: companyTheme
+                                                                  .mutedInkColor,
+                                                            ),
+                                                            const SizedBox(
+                                                                width: 4),
+                                                            Text(
+                                                              'End ${DateFormat('MMM d, yyyy').format(task.dueDate)}',
+                                                              style: TextStyle(
+                                                                color: companyTheme
+                                                                    .mutedInkColor,
+                                                                fontSize: 14,
+                                                              ),
+                                                            ),
+                                                          ],
                                                         ),
                                                       ],
                                                     ),
                                                   ),
+                                                  if (task.goalType ==
+                                                      GoalType.everyday)
+                                                    _buildTaskDateStrip(
+                                                      task: task,
+                                                      companyTheme:
+                                                          companyTheme,
+                                                    ),
                                                   if (task.tag != TaskTag.none)
                                                     Padding(
                                                       padding:
@@ -2328,12 +3053,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                                   const SizedBox(height: 8),
                                                   _buildTaskProgressBar(
                                                     task: task,
-                                                    accentColor: task.tag ==
-                                                            TaskTag.none
-                                                        ? companyTheme.mutedInkColor
-                                                        : task.tag.color,
-                                                    mutedColor:
-                                                        companyTheme.mutedInkColor,
+                                                    accentColor:
+                                                        task.tag == TaskTag.none
+                                                            ? companyTheme
+                                                                .mutedInkColor
+                                                            : task.tag.color,
+                                                    mutedColor: companyTheme
+                                                        .mutedInkColor,
                                                     isCompleted: isCompleted,
                                                   ),
                                                   if (task.subTasks.isNotEmpty)
@@ -2473,6 +3199,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   void _showTaskDetails(Task task) {
     final companyTheme = _currentCompanyTheme();
+    final startDate = DateFormat('EEE, MMM d, yyyy').format(task.startDate);
     final dueDate = DateFormat('EEE, MMM d, yyyy').format(task.dueDate);
     final completedDate = task.completedAt == null
         ? null
@@ -2480,128 +3207,147 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
     showDialog(
       context: context,
-      builder: (dialogContext) => Theme(
-        data: AppTheme.company(companyTheme),
-        child: AlertDialog(
-          title: const Text('Goal Details'),
-          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          backgroundColor: companyTheme.surfaceColor,
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTaskDetailRow(
-                  icon: Icons.list,
-                  label: 'Goal title',
-                  value: task.title,
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                ),
-                const SizedBox(height: 16),
-                _buildTaskDetailRow(
-                  icon: Icons.chat_bubble_outline,
-                  label: 'Description',
-                  value: task.description.trim().isEmpty
-                      ? 'No description added.'
-                      : task.description.trim(),
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                ),
-                const SizedBox(height: 16),
-                _buildTaskDetailRow(
-                  icon: Icons.local_offer_outlined,
-                  label: 'Tag',
-                  value: task.tag.fullDisplayName,
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                  accentColor:
-                      task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                ),
-                const SizedBox(height: 16),
-                _buildTaskDetailRow(
-                  icon: Icons.calendar_today,
-                  label: 'Due Date',
-                  value: dueDate,
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                ),
-                const SizedBox(height: 16),
-                _buildTaskDetailRow(
-                  icon: Icons.insights_outlined,
-                  label: 'Progress',
-                  value: '${taskProgress(task).round()}%',
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                  accentColor:
-                      task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                ),
-                const SizedBox(height: 12),
-                _buildTaskProgressBar(
-                  task: task,
-                  accentColor:
-                      task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                  mutedColor: const Color(0xFF6E625B),
-                  isCompleted: taskIsEffectivelyCompleted(task),
-                ),
-                if (task.subTasks.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _buildSubtaskRows(
-                    task: task,
-                    titleColor: companyTheme.inkColor,
-                    mutedColor: companyTheme.mutedInkColor,
-                    accentColor:
-                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                  ),
-                ],
-                const SizedBox(height: 16),
-                _buildTaskDetailRow(
-                  icon: taskIsEffectivelyCompleted(task)
-                      ? Icons.check_circle_outline
-                      : Icons.radio_button_unchecked,
-                  label: 'Status',
-                  value: taskIsEffectivelyCompleted(task)
-                      ? 'Completed'
-                      : 'Pending',
-                  labelColor: companyTheme.mutedInkColor,
-                  valueColor: companyTheme.inkColor,
-                  accentColor:
-                      taskIsEffectivelyCompleted(task)
-                          ? const Color(0xFF6F8A5F)
-                          : Colors.grey,
-                ),
-                if (completedDate != null) ...[
-                  const SizedBox(height: 16),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => Theme(
+          data: AppTheme.company(companyTheme),
+          child: AlertDialog(
+            title: const Text('Goal Details'),
+            contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            backgroundColor: companyTheme.surfaceColor,
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   _buildTaskDetailRow(
-                    icon: Icons.event_available,
-                    label: 'Completed At',
-                    value: completedDate,
+                    icon: Icons.list,
+                    label: 'Goal title',
+                    value: task.title,
                     labelColor: companyTheme.mutedInkColor,
                     valueColor: companyTheme.inkColor,
                   ),
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: Icons.chat_bubble_outline,
+                    label: 'Description',
+                    value: task.description.trim().isEmpty
+                        ? 'No description added.'
+                        : task.description.trim(),
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: Icons.local_offer_outlined,
+                    label: 'Tag',
+                    value: task.tag.fullDisplayName,
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                    accentColor:
+                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: Icons.calendar_today,
+                    label: 'Start Date',
+                    value: startDate,
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: Icons.event_available,
+                    label: 'End Date',
+                    value: dueDate,
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                  ),
+                  if (task.goalType == GoalType.everyday) ...[
+                    const SizedBox(height: 16),
+                    _buildTaskCalendarPanel(
+                      task: task,
+                      companyTheme: companyTheme,
+                      onDayChanged: () => setDialogState(() {}),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: Icons.insights_outlined,
+                    label: 'Progress',
+                    value: '${taskProgress(task).round()}%',
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                    accentColor:
+                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTaskProgressBar(
+                    task: task,
+                    accentColor:
+                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
+                    mutedColor: const Color(0xFF6E625B),
+                    isCompleted: taskIsEffectivelyCompleted(task),
+                  ),
+                  if (task.goalType == GoalType.longTerm &&
+                      task.subTasks.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildSubtaskRows(
+                      task: task,
+                      titleColor: companyTheme.inkColor,
+                      mutedColor: companyTheme.mutedInkColor,
+                      accentColor: task.tag == TaskTag.none
+                          ? Colors.grey
+                          : task.tag.color,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _buildTaskDetailRow(
+                    icon: taskIsEffectivelyCompleted(task)
+                        ? Icons.check_circle_outline
+                        : Icons.radio_button_unchecked,
+                    label: 'Status',
+                    value: taskIsEffectivelyCompleted(task)
+                        ? 'Completed'
+                        : 'Pending',
+                    labelColor: companyTheme.mutedInkColor,
+                    valueColor: companyTheme.inkColor,
+                    accentColor: taskIsEffectivelyCompleted(task)
+                        ? const Color(0xFF6F8A5F)
+                        : Colors.grey,
+                  ),
+                  if (completedDate != null) ...[
+                    const SizedBox(height: 16),
+                    _buildTaskDetailRow(
+                      icon: Icons.event_available,
+                      label: 'Completed At',
+                      value: completedDate,
+                      labelColor: companyTheme.mutedInkColor,
+                      valueColor: companyTheme.inkColor,
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('CLOSE'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _editTask(task);
-              },
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('EDIT'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: companyTheme.primaryColor,
-                foregroundColor: _onSurfaceFor(companyTheme.primaryColor),
               ),
             ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('CLOSE'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _editTask(task);
+                },
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('EDIT'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: companyTheme.primaryColor,
+                  foregroundColor: _onSurfaceFor(companyTheme.primaryColor),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2627,7 +3373,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-              label,
+                label,
                 style: TextStyle(
                   fontSize: 13,
                   color: labelColor,
@@ -2661,7 +3407,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
           (subTask) => subTask.copyWith(),
         )
         .toList();
-    DateTime selectedDate = task.dueDate;
+    GoalType selectedGoalType = task.goalType;
+    DateTime selectedStartDate = task.startDate;
+    DateTime selectedDueDate = task.dueDate;
     TaskTag selectedTag =
         _goalCategories.contains(task.tag) ? task.tag : TaskTag.personal;
 
@@ -2680,309 +3428,430 @@ class _TodoListScreenState extends State<TodoListScreen> {
             final onAccentColor = colorScheme.onPrimary;
 
             return AlertDialog(
-            title: const Text('Edit Goal'),
-            contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-            actionsPadding: EdgeInsets.zero,
-            backgroundColor: surfaceColor,
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Title field with list icon
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(Icons.list, color: accentColor, size: 28),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: titleController,
-                          decoration: InputDecoration(
-                            labelText: 'Goal title',
-                            hintText: '',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide:
-                                  BorderSide(color: borderColor, width: 1.4),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide:
-                                  BorderSide(color: borderColor, width: 1.4),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide:
-                                  BorderSide(color: accentColor, width: 1.4),
-                            ),
-                            counterText: '${titleController.text.length}/60',
-                            helperText: 'Maximum 60 characters',
-                            labelStyle: TextStyle(color: textSecondaryColor),
-                            helperStyle: TextStyle(color: textSecondaryColor),
-                          ),
-                          autofocus: true,
-                          maxLength: 60,
-                          buildCounter: (BuildContext context,
-                              {required int currentLength,
-                              required bool isFocused,
-                              required int? maxLength}) {
-                            return null;
-                          },
-                          onChanged: (text) {
-                            setState(() {});
-                          },
-                          style: TextStyle(color: textPrimaryColor),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Description field with chat icon
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Icon(Icons.chat_bubble_outline,
-                            color: accentColor, size: 28),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: descriptionController,
-                          decoration: InputDecoration(
-                            hintText: 'Description (optional)',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: borderColor),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: borderColor),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide:
-                                  BorderSide(color: accentColor, width: 1.4),
-                            ),
-                            hintStyle: TextStyle(color: textSecondaryColor),
-                            contentPadding: const EdgeInsets.symmetric(
-                                vertical: 16, horizontal: 12),
-                          ),
-                          maxLines: 3,
-                          style: TextStyle(color: textPrimaryColor),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(Icons.local_offer_outlined,
-                          color: accentColor, size: 28),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: borderColor),
-                            borderRadius: BorderRadius.circular(8),
-                            color: surfaceColor,
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<TaskTag>(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              isExpanded: true,
-                              value: selectedTag,
-                              items: _goalCategories.map((tag) {
-                                return DropdownMenuItem<TaskTag>(
-                                  value: tag,
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(right: 8.0),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          width: 12,
-                                          height: 12,
-                                          decoration: BoxDecoration(
-                                            color: tag == TaskTag.none
-                                                ? textSecondaryColor
-                                                : tag.color,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Flexible(
-                                          child: Text(
-                                            tag.displayName,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (newValue) {
-                                setState(() {
-                                  selectedTag = newValue!;
-                                });
-                              },
-                              menuMaxHeight: 300,
-                              hint: Text(
-                                'Add a goal tag',
-                                style: TextStyle(color: textSecondaryColor),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  _buildSubtaskEditor(
-                    subTasks: subTasks,
-                    controller: subTaskController,
-                    setDialogState: setState,
-                    companyTheme: companyTheme,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Due date selection
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(Icons.calendar_today,
-                          color: accentColor, size: 28),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Due Date',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: textPrimaryColor,
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () async {
-                              final DateTime? picked = await showDatePicker(
-                                context: context,
-                                initialDate: selectedDate,
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime(2100),
-                              );
-                              if (picked != null && picked != selectedDate) {
-                                setState(() {
-                                  selectedDate = picked;
-                                });
-                              }
-                            },
-                            child: Text(
-                              DateFormat('EEE, MMM d, yyyy')
-                                  .format(selectedDate),
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: textSecondaryColor,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                ],
-              ),
-            ),
-            actions: [
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              title: const Text('Edit Goal'),
+              contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+              actionsPadding: EdgeInsets.zero,
+              backgroundColor: surfaceColor,
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // SAVE button
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8.0),
-                        child: ElevatedButton(
-                          onPressed: () {
-                            if (titleController.text.trim().isNotEmpty) {
-                              final updatedTask = Task(
-                                id: task.id,
-                                title: titleController.text.trim(),
-                                description: descriptionController.text.trim(),
-                                dueDate: selectedDate,
-                                tag: selectedTag,
-                                createdAt: task.createdAt,
-                                updatedAt: DateTime.now(),
-                                completedAt: task.completedAt,
-                                subTasks: List<TaskSubItem>.from(subTasks),
-                              );
+                    // Title field with list icon
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(Icons.list, color: accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: titleController,
+                            decoration: InputDecoration(
+                              labelText: 'Goal title',
+                              hintText: '',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: borderColor, width: 1.4),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: borderColor, width: 1.4),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: accentColor, width: 1.4),
+                              ),
+                              counterText: '${titleController.text.length}/60',
+                              helperText: 'Maximum 60 characters',
+                              labelStyle: TextStyle(color: textSecondaryColor),
+                              helperStyle: TextStyle(color: textSecondaryColor),
+                            ),
+                            autofocus: true,
+                            maxLength: 60,
+                            buildCounter: (BuildContext context,
+                                {required int currentLength,
+                                required bool isFocused,
+                                required int? maxLength}) {
+                              return null;
+                            },
+                            onChanged: (text) {
+                              setState(() {});
+                            },
+                            style: TextStyle(color: textPrimaryColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
 
-                              _updateTask(updatedTask);
-                              Navigator.pop(context);
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accentColor,
-                            foregroundColor: onAccentColor,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
+                    // Description field with chat icon
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Icon(Icons.chat_bubble_outline,
+                              color: accentColor, size: 28),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: descriptionController,
+                            decoration: InputDecoration(
+                              hintText: 'Description (optional)',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: accentColor, width: 1.4),
+                              ),
+                              hintStyle: TextStyle(color: textSecondaryColor),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 16, horizontal: 12),
                             ),
+                            maxLines: 3,
+                            style: TextStyle(color: textPrimaryColor),
                           ),
-                          child: const Text(
-                            'SAVE',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.flag_outlined, color: accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: GoalType.values.map((goalType) {
+                              final isSelected = goalType == selectedGoalType;
+                              return ChoiceChip(
+                                label: Text(goalType.displayName),
+                                selected: isSelected,
+                                onSelected: (_) {
+                                  setState(() {
+                                    selectedGoalType = goalType;
+                                    if (goalType == GoalType.everyday) {
+                                      subTasks.clear();
+                                    }
+                                  });
+                                },
+                                selectedColor:
+                                    accentColor.withValues(alpha: 0.18),
+                                backgroundColor: surfaceColor,
+                                labelStyle: TextStyle(
+                                  color: isSelected
+                                      ? textPrimaryColor
+                                      : textSecondaryColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                side: BorderSide(
+                                  color: isSelected
+                                      ? accentColor
+                                      : textSecondaryColor.withValues(
+                                          alpha: 0.25,
+                                        ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(Icons.local_offer_outlined,
+                            color: accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: borderColor),
+                              borderRadius: BorderRadius.circular(8),
+                              color: surfaceColor,
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<TaskTag>(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                isExpanded: true,
+                                value: selectedTag,
+                                items: _goalCategories.map((tag) {
+                                  return DropdownMenuItem<TaskTag>(
+                                    value: tag,
+                                    child: Padding(
+                                      padding:
+                                          const EdgeInsets.only(right: 8.0),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            decoration: BoxDecoration(
+                                              color: tag == TaskTag.none
+                                                  ? textSecondaryColor
+                                                  : tag.color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              tag.displayName,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: (newValue) {
+                                  setState(() {
+                                    selectedTag = newValue!;
+                                  });
+                                },
+                                menuMaxHeight: 300,
+                                hint: Text(
+                                  'Add a goal tag',
+                                  style: TextStyle(color: textSecondaryColor),
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                    // CANCEL button
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8.0),
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: surfaceColor,
-                            foregroundColor: textSecondaryColor,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                              side: BorderSide(color: borderColor),
-                            ),
-                          ),
-                          child: const Text(
-                            'CANCEL',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                    const SizedBox(height: 16),
+
+                    if (selectedGoalType == GoalType.longTerm) ...[
+                      _buildSubtaskEditor(
+                        subTasks: subTasks,
+                        controller: subTaskController,
+                        setDialogState: setState,
+                        companyTheme: companyTheme,
+                      ),
+                      const SizedBox(height: 16),
+                    ] else ...[
+                      Text(
+                        'Everyday goals use the calendar inside the task card to mark each day done.',
+                        style: TextStyle(
+                          color: textSecondaryColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Goal date selection
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.calendar_today,
+                            color: accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Start Date',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                  color: textPrimaryColor,
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () async {
+                                  final DateTime? picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: selectedStartDate,
+                                    firstDate: DateTime(2000),
+                                    lastDate: DateTime(2100),
+                                  );
+                                  if (picked != null &&
+                                      picked != selectedStartDate) {
+                                    setState(() {
+                                      selectedStartDate = picked;
+                                      if (selectedDueDate.isBefore(picked)) {
+                                        selectedDueDate = picked;
+                                      }
+                                    });
+                                  }
+                                },
+                                child: Text(
+                                  DateFormat('EEE, MMM d, yyyy')
+                                      .format(selectedStartDate),
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: textSecondaryColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.event_available,
+                            color: accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'End Date',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                  color: textPrimaryColor,
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () async {
+                                  final DateTime? picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: selectedDueDate,
+                                    firstDate: selectedStartDate,
+                                    lastDate: DateTime(2100),
+                                  );
+                                  if (picked != null &&
+                                      picked != selectedDueDate) {
+                                    setState(() {
+                                      selectedDueDate = picked;
+                                      if (selectedStartDate.isAfter(picked)) {
+                                        selectedStartDate = picked;
+                                      }
+                                    });
+                                  }
+                                },
+                                child: Text(
+                                  DateFormat('EEE, MMM d, yyyy')
+                                      .format(selectedDueDate),
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: textSecondaryColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
-            ],
-          );
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // SAVE button
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ElevatedButton(
+                            onPressed: () {
+                              if (titleController.text.trim().isNotEmpty) {
+                                final updatedTask = Task(
+                                  id: task.id,
+                                  title: titleController.text.trim(),
+                                  description:
+                                      descriptionController.text.trim(),
+                                  goalType: selectedGoalType,
+                                  startDate: selectedStartDate,
+                                  dueDate: selectedDueDate,
+                                  tag: selectedTag,
+                                  createdAt: task.createdAt,
+                                  updatedAt: DateTime.now(),
+                                  completedAt: task.completedAt,
+                                  completionDates:
+                                      List<DateTime>.from(task.completionDates),
+                                  subTasks: List<TaskSubItem>.from(subTasks),
+                                );
+
+                                _updateTask(updatedTask);
+                                Navigator.pop(context);
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: accentColor,
+                              foregroundColor: onAccentColor,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                            ),
+                            child: const Text(
+                              'SAVE',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // CANCEL button
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8.0),
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: surfaceColor,
+                              foregroundColor: textSecondaryColor,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                                side: BorderSide(color: borderColor),
+                              ),
+                            ),
+                            child: const Text(
+                              'CANCEL',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
           },
         ),
       ),

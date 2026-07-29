@@ -1,15 +1,25 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 
 Task _task({
   bool isCompleted = false,
+  DateTime? completedAt,
+  DateTime? startDate,
+  DateTime? dueDate,
+  GoalType goalType = GoalType.longTerm,
+  List<DateTime> completionDates = const [],
   List<TaskSubItem> subTasks = const [],
 }) {
   return Task(
     id: 'task-1',
     title: 'Personal Goal',
-    dueDate: DateTime(2026, 7, 20),
+    startDate: startDate ?? DateTime(2026, 7, 18),
+    dueDate: dueDate ?? DateTime(2026, 7, 20),
     isCompleted: isCompleted,
+    completedAt: completedAt,
+    goalType: goalType,
+    completionDates: List<DateTime>.from(completionDates),
     subTasks: List<TaskSubItem>.from(subTasks),
   );
 }
@@ -19,6 +29,71 @@ void main() {
     test('flat tasks still score by their completion flag', () {
       expect(taskProgress(_task()), 0);
       expect(taskProgress(_task(isCompleted: true)), 100);
+    });
+
+    test('late completions do not count toward the score', () {
+      final task = _task(
+        isCompleted: true,
+        completedAt: DateTime(2026, 7, 21, 10),
+      );
+
+      expect(taskProgress(task), 100);
+      expect(taskScoreProgress(task), 0);
+    });
+
+    test('everyday goals score by checked calendar days', () {
+      final today = DateUtils.dateOnly(DateTime.now());
+      final task = _task(
+        goalType: GoalType.everyday,
+        startDate: today.subtract(const Duration(days: 2)),
+        dueDate: today,
+        completionDates: [
+          today.subtract(const Duration(days: 2)),
+          today,
+          today,
+        ],
+      );
+
+      expect(taskProgress(task), closeTo(66.666, 0.01));
+      expect(taskScoreProgress(task), closeTo(66.666, 0.01));
+    });
+
+    test('calendar day matcher includes tasks within the date range', () {
+      final task = _task(
+        startDate: DateTime(2026, 7, 18),
+        dueDate: DateTime(2026, 7, 22),
+      );
+
+      expect(taskOccursOnDate(task, DateTime(2026, 7, 18)), isTrue);
+      expect(taskOccursOnDate(task, DateTime(2026, 7, 20)), isTrue);
+      expect(taskOccursOnDate(task, DateTime(2026, 7, 23)), isFalse);
+      expect(taskCalendarDays(task), hasLength(5));
+      expect(taskCalendarDays(task).first, DateTime(2026, 7, 18));
+      expect(taskCalendarDays(task).last, DateTime(2026, 7, 22));
+    });
+
+    test('future task calendar days are disabled', () {
+      final task = _task(
+        startDate: DateTime(2026, 7, 20),
+        dueDate: DateTime(2026, 7, 25),
+      );
+
+      expect(
+        taskCalendarDayIsEnabled(
+          task,
+          DateTime(2026, 7, 24),
+          today: DateTime(2026, 7, 23),
+        ),
+        isFalse,
+      );
+      expect(
+        taskCalendarDayIsEnabled(
+          task,
+          DateTime(2026, 7, 23),
+          today: DateTime(2026, 7, 23),
+        ),
+        isTrue,
+      );
     });
 
     test('subtasks drive parent progress', () {
@@ -75,6 +150,7 @@ void main() {
         id: 'task-2',
         title: 'Personal Goal',
         description: 'Build the habit step by step',
+        startDate: DateTime(2026, 7, 17),
         dueDate: DateTime(2026, 7, 21),
         tag: TaskTag.personal,
         subTasks: [
@@ -99,6 +175,7 @@ void main() {
       expect(restored.id, original.id);
       expect(restored.title, original.title);
       expect(restored.description, original.description);
+      expect(restored.startDate, original.startDate);
       expect(restored.tag, original.tag);
       expect(restored.subTasks, hasLength(2));
       expect(restored.subTasks.first.title, 'Plan');

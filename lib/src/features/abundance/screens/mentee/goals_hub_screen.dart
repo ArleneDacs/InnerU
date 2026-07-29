@@ -36,7 +36,8 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
   void initState() {
     super.initState();
     _service = widget.service ?? GoalsService();
-    _uid = widget.uid ?? AuthService.instance.currentSession?.id.toString() ?? '';
+    _uid =
+        widget.uid ?? AuthService.instance.currentSession?.id.toString() ?? '';
     _hasAccessFuture = _resolveAccess();
   }
 
@@ -238,7 +239,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                             selectedCategory: _selectedCategory,
                             counts: categoryCounts,
                             onSelect: (category) {
-                            setState(() => _selectedCategory = category);
+                              setState(() => _selectedCategory = category);
                             },
                           ),
                           const SizedBox(height: 20),
@@ -319,7 +320,7 @@ class _GoalsHeader extends StatelessWidget {
             ),
             SizedBox(height: 10),
             Text(
-              'Personal, professional and contribution - combined into your Goal Total Score.',
+              'Personal, professional and contribution - combined into your Goal Total Score. In Todo List, new goals can include a start date and an end date.',
               style: TextStyle(
                 color: Color(0xFFB7C0E5),
                 fontSize: 15.5,
@@ -997,7 +998,7 @@ class _EmptyGoalsState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Tap New goal to create your first A12 goal and start building your Goal Total Score.',
+            'Tap New goal in Todo List to create your first A12 goal and set its start and end dates.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Color(0xFFB7C0E5),

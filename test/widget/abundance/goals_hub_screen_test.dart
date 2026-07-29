@@ -38,6 +38,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('RUN 100 KM'), findsOneWidget);
+    expect(
+      find.textContaining('new goals can include a start date and an end date'),
+      findsOneWidget,
+    );
     // Personal is held; the other two required categories are named as gaps.
     expect(find.textContaining('Professional'), findsWidgets);
     expect(find.textContaining('Contribution'), findsWidgets);

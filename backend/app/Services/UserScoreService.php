@@ -837,7 +837,16 @@ class UserScoreService
 
         $tasks = TodoTask::query()
             ->whereIn('user_id', $userIds)
-            ->get(['user_id', 'is_completed', 'sub_tasks']);
+            ->get([
+                'user_id',
+                'goal_type',
+                'start_date',
+                'due_date',
+                'is_completed',
+                'completed_at',
+                'completion_dates',
+                'sub_tasks',
+            ]);
 
         if ($tasks->isEmpty()) {
             return [];
@@ -875,6 +884,10 @@ class UserScoreService
 
     private function todoTaskProgress(TodoTask $task): float
     {
+        if (strtoupper((string) $task->goal_type) === 'EVERYDAY') {
+            return $this->todoTaskEverydayProgress($task);
+        }
+
         $subTasks = is_array($task->sub_tasks) ? $task->sub_tasks : [];
 
         if ($subTasks !== []) {
@@ -888,7 +901,76 @@ class UserScoreService
             return ($completed / count($subTasks)) * 100;
         }
 
-        return $task->is_completed ? 100.0 : 0.0;
+        if (! $task->is_completed) {
+            return 0.0;
+        }
+
+        $completedAt = $task->completed_at instanceof Carbon
+            ? $task->completed_at
+            : ($task->completed_at ? Carbon::parse($task->completed_at) : null);
+        $dueDate = $task->due_date instanceof Carbon
+            ? $task->due_date
+            : ($task->due_date ? Carbon::parse($task->due_date) : null);
+
+        if ($completedAt !== null && $dueDate !== null && $completedAt->startOfDay()->gt($dueDate->startOfDay())) {
+            return 0.0;
+        }
+
+        return 100.0;
+    }
+
+    private function todoTaskEverydayProgress(TodoTask $task): float
+    {
+        $startDate = $task->start_date instanceof Carbon
+            ? $task->start_date
+            : ($task->start_date ? Carbon::parse($task->start_date) : null);
+        $dueDate = $task->due_date instanceof Carbon
+            ? $task->due_date
+            : ($task->due_date ? Carbon::parse($task->due_date) : null);
+
+        if ($startDate === null || $dueDate === null) {
+            return 0.0;
+        }
+
+        $today = Carbon::today();
+        $rangeStart = $startDate->copy()->startOfDay();
+        $rangeEnd = $dueDate->copy()->startOfDay()->isBefore($today->startOfDay())
+            ? $dueDate->copy()->startOfDay()
+            : $today->copy()->startOfDay();
+
+        if ($rangeEnd->lt($rangeStart)) {
+            return 0.0;
+        }
+
+        $eligibleDays = $rangeStart->diffInDays($rangeEnd) + 1;
+        if ($eligibleDays <= 0) {
+            return 0.0;
+        }
+
+        $completedDates = collect($task->completion_dates ?? [])
+            ->map(fn ($date) => Carbon::parse($date)->startOfDay()->toDateString())
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($completedDates === [] && $task->is_completed) {
+            $completedAt = $task->completed_at instanceof Carbon
+                ? $task->completed_at
+                : ($task->completed_at ? Carbon::parse($task->completed_at) : null);
+
+            if ($completedAt !== null) {
+                $completedDates = [$completedAt->copy()->startOfDay()->toDateString()];
+            }
+        }
+
+        $completedDays = collect($completedDates)
+            ->map(fn ($date) => Carbon::parse($date)->startOfDay())
+            ->filter(fn (Carbon $date) => $date->betweenIncluded($rangeStart, $rangeEnd))
+            ->map(fn (Carbon $date) => $date->toDateString())
+            ->unique()
+            ->count();
+
+        return ($completedDays / $eligibleDays) * 100;
     }
 
     /**

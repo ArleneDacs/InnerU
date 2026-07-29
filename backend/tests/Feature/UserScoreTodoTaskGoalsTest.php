@@ -7,6 +7,7 @@ use App\Models\TodoTask;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -83,5 +84,37 @@ class UserScoreTodoTaskGoalsTest extends TestCase
         // (25 + 33.33... + 0) / 3 = 19.44... -> rounds to 19, matching the
         // Goals page's own _todoScore.round() display of "19%".
         $this->assertEquals(19.0, $breakdown['goalScore']);
+    }
+
+    public function test_everyday_goal_score_uses_calendar_completion_dates(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-29 12:00:00'));
+
+        try {
+            $user = User::factory()->create();
+
+            TodoTask::create([
+                'id' => (string) Str::uuid(),
+                'user_id' => $user->id,
+                'title' => 'Check in daily',
+                'goal_type' => 'EVERYDAY',
+                'start_date' => '2026-07-27',
+                'due_date' => '2026-07-29',
+                'tag' => 'personal',
+                'is_completed' => false,
+                'completion_dates' => [
+                    '2026-07-27',
+                    '2026-07-29T08:00:00+08:00',
+                    '2026-07-29',
+                ],
+                'sub_tasks' => [],
+            ]);
+
+            $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+            $this->assertEquals(67.0, $breakdown['goalScore']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 }

@@ -75,5 +75,9 @@ void main() {
     expect(find.text('New Goal'), findsOneWidget);
     expect(find.text('Goal title'), findsOneWidget);
     expect(find.text('Description (optional)'), findsOneWidget);
+    expect(find.text('Long Term Goal'), findsOneWidget);
+    expect(find.text('Everyday Goal'), findsOneWidget);
+    expect(find.text('Start Date'), findsOneWidget);
+    expect(find.text('End Date'), findsOneWidget);
   });
 }

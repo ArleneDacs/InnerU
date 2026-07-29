@@ -43,11 +43,14 @@ class TodoTaskController extends Controller
             'id' => ['sometimes', 'string', 'max:255'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'goal_type' => ['nullable', 'string', 'max:32'],
+            'start_date' => ['nullable', 'date'],
             'due_date' => ['required', 'date'],
             'tag' => ['nullable', 'string', 'max:64'],
             'tag_index' => ['nullable', 'integer', 'min:0', 'max:3'],
             'is_completed' => ['sometimes', 'boolean'],
             'completed_at' => ['nullable', 'date'],
+            'completion_dates' => ['nullable', 'array'],
             'sub_tasks' => ['nullable', 'array'],
         ]);
 
@@ -59,6 +62,10 @@ class TodoTaskController extends Controller
             [
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? '',
+                'goal_type' => $this->normalizeGoalType($validated['goal_type'] ?? null),
+                'start_date' => isset($validated['start_date'])
+                    ? Carbon::parse($validated['start_date'])->toDateString()
+                    : Carbon::parse($validated['due_date'])->toDateString(),
                 'due_date' => Carbon::parse($validated['due_date'])->toDateString(),
                 'tag' => $this->normalizeTag(
                     $validated['tag'] ?? null,
@@ -68,6 +75,9 @@ class TodoTaskController extends Controller
                 'completed_at' => isset($validated['completed_at'])
                     ? Carbon::parse($validated['completed_at'])
                     : null,
+                'completion_dates' => $this->normalizeCompletionDates(
+                    $validated['completion_dates'] ?? []
+                ),
                 'sub_tasks' => $validated['sub_tasks'] ?? [],
             ],
         );
@@ -85,11 +95,14 @@ class TodoTaskController extends Controller
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'goal_type' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'start_date' => ['sometimes', 'date'],
             'due_date' => ['sometimes', 'date'],
             'tag' => ['nullable', 'string', 'max:64'],
             'tag_index' => ['nullable', 'integer', 'min:0', 'max:3'],
             'is_completed' => ['sometimes', 'boolean'],
             'completed_at' => ['nullable', 'date'],
+            'completion_dates' => ['sometimes', 'nullable', 'array'],
             'sub_tasks' => ['nullable', 'array'],
         ]);
 
@@ -100,6 +113,12 @@ class TodoTaskController extends Controller
         }
         if (array_key_exists('description', $validated)) {
             $todoTask->description = $validated['description'];
+        }
+        if (array_key_exists('goal_type', $validated)) {
+            $todoTask->goal_type = $this->normalizeGoalType($validated['goal_type']);
+        }
+        if (array_key_exists('start_date', $validated)) {
+            $todoTask->start_date = Carbon::parse($validated['start_date'])->toDateString();
         }
         if (array_key_exists('due_date', $validated)) {
             $todoTask->due_date = Carbon::parse($validated['due_date'])->toDateString();
@@ -119,6 +138,11 @@ class TodoTaskController extends Controller
             $todoTask->completed_at = $validated['completed_at'] === null
                 ? null
                 : Carbon::parse($validated['completed_at']);
+        }
+        if (array_key_exists('completion_dates', $validated)) {
+            $todoTask->completion_dates = $this->normalizeCompletionDates(
+                $validated['completion_dates']
+            );
         }
         if (array_key_exists('sub_tasks', $validated)) {
             $todoTask->sub_tasks = $validated['sub_tasks'];
@@ -170,15 +194,43 @@ class TodoTaskController extends Controller
             'id' => (string) $task->id,
             'title' => $task->title,
             'description' => $task->description,
+            'goalType' => $task->goal_type,
             'isCompleted' => (bool) $task->is_completed,
+            'startDate' => $task->start_date?->toDateString(),
             'dueDate' => $task->due_date?->toDateString(),
             'tag' => $task->tag,
             'tagIndex' => $this->tagIndexFromValue($task->tag),
             'createdAt' => $task->created_at?->toIso8601String(),
             'updatedAt' => $task->updated_at?->toIso8601String(),
             'completedAt' => $task->completed_at?->toIso8601String(),
+            'completionDates' => collect($task->completion_dates ?? [])
+                ->map(fn ($date) => Carbon::parse($date)->toDateString())
+                ->values()
+                ->all(),
             'subTasks' => $task->sub_tasks ?? [],
         ];
+    }
+
+    private function normalizeGoalType(?string $goalType): string
+    {
+        $normalized = strtoupper(trim((string) $goalType));
+        return match ($normalized) {
+            'EVERYDAY', 'DAILY' => 'EVERYDAY',
+            default => 'LONG_TERM',
+        };
+    }
+
+    /**
+     * @param  array<int, mixed>  $completionDates
+     * @return array<int, string>
+     */
+    private function normalizeCompletionDates(array $completionDates): array
+    {
+        return collect($completionDates)
+            ->map(fn ($date) => Carbon::parse($date)->toDateString())
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function normalizeTag(?string $tag, ?int $tagIndex): string
