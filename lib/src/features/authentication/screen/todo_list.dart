@@ -3272,134 +3272,147 @@ class _TodoListScreenState extends State<TodoListScreen> {
           data: AppTheme.company(companyTheme),
           child: AlertDialog(
             title: const Text('Goal Details'),
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
             actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             backgroundColor: companyTheme.surfaceColor,
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTaskDetailRow(
-                    icon: Icons.list,
-                    label: 'Goal title',
-                    value: task.title,
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.68,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildTaskDetailRow(
+                        icon: Icons.list,
+                        label: 'Goal title',
+                        value: task.title,
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: Icons.chat_bubble_outline,
+                        label: 'Description',
+                        value: task.description.trim().isEmpty
+                            ? 'No description added.'
+                            : task.description.trim(),
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: Icons.local_offer_outlined,
+                        label: 'Tag',
+                        value: task.tag.fullDisplayName,
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                        accentColor: task.tag == TaskTag.none
+                            ? Colors.grey
+                            : task.tag.color,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: Icons.calendar_today,
+                        label: 'Start Date',
+                        value: startDate,
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: Icons.event_available,
+                        label: 'End Date',
+                        value: dueDate,
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                      ),
+                      if (task.goalType == GoalType.everyday) ...[
+                        const SizedBox(height: 16),
+                        _buildTaskCalendarPanel(
+                          task: task,
+                          companyTheme: companyTheme,
+                          visibleMonth: visibleMonth,
+                          onDayChanged: () => setDialogState(() {}),
+                          onPreviousMonth: () {
+                            setDialogState(() {
+                              visibleMonth = DateTime(
+                                  visibleMonth.year, visibleMonth.month - 1);
+                            });
+                          },
+                          onNextMonth: () {
+                            setDialogState(() {
+                              visibleMonth = DateTime(
+                                  visibleMonth.year, visibleMonth.month + 1);
+                            });
+                          },
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: Icons.insights_outlined,
+                        label: 'Progress',
+                        value: '${taskProgress(task).round()}%',
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                        accentColor: task.tag == TaskTag.none
+                            ? Colors.grey
+                            : task.tag.color,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildTaskProgressBar(
+                        task: task,
+                        accentColor: task.tag == TaskTag.none
+                            ? Colors.grey
+                            : task.tag.color,
+                        mutedColor: const Color(0xFF6E625B),
+                        isCompleted: taskIsEffectivelyCompleted(task),
+                      ),
+                      if (task.goalType == GoalType.longTerm &&
+                          task.subTasks.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        _buildSubtaskRows(
+                          task: task,
+                          titleColor: companyTheme.inkColor,
+                          mutedColor: companyTheme.mutedInkColor,
+                          accentColor: task.tag == TaskTag.none
+                              ? Colors.grey
+                              : task.tag.color,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      _buildTaskDetailRow(
+                        icon: taskIsEffectivelyCompleted(task)
+                            ? Icons.check_circle_outline
+                            : Icons.radio_button_unchecked,
+                        label: 'Status',
+                        value: taskIsEffectivelyCompleted(task)
+                            ? 'Completed'
+                            : 'Pending',
+                        labelColor: companyTheme.mutedInkColor,
+                        valueColor: companyTheme.inkColor,
+                        accentColor: taskIsEffectivelyCompleted(task)
+                            ? const Color(0xFF6F8A5F)
+                            : Colors.grey,
+                      ),
+                      if (completedDate != null) ...[
+                        const SizedBox(height: 16),
+                        _buildTaskDetailRow(
+                          icon: Icons.event_available,
+                          label: 'Completed At',
+                          value: completedDate,
+                          labelColor: companyTheme.mutedInkColor,
+                          valueColor: companyTheme.inkColor,
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: Icons.chat_bubble_outline,
-                    label: 'Description',
-                    value: task.description.trim().isEmpty
-                        ? 'No description added.'
-                        : task.description.trim(),
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: Icons.local_offer_outlined,
-                    label: 'Tag',
-                    value: task.tag.fullDisplayName,
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                    accentColor:
-                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: Icons.calendar_today,
-                    label: 'Start Date',
-                    value: startDate,
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: Icons.event_available,
-                    label: 'End Date',
-                    value: dueDate,
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                  ),
-                  if (task.goalType == GoalType.everyday) ...[
-                    const SizedBox(height: 16),
-                    _buildTaskCalendarPanel(
-                      task: task,
-                      companyTheme: companyTheme,
-                      visibleMonth: visibleMonth,
-                      onDayChanged: () => setDialogState(() {}),
-                      onPreviousMonth: () {
-                        setDialogState(() {
-                          visibleMonth = DateTime(
-                              visibleMonth.year, visibleMonth.month - 1);
-                        });
-                      },
-                      onNextMonth: () {
-                        setDialogState(() {
-                          visibleMonth = DateTime(
-                              visibleMonth.year, visibleMonth.month + 1);
-                        });
-                      },
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: Icons.insights_outlined,
-                    label: 'Progress',
-                    value: '${taskProgress(task).round()}%',
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                    accentColor:
-                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTaskProgressBar(
-                    task: task,
-                    accentColor:
-                        task.tag == TaskTag.none ? Colors.grey : task.tag.color,
-                    mutedColor: const Color(0xFF6E625B),
-                    isCompleted: taskIsEffectivelyCompleted(task),
-                  ),
-                  if (task.goalType == GoalType.longTerm &&
-                      task.subTasks.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    _buildSubtaskRows(
-                      task: task,
-                      titleColor: companyTheme.inkColor,
-                      mutedColor: companyTheme.mutedInkColor,
-                      accentColor: task.tag == TaskTag.none
-                          ? Colors.grey
-                          : task.tag.color,
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  _buildTaskDetailRow(
-                    icon: taskIsEffectivelyCompleted(task)
-                        ? Icons.check_circle_outline
-                        : Icons.radio_button_unchecked,
-                    label: 'Status',
-                    value: taskIsEffectivelyCompleted(task)
-                        ? 'Completed'
-                        : 'Pending',
-                    labelColor: companyTheme.mutedInkColor,
-                    valueColor: companyTheme.inkColor,
-                    accentColor: taskIsEffectivelyCompleted(task)
-                        ? const Color(0xFF6F8A5F)
-                        : Colors.grey,
-                  ),
-                  if (completedDate != null) ...[
-                    const SizedBox(height: 16),
-                    _buildTaskDetailRow(
-                      icon: Icons.event_available,
-                      label: 'Completed At',
-                      value: completedDate,
-                      labelColor: companyTheme.mutedInkColor,
-                      valueColor: companyTheme.inkColor,
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
             actions: [
