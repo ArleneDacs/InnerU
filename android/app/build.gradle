@@ -71,11 +71,6 @@ kotlinOptions {
         }
     }
 
-    packaging {
-        jniLibs {
-            keepDebugSymbols += ['**/*.so']
-        }
-    }
 }
 
 dependencies {
