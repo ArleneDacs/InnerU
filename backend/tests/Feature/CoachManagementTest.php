@@ -288,4 +288,70 @@ class CoachManagementTest extends TestCase
         $this->assertFalse($ids->contains((string) $otherCompanyUser->id));
         $this->assertFalse($ids->contains((string) $coach->id));
     }
+
+    public function test_coach_can_see_an_assigned_mentees_todo_tasks(): void
+    {
+        $coach = User::factory()->create([
+            'name' => 'Coach Todo',
+            'email' => 'coachtodo@example.com',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $mentee = User::factory()->create([
+            'name' => 'Mentee Todo',
+            'email' => 'menteetodo@example.com',
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'team_name' => 'Team Todo',
+        ]);
+
+        \App\Models\TodoTask::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'user_id' => (string) $mentee->id,
+            'title' => 'Finish reading',
+            'due_date' => now()->toDateString(),
+            'is_completed' => true,
+        ]);
+        \App\Models\TodoTask::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'user_id' => (string) $mentee->id,
+            'title' => 'Log meals',
+            'due_date' => now()->toDateString(),
+            'is_completed' => false,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->getJson("/api/coach/mentees/{$mentee->id}/todo-tasks");
+
+        $response->assertOk();
+        $tasks = collect($response->json('tasks'));
+
+        $this->assertCount(2, $tasks);
+        $this->assertTrue($tasks->firstWhere('title', 'Finish reading')['isCompleted']);
+        $this->assertFalse($tasks->firstWhere('title', 'Log meals')['isCompleted']);
+    }
+
+    public function test_coach_cannot_see_todo_tasks_of_a_non_mentee(): void
+    {
+        $coach = User::factory()->create([
+            'name' => 'Coach Stranger',
+            'email' => 'coachstranger@example.com',
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $unrelatedUser = User::factory()->create([
+            'name' => 'Unrelated User',
+            'email' => 'unrelated@example.com',
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        $response = $this->getJson("/api/coach/mentees/{$unrelatedUser->id}/todo-tasks");
+
+        $response->assertStatus(401);
+    }
 }

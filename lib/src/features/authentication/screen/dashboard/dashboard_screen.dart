@@ -283,7 +283,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       final userId = session?.id.toString();
       final prefs = await SharedPreferences.getInstance();
       final today = _todayQuoteKey();
-      final quoteKey = userId == null ? 'quote_guest' : _quoteStorageKey(userId);
+      final quoteKey =
+          userId == null ? 'quote_guest' : _quoteStorageKey(userId);
       final authorKey =
           userId == null ? 'author_guest' : _authorStorageKey(userId);
       final dateKey =
@@ -1175,6 +1176,48 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  ActivityStreakType _activityStreakTypeFromLabel(String? label) {
+    switch (label) {
+      case 'Steps':
+        return ActivityStreakType.steps;
+      case 'Exercise':
+        return ActivityStreakType.exercise;
+      case 'Fasting':
+        return ActivityStreakType.fasting;
+      case 'Meditation':
+      default:
+        return ActivityStreakType.meditation;
+    }
+  }
+
+  void _handleUserNotificationTap(
+    BuildContext context,
+    Map<String, dynamic> notification,
+  ) {
+    final type = (notification['type'] as String?) ?? '';
+    switch (type) {
+      case 'mentee_request_accepted':
+      case 'added_to_group':
+        Navigator.pushNamed(context, '/coachesScreen');
+        break;
+      case 'streak_milestone':
+        final data = notification['data'];
+        final activity = data is Map ? data['activity'] as String? : null;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => MeditationStreakRewardsScreen(
+              activityType: _activityStreakTypeFromLabel(activity),
+            ),
+          ),
+        );
+        break;
+      case 'community_comment':
+        Navigator.pushNamed(context, '/communityScreen');
+        break;
+    }
+  }
+
   Widget _buildNotificationAction() {
     final session = AuthService.instance.currentSession;
     if (session == null) {
@@ -1198,6 +1241,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   MaterialPageRoute(
                     builder: (context) => NotificationsScreen(
                       userId: session.id.toString(),
+                      onNotificationTap: _handleUserNotificationTap,
                     ),
                   ),
                 );
@@ -1429,9 +1473,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                           if (snapshot.connectionState ==
                                   ConnectionState.done &&
                               snapshot.hasData) {
-                            final userId =
-                                AuthService.instance.currentSession?.id
-                                    .toString();
+                            final userId = AuthService
+                                .instance.currentSession?.id
+                                .toString();
                             if (userId == null || userId.isEmpty) {
                               UserPreferences.saveUsername(snapshot.data!);
                             } else {
@@ -1968,7 +2012,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     final normalizedCode =
         code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
     return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
+        (normalizedName.contains('abundance') &&
+            normalizedName.contains('12')) ||
         normalizedCode.contains('ABUNDANCE12') ||
         normalizedCode.contains('ABUND12') ||
         normalizedCode == 'A12' ||
@@ -2582,9 +2627,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   for (final coach in coaches)
                     _buildAssignedCoachCard(context, coach: coach),
                 ],
-                activeDotColor: theme.isDark
-                    ? theme.primaryColor
-                    : const Color(0xFF7E9471),
+                activeDotColor:
+                    theme.isDark ? theme.primaryColor : const Color(0xFF7E9471),
                 inactiveDotColor: theme.isDark
                     ? theme.primaryColor.withValues(alpha: 0.25)
                     : const Color(0xFFD8D4C9),

@@ -266,7 +266,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     return 'Coach';
   }
 
-
   Future<void> _openAssignedCoachChat({
     required BuildContext context,
     required Coach coach,
@@ -610,7 +609,8 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: colors.surface.withValues(alpha: colors.brightness == Brightness.dark ? 0.96 : 0.94),
+        color: colors.surface.withValues(
+            alpha: colors.brightness == Brightness.dark ? 0.96 : 0.94),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: colors.primary.withValues(
@@ -959,7 +959,60 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
     );
   }
 
-  Widget _buildNotificationAction() {
+  void _handleCoachNotificationTap(
+    BuildContext context,
+    Map<String, dynamic> notification, {
+    required String teamName,
+    required Map<String, dynamic> userData,
+    required Map<String, dynamic> coachData,
+  }) {
+    final type = (notification['type'] as String?) ?? '';
+    switch (type) {
+      case 'mentee_request_received':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CoachManageMenteesPage(
+              firestore: _firestore,
+              currentUserId: _userId,
+              currentUserName: (userData['username'] as String?) ??
+                  (coachData['fullName'] as String?) ??
+                  'Coach',
+              teamName: teamName,
+              menteesStream: _menteesStream,
+              pendingRequestsStream: _pendingRequestsStream,
+              groupsStream: _coachGroupsStream,
+              onAssignMentee: _assignMentee,
+              onRemoveMentee: _removeMentee,
+              onAcceptRequest: _acceptCoachRequest,
+              onDeclineRequest: _declineCoachRequest,
+              onCreateGroup: _createCoachGroup,
+              onDeleteGroup: _deleteCoachGroup,
+              latestTrackerForUser: _latestTrackerForUser,
+              formatTrackerDate: _formatTrackerDate,
+            ),
+          ),
+        );
+        break;
+      case 'mentee_progress_logged':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CoachMenteeActivityCalendarPage(
+              firestore: _firestore,
+              menteesStream: _menteesStream,
+            ),
+          ),
+        );
+        break;
+    }
+  }
+
+  Widget _buildNotificationAction({
+    required String teamName,
+    required Map<String, dynamic> userData,
+    required Map<String, dynamic> coachData,
+  }) {
     return StreamBuilder<Map<String, dynamic>>(
       stream: NotificationApiService.instance.watchNotifications(),
       builder: (context, snapshot) {
@@ -976,8 +1029,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        NotificationsScreen(userId: _userId),
+                    builder: (context) => NotificationsScreen(
+                      userId: _userId,
+                      onNotificationTap: (tapContext, notification) =>
+                          _handleCoachNotificationTap(
+                        tapContext,
+                        notification,
+                        teamName: teamName,
+                        userData: userData,
+                        coachData: coachData,
+                      ),
+                    ),
                   ),
                 );
               },
@@ -1173,7 +1235,11 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                 ),
                 actions: [
                   _buildInboxAction(),
-                  _buildNotificationAction(),
+                  _buildNotificationAction(
+                    teamName: teamName,
+                    userData: userData,
+                    coachData: coachData,
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: IconButton(
@@ -3301,7 +3367,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                           backgroundImage: profilePic.isNotEmpty
                               ? NetworkImage(profilePic)
                               : null,
-                          backgroundColor: colors.primary.withValues(alpha: 0.10),
+                          backgroundColor:
+                              colors.primary.withValues(alpha: 0.10),
                           child: profilePic.isEmpty
                               ? Text(
                                   coachName.isNotEmpty ? coachName[0] : '?',
@@ -3317,7 +3384,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                             : Text(
                                 coachEmail,
                                 style: TextStyle(
-                                  color: colors.onSurface.withValues(alpha: 0.68),
+                                  color:
+                                      colors.onSurface.withValues(alpha: 0.68),
                                 ),
                               ),
                         onTap: () => Navigator.pop(sheetContext, coachId),
@@ -3347,8 +3415,7 @@ class CoachGroupCustomizationPage extends StatelessWidget {
       (coach) => coach['id']?.toString() == selectedCoachId,
       orElse: () => <String, dynamic>{},
     );
-    final selectedCoachName =
-        (selectedCoach['name'] as String?)?.trim() ?? '';
+    final selectedCoachName = (selectedCoach['name'] as String?)?.trim() ?? '';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -3459,24 +3526,22 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                                     const SizedBox(height: 8),
                                 itemBuilder: (context, index) {
                                   final user = filteredUsers[index];
-                                  final userName =
-                                      (user['name'] as String?)
+                                  final userName = (user['name'] as String?)
+                                              ?.trim()
+                                              .isNotEmpty ==
+                                          true
+                                      ? (user['name'] as String).trim()
+                                      : ((user['email'] as String?)
                                                   ?.trim()
                                                   .isNotEmpty ==
                                               true
-                                          ? (user['name'] as String).trim()
-                                          : ((user['email'] as String?)
-                                                      ?.trim()
-                                                      .isNotEmpty ==
-                                                  true
-                                              ? (user['email'] as String)
-                                                  .trim()
-                                                  .split('@')
-                                                  .first
-                                              : 'Mentee');
+                                          ? (user['email'] as String)
+                                              .trim()
+                                              .split('@')
+                                              .first
+                                          : 'Mentee');
                                   final profilePic =
-                                      (user['profilePic'] as String?)
-                                              ?.trim() ??
+                                      (user['profilePic'] as String?)?.trim() ??
                                           '';
                                   final email =
                                       (user['email'] as String?)?.trim() ?? '';
@@ -3499,7 +3564,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
                                     ),
                                     title: Text(userName),
                                     subtitle: Text(email),
-                                    onTap: () => Navigator.pop(sheetContext, user),
+                                    onTap: () =>
+                                        Navigator.pop(sheetContext, user),
                                   );
                                 },
                               ),
@@ -4071,7 +4137,8 @@ class CoachGroupCustomizationPage extends StatelessWidget {
     return summaries;
   }
 
-  Widget _buildEmptyGroupsCard(BuildContext context, {VoidCallback? onCreated}) {
+  Widget _buildEmptyGroupsCard(BuildContext context,
+      {VoidCallback? onCreated}) {
     final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(22),
@@ -4680,10 +4747,9 @@ class _CoachGroupCustomizationBodyState
             ),
             actions: [
               IconButton(
-                onPressed: () =>
-                    page._showCreateGroupDialog(context).then(
-                          (_) => _refresh(),
-                        ),
+                onPressed: () => page._showCreateGroupDialog(context).then(
+                      (_) => _refresh(),
+                    ),
                 icon: const Icon(CupertinoIcons.plus),
               ),
             ],
@@ -4924,7 +4990,8 @@ class CoachManageMenteesPage extends StatelessWidget {
     if (explicitId.isNotEmpty) return explicitId;
 
     final menteeId = (requestData['menteeId'] as String?)?.trim() ?? '';
-    final coachId = (requestData['coachId'] as String?)?.trim() ?? currentUserId;
+    final coachId =
+        (requestData['coachId'] as String?)?.trim() ?? currentUserId;
     if (menteeId.isNotEmpty && coachId.isNotEmpty) {
       return '${menteeId}_$coachId';
     }
@@ -5303,14 +5370,14 @@ class CoachManageMenteesPage extends StatelessWidget {
                                           ),
                                         ),
                                       );
-                                      } catch (error) {
-                                        debugPrint(
-                                          'Failed to accept coach request '
-                                          '${_requestIdForRequest(request)}: $error',
-                                        );
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
+                                    } catch (error) {
+                                      debugPrint(
+                                        'Failed to accept coach request '
+                                        '${_requestIdForRequest(request)}: $error',
+                                      );
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         const SnackBar(
                                           content: Text(
                                             'Could not accept this application. Please try again.',
@@ -5676,11 +5743,9 @@ class CoachManageMenteesPage extends StatelessWidget {
                             final userId =
                                 (user['id'] as String?)?.trim() ?? '';
                             final username =
-                                (user['name'] as String?)?.toLowerCase() ??
-                                    '';
+                                (user['name'] as String?)?.toLowerCase() ?? '';
                             final email =
-                                (user['email'] as String?)?.toLowerCase() ??
-                                    '';
+                                (user['email'] as String?)?.toLowerCase() ?? '';
                             final isCoach = user['isCoach'] == true ||
                                 ((user['role'] as String?)?.toLowerCase() ==
                                     'coach');
@@ -5705,25 +5770,24 @@ class CoachManageMenteesPage extends StatelessWidget {
 
                           return ListView(
                             children: filteredUsers.map((user) {
-                              final userName =
-                                  (user['name'] as String?)?.trim().isNotEmpty ==
+                              final userName = (user['name'] as String?)
+                                          ?.trim()
+                                          .isNotEmpty ==
+                                      true
+                                  ? (user['name'] as String).trim()
+                                  : ((user['email'] as String?)
+                                              ?.trim()
+                                              .isNotEmpty ==
                                           true
-                                      ? (user['name'] as String).trim()
-                                      : ((user['email'] as String?)
-                                                  ?.trim()
-                                                  .isNotEmpty ==
-                                              true
-                                          ? (user['email'] as String)
-                                              .trim()
-                                              .split('@')
-                                              .first
-                                          : 'Unknown User');
+                                      ? (user['email'] as String)
+                                          .trim()
+                                          .split('@')
+                                          .first
+                                      : 'Unknown User');
                               final isCoach = user['isCoach'] == true ||
-                                  ((user['role'] as String?)
-                                          ?.toLowerCase() ==
+                                  ((user['role'] as String?)?.toLowerCase() ==
                                       'coach');
-                              final assignedToMe =
-                                  user['assignedToMe'] == true;
+                              final assignedToMe = user['assignedToMe'] == true;
                               return ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: CircleAvatar(
@@ -5756,17 +5820,17 @@ class CoachManageMenteesPage extends StatelessWidget {
                                     return value.toString().trim().isNotEmpty;
                                   }).join(' · '),
                                 ),
-                                    trailing: ElevatedButton(
-                                      onPressed: () {
-                                        setSheetState(() {
-                                          selectedUser = user;
-                                          selectedUserName = userName;
-                                        });
-                                      },
-                                      child: Text(
-                                        assignedToMe ? 'Move' : 'Add',
-                                      ),
-                                    ),
+                                trailing: ElevatedButton(
+                                  onPressed: () {
+                                    setSheetState(() {
+                                      selectedUser = user;
+                                      selectedUserName = userName;
+                                    });
+                                  },
+                                  child: Text(
+                                    assignedToMe ? 'Move' : 'Add',
+                                  ),
+                                ),
                               );
                             }).toList(),
                           );
@@ -6378,8 +6442,8 @@ class _CoachPendingApplicationsSectionState
     if (explicitId.isNotEmpty) return explicitId;
 
     final menteeId = (requestData['menteeId'] as String?)?.trim() ?? '';
-    final coachId = (requestData['coachId'] as String?)?.trim() ??
-        widget.currentUserId;
+    final coachId =
+        (requestData['coachId'] as String?)?.trim() ?? widget.currentUserId;
     if (menteeId.isNotEmpty && coachId.isNotEmpty) {
       return '${menteeId}_$coachId';
     }
@@ -6404,12 +6468,10 @@ class _CoachPendingApplicationsSectionState
   }
 
   Future<void> _handleAccept(Map<String, dynamic> request) async {
-    final userName = (request['menteeName'] as String?)
-                ?.trim()
-                .isNotEmpty ==
-            true
-        ? (request['menteeName'] as String).trim()
-        : 'User';
+    final userName =
+        (request['menteeName'] as String?)?.trim().isNotEmpty == true
+            ? (request['menteeName'] as String).trim()
+            : 'User';
     final userId = (request['menteeId'] as String?)?.trim() ?? '';
     final requestId = _requestIdForRequest(request);
 
@@ -6454,12 +6516,10 @@ class _CoachPendingApplicationsSectionState
   }
 
   Future<void> _handleDecline(Map<String, dynamic> request) async {
-    final userName = (request['menteeName'] as String?)
-                ?.trim()
-                .isNotEmpty ==
-            true
-        ? (request['menteeName'] as String).trim()
-        : 'User';
+    final userName =
+        (request['menteeName'] as String?)?.trim().isNotEmpty == true
+            ? (request['menteeName'] as String).trim()
+            : 'User';
     final requestId = _requestIdForRequest(request);
 
     if (requestId.isEmpty) {
@@ -6496,12 +6556,10 @@ class _CoachPendingApplicationsSectionState
   }
 
   Widget _buildRequestCard(Map<String, dynamic> request) {
-    final userName = (request['menteeName'] as String?)
-                ?.trim()
-                .isNotEmpty ==
-            true
-        ? (request['menteeName'] as String).trim()
-        : 'User';
+    final userName =
+        (request['menteeName'] as String?)?.trim().isNotEmpty == true
+            ? (request['menteeName'] as String).trim()
+            : 'User';
     final userEmail = (request['menteeEmail'] as String?)?.trim() ?? '';
     final applicantRole =
         (request['applicantRole'] as String?)?.trim().toLowerCase() ?? '';
@@ -6581,10 +6639,10 @@ class _CoachPendingApplicationsSectionState
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: (request['menteeId'] as String?)?.trim().isEmpty ==
-                          true
-                      ? null
-                      : () => _handleAccept(request),
+                  onPressed:
+                      (request['menteeId'] as String?)?.trim().isEmpty == true
+                          ? null
+                          : () => _handleAccept(request),
                   child: const Text('Accept'),
                 ),
               ),
@@ -7027,7 +7085,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   late DateTime _focusedDay;
   late DateTime _selectedDay;
   List<Map<String, dynamic>>? _goals;
+  List<Map<String, dynamic>>? _todoTasks;
   bool _recentLogsExpanded = false;
+  bool _cardExpanded = false;
+  bool _detailsRequested = false;
 
   @override
   void initState() {
@@ -7035,7 +7096,19 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final today = _normalizeDate(DateTime.now());
     _focusedDay = today;
     _selectedDay = today;
-    _loadGoals();
+  }
+
+  // Calendar, goals, todo tasks, and tracker logs are all hidden until the
+  // coach actually expands a mentee's card, so goals/todos are only fetched
+  // then too - with many mentees, eagerly firing two extra requests per
+  // card for detail nobody may ever look at doesn't scale.
+  void _toggleExpanded() {
+    setState(() => _cardExpanded = !_cardExpanded);
+    if (_cardExpanded && !_detailsRequested) {
+      _detailsRequested = true;
+      _loadGoals();
+      _loadTodoTasks();
+    }
   }
 
   Future<void> _loadGoals() async {
@@ -7049,6 +7122,21 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       });
     } catch (error) {
       debugPrint('Failed to load mentee goals: $error');
+    }
+  }
+
+  Future<void> _loadTodoTasks() async {
+    final menteeId = (widget.mentee['menteeId'] as String?)?.trim() ?? '';
+    if (menteeId.isEmpty) return;
+    try {
+      final tasks =
+          await CoachApiService.instance.fetchMenteeTodoTasks(menteeId);
+      if (!mounted) return;
+      setState(() {
+        _todoTasks = tasks;
+      });
+    } catch (error) {
+      debugPrint('Failed to load mentee todo tasks: $error');
     }
   }
 
@@ -7078,16 +7166,22 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
         return count > 0 ? '$count ${count == 1 ? 'call' : 'calls'}' : 'Done';
       case 'Steps':
         final steps = (tracker['stepCount'] as num?)?.toInt() ?? 0;
-        return steps > 0 ? '${NumberFormat('#,###').format(steps)} steps' : 'Done';
+        return steps > 0
+            ? '${NumberFormat('#,###').format(steps)} steps'
+            : 'Done';
       case 'Meditation':
         final minutes = (tracker['meditationMinutes'] as num?)?.toInt() ?? 0;
         return minutes > 0 ? '$minutes min' : 'Done';
       case 'Learning':
         final count = (tracker['learningCount'] as num?)?.toInt() ?? 0;
-        return count > 0 ? '$count ${count == 1 ? 'entry' : 'entries'}' : 'Done';
+        return count > 0
+            ? '$count ${count == 1 ? 'entry' : 'entries'}'
+            : 'Done';
       case 'Add Value':
         final count = (tracker['valueCount'] as num?)?.toInt() ?? 0;
-        return count > 0 ? '$count ${count == 1 ? 'entry' : 'entries'}' : 'Done';
+        return count > 0
+            ? '$count ${count == 1 ? 'entry' : 'entries'}'
+            : 'Done';
       default:
         return 'Done';
     }
@@ -7222,48 +7316,60 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final goals = _goals ?? const <Map<String, dynamic>>[];
     final completedGoals = goals.where((goal) {
       final status = (goal['status'] as String?)?.trim().toLowerCase() ?? '';
-      final progress =
-          ((goal['progress'] as num?)?.toInt() ?? 0).clamp(0, 100);
+      final progress = ((goal['progress'] as num?)?.toInt() ?? 0).clamp(0, 100);
       return status == 'completed' || progress >= 100;
     }).length;
     final goalsPercent =
         goals.isEmpty ? null : (completedGoals / goals.length * 100).round();
 
+    final todoTasks = _todoTasks ?? const <Map<String, dynamic>>[];
+    final completedTodos =
+        todoTasks.where((task) => task['isCompleted'] == true).length;
+    final todoPercent = todoTasks.isEmpty
+        ? null
+        : (completedTodos / todoTasks.length * 100).round();
+
     final trackerMap = _buildTrackerMap();
     final latestTracker = trackerMap.entries.isEmpty
         ? null
-        : (trackerMap.entries.toList()
-              ..sort((a, b) => b.key.compareTo(a.key)))
+        : (trackerMap.entries.toList()..sort((a, b) => b.key.compareTo(a.key)))
             .first
             .value;
     final trackerPercent = latestTracker == null
         ? null
         : (_completedCount(latestTracker) / 5 * 100).round();
 
-    if (goalsPercent == null && trackerPercent == null) {
+    final stats = <Widget>[
+      if (goalsPercent != null)
+        _buildOverviewStat(
+          label: 'Goals completed',
+          percent: goalsPercent,
+          color: colors.primary,
+        ),
+      if (todoPercent != null)
+        _buildOverviewStat(
+          label: 'To-do list',
+          percent: todoPercent,
+          color: colors.tertiary,
+        ),
+      if (trackerPercent != null)
+        _buildOverviewStat(
+          label: 'Latest daily tracker',
+          percent: trackerPercent,
+          color: colors.secondary,
+        ),
+    ];
+
+    if (stats.isEmpty) {
       return const SizedBox.shrink();
     }
 
     return Row(
       children: [
-        if (goalsPercent != null)
-          Expanded(
-            child: _buildOverviewStat(
-              label: 'Goals completed',
-              percent: goalsPercent,
-              color: colors.primary,
-            ),
-          ),
-        if (goalsPercent != null && trackerPercent != null)
-          const SizedBox(width: 10),
-        if (trackerPercent != null)
-          Expanded(
-            child: _buildOverviewStat(
-              label: "Latest daily tracker",
-              percent: trackerPercent,
-              color: colors.secondary,
-            ),
-          ),
+        for (var i = 0; i < stats.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: stats[i]),
+        ],
       ],
     );
   }
@@ -7340,9 +7446,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
           final title = (goal['title'] as String?)?.trim().isNotEmpty == true
               ? (goal['title'] as String).trim()
               : 'Goal';
-          final status = (goal['status'] as String?)?.trim().toLowerCase() ?? '';
-          final progress = ((goal['progress'] as num?)?.toInt() ?? 0)
-              .clamp(0, 100);
+          final status =
+              (goal['status'] as String?)?.trim().toLowerCase() ?? '';
+          final progress =
+              ((goal['progress'] as num?)?.toInt() ?? 0).clamp(0, 100);
           final isCompleted = status == 'completed' || progress >= 100;
 
           return Container(
@@ -7403,8 +7510,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final colors = Theme.of(context).colorScheme;
     final recentTrackers = widget.trackerDocs.toList()
       ..sort((left, right) {
-        final leftDate = _trackerDate(left) ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final rightDate = _trackerDate(right) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final leftDate =
+            _trackerDate(left) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final rightDate =
+            _trackerDate(right) ?? DateTime.fromMillisecondsSinceEpoch(0);
         return rightDate.compareTo(leftDate);
       });
 
@@ -7612,169 +7721,186 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: const Color(0xFFE9EEE4),
-                child: Text(
-                  menteeName?.isNotEmpty == true
-                      ? menteeName![0].toUpperCase()
-                      : '?',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      menteeName?.isNotEmpty == true ? menteeName! : 'Mentee',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: colors.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      latestEntry == null
-                          ? 'No recent activity yet'
-                          : 'Latest activity: ${DateFormat.yMMMd().format(latestEntry.key)}',
-                      style: TextStyle(
-                        color: colors.onSurface.withValues(alpha: 0.68),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${(data['score'] as num?)?.toInt() ?? 0} pts',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: colors.onSurface,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _buildProgressOverview(),
-          if (_goals != null && _goals!.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _buildGoalsSection(),
-          ],
-          const SizedBox(height: 16),
-          _buildActivityLegend(),
-          const SizedBox(height: 14),
-          TableCalendar<Map<String, dynamic>>(
-            firstDay: DateTime.now().subtract(const Duration(days: 120)),
-            lastDay: DateTime.now().add(const Duration(days: 30)),
-            focusedDay: _focusedDay,
-            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-            eventLoader: (day) {
-              final tracker = trackerMap[_normalizeDate(day)];
-              return tracker == null ? const [] : [tracker];
-            },
-            calendarFormat: CalendarFormat.month,
-            startingDayOfWeek: StartingDayOfWeek.sunday,
-            headerStyle: const HeaderStyle(
-              titleCentered: true,
-              formatButtonVisible: false,
-            ),
-            onDaySelected: (selected, focused) {
-              setState(() {
-                _selectedDay = _normalizeDate(selected);
-                _focusedDay = _normalizeDate(focused);
-              });
-            },
-            onPageChanged: (focused) {
-              setState(() {
-                _focusedDay = _normalizeDate(focused);
-              });
-            },
-            calendarStyle: CalendarStyle(
-              outsideDaysVisible: false,
-              todayDecoration: BoxDecoration(
-                color: colors.primary.withValues(alpha: 0.24),
-                shape: BoxShape.circle,
-              ),
-              selectedDecoration: BoxDecoration(
-                color: colors.primary,
-                shape: BoxShape.circle,
-              ),
-              markerDecoration: const BoxDecoration(
-                color: Colors.transparent,
-                shape: BoxShape.circle,
-              ),
-            ),
-            calendarBuilders: CalendarBuilders(
-              defaultBuilder: (context, day, focusedDay) {
-                final tracker = trackerMap[_normalizeDate(day)];
-                if (tracker == null) return null;
-                final count = _completedCount(tracker);
-                return Container(
-                  margin: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: _calendarColorForCount(count),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  alignment: Alignment.center,
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: _toggleExpanded,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: const Color(0xFFE9EEE4),
                   child: Text(
-                    '${day.day}',
+                    menteeName?.isNotEmpty == true
+                        ? menteeName![0].toUpperCase()
+                        : '?',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        menteeName?.isNotEmpty == true ? menteeName! : 'Mentee',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                      if (_cardExpanded) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          latestEntry == null
+                              ? 'No recent activity yet'
+                              : 'Latest activity: ${DateFormat.yMMMd().format(latestEntry.key)}',
+                          style: TextStyle(
+                            color: colors.onSurface.withValues(alpha: 0.68),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${(data['score'] as num?)?.toInt() ?? 0} pts',
                     style: TextStyle(
-                      color: count >= 5 ? Colors.white : colors.onSurface,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: colors.onSurface,
                     ),
                   ),
-                );
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  _cardExpanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  size: 18,
+                  color: colors.onSurface.withValues(alpha: 0.68),
+                ),
+              ],
+            ),
+          ),
+          if (_cardExpanded) ...[
+            const SizedBox(height: 14),
+            _buildProgressOverview(),
+            if (_goals != null && _goals!.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _buildGoalsSection(),
+            ],
+            const SizedBox(height: 16),
+            _buildActivityLegend(),
+            const SizedBox(height: 14),
+            TableCalendar<Map<String, dynamic>>(
+              firstDay: DateTime.now().subtract(const Duration(days: 120)),
+              lastDay: DateTime.now().add(const Duration(days: 30)),
+              focusedDay: _focusedDay,
+              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              eventLoader: (day) {
+                final tracker = trackerMap[_normalizeDate(day)];
+                return tracker == null ? const [] : [tracker];
               },
-              markerBuilder: (context, day, events) {
-                if (events.isEmpty) return const SizedBox.shrink();
-                final tracker = events.first;
-                final count = _completedCount(tracker);
-                return Positioned(
-                  bottom: 6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 1,
-                    ),
+              calendarFormat: CalendarFormat.month,
+              startingDayOfWeek: StartingDayOfWeek.sunday,
+              headerStyle: const HeaderStyle(
+                titleCentered: true,
+                formatButtonVisible: false,
+              ),
+              onDaySelected: (selected, focused) {
+                setState(() {
+                  _selectedDay = _normalizeDate(selected);
+                  _focusedDay = _normalizeDate(focused);
+                });
+              },
+              onPageChanged: (focused) {
+                setState(() {
+                  _focusedDay = _normalizeDate(focused);
+                });
+              },
+              calendarStyle: CalendarStyle(
+                outsideDaysVisible: false,
+                todayDecoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.24),
+                  shape: BoxShape.circle,
+                ),
+                selectedDecoration: BoxDecoration(
+                  color: colors.primary,
+                  shape: BoxShape.circle,
+                ),
+                markerDecoration: const BoxDecoration(
+                  color: Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              calendarBuilders: CalendarBuilders(
+                defaultBuilder: (context, day, focusedDay) {
+                  final tracker = trackerMap[_normalizeDate(day)];
+                  if (tracker == null) return null;
+                  final count = _completedCount(tracker);
+                  return Container(
+                    margin: const EdgeInsets.all(5),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(999),
+                      color: _calendarColorForCount(count),
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    alignment: Alignment.center,
                     child: Text(
-                      '$count',
-                      style: const TextStyle(
-                        fontSize: 9,
+                      '${day.day}',
+                      style: TextStyle(
+                        color: count >= 5 ? Colors.white : colors.onSurface,
                         fontWeight: FontWeight.w700,
-                        color: Colors.black87,
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+                markerBuilder: (context, day, events) {
+                  if (events.isEmpty) return const SizedBox.shrink();
+                  final tracker = events.first;
+                  final count = _completedCount(tracker);
+                  return Positioned(
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Selected day: ${DateFormat.yMMMMd().format(_selectedDay)}',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: colors.onSurface,
+            const SizedBox(height: 14),
+            Text(
+              'Selected day: ${DateFormat.yMMMMd().format(_selectedDay)}',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: colors.onSurface,
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          _buildActivityDetails(selectedTracker),
-          _buildRecentActivityLogs(),
+            const SizedBox(height: 10),
+            _buildActivityDetails(selectedTracker),
+            _buildRecentActivityLogs(),
+          ],
         ],
       ),
     );

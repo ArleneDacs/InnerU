@@ -9,6 +9,7 @@ use App\Models\CoachMentee;
 use App\Models\CoachRequest;
 use App\Models\Goal;
 use App\Models\Notification;
+use App\Models\TodoTask;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Support\Carbon;
@@ -351,6 +352,37 @@ class CoachManagementController extends Controller
             ]);
 
         return response()->json(['goals' => $goals]);
+    }
+
+    public function menteeTodoTasks(Request $request, string $menteeId): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $isRelatedMentee = CoachMentee::query()
+            ->where('coach_id', (string) $user->id)
+            ->where('mentee_id', $menteeId)
+            ->exists();
+        if (! $isRelatedMentee) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $tasks = TodoTask::query()
+            ->where('user_id', $menteeId)
+            ->orderByRaw('COALESCE(due_date, created_at) asc')
+            ->orderBy('created_at')
+            ->get()
+            ->map(fn (TodoTask $task) => [
+                'id' => (string) $task->id,
+                'title' => $task->title,
+                'isCompleted' => (bool) $task->is_completed,
+                'dueDate' => $task->due_date?->toDateString(),
+                'subTasks' => $task->sub_tasks ?? [],
+            ]);
+
+        return response()->json(['tasks' => $tasks]);
     }
 
     public function assignMentee(Request $request): JsonResponse

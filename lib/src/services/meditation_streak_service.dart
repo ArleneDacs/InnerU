@@ -283,7 +283,8 @@ class ActivityStreakService {
     );
     final unlockedNow = <ActivityStreakMilestone>[];
     for (final milestone in milestonesFor(type)) {
-      if (currentStreak >= milestone.days && !rewards.containsKey(milestone.id)) {
+      if (currentStreak >= milestone.days &&
+          !rewards.containsKey(milestone.id)) {
         rewards[milestone.id] = todayKey;
         unlockedNow.add(milestone);
       }

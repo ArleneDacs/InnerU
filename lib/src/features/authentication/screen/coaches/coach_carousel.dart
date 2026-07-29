@@ -21,8 +21,7 @@ class CoachCarousel extends StatefulWidget {
 
 class _CoachCarouselState extends State<CoachCarousel> {
   int _currentPage = 0;
-  final PageController _pageController =
-      PageController(viewportFraction: 0.88);
+  final PageController _pageController = PageController(viewportFraction: 0.88);
 
   @override
   void dispose() {
@@ -72,7 +71,8 @@ class _CoachCarouselState extends State<CoachCarousel> {
               height: 8,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(4),
-                color: isActive ? widget.activeDotColor : widget.inactiveDotColor,
+                color:
+                    isActive ? widget.activeDotColor : widget.inactiveDotColor,
               ),
             );
           }),

@@ -5,9 +5,20 @@ import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notification_api_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key, required this.userId});
+  const NotificationsScreen({
+    super.key,
+    required this.userId,
+    this.onNotificationTap,
+  });
 
   final String userId;
+
+  // Lets each dashboard own its own screen-specific navigation (e.g. a
+  // coach's "mentee applied" notification opens Manage Mentees; a mentee's
+  // "coach accepted you" notification opens their coaches list) without
+  // this generic screen needing to import every possible destination.
+  final void Function(BuildContext context, Map<String, dynamic> notification)?
+      onNotificationTap;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -102,9 +113,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         stream: _api.watchNotifications(),
         builder: (context, snapshot) {
           final payload = snapshot.data;
-          final notifications = (payload?['notifications']
-                  as List<Map<String, dynamic>>?) ??
-              const <Map<String, dynamic>>[];
+          final notifications =
+              (payload?['notifications'] as List<Map<String, dynamic>>?) ??
+                  const <Map<String, dynamic>>[];
 
           if (snapshot.connectionState == ConnectionState.waiting &&
               notifications.isEmpty) {
@@ -160,9 +171,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       borderRadius: BorderRadius.circular(18),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
-                        onTap: id.isEmpty || isRead
-                            ? null
-                            : () => _markRead(id),
+                        onTap: () {
+                          if (!isRead && id.isNotEmpty) {
+                            _markRead(id);
+                          }
+                          widget.onNotificationTap?.call(context, notification);
+                        },
                         child: Padding(
                           padding: const EdgeInsets.all(14),
                           child: Row(

@@ -31,10 +31,7 @@ class NotificationApiService {
     final response = await _api.getJson('/api/notifications', token: _token);
     final raw = response['notifications'];
     final notifications = raw is List
-        ? raw
-            .whereType<Map>()
-            .map((n) => Map<String, dynamic>.from(n))
-            .toList()
+        ? raw.whereType<Map>().map((n) => Map<String, dynamic>.from(n)).toList()
         : <Map<String, dynamic>>[];
     final unreadCountRaw = response['unreadCount'];
     final unreadCount = unreadCountRaw is int
@@ -65,7 +62,8 @@ class NotificationApiService {
   }
 
   Future<void> markAllRead() async {
-    await _api.patchJson('/api/notifications/read-all', const {}, token: _token);
+    await _api.patchJson('/api/notifications/read-all', const {},
+        token: _token);
   }
 
   Future<void> reportStreakMilestone({
