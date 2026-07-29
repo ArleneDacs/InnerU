@@ -38,6 +38,7 @@ import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/app_session_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/onesignal_push_service.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/app_route_observer.dart';
@@ -67,6 +68,11 @@ void main() {
     }
     try {
       await FastingNotificationService.instance.initialize();
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+    }
+    try {
+      await OneSignalPushService.instance.initialize(appNavigatorKey);
     } catch (error, stack) {
       await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
     }
@@ -211,6 +217,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
   @override
   void dispose() {
     unawaited(EmailLinkAuthService.instance.dispose());
+    unawaited(OneSignalPushService.instance.dispose());
     super.dispose();
   }
 

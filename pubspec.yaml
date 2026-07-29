@@ -77,6 +77,7 @@ dependencies:
   google_mlkit_image_labeling: ^0.13.0
   flutter_image_compress: ^2.5.0
   flutter_local_notifications: ^21.0.0
+  onesignal_flutter: ^5.1.2
   flutter_timezone: ^5.0.2
   timezone: ^0.11.0
   watch_connectivity: ^0.2.8

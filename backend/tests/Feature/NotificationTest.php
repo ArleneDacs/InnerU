@@ -9,6 +9,7 @@ use App\Models\Notification;
 use App\Models\TodoTask;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -43,6 +44,41 @@ class NotificationTest extends TestCase
             'type' => 'streak_milestone',
             'title' => 'Test title',
         ]);
+    }
+
+    public function test_create_for_sends_a_one_signal_push_for_the_recipient(): void
+    {
+        config()->set('services.onesignal.app_id', 'onesignal-app-id');
+        config()->set('services.onesignal.rest_api_key', 'onesignal-rest-api-key');
+
+        Http::fake([
+            'api.onesignal.com/notifications*' => Http::response([
+                'id' => 'message-id',
+            ]),
+        ]);
+
+        $user = User::factory()->create();
+
+        Notification::createFor(
+            (string) $user->id,
+            'community_comment',
+            'New comment',
+            'Someone commented on your post.',
+            ['post_id' => 'post-123'],
+        );
+
+        Http::assertSent(function ($request) use ($user): bool {
+            $body = $request->data();
+
+            return $request->url() === 'https://api.onesignal.com/notifications?c=push'
+                && ($body['app_id'] ?? null) === 'onesignal-app-id'
+                && ($body['target_channel'] ?? null) === 'push'
+                && ($body['include_aliases']['external_id'][0] ?? null) === (string) $user->id
+                && ($body['headings']['en'] ?? null) === 'New comment'
+                && ($body['contents']['en'] ?? null) === 'Someone commented on your post.'
+                && ($body['data']['post_id'] ?? null) === 'post-123'
+                && ($body['data']['notification_id'] ?? null) !== null;
+        });
     }
 
     public function test_index_returns_only_the_authenticated_users_notifications_with_unread_count(): void

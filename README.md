@@ -45,3 +45,30 @@ flutter build appbundle --release
 
 If `android/key.properties` is missing, release builds now fail immediately instead
 of producing an artifact that may be signed incorrectly.
+
+## GitHub Actions release secrets
+
+If you want GitHub Actions to build the Android release for you, add these
+repository secrets:
+
+- `ONESIGNAL_APP_ID`
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_STORE_PASSWORD`
+- `ANDROID_KEY_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+
+`ANDROID_KEYSTORE_BASE64` should be the base64-encoded contents of
+`upload-keystore.jks`. The release workflow writes `android/key.properties`
+automatically and passes `ONESIGNAL_APP_ID` into the Flutter build.
+
+## Backend OneSignal env
+
+The Laravel backend sends the push notification and still needs these
+production environment variables:
+
+- `ONESIGNAL_APP_ID`
+- `ONESIGNAL_REST_API_KEY`
+
+If those are already set on the server, no extra server change is needed.
+If not, add them to the backend `.env` before deploying so push delivery works
+for production notifications.

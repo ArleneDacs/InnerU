@@ -55,6 +55,11 @@ return [
         'service_id' => env('APPLE_SERVICE_ID', 'com.valenin.inneru'),
     ],
 
+    'onesignal' => [
+        'app_id' => env('ONESIGNAL_APP_ID'),
+        'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
+    ],
+
     'firebase_scrypt' => [
         'node_verifier_path' => base_path('scripts/firebase-auth-verify/verify.js'),
         'hash_config_path' => env('FIREBASE_HASH_CONFIG_PATH', storage_path('app/firestore-snapshot/hash-config.json')),

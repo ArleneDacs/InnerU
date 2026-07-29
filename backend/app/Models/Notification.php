@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Services\OneSignalPushService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
@@ -48,7 +50,7 @@ class Notification extends Model
         ?string $body = null,
         ?array $data = null,
     ): self {
-        return static::create([
+        $notification = static::create([
             'id' => (string) Str::uuid(),
             'user_id' => $userId,
             'type' => $type,
@@ -56,5 +58,17 @@ class Notification extends Model
             'body' => $body,
             'data' => $data,
         ]);
+
+        $sendPush = function () use ($notification): void {
+            app(OneSignalPushService::class)->send($notification);
+        };
+
+        if (app()->runningUnitTests() || DB::transactionLevel() === 0) {
+            $sendPush();
+        } else {
+            DB::afterCommit($sendPush);
+        }
+
+        return $notification;
     }
 }
