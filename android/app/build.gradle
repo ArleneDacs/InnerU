@@ -25,6 +25,13 @@ if (keystorePropertiesFile.exists()) {
     throw new GradleException("Missing android/key.properties. Configure a release keystore before building a release artifact.")
 }
 
+// OneSignal pulls in an old Firebase IID artifact transitively on Android.
+// Exclude it so Gradle does not see the duplicate FirebaseInstanceIdReceiver
+// class alongside firebase-messaging.
+configurations.configureEach {
+    exclude group: "com.google.firebase", module: "firebase-iid"
+}
+
 android {
     namespace = "com.valenin.inneru"
     compileSdk = flutter.compileSdkVersion
