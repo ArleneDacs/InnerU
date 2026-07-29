@@ -377,8 +377,11 @@ class CoachManagementController extends Controller
             ->map(fn (TodoTask $task) => [
                 'id' => (string) $task->id,
                 'title' => $task->title,
+                'description' => $task->description,
                 'isCompleted' => (bool) $task->is_completed,
                 'dueDate' => $task->due_date?->toDateString(),
+                'tag' => $task->tag,
+                'completedAt' => $task->completed_at?->toIso8601String(),
                 'subTasks' => $task->sub_tasks ?? [],
             ]);
 

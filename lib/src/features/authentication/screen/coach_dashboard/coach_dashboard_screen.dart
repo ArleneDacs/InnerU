@@ -17,10 +17,13 @@ import 'package:selfcare_projects/src/features/authentication/screen/coaches/coa
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_mentee_goals_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart'
+    show Task, taskProgress;
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/chat_api_service.dart';
@@ -7085,7 +7088,7 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
   late DateTime _focusedDay;
   late DateTime _selectedDay;
   List<Map<String, dynamic>>? _goals;
-  List<Map<String, dynamic>>? _todoTasks;
+  List<Task>? _todoTasks;
   bool _recentLogsExpanded = false;
   bool _cardExpanded = false;
   bool _detailsRequested = false;
@@ -7129,11 +7132,11 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final menteeId = (widget.mentee['menteeId'] as String?)?.trim() ?? '';
     if (menteeId.isEmpty) return;
     try {
-      final tasks =
+      final rawTasks =
           await CoachApiService.instance.fetchMenteeTodoTasks(menteeId);
       if (!mounted) return;
       setState(() {
-        _todoTasks = tasks;
+        _todoTasks = rawTasks.map(Task.fromJson).toList();
       });
     } catch (error) {
       debugPrint('Failed to load mentee todo tasks: $error');
@@ -7322,12 +7325,18 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     final goalsPercent =
         goals.isEmpty ? null : (completedGoals / goals.length * 100).round();
 
-    final todoTasks = _todoTasks ?? const <Map<String, dynamic>>[];
-    final completedTodos =
-        todoTasks.where((task) => task['isCompleted'] == true).length;
-    final todoPercent = todoTasks.isEmpty
+    // Same formula as the mentee's own "Goals score" panel on their Goals
+    // screen (todo_list.dart _todoScore) - a task with sub-tasks counts
+    // proportionally by how many sub-tasks are checked off, not just
+    // all-or-nothing, so this reuses taskProgress() directly rather than a
+    // simplified completed/total approximation that could disagree with
+    // what the mentee actually sees.
+    final todoTasks = _todoTasks ?? const <Task>[];
+    final todoScorePercent = todoTasks.isEmpty
         ? null
-        : (completedTodos / todoTasks.length * 100).round();
+        : (todoTasks.fold<double>(0, (total, t) => total + taskProgress(t)) /
+                todoTasks.length)
+            .round();
 
     final trackerMap = _buildTrackerMap();
     final latestTracker = trackerMap.entries.isEmpty
@@ -7339,6 +7348,8 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
         ? null
         : (_completedCount(latestTracker) / 5 * 100).round();
 
+    final menteeName = (widget.mentee['menteeName'] as String?)?.trim();
+
     final stats = <Widget>[
       if (goalsPercent != null)
         _buildOverviewStat(
@@ -7346,11 +7357,21 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
           percent: goalsPercent,
           color: colors.primary,
         ),
-      if (todoPercent != null)
+      if (todoScorePercent != null)
         _buildOverviewStat(
-          label: 'To-do list',
-          percent: todoPercent,
+          label: 'Goals score',
+          percent: todoScorePercent,
           color: colors.tertiary,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CoachMenteeGoalsScreen(
+                menteeName:
+                    menteeName?.isNotEmpty == true ? menteeName! : 'Mentee',
+                tasks: todoTasks,
+              ),
+            ),
+          ),
         ),
       if (trackerPercent != null)
         _buildOverviewStat(
@@ -7378,9 +7399,10 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
     required String label,
     required int percent,
     required Color color,
+    VoidCallback? onTap,
   }) {
     final colors = Theme.of(context).colorScheme;
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
@@ -7389,13 +7411,25 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: colors.onSurface.withValues(alpha: 0.68),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: colors.onSurface.withValues(alpha: 0.68),
+                  ),
+                ),
+              ),
+              if (onTap != null)
+                Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 14,
+                  color: colors.onSurface.withValues(alpha: 0.5),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
           Row(
@@ -7423,6 +7457,16 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
           ),
         ],
       ),
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: content,
     );
   }
 
