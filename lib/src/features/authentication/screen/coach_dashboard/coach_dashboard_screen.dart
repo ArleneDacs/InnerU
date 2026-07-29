@@ -7455,15 +7455,16 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
                 todoTasks.length)
             .round();
 
+    // Today's tracker specifically, not whichever day the mentee most
+    // recently logged anything for - a coach checking in "how's today
+    // going" shouldn't see a stale percentage from three days ago mislabeled
+    // as current. No entry yet for today just means 0% so far, not "hide
+    // the stat".
     final trackerMap = _buildTrackerMap();
-    final latestTracker = trackerMap.entries.isEmpty
-        ? null
-        : (trackerMap.entries.toList()..sort((a, b) => b.key.compareTo(a.key)))
-            .first
-            .value;
-    final trackerPercent = latestTracker == null
-        ? null
-        : (_completedCount(latestTracker) / 5 * 100).round();
+    final todayTracker = trackerMap[_normalizeDate(DateTime.now())];
+    final trackerPercent = todayTracker == null
+        ? 0
+        : (_completedCount(todayTracker) / 5 * 100).round();
 
     final menteeName = (widget.mentee['menteeName'] as String?)?.trim();
 
@@ -7490,12 +7491,11 @@ class _CoachMenteeCalendarCardState extends State<_CoachMenteeCalendarCard> {
             ),
           ),
         ),
-      if (trackerPercent != null)
-        _buildOverviewStat(
-          label: 'Latest daily tracker',
-          percent: trackerPercent,
-          color: colors.secondary,
-        ),
+      _buildOverviewStat(
+        label: "Today's daily tracker",
+        percent: trackerPercent,
+        color: colors.secondary,
+      ),
     ];
 
     if (stats.isEmpty) {
