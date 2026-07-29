@@ -80,6 +80,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return CupertinoIcons.person_add_solid;
       case 'mentee_progress_logged':
         return CupertinoIcons.chart_bar_alt_fill;
+      case 'step_submission_received':
+        return CupertinoIcons.photo_on_rectangle;
+      case 'step_submission_approved':
+        return CupertinoIcons.checkmark_circle_fill;
+      case 'step_submission_declined':
+        return CupertinoIcons.xmark_circle_fill;
       default:
         return CupertinoIcons.bell_fill;
     }

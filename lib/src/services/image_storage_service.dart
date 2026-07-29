@@ -35,6 +35,17 @@ class ImageStorageService {
     );
   }
 
+  static Future<String?> uploadStepProofBytes(
+    Uint8List bytes, {
+    String fileName = 'step-proof.jpg',
+  }) async {
+    return _uploadBytes(
+      bytes,
+      fileName: fileName,
+      kind: 'step_proof',
+    );
+  }
+
   static Future<String?> uploadVideoFile(File file) async {
     final bytes = await file.readAsBytes();
     return _uploadBytes(
@@ -147,9 +158,8 @@ class ImageStorageService {
       final base = _normalizedApiBase();
       final host = parsed.host.toLowerCase();
       final baseHost = base.host.toLowerCase();
-      final shouldRewrite = host == 'localhost' ||
-          host == '127.0.0.1' ||
-          host == baseHost;
+      final shouldRewrite =
+          host == 'localhost' || host == '127.0.0.1' || host == baseHost;
       if (shouldRewrite) {
         final normalized = base.replace(
           path: parsed.path,
@@ -187,9 +197,8 @@ class ImageStorageService {
       final base = _normalizedApiBase();
       final host = parsed.host.toLowerCase();
       final baseHost = base.host.toLowerCase();
-      final shouldRewrite = host == 'localhost' ||
-          host == '127.0.0.1' ||
-          host == baseHost;
+      final shouldRewrite =
+          host == 'localhost' || host == '127.0.0.1' || host == baseHost;
       if (shouldRewrite) {
         final normalized = base.replace(
           path: parsed.path,

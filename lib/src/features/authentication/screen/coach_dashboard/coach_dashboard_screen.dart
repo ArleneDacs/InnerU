@@ -18,6 +18,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/dashboard/e
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_mentee_goals_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
@@ -1005,6 +1006,14 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
               firestore: _firestore,
               menteesStream: _menteesStream,
             ),
+          ),
+        );
+        break;
+      case 'step_submission_received':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const CoachStepSubmissionsScreen(),
           ),
         );
         break;
@@ -2362,6 +2371,22 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen>
                   firestore: _firestore,
                   menteesStream: _menteesStream,
                 ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildNavigationCard(
+          title: 'Step submissions',
+          subtitle: 'Review manually logged steps and their proof photos.',
+          icon: CupertinoIcons.check_mark_circled,
+          color: const Color(0xFFF4E0DC),
+          actionLabel: 'Review',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const CoachStepSubmissionsScreen(),
               ),
             );
           },

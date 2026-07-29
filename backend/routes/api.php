@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\LeaderboardController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\StepSubmissionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json([
@@ -149,4 +150,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/streak', [NotificationController::class, 'store']);
+    Route::post('/step-submissions', [StepSubmissionController::class, 'store']);
+    Route::get('/step-submissions/mine', [StepSubmissionController::class, 'mine']);
+    Route::get('/coach/step-submissions', [StepSubmissionController::class, 'index']);
+    Route::patch('/coach/step-submissions/{stepSubmission}/approve', [StepSubmissionController::class, 'approve']);
+    Route::patch('/coach/step-submissions/{stepSubmission}/decline', [StepSubmissionController::class, 'decline']);
 });

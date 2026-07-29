@@ -13,7 +13,9 @@ import 'package:selfcare_projects/src/features/authentication/screen/UsersData/u
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/notes_type.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/my_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_submission_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_tracker_utils.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
@@ -257,7 +259,8 @@ class _StepTrackerState extends State<StepTracker>
         _stepCountOffset,
       );
       await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
-      await prefs.setString(SessionCleanupService.lastSavedDateKey(userId), today);
+      await prefs.setString(
+          SessionCleanupService.lastSavedDateKey(userId), today);
     } catch (error) {
       debugPrint("Failed to persist local step state: $error");
     }
@@ -753,9 +756,8 @@ class _StepTrackerState extends State<StepTracker>
       builder: (dialogContext) {
         final dialogTheme = Theme.of(dialogContext);
         final isDark = dialogTheme.brightness == Brightness.dark;
-        final surfaceColor = isDark
-            ? dialogTheme.colorScheme.surface
-            : const Color(0xFFFFFBF7);
+        final surfaceColor =
+            isDark ? dialogTheme.colorScheme.surface : const Color(0xFFFFFBF7);
         final borderColor = isDark
             ? dialogTheme.colorScheme.outlineVariant
             : const Color(0xFFE9DED5);
@@ -1398,7 +1400,34 @@ class _StepTrackerState extends State<StepTracker>
                                     icon: const Icon(Icons.map_outlined),
                                     label: const Text('Track on Map'),
                                   ),
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const StepSubmissionScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.add_photo_alternate_outlined,
+                                    ),
+                                    label: const Text('Submit Steps'),
+                                  ),
                                 ],
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const MyStepSubmissionsScreen(),
+                                    ),
+                                  );
+                                },
+                                child: const Text('View my submissions'),
                               ),
                             ],
                           ),

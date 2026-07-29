@@ -19,6 +19,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/my_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
@@ -1214,6 +1215,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         break;
       case 'community_comment':
         Navigator.pushNamed(context, '/communityScreen');
+        break;
+      case 'step_submission_approved':
+      case 'step_submission_declined':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const MyStepSubmissionsScreen(),
+          ),
+        );
         break;
     }
   }
