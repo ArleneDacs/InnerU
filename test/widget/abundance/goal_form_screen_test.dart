@@ -5,44 +5,59 @@ import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_for
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 
 void main() {
-  testWidgets('form requires a title and creates a merit goal', (tester) async {
-    final firestore = FakeFirebaseFirestore();
-    final service = GoalsService(firestore);
-    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
-
-    // The form's fields are taller than the default 800x600 test surface,
-    // which would otherwise leave the submit button below the fold. Use a
-    // taller - but same-width, so horizontal layout is unaffected - surface
-    // so every field and the button are reachable without scrolling.
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    tester.view.physicalSize = const Size(800, 1400);
-    tester.view.devicePixelRatio = 1.0;
+  testWidgets('wizard starts on step 1 of 4 and blocks Next until the declaration is filled',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
 
     await tester.pumpWidget(MaterialApp(
       home: GoalFormScreen(service: service, uid: 'u1'),
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Start date'), findsOneWidget);
-    expect(find.text('End date'), findsOneWidget);
+    expect(find.text('Step 1 of 4 — What'), findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
 
-    // Saving with no title trips the validator.
-    await tester.tap(find.text('Create goal'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
-    expect(find.text('Title is required'), findsOneWidget);
+    // Still on step 1 — the declaration field is required and empty.
+    expect(find.text('Step 1 of 4 — What'), findsOneWidget);
 
     await tester.enterText(
-        find.byKey(const Key('goal-title')), 'Read 12 books');
-    await tester.enterText(find.byKey(const Key('goal-target-value')), '12');
-    await tester.tap(find.text('Create goal'));
+      find.byKey(const Key('quest-declaration-field')),
+      'I see myself finishing what I start',
+    );
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
-    final goals = await firestore.collection('goals').get();
-    expect(goals.docs.length, 1);
-    expect(goals.docs.first.data()['title'], 'Read 12 books');
-    expect(goals.docs.first.data()['targetValue'], 12);
-    expect(goals.docs.first.data()['startDate'], isNotNull);
-    expect(goals.docs.first.data()['targetDate'], isNotNull);
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+    expect(find.text('Back'), findsOneWidget);
+  });
+
+  testWidgets('step 2 requires a category and a target value before advancing',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      'I see myself finishing what I start',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    // No category chosen yet — Next must not advance.
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '10');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
   });
 }

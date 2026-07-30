@@ -1,13 +1,16 @@
-// ignore_for_file: dead_code
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
 
-/// Create or edit a goal. A MERIT goal carries a numeric measure (target,
-/// current, unit, optional recurring cadence); a MILESTONE goal is scored by
-/// its action plans instead, so the measure fields hide and a plan list
-/// shows.
+/// Create or edit a quest through a 4-step wizard mirroring A12-Tracker's
+/// `goal-wizard.tsx`: What -> How -> When & qualities -> Declaration.
+///
+/// This screen is built across two tasks: this one (the step *shell* --
+/// navigation, progress bar, per-step validation gating -- plus the first
+/// two steps' content) and a later task (steps 3-4 plus wiring the final
+/// Submit action into [_save]).
 class GoalFormScreen extends StatefulWidget {
   const GoalFormScreen({
     super.key,
@@ -33,9 +36,14 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   late final TextEditingController _currentValue;
   late final TextEditingController _unit;
   final _planEntry = TextEditingController();
+  final _declarationController = TextEditingController();
   final _scrollController = ScrollController();
 
-  late GoalCategory _category;
+  // Nullable (unlike the other fields below): a new quest starts with no
+  // category picked, matching A12's wizard, which shows the category picker
+  // unselected until the member chooses one. An edit still inherits its
+  // existing category.
+  GoalCategory? _category;
   late GoalType _goalType;
   late GoalDirection _direction;
   late TargetPeriod _targetPeriod;
@@ -45,7 +53,34 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   final List<String> _planTitles = [];
   bool _saving = false;
 
+  int _currentStep = 0; // 0=What, 1=How, 2=When & qualities, 3=Declaration
+  static const _stepTitles = [
+    'Step 1 of 4 — What',
+    'Step 2 of 4 — How',
+    'Step 3 of 4 — When & qualities',
+    'Step 4 of 4 — Declaration',
+  ];
+  static const _stepLabels = ['What', 'How', 'When & qualities', 'Declaration'];
+
   bool get _isEdit => widget.existing != null;
+
+  bool get _step1Valid => _declarationController.text.trim().length >= 3;
+  bool get _step2Valid =>
+      _category != null && double.tryParse(_targetValue.text.trim()) != null;
+
+  /// What the current step still needs, said out loud rather than left to a
+  /// silently-dead Next button. Null once the step is satisfied.
+  String? get _stepBlocker => switch (_currentStep) {
+        0 => _step1Valid
+            ? null
+            : 'Answer the question with at least 3 characters.',
+        1 => _category == null
+            ? 'Choose a category.'
+            : double.tryParse(_targetValue.text.trim()) == null
+                ? 'Enter a target value.'
+                : null,
+        _ => null,
+      };
 
   @override
   void initState() {
@@ -59,7 +94,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     _currentValue = TextEditingController(
         text: g == null || g.currentValue == 0 ? '' : '${g.currentValue}');
     _unit = TextEditingController(text: g?.unit ?? '');
-    _category = g?.category ?? GoalCategory.personal;
+    _category = g?.category;
     _goalType = g?.goalType ?? GoalType.merit;
     _direction = g?.direction ?? GoalDirection.gain;
     _targetPeriod = g?.targetPeriod ?? TargetPeriod.none;
@@ -77,10 +112,14 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     _currentValue.dispose();
     _unit.dispose();
     _planEntry.dispose();
+    _declarationController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
+  // Kept for the "When & qualities" step a later task adds to this screen --
+  // that step shows the target-date picker these back.
+  // ignore: unused_element
   Future<void> _pickTargetDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -98,6 +137,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     });
   }
 
+  // ignore: unused_element
   Future<void> _pickStartDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -113,6 +153,30 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
         _targetDate = normalized;
       }
     });
+  }
+
+  void _goNext() {
+    final valid = switch (_currentStep) {
+      0 => _step1Valid,
+      1 => _step2Valid,
+      _ => true,
+    };
+    if (!valid) return;
+    setState(() => _currentStep = (_currentStep + 1).clamp(0, 3));
+  }
+
+  void _goBack() {
+    setState(() => _currentStep = (_currentStep - 1).clamp(0, 3));
+  }
+
+  /// Deliberately a no-op beyond the snackbar. Real AI-suggestion behavior
+  /// (see `A12-Tracker/src/app/(app)/goals/actions.ts`'s
+  /// `suggestDeclarationAction`) is unconfirmed from source and out of scope
+  /// here -- a later task should read that file before wiring this up.
+  void _requestAiSuggestions() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('AI suggestions are coming soon.')),
+    );
   }
 
   Future<void> _save() async {
@@ -141,7 +205,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       } else {
         await widget.service.createGoal(
           uid: widget.uid,
-          category: _category,
+          category: _category ?? GoalCategory.personal,
           title: _title.text.trim(),
           description: _description.text.trim(),
           notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
@@ -168,1080 +232,56 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final wide = screenWidth >= 760;
-    final wideInner = screenWidth >= 860;
-
-    final goalTypeRow = wide
-        ? Row(
-            children: [
-              Expanded(
-                child: _GoalTypeCard(
-                  selected: _goalType == GoalType.merit,
-                  title: 'Merit',
-                  subtitle: 'A number you chip away at over time.',
-                  onTap: () => setState(() => _goalType = GoalType.merit),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _GoalTypeCard(
-                  selected: _goalType == GoalType.milestone,
-                  title: 'Milestone',
-                  subtitle: 'Done when its action plans are done.',
-                  onTap: () => setState(() => _goalType = GoalType.milestone),
-                ),
-              ),
-            ],
-          )
-        : Column(
-            children: [
-              _GoalTypeCard(
-                selected: _goalType == GoalType.merit,
-                title: 'Merit',
-                subtitle: 'A number you chip away at over time.',
-                onTap: () => setState(() => _goalType = GoalType.merit),
-              ),
-              const SizedBox(height: 10),
-              _GoalTypeCard(
-                selected: _goalType == GoalType.milestone,
-                title: 'Milestone',
-                subtitle: 'Done when its action plans are done.',
-                onTap: () => setState(() => _goalType = GoalType.milestone),
-              ),
-            ],
-          );
-
-    final categoryField = DropdownButtonFormField<GoalCategory>(
-      initialValue: _category,
-      dropdownColor: const Color(0xFF111A45),
-      decoration: _fieldDecoration('Choose a category'),
-      style: const TextStyle(
-        color: Color(0xFFF7F5EC),
-        fontSize: 16,
-      ),
-      items: [
-        for (final c in GoalCategory.values)
-          DropdownMenuItem(
-            value: c,
-            child: Text(c.label),
-          ),
-      ],
-      onChanged: (v) => setState(() => _category = v!),
-    );
-
-    final statusField = DropdownButtonFormField<GoalStatus>(
-      initialValue: _status,
-      dropdownColor: const Color(0xFF111A45),
-      decoration: _fieldDecoration('In progress'),
-      style: const TextStyle(
-        color: Color(0xFFF7F5EC),
-        fontSize: 16,
-      ),
-      items: [
-        for (final status in GoalStatus.values)
-          DropdownMenuItem(
-            value: status,
-            child: Text(status.label),
-          ),
-      ],
-      onChanged: (value) {
-        if (value == null) return;
-        setState(() => _status = value);
-      },
-    );
-
-    Widget dateField({
-      required Key key,
-      required String label,
-      required DateTime value,
-      required VoidCallback onTap,
-    }) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFD7DCF4),
-              fontSize: 15.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          InkWell(
-            key: key,
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: InputDecorator(
-              decoration: _fieldDecoration(isoDay(value)),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      isoDay(value),
-                      style: const TextStyle(
-                        color: Color(0xFFF7F5EC),
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                  const Icon(
-                    Icons.calendar_today_outlined,
-                    color: Color(0xFFB7C0E5),
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final startDateField = dateField(
-      key: const Key('goal-start-date'),
-      label: 'Start date',
-      value: _startDate,
-      onTap: _pickStartDate,
-    );
-
-    final targetDateField = dateField(
-      key: const Key('goal-target-date'),
-      label: 'End date',
-      value: _targetDate,
-      onTap: _pickTargetDate,
-    );
-
-    final topMetaFields = _isEdit
-        ? Column(
-            children: [
-              statusField,
-              const SizedBox(height: 18),
-              startDateField,
-              const SizedBox(height: 18),
-              targetDateField,
-            ],
-          )
-        : Column(
-            children: [
-              categoryField,
-              const SizedBox(height: 18),
-              startDateField,
-              const SizedBox(height: 18),
-              targetDateField,
-            ],
-          );
-
-    final meritFields = Column(
-      children: [
-        if (wideInner)
-          Row(
-            children: [
-              Expanded(
-                child: TextFormField(
-                  key: const Key('goal-target-value'),
-                  controller: _targetValue,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  style: const TextStyle(
-                    color: Color(0xFFF7F5EC),
-                    fontSize: 16,
-                  ),
-                  decoration: _fieldDecoration('10'),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: TextFormField(
-                  key: const Key('goal-current-value'),
-                  controller: _currentValue,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  style: const TextStyle(
-                    color: Color(0xFFF7F5EC),
-                    fontSize: 16,
-                  ),
-                  decoration: _fieldDecoration('0'),
-                ),
-              ),
-            ],
-          )
-        else ...[
-          TextFormField(
-            key: const Key('goal-target-value'),
-            controller: _targetValue,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(
-              color: Color(0xFFF7F5EC),
-              fontSize: 16,
-            ),
-            decoration: _fieldDecoration('10'),
-          ),
-          const SizedBox(height: 18),
-          TextFormField(
-            key: const Key('goal-current-value'),
-            controller: _currentValue,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(
-              color: Color(0xFFF7F5EC),
-              fontSize: 16,
-            ),
-            decoration: _fieldDecoration('0'),
-          ),
-        ],
-        const SizedBox(height: 18),
-        if (wideInner)
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<GoalDirection>(
-                  initialValue: _direction,
-                  dropdownColor: const Color(0xFF111A45),
-                  decoration: _fieldDecoration('Gain'),
-                  style: const TextStyle(
-                    color: Color(0xFFF7F5EC),
-                    fontSize: 16,
-                  ),
-                  items: [
-                    for (final d in GoalDirection.values)
-                      DropdownMenuItem(
-                        value: d,
-                        child: Text(d.label),
-                      ),
-                  ],
-                  onChanged: (v) => setState(() => _direction = v!),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: TextFormField(
-                  controller: _unit,
-                  style: const TextStyle(
-                    color: Color(0xFFF7F5EC),
-                    fontSize: 16,
-                  ),
-                  decoration: _fieldDecoration(
-                    'Kg',
-                    helper: 'e.g. Kg, M, books',
-                  ),
-                ),
-              ),
-            ],
-          )
-        else ...[
-          DropdownButtonFormField<GoalDirection>(
-            initialValue: _direction,
-            dropdownColor: const Color(0xFF111A45),
-            decoration: _fieldDecoration('Gain'),
-            style: const TextStyle(
-              color: Color(0xFFF7F5EC),
-              fontSize: 16,
-            ),
-            items: [
-              for (final d in GoalDirection.values)
-                DropdownMenuItem(
-                  value: d,
-                  child: Text(d.label),
-                ),
-            ],
-            onChanged: (v) => setState(() => _direction = v!),
-          ),
-          const SizedBox(height: 18),
-          TextFormField(
-            controller: _unit,
-            style: const TextStyle(
-              color: Color(0xFFF7F5EC),
-              fontSize: 16,
-            ),
-            decoration: _fieldDecoration(
-              'Kg',
-              helper: 'e.g. Kg, M, books',
-            ),
-          ),
-        ],
-        const SizedBox(height: 18),
-        DropdownButtonFormField<TargetPeriod>(
-          initialValue: _targetPeriod,
-          dropdownColor: const Color(0xFF111A45),
-          decoration: _fieldDecoration('Daily'),
-          style: const TextStyle(
-            color: Color(0xFFF7F5EC),
-            fontSize: 16,
-          ),
-          items: [
-            for (final p in TargetPeriod.values)
-              DropdownMenuItem(
-                value: p,
-                child: Text(p.label),
-              ),
-          ],
-          onChanged: (v) => setState(() => _targetPeriod = v!),
-        ),
-      ],
-    );
-
-    Widget sectionCard(Widget child, {EdgeInsetsGeometry? padding}) {
-      return Container(
-        width: double.infinity,
-        padding: padding ?? const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0D1438).withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF243169)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x22000000),
-              blurRadius: 24,
-              offset: Offset(0, 12),
-            ),
-          ],
-        ),
-        child: child,
-      );
-    }
-
-    final pageContent = Scaffold(
-      backgroundColor: const Color(0xFF050714),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF070A18),
-              Color(0xFF0A1026),
-              Color(0xFF050714),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding:
-                EdgeInsets.fromLTRB(wide ? 16 : 14, 14, wide ? 16 : 14, 20),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => Navigator.pop(context),
-                              child: const Text(
-                                '← My goals',
-                                style: TextStyle(
-                                  color: Color(0xFF9DA9D6),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10183F),
-                                borderRadius: BorderRadius.circular(999),
-                                border:
-                                    Border.all(color: const Color(0xFF243169)),
-                              ),
-                              child: const Text(
-                                'A12 only',
-                                style: TextStyle(
-                                  color: Color(0xFFF0B93C),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      sectionCard(
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _isEdit
-                                            ? 'Edit goal'
-                                            : 'Set a new goal',
-                                        style: const TextStyle(
-                                          color: Color(0xFFF6EAD0),
-                                          fontSize: 24,
-                                          height: 1.1,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: 0.2,
-                                          fontFamily: 'Georgia',
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        _isEdit
-                                            ? 'Update the goal details, score, and status.'
-                                            : 'Build a focused goal and set both the start date and end date.',
-                                        style: const TextStyle(
-                                          color: Color(0xFFB7C0E5),
-                                          fontSize: 13.5,
-                                          height: 1.45,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  iconSize: 24,
-                                  color: const Color(0xFFB7C0E5),
-                                  icon: const Icon(Icons.close_rounded),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            const Text(
-                              'Goal type',
-                              style: TextStyle(
-                                color: Color(0xFFD7DCF4),
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            goalTypeRow,
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      sectionCard(
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Goal details',
-                              style: TextStyle(
-                                color: Color(0xFFD7DCF4),
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              key: const Key('goal-title'),
-                              controller: _title,
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 16,
-                              ),
-                              decoration: _fieldDecoration('Goal title'),
-                              validator: (v) => (v == null || v.trim().isEmpty)
-                                  ? 'Title is required'
-                                  : null,
-                            ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _description,
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 16,
-                              ),
-                              decoration: _fieldDecoration(
-                                'What are you committing to?',
-                              ),
-                              maxLines: 3,
-                            ),
-                            const SizedBox(height: 12),
-                            topMetaFields,
-                            if (_goalType == GoalType.merit) ...[
-                              const SizedBox(height: 12),
-                              meritFields,
-                            ] else ...[
-                              const SizedBox(height: 12),
-                              _ActionPlansPanel(
-                                planTitles: _planTitles,
-                                planEntry: _planEntry,
-                                onAdd: () {
-                                  final t = _planEntry.text.trim();
-                                  if (t.isEmpty) return;
-                                  setState(() {
-                                    _planTitles.add(t);
-                                    _planEntry.clear();
-                                  });
-                                },
-                                onRemove: (title) =>
-                                    setState(() => _planTitles.remove(title)),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _notes,
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 16,
-                              ),
-                              decoration: _fieldDecoration(
-                                'Notes',
-                                helper: 'Anything your coach should know.',
-                              ),
-                              maxLines: 3,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
+    final showAiBanner = _currentStep == 0 || _currentStep == 2;
+    return Scaffold(
+      backgroundColor: AbundanceColors.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Scrollable step content. The Back/Next (or Submit) row below
+            // is deliberately NOT part of this scroll view -- it is a
+            // pinned footer so it stays reachable at the bottom of the
+            // screen no matter how tall a given step's content is (this
+            // mirrors a modal's fixed footer, adapted for a full-screen
+            // mobile layout instead of a desktop dialog).
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFFB7C0E5),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(fontSize: 15),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: _saving ? null : _save,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFF0B93C),
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                              child: Text(
-                                _saving
-                                    ? 'Saving...'
-                                    : _isEdit
-                                        ? 'Save changes'
-                                        : 'Create goal',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ),
+                          _buildHeader(),
+                          const SizedBox(height: 16),
+                          if (showAiBanner) ...[
+                            _buildAiBanner(),
+                            const SizedBox(height: 16),
+                          ],
+                          _buildProgressBar(),
+                          const SizedBox(height: 20),
+                          _buildStepBody(),
                         ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-
-    return pageContent;
-
-    final isMerit = _goalType == GoalType.merit;
-    final headerTitle = _isEdit ? 'EDIT GOAL' : 'SET A NEW GOAL';
-    final headerSubtitle = _isEdit
-        ? 'A merit goal is scored by its measure; a milestone goal by its action plans.'
-        : 'Personal, professional or contribution - all three categories count towards your Goal Total Score.';
-    return Scaffold(
-      backgroundColor: const Color(0xFF050714),
-      body: SafeArea(
-        child: ListView(
-          controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1240),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0E1539),
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: const Color(0xFF25336A)),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x66000000),
-                        blurRadius: 30,
-                        offset: Offset(0, 14),
-                      ),
-                    ],
-                  ),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    headerTitle,
-                                    style: const TextStyle(
-                                      color: Color(0xFFF0E6CF),
-                                      fontSize: 34,
-                                      height: 1.05,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.3,
-                                      fontFamily: 'Georgia',
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    headerSubtitle,
-                                    style: const TextStyle(
-                                      color: Color(0xFFB7C0E5),
-                                      fontSize: 18,
-                                      height: 1.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => Navigator.pop(context),
-                              iconSize: 30,
-                              color: const Color(0xFFB7C0E5),
-                              icon: const Icon(Icons.close),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 28),
-                        const Text(
-                          'Goal type',
-                          style: TextStyle(
-                            color: Color(0xFFD7DCF4),
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final stacked = constraints.maxWidth < 860;
-                            final meritCard = Expanded(
-                              child: _GoalTypeCard(
-                                selected: _goalType == GoalType.merit,
-                                title: 'Merit',
-                                subtitle:
-                                    'A number you chip away at over time.',
-                                onTap: () =>
-                                    setState(() => _goalType = GoalType.merit),
-                              ),
-                            );
-                            final milestoneCard = Expanded(
-                              child: _GoalTypeCard(
-                                selected: _goalType == GoalType.milestone,
-                                title: 'Milestone',
-                                subtitle:
-                                    'Done when its action plans are done.',
-                                onTap: () => setState(
-                                    () => _goalType = GoalType.milestone),
-                              ),
-                            );
-
-                            if (stacked) {
-                              return Column(
-                                children: [
-                                  meritCard,
-                                  const SizedBox(height: 16),
-                                  milestoneCard,
-                                ],
-                              );
-                            }
-
-                            return Row(
-                              children: [
-                                meritCard,
-                                const SizedBox(width: 16),
-                                milestoneCard,
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 28),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            Widget titleField = TextFormField(
-                              key: const Key('goal-title'),
-                              controller: _title,
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 18,
-                              ),
-                              decoration:
-                                  _fieldDecoration('Enter a goal title'),
-                              validator: (v) => (v == null || v.trim().isEmpty)
-                                  ? 'Title is required'
-                                  : null,
-                            );
-
-                            Widget descriptionField = TextFormField(
-                              controller: _description,
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 18,
-                              ),
-                              decoration: _fieldDecoration(
-                                  'The outcome you are committing to...'),
-                              maxLines: 4,
-                            );
-
-                            Widget categoryField =
-                                DropdownButtonFormField<GoalCategory>(
-                              initialValue: _category,
-                              dropdownColor: const Color(0xFF111A45),
-                              decoration: _fieldDecoration('Choose a category'),
-                              style: const TextStyle(
-                                color: Color(0xFFF7F5EC),
-                                fontSize: 18,
-                              ),
-                              items: [
-                                for (final c in GoalCategory.values)
-                                  DropdownMenuItem(
-                                    value: c,
-                                    child: Text(c.label),
-                                  ),
-                              ],
-                              onChanged: (v) => setState(() => _category = v!),
-                            );
-
-                            Widget targetDateField = InkWell(
-                              onTap: _pickTargetDate,
-                              borderRadius: BorderRadius.circular(18),
-                              child: InputDecorator(
-                                decoration:
-                                    _fieldDecoration(isoDay(_targetDate)),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        isoDay(_targetDate),
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.calendar_today_outlined,
-                                      color: Color(0xFFB7C0E5),
-                                      size: 18,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-
-                            Widget topMetaFields;
-                            if (_isEdit) {
-                              topMetaFields = Row(
-                                children: [
-                                  Expanded(
-                                    child: DropdownButtonFormField<GoalStatus>(
-                                      initialValue: _status,
-                                      dropdownColor: const Color(0xFF111A45),
-                                      decoration:
-                                          _fieldDecoration('In progress'),
-                                      style: const TextStyle(
-                                        color: Color(0xFFF7F5EC),
-                                        fontSize: 18,
-                                      ),
-                                      items: [
-                                        for (final status in GoalStatus.values)
-                                          DropdownMenuItem(
-                                            value: status,
-                                            child: Text(status.label),
-                                          ),
-                                      ],
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setState(() => _status = value);
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 18),
-                                  Expanded(child: targetDateField),
-                                ],
-                              );
-                            } else {
-                              topMetaFields = Row(
-                                children: [
-                                  Expanded(child: categoryField),
-                                  const SizedBox(width: 18),
-                                  Expanded(child: targetDateField),
-                                ],
-                              );
-                            }
-
-                            return Column(
-                              children: [
-                                titleField,
-                                const SizedBox(height: 20),
-                                descriptionField,
-                                const SizedBox(height: 20),
-                                topMetaFields,
-                                if (!_isEdit && !isMerit) ...[
-                                  const SizedBox(height: 20),
-                                  _ActionPlansPanel(
-                                    planTitles: _planTitles,
-                                    planEntry: _planEntry,
-                                    onAdd: () {
-                                      final t = _planEntry.text.trim();
-                                      if (t.isEmpty) return;
-                                      setState(() {
-                                        _planTitles.add(t);
-                                        _planEntry.clear();
-                                      });
-                                    },
-                                    onRemove: (title) => setState(
-                                      () => _planTitles.remove(title),
-                                    ),
-                                  ),
-                                ],
-                                if (isMerit) ...[
-                                  const SizedBox(height: 20),
-                                  LayoutBuilder(
-                                    builder: (context, innerConstraints) {
-                                      final wideInner =
-                                          innerConstraints.maxWidth >= 900;
-                                      final targetValueField = TextFormField(
-                                        key: const Key('goal-target-value'),
-                                        controller: _targetValue,
-                                        keyboardType: const TextInputType
-                                            .numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                        decoration: _fieldDecoration('10'),
-                                      );
-                                      final currentValueField = TextFormField(
-                                        key: const Key('goal-current-value'),
-                                        controller: _currentValue,
-                                        keyboardType: const TextInputType
-                                            .numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                        decoration: _fieldDecoration('0'),
-                                      );
-                                      final directionField =
-                                          DropdownButtonFormField<
-                                              GoalDirection>(
-                                        initialValue: _direction,
-                                        dropdownColor: const Color(0xFF111A45),
-                                        decoration: _fieldDecoration('Gain'),
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                        items: [
-                                          for (final d in GoalDirection.values)
-                                            DropdownMenuItem(
-                                              value: d,
-                                              child: Text(d.label),
-                                            ),
-                                        ],
-                                        onChanged: (v) =>
-                                            setState(() => _direction = v!),
-                                      );
-                                      final unitField = TextFormField(
-                                        controller: _unit,
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                        decoration: _fieldDecoration(
-                                          'Kg',
-                                          helper: 'e.g. Kg, M, books',
-                                        ),
-                                      );
-                                      final periodField =
-                                          DropdownButtonFormField<TargetPeriod>(
-                                        initialValue: _targetPeriod,
-                                        dropdownColor: const Color(0xFF111A45),
-                                        decoration: _fieldDecoration('Daily'),
-                                        style: const TextStyle(
-                                          color: Color(0xFFF7F5EC),
-                                          fontSize: 18,
-                                        ),
-                                        items: [
-                                          for (final p in TargetPeriod.values)
-                                            DropdownMenuItem(
-                                              value: p,
-                                              child: Text(p.label),
-                                            ),
-                                        ],
-                                        onChanged: (v) =>
-                                            setState(() => _targetPeriod = v!),
-                                      );
-
-                                      return Column(
-                                        children: [
-                                          if (wideInner)
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                    child: targetValueField),
-                                                const SizedBox(width: 18),
-                                                Expanded(
-                                                  child: currentValueField,
-                                                ),
-                                              ],
-                                            )
-                                          else ...[
-                                            targetValueField,
-                                            const SizedBox(height: 18),
-                                            currentValueField,
-                                          ],
-                                          const SizedBox(height: 18),
-                                          if (wideInner)
-                                            Row(
-                                              children: [
-                                                Expanded(child: directionField),
-                                                const SizedBox(width: 18),
-                                                Expanded(child: unitField),
-                                              ],
-                                            )
-                                          else ...[
-                                            directionField,
-                                            const SizedBox(height: 18),
-                                            unitField,
-                                          ],
-                                          const SizedBox(height: 18),
-                                          periodField,
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ],
-                                const SizedBox(height: 20),
-                                TextFormField(
-                                  controller: _notes,
-                                  style: const TextStyle(
-                                    color: Color(0xFFF7F5EC),
-                                    fontSize: 18,
-                                  ),
-                                  decoration: _fieldDecoration(
-                                    'Notes',
-                                    helper:
-                                        'Anything you want your coach to know.',
-                                  ),
-                                  maxLines: 4,
-                                ),
-                                const SizedBox(height: 24),
-                                LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final compact = constraints.maxWidth < 420;
-                                    final saveLabel = _saving
-                                        ? 'Saving...'
-                                        : _isEdit
-                                            ? 'Save changes'
-                                            : 'Create goal';
-                                    final saveButton = FilledButton(
-                                      onPressed: _saving ? null : _save,
-                                      style: FilledButton.styleFrom(
-                                        backgroundColor:
-                                            const Color(0xFFF0B93C),
-                                        foregroundColor: Colors.black,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 18,
-                                          vertical: 12,
-                                        ),
-                                        minimumSize: const Size(0, 42),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(14),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        saveLabel,
-                                        style: const TextStyle(fontSize: 15),
-                                      ),
-                                    );
-                                    final cancelButton = TextButton(
-                                      onPressed: () => Navigator.pop(context),
-                                      style: TextButton.styleFrom(
-                                        foregroundColor:
-                                            const Color(0xFFD7DCF4),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                          vertical: 10,
-                                        ),
-                                        minimumSize: const Size(0, 38),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      child: const Text(
-                                        'Cancel',
-                                        style: TextStyle(fontSize: 15),
-                                      ),
-                                    );
-                                    if (compact) {
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          saveButton,
-                                          const SizedBox(height: 10),
-                                          cancelButton,
-                                        ],
-                                      );
-                                    }
-                                    return Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        cancelButton,
-                                        const SizedBox(width: 12),
-                                        saveButton,
-                                      ],
-                                    );
-                                  },
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                color: AbundanceColors.background,
+                border: Border(top: BorderSide(color: AbundanceColors.border)),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: _buildNavRow(),
                 ),
               ),
             ),
@@ -1251,28 +291,463 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     );
   }
 
-  InputDecoration _fieldDecoration(
-    String hint, {
-    String? helper,
-  }) {
+  Widget _buildHeader() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isEdit ? 'Edit quest' : 'Set a new quest',
+                style: const TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'Georgia',
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _stepTitles[_currentStep],
+                style: const TextStyle(
+                  color: AbundanceColors.muted,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close_rounded),
+          color: AbundanceColors.muted,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAiBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AbundanceColors.primaryGold.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AbundanceColors.primaryGold.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 10,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 200),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Start with AI declaration suggestions',
+                  style: TextStyle(
+                    color: AbundanceColors.foreground,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Answer four questions, choose from five declarations, '
+                  'then review the populated Quest steps.',
+                  style: TextStyle(
+                    color: AbundanceColors.muted,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _requestAiSuggestions,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AbundanceColors.foreground,
+              side: const BorderSide(color: AbundanceColors.border),
+            ),
+            icon: const Icon(Icons.auto_awesome, size: 16),
+            label: const Text('Get 5 AI suggestions'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressBar() {
+    return Row(
+      children: [
+        for (var i = 0; i < _stepLabels.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: i <= _currentStep
+                        ? AbundanceColors.primaryGold
+                        : AbundanceColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _stepLabels[i],
+                  style: TextStyle(
+                    color: i == _currentStep
+                        ? AbundanceColors.primaryGold
+                        : AbundanceColors.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStepBody() {
+    return switch (_currentStep) {
+      0 => _buildStepWhat(),
+      1 => _buildStepHow(),
+      2 => _buildStepPlaceholder('When & qualities'),
+      _ => _buildStepPlaceholder('Declaration'),
+    };
+  }
+
+  Widget _buildStepWhat() {
+    return _sectionCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Shape your declaration',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'Georgia',
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Answer in the present tense so the result reads like a quest '
+            'you can see and feel.',
+            style: TextStyle(
+              color: AbundanceColors.muted,
+              fontSize: 13.5,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'What do you joyfully see yourself achieving?',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('quest-declaration-field'),
+            controller: _declarationController,
+            maxLines: 4,
+            style: const TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 16,
+            ),
+            decoration: _fieldDecoration(
+              'I see myself build a closer relationship with my family, '
+              'friends and love ones.',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepHow() {
+    return _sectionCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'How will you achieve it?',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'Georgia',
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Choose how the quest is measured, then list the action plans '
+            'that will make it real.',
+            style: TextStyle(
+              color: AbundanceColors.muted,
+              fontSize: 13.5,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Category',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildCategoryPicker(),
+          const SizedBox(height: 18),
+          const Text(
+            'Direction',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildDirectionToggle(),
+          const SizedBox(height: 18),
+          const Text(
+            'Target value',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('quest-target-value-field'),
+            controller: _targetValue,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 16,
+            ),
+            decoration: _fieldDecoration('10'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Target period',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<TargetPeriod>(
+            initialValue: _targetPeriod,
+            dropdownColor: AbundanceColors.surfaceRaised,
+            decoration: _fieldDecoration('Daily'),
+            style: const TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 16,
+            ),
+            items: [
+              for (final p in TargetPeriod.values)
+                DropdownMenuItem(value: p, child: Text(p.label)),
+            ],
+            onChanged: (v) => setState(() => _targetPeriod = v!),
+          ),
+          const SizedBox(height: 18),
+          _ActionPlansPanel(
+            planTitles: _planTitles,
+            planEntry: _planEntry,
+            onAdd: () {
+              final t = _planEntry.text.trim();
+              if (t.isEmpty) return;
+              setState(() {
+                _planTitles.add(t);
+                _planEntry.clear();
+              });
+            },
+            onRemove: (title) => setState(() => _planTitles.remove(title)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryPicker() {
+    return Row(
+      children: [
+        for (final c in GoalCategory.values) ...[
+          if (c != GoalCategory.values.first) const SizedBox(width: 8),
+          Expanded(
+            child: _CategoryChip(
+              category: c,
+              selected: _category == c,
+              onTap: () => setState(() => _category = c),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDirectionToggle() {
+    return Row(
+      children: [
+        Expanded(
+          child: _DirectionButton(
+            label: 'Gain',
+            icon: Icons.trending_up,
+            selected: _direction == GoalDirection.gain,
+            onTap: () => setState(() => _direction = GoalDirection.gain),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _DirectionButton(
+            label: 'Release',
+            icon: Icons.trending_down,
+            selected: _direction == GoalDirection.lose,
+            onTap: () => setState(() => _direction = GoalDirection.lose),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStepPlaceholder(String label) {
+    return _sectionCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'Georgia',
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Built in a later task.',
+            style: TextStyle(color: AbundanceColors.muted, fontSize: 13.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavRow() {
+    final isLast = _currentStep == _stepTitles.length - 1;
+    final blocker = _stepBlocker;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (blocker != null) ...[
+          Text(
+            blocker,
+            style: const TextStyle(color: AbundanceColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+        ],
+        Row(
+          children: [
+            TextButton(
+              onPressed: _currentStep == 0 ? () => Navigator.pop(context) : _goBack,
+              style: TextButton.styleFrom(foregroundColor: AbundanceColors.muted),
+              child: Text(_currentStep == 0 ? 'Cancel' : 'Back'),
+            ),
+            const Spacer(),
+            if (!isLast)
+              FilledButton(
+                // Deliberately always wired to `_goNext` rather than
+                // `blocker == null ? _goNext : null`: `_goNext` re-reads
+                // step validity live when pressed, so it stays correct even
+                // in a frame where this row hasn't rebuilt since the last
+                // keystroke (e.g. a test's enterText immediately followed
+                // by tap(), with no pump in between). The blocker text
+                // above is the user-facing signal for why a tap did
+                // nothing; the button itself is not visually disabled.
+                onPressed: _goNext,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AbundanceColors.primaryGold,
+                  foregroundColor: Colors.black,
+                ),
+                child: const Text('Next'),
+              )
+            else
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AbundanceColors.primaryGold,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(_saving ? 'Saving...' : 'Submit'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionCard(Widget child) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AbundanceColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AbundanceColors.border),
+      ),
+      child: child,
+    );
+  }
+
+  InputDecoration _fieldDecoration(String hint, {String? helper}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFF8390C0), fontSize: 15),
+      hintStyle: const TextStyle(color: AbundanceColors.muted, fontSize: 15),
       helperText: helper,
-      helperStyle: const TextStyle(color: Color(0xFF8390C0), fontSize: 12.5),
+      helperStyle: const TextStyle(color: AbundanceColors.muted, fontSize: 12.5),
       filled: true,
-      fillColor: const Color(0xFF10183F),
+      fillColor: AbundanceColors.surfaceRaised,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF243169)),
+        borderSide: const BorderSide(color: AbundanceColors.border),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF243169)),
+        borderSide: const BorderSide(color: AbundanceColors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFF0B93C), width: 1.4),
+        borderSide: const BorderSide(color: AbundanceColors.primaryGold, width: 1.4),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
@@ -1282,67 +757,120 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       DateTime(date.year, date.month, date.day);
 }
 
-class _GoalTypeCard extends StatelessWidget {
-  const _GoalTypeCard({
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.category,
     required this.selected,
-    required this.title,
-    required this.subtitle,
     required this.onTap,
   });
 
+  final GoalCategory category;
   final bool selected;
-  final String title;
-  final String subtitle;
   final VoidCallback onTap;
+
+  static const _icons = {
+    GoalCategory.personal: Icons.person_outline,
+    GoalCategory.professional: Icons.work_outline,
+    GoalCategory.contribution: Icons.volunteer_activism_outlined,
+  };
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 0),
-      child: Material(
-        color: selected ? const Color(0xFF2B2A37) : const Color(0xFF10183F),
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 68),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFFF0B93C)
-                    : const Color(0xFF243169),
-                width: selected ? 1.6 : 1,
-              ),
+    final tint = AbundanceColors.categoryColor(category.code);
+    return Material(
+      color: AbundanceColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? AbundanceColors.primaryGold : AbundanceColors.border,
+              width: selected ? 1.6 : 1,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: tint.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(_icons[category], size: 18, color: tint),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  category.label,
                   style: const TextStyle(
-                    color: Color(0xFFF7F5EC),
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
+                    color: AbundanceColors.foreground,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Color(0xFFB7C0E5),
-                    fontSize: 12.5,
-                    height: 1.35,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DirectionButton extends StatelessWidget {
+  const _DirectionButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AbundanceColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 52),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? AbundanceColors.primaryGold : AbundanceColors.border,
+              width: selected ? 1.6 : 1,
             ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: AbundanceColors.foreground),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1369,9 +897,9 @@ class _ActionPlansPanel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF0B102E),
+        color: AbundanceColors.surfaceSunken,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF243169)),
+        border: Border.all(color: AbundanceColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1382,7 +910,7 @@ class _ActionPlansPanel extends StatelessWidget {
                 child: Text(
                   'Action plans',
                   style: TextStyle(
-                    color: Color(0xFFD7DCF4),
+                    color: AbundanceColors.foreground,
                     fontSize: 15.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1391,7 +919,7 @@ class _ActionPlansPanel extends StatelessWidget {
               Text(
                 '${planTitles.length} plans',
                 style: const TextStyle(
-                  color: Color(0xFFB7C0E5),
+                  color: AbundanceColors.muted,
                   fontSize: 12.5,
                 ),
               ),
@@ -1399,9 +927,10 @@ class _ActionPlansPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Optional - the steps you\'ll take. The score comes from the measure above; these just track the work.',
+            'Optional - the steps you\'ll take. The score comes from the '
+            'measure above; these just track the work.',
             style: TextStyle(
-              color: Color(0xFFB7C0E5),
+              color: AbundanceColors.muted,
               fontSize: 13.5,
               height: 1.35,
             ),
@@ -1415,7 +944,7 @@ class _ActionPlansPanel extends StatelessWidget {
                   height: 18,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: const Color(0xFF243169)),
+                    border: Border.all(color: AbundanceColors.border),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1424,14 +953,14 @@ class _ActionPlansPanel extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10183F),
+                      color: AbundanceColors.surfaceRaised,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFF243169)),
+                      border: Border.all(color: AbundanceColors.border),
                     ),
                     child: Text(
                       title,
                       style: const TextStyle(
-                        color: Color(0xFFF7F5EC),
+                        color: AbundanceColors.foreground,
                         fontSize: 14.5,
                       ),
                       maxLines: 1,
@@ -1446,7 +975,7 @@ class _ActionPlansPanel extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints:
                       const BoxConstraints(minWidth: 28, minHeight: 28),
-                  icon: const Icon(Icons.close, color: Color(0xFF8390C0)),
+                  icon: const Icon(Icons.close, color: AbundanceColors.muted),
                 ),
               ],
             ),
@@ -1457,27 +986,27 @@ class _ActionPlansPanel extends StatelessWidget {
               Expanded(
                 child: TextField(
                   controller: planEntry,
-                  style: const TextStyle(color: Color(0xFFF7F5EC)),
+                  style: const TextStyle(color: AbundanceColors.foreground),
                   decoration: InputDecoration(
                     hintText: 'Plan 1',
                     hintStyle: const TextStyle(
-                      color: Color(0xFF8390C0),
+                      color: AbundanceColors.muted,
                       fontSize: 14.5,
                     ),
                     filled: true,
-                    fillColor: const Color(0xFF10183F),
+                    fillColor: AbundanceColors.surfaceRaised,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: Color(0xFF243169)),
+                      borderSide: const BorderSide(color: AbundanceColors.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: Color(0xFF243169)),
+                      borderSide: const BorderSide(color: AbundanceColors.border),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
                       borderSide: const BorderSide(
-                        color: Color(0xFFF0B93C),
+                        color: AbundanceColors.primaryGold,
                         width: 1.4,
                       ),
                     ),
@@ -1490,8 +1019,8 @@ class _ActionPlansPanel extends StatelessWidget {
               OutlinedButton(
                 onPressed: onAdd,
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFF7F5EC),
-                  side: const BorderSide(color: Color(0xFF243169)),
+                  foregroundColor: AbundanceColors.foreground,
+                  side: const BorderSide(color: AbundanceColors.border),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 12,
