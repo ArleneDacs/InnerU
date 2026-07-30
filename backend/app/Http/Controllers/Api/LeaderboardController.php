@@ -342,13 +342,22 @@ class LeaderboardController extends Controller
             ->orderBy('name')
             ->get();
 
-        // Code/name is only a valid signal for a user with no definitive
-        // company_id at all. A user whose company_id already points at a
-        // DIFFERENT company must never be pulled in just because their
-        // company_name/company_code happens to collide with this one
-        // (e.g. two different companies sharing a display name) -- their
-        // own id is authoritative and wins over a name coincidence.
-        $codeOrNameUsers = User::query()
+        // company_code is the safest fallback for legacy or partially
+        // migrated users: it is unique per company and should still pull in
+        // the user even if their company_id has drifted elsewhere.
+        $codeUsers = User::query()
+            ->where(function ($builder) use ($company): void {
+                $builder->where('company_code', $company->code)
+                    ->orWhere('active_company_code', $company->code);
+            })
+            ->orderBy('name')
+            ->get();
+
+        // company_name is only trusted when no definitive company id is
+        // present on the user record. Names are not unique, so they stay the
+        // last-resort fallback for the messy legacy records that still need a
+        // leaderboard until their data is cleaned up.
+        $nameUsers = User::query()
             ->where(function ($builder): void {
                 $builder->whereNull('company_id')->orWhere('company_id', '');
             })
@@ -356,13 +365,26 @@ class LeaderboardController extends Controller
                 $builder->whereNull('active_company_id')->orWhere('active_company_id', '');
             })
             ->where(function ($builder) use ($company): void {
-                $builder->where('company_code', $company->code)
-                    ->orWhere('active_company_code', $company->code)
-                    ->orWhere('company_name', $company->name)
+                $builder->where('company_name', $company->name)
                     ->orWhere('active_company_name', $company->name);
             })
             ->orderBy('name')
             ->get();
+
+        // Newer mobile/profile sync flows can persist company membership
+        // details in the JSON array columns instead of the legacy direct
+        // company_id/company_code/company_name fields. Keep those users in
+        // scope too so the leaderboard still renders for partially
+        // migrated accounts.
+        $membershipUsers = User::query()
+            ->where(function ($builder): void {
+                $builder->whereNotNull('company_memberships')
+                    ->orWhereNotNull('company_ids')
+                    ->orWhereNotNull('company_codes');
+            })
+            ->orderBy('name')
+            ->get()
+            ->filter(fn (User $candidate): bool => $this->userBelongsToCompany($candidate, $company));
 
         // Union both, don't short-circuit on the exact-id match alone: a
         // user resolved into this company only via code/name (e.g. their
@@ -372,7 +394,9 @@ class LeaderboardController extends Controller
         // from their own company's leaderboard whenever anyone else in
         // the company has tidier data than they do.
         $combined = $exactCompanyUsers
-            ->concat($codeOrNameUsers)
+            ->concat($codeUsers)
+            ->concat($nameUsers)
+            ->concat($membershipUsers)
             ->unique(fn (User $candidate) => (string) $candidate->id)
             ->values();
 
@@ -405,7 +429,19 @@ class LeaderboardController extends Controller
             return true;
         }
 
-        return (string) $user->active_company_name === (string) $company->name;
+        if ((string) $user->active_company_name === (string) $company->name) {
+            return true;
+        }
+
+        if ($this->companyMembershipMatches($user->company_memberships, $company)) {
+            return true;
+        }
+
+        if ($this->companyIdArrayMatches($user->company_ids, (string) $company->id)) {
+            return true;
+        }
+
+        return $this->companyCodeArrayMatches($user->company_codes, (string) $company->code);
     }
 
     private function groupBelongsToCompany(CoachGroup $group, Company $company): bool
@@ -464,5 +500,80 @@ class LeaderboardController extends Controller
         }
 
         return array_values(array_unique(array_filter($coachIds)));
+    }
+
+    /**
+     * @param mixed $values
+     */
+    private function companyIdArrayMatches(mixed $values, string $companyId): bool
+    {
+        if (! is_array($values)) {
+            return false;
+        }
+
+        foreach ($values as $value) {
+            if ((string) $value === $companyId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param mixed $values
+     */
+    private function companyCodeArrayMatches(mixed $values, string $companyCode): bool
+    {
+        if (! is_array($values)) {
+            return false;
+        }
+
+        $normalizedCompanyCode = strtoupper(trim($companyCode));
+        foreach ($values as $value) {
+            if (strtoupper(trim((string) $value)) === $normalizedCompanyCode) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param mixed $memberships
+     */
+    private function companyMembershipMatches(mixed $memberships, Company $company): bool
+    {
+        if (! is_array($memberships)) {
+            return false;
+        }
+
+        foreach ($memberships as $membership) {
+            if (! is_array($membership)) {
+                continue;
+            }
+
+            $membershipCompanyId = trim((string) ($membership['companyId'] ?? $membership['id'] ?? ''));
+            $membershipCompanyCode = strtoupper(trim((string) (
+                $membership['companyCode'] ?? $membership['code'] ?? ''
+            )));
+            $membershipCompanyName = trim((string) (
+                $membership['companyName'] ?? $membership['name'] ?? ''
+            ));
+
+            if ($membershipCompanyId !== '' && $membershipCompanyId === (string) $company->id) {
+                return true;
+            }
+
+            if ($membershipCompanyCode !== '' && $membershipCompanyCode === strtoupper((string) $company->code)) {
+                return true;
+            }
+
+            if ($membershipCompanyName !== '' && $membershipCompanyName === (string) $company->name) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

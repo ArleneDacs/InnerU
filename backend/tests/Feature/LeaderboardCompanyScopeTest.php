@@ -124,6 +124,135 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
     }
 
+    public function test_a_user_with_a_matching_company_code_is_still_included_even_if_their_company_id_has_drifted(): void
+    {
+        $company = $this->makeCompany('Gencys', 'GENTIKG');
+        $otherCompany = $this->makeCompany('Other Company', 'OTHER01');
+
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $driftedUser = User::factory()->create([
+            'name' => 'Drifted Gencys User',
+            'company_id' => $otherCompany->id,
+            'active_company_id' => $otherCompany->id,
+            'company_code' => $company->code,
+            'active_company_code' => $company->code,
+            'company_name' => $company->name,
+            'active_company_name' => $company->name,
+        ]);
+
+        $coach = User::factory()->create([
+            'company_id' => $otherCompany->id,
+            'active_company_id' => $otherCompany->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+            'is_coach' => true,
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'company_id' => null,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Gencys Circle',
+            'member_ids' => [(string) $driftedUser->id],
+            'member_count' => 1,
+            'company_code' => null,
+            'company_name' => null,
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $driftedUser->id,
+            'group_id' => $group->id,
+            'group_name' => $group->name,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+
+        $companyIds = collect($response->json('companyLeaderboard'))->pluck('userId');
+        $this->assertTrue($companyIds->contains((string) $driftedUser->id));
+
+        $groupNames = collect($response->json('groupLeaderboards'))->pluck('groupName');
+        $this->assertTrue($groupNames->contains('Gencys Circle'));
+    }
+
+    public function test_a_user_with_only_company_membership_arrays_is_still_included_in_the_leaderboard(): void
+    {
+        $company = $this->makeCompany('Gencys', 'GENTIKG');
+        $otherCompany = $this->makeCompany('Other Company', 'OTHER01');
+
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $arrayOnlyUser = User::factory()->create([
+            'name' => 'Array Only Gencys User',
+            'company_id' => null,
+            'active_company_id' => null,
+            'company_code' => null,
+            'active_company_code' => null,
+            'company_name' => null,
+            'active_company_name' => null,
+            'company_memberships' => [[
+                'companyId' => $company->id,
+                'companyCode' => $company->code,
+                'companyName' => $company->name,
+            ]],
+            'company_ids' => null,
+            'company_codes' => null,
+        ]);
+
+        $coach = User::factory()->create([
+            'company_id' => $otherCompany->id,
+            'active_company_id' => $otherCompany->id,
+            'company_code' => $otherCompany->code,
+            'company_name' => $otherCompany->name,
+            'is_coach' => true,
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'company_id' => null,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Array Membership Group',
+            'member_ids' => [(string) $arrayOnlyUser->id],
+            'member_count' => 1,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $arrayOnlyUser->id,
+            'group_id' => $group->id,
+            'group_name' => $group->name,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+
+        $companyIds = collect($response->json('companyLeaderboard'))->pluck('userId');
+        $this->assertTrue($companyIds->contains((string) $arrayOnlyUser->id));
+
+        $groupNames = collect($response->json('groupLeaderboards'))->pluck('groupName');
+        $this->assertTrue($groupNames->contains('Array Membership Group'));
+    }
+
     public function test_each_group_reports_the_viewers_own_company_id_and_name(): void
     {
         $company = $this->makeCompany('CompanyA', 'COMPA');
