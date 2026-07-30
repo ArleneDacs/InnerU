@@ -44,6 +44,31 @@ void main() {
     expect((data['currentValue'] as num).toDouble(), 100);
   });
 
+  testWidgets(
+      'measure card shows the log-period-target action for a MERIT quest with a period',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'c1'});
+    final goalId = await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.personal,
+      title: 'Run 100 km',
+      targetDate: DateTime(2026, 9, 1),
+      targetValue: 100,
+      currentValue: 40,
+      unit: 'km',
+      targetPeriod: TargetPeriod.weekly,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalDetailScreen(goalId: goalId, service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Log period target'), findsOneWidget);
+  });
+
   testWidgets('milestone detail cycles a plan status', (tester) async {
     final firestore = FakeFirebaseFirestore();
     final service = GoalsService(firestore);

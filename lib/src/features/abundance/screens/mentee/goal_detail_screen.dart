@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_assets.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
 
 /// Goal detail page for Abundance 12. It keeps the original actions and
 /// streams, but presents them in the darker dashboard-style layout shown in
@@ -43,9 +45,9 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Abandon this goal?'),
+          title: const Text('Abandon this quest?'),
           content: const Text(
-            'An abandoned goal is withdrawn from your score. You can reopen it later.',
+            'An abandoned quest is withdrawn from your score. You can reopen it later.',
           ),
           actions: [
             TextButton(
@@ -79,7 +81,19 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Goal score updated')),
+        const SnackBar(content: Text('Progress saved')),
+      );
+    }
+  }
+
+  Future<void> _logPeriodTarget() async {
+    await widget.service.logMeritTarget(
+      goalId: widget.goalId,
+      actorId: widget.uid,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Period target logged')),
       );
     }
   }
@@ -122,9 +136,10 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete this goal?'),
+        title: const Text('Delete this quest?'),
         content: const Text(
-          'This permanently removes the goal, its plans, updates, and comments.',
+          'Its tasks, comments, progress history and attachments go with it. '
+          'This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -220,6 +235,12 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                                                 GoalType.merit
                                             ? _goExtraMile
                                             : null,
+                                        onLogPeriodTarget: goal.goalType ==
+                                                    GoalType.merit &&
+                                                goal.targetPeriod !=
+                                                    TargetPeriod.none
+                                            ? _logPeriodTarget
+                                            : null,
                                       ),
                                       const SizedBox(height: 18),
                                       _ActionPlansCard(
@@ -270,6 +291,12 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                                       : null,
                                   onExtraMile: goal.goalType == GoalType.merit
                                       ? _goExtraMile
+                                      : null,
+                                  onLogPeriodTarget: goal.goalType ==
+                                                  GoalType.merit &&
+                                              goal.targetPeriod !=
+                                                  TargetPeriod.none
+                                      ? _logPeriodTarget
                                       : null,
                                 ),
                                 const SizedBox(height: 18),
@@ -327,7 +354,7 @@ class _BackLink extends StatelessWidget {
             Icon(Icons.arrow_back_rounded, color: _muted, size: 22),
             SizedBox(width: 6),
             Text(
-              'My goals',
+              'My quests',
               style: TextStyle(
                 color: _muted,
                 fontSize: 16,
@@ -464,8 +491,9 @@ class _TopHeader extends StatelessWidget {
               children: [
                 _Badge(
                   label: goal.category.label,
-                  background: Color(goal.category.accent).withValues(alpha: 0.12),
-                  foreground: Color(goal.category.accent),
+                  background: AbundanceColors.categoryColor(goal.category.code)
+                      .withValues(alpha: 0.12),
+                  foreground: AbundanceColors.categoryColor(goal.category.code),
                 ),
                 _Badge(
                   label: goal.status.label,
@@ -474,13 +502,25 @@ class _TopHeader extends StatelessWidget {
                 ),
                 _Badge(
                   label: 'Score ${goal.progress}',
-                  background: _chipPinkBg,
-                  foreground: _chipPink,
+                  background: AbundanceColors.scoreColorFor(goal.progress)
+                      .withValues(alpha: 0.12),
+                  foreground: AbundanceColors.scoreColorFor(goal.progress),
                 ),
-                _Badge(
-                  label: goal.rank.name,
-                  background: _chipGrayBg,
-                  foreground: _chipGray,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset(
+                      abundanceRankMedalAsset(goal.rank.key),
+                      width: 20,
+                      height: 20,
+                    ),
+                    const SizedBox(width: 6),
+                    _Badge(
+                      label: goal.rank.name,
+                      background: _chipGrayBg,
+                      foreground: _chipGray,
+                    ),
+                  ],
                 ),
                 _MetaPill(
                   icon: Icons.calendar_today_outlined,
@@ -522,6 +562,7 @@ class _GoalScoreCard extends StatelessWidget {
     required this.currentValueFocus,
     required this.onSave,
     required this.onExtraMile,
+    required this.onLogPeriodTarget,
   });
 
   final GoalSummary goal;
@@ -531,6 +572,7 @@ class _GoalScoreCard extends StatelessWidget {
   final FocusNode currentValueFocus;
   final VoidCallback? onSave;
   final VoidCallback? onExtraMile;
+  final VoidCallback? onLogPeriodTarget;
 
   @override
   Widget build(BuildContext context) {
@@ -549,7 +591,7 @@ class _GoalScoreCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Goal Score',
+            'Quest Score',
             style: TextStyle(
               color: _text,
               fontSize: 22,
@@ -564,7 +606,7 @@ class _GoalScoreCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Goals only earn full score when they\'re finished by the target date.',
+            'Quests only earn full score when they\'re finished by the target date.',
             style: TextStyle(color: _muted, fontSize: 13.5, height: 1.4),
           ),
           const SizedBox(height: 16),
@@ -579,7 +621,7 @@ class _GoalScoreCard extends StatelessWidget {
                     const Padding(
                       padding: EdgeInsets.only(bottom: 12),
                       child: Text(
-                        'This goal is scored by its action plans.',
+                        'This quest is scored by its action plans.',
                         style: TextStyle(
                           color: _muted,
                           fontSize: 14.5,
@@ -595,7 +637,7 @@ class _GoalScoreCard extends StatelessWidget {
                             )} / ${goal.targetValue.toStringAsFixed(
                               goal.targetValue.truncateToDouble() == goal.targetValue ? 0 : 2,
                             )} ${goal.unit}'.trim()
-                      : 'No measure set yet - add a target to start scoring this goal.',
+                      : 'No measure set yet — add a target to start scoring this quest.',
                       style: const TextStyle(
                         color: _text,
                         fontSize: 15.5,
@@ -659,6 +701,17 @@ class _GoalScoreCard extends StatelessWidget {
                           ),
                           child: const Text('Go extra mile'),
                         );
+                        final logTargetButton = TextButton(
+                          onPressed: onLogPeriodTarget,
+                          style: TextButton.styleFrom(
+                            foregroundColor: AbundanceColors.accentCyan,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          child: const Text('Log period target'),
+                        );
                         if (stacked) {
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -673,13 +726,14 @@ class _GoalScoreCard extends StatelessWidget {
                               const SizedBox(height: 8),
                               currentInput,
                               const SizedBox(height: 10),
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
                                 children: [
                                   saveButton,
-                                  if (onExtraMile != null) ...[
-                                    const SizedBox(width: 8),
-                                    extraButton,
-                                  ],
+                                  if (onExtraMile != null) extraButton,
+                                  if (onLogPeriodTarget != null)
+                                    logTargetButton,
                                 ],
                               ),
                             ],
@@ -701,6 +755,10 @@ class _GoalScoreCard extends StatelessWidget {
                             if (onExtraMile != null) ...[
                               const SizedBox(width: 8),
                               extraButton,
+                            ],
+                            if (onLogPeriodTarget != null) ...[
+                              const SizedBox(width: 8),
+                              logTargetButton,
                             ],
                           ],
                         );
@@ -897,7 +955,7 @@ class _ActionPlansCard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               const Text(
-                'The steps toward this goal. Click a status to move it between not started, in progress and done.',
+                'The steps toward this quest. Click a status to move it between not started, in progress and done.',
                 style: TextStyle(color: _muted, fontSize: 14.5, height: 1.45),
               ),
               const SizedBox(height: 16),
@@ -1254,7 +1312,7 @@ class _AttachmentsCard extends StatelessWidget {
           _EmptySectionBody(
             icon: Icons.flag_outlined,
             title: 'Nothing attached',
-            subtitle: 'Files linked to this goal will appear here.',
+            subtitle: 'Files linked to this quest will appear here.',
           ),
         ],
       ),
@@ -1392,6 +1450,7 @@ class _ScoreCircle extends StatelessWidget {
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 420;
     final size = compact ? 146.0 : 170.0;
+    final scoreColor = AbundanceColors.scoreColorFor(score);
     return SizedBox(
       width: size,
       height: size,
@@ -1405,7 +1464,7 @@ class _ScoreCircle extends StatelessWidget {
               value: score / 100,
               strokeWidth: compact ? 10 : 12,
               backgroundColor: _barBg,
-              valueColor: const AlwaysStoppedAnimation<Color>(_accent),
+              valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
             ),
           ),
           Column(
@@ -1413,8 +1472,8 @@ class _ScoreCircle extends StatelessWidget {
             children: [
               Text(
                 '$score',
-                style: const TextStyle(
-                  color: _chipPink,
+                style: TextStyle(
+                  color: scoreColor,
                   fontSize: 40,
                   height: 1.0,
                   fontWeight: FontWeight.w800,
@@ -1663,28 +1722,36 @@ Color _statusForeground(GoalStatus status) {
   };
 }
 
-const Color _bg = Color(0xFF050714);
-const Color _panel = Color(0xFF0E1539);
-const Color _innerPanel = Color(0xFF0B102E);
-const Color _emptyPanel = Color(0xFF0C1235);
-const Color _border = Color(0xFF25336A);
-const Color _innerBorder = Color(0xFF1E2A57);
-const Color _divider = Color(0xFF21305F);
-const Color _text = Color(0xFFF0E6CF);
-const Color _muted = Color(0xFFB7C0E5);
-const Color _accent = Color(0xFFF0B93C);
-const Color _accentGold = Color(0xFFF0B93C);
-const Color _buttonDark = Color(0xFF11183C);
-const Color _barBg = Color(0xFF0A0F2B);
-const Color _circleBg = Color(0xFF09102A);
-const Color _metaBg = Color(0xFF11183C);
-const Color _danger = Color(0xFFFF4F85);
+// Sourced from AbundanceColors (lib/src/features/abundance/theme/abundance_theme.dart)
+// rather than new magic hex — this screen's own dark dashboard palette was
+// built before that shared token file existed; these aliases keep the rest
+// of this file's widget code unchanged while pointing every solid color at
+// the single shared source of truth. The "*Bg" variants below are subtle
+// tinted backgrounds with no AbundanceColors equivalent (status chips and
+// plan-row chips only, out of this task's explicit color-mapping scope) and
+// remain as they were.
+const Color _bg = AbundanceColors.background;
+const Color _panel = AbundanceColors.surfaceRaised;
+const Color _innerPanel = AbundanceColors.surfaceSunken;
+const Color _emptyPanel = AbundanceColors.surfaceSunken;
+const Color _border = AbundanceColors.border;
+const Color _innerBorder = AbundanceColors.border;
+const Color _divider = AbundanceColors.border;
+const Color _text = AbundanceColors.foreground;
+const Color _muted = AbundanceColors.muted;
+const Color _accent = AbundanceColors.primaryGold;
+const Color _accentGold = AbundanceColors.primaryGold;
+const Color _buttonDark = AbundanceColors.surfaceSunken;
+const Color _barBg = AbundanceColors.surfaceSunken;
+const Color _circleBg = AbundanceColors.surfaceSunken;
+const Color _metaBg = AbundanceColors.surfaceSunken;
+const Color _danger = AbundanceColors.scoreCritical;
 const Color _dangerBg = Color(0xFF2A1230);
-const Color _chipPink = Color(0xFFFF6B86);
+const Color _chipPink = AbundanceColors.scoreCritical;
 const Color _chipPinkBg = Color(0xFF2A2030);
-const Color _chipBlue = Color(0xFF56C7F4);
+const Color _chipBlue = AbundanceColors.accentCyan;
 const Color _chipBlueBg = Color(0xFF142339);
-const Color _chipGreen = Color(0xFF5BE0B1);
+const Color _chipGreen = AbundanceColors.scoreExcellent;
 const Color _chipGreenBg = Color(0xFF12302A);
-const Color _chipGray = Color(0xFFCFD6FF);
+const Color _chipGray = AbundanceColors.muted;
 const Color _chipGrayBg = Color(0xFF232A47);
