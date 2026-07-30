@@ -37,6 +37,47 @@ class GoalController extends Controller
         return response()->json(['goals' => $goals]);
     }
 
+    public function coachGoalsRoster(Request $request): JsonResponse
+    {
+        $user = $this->currentUser($request);
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $assignments = CoachMentee::query()
+            ->where('coach_id', (string) $user->id)
+            ->get(['mentee_id', 'mentee_name'])
+            ->unique('mentee_id')
+            ->values();
+
+        $menteeIds = $assignments->pluck('mentee_id')->all();
+
+        $goalsByMentee = Goal::query()
+            ->whereIn('user_id', $menteeIds)
+            ->orderByDesc('updated_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $roster = $assignments->map(function (CoachMentee $assignment) use ($goalsByMentee) {
+            $goals = $goalsByMentee->get($assignment->mentee_id, collect());
+
+            return [
+                'menteeId' => (string) $assignment->mentee_id,
+                'menteeName' => $assignment->mentee_name,
+                'goals' => $goals->map(fn (Goal $goal) => [
+                    'id' => (string) $goal->id,
+                    'title' => $goal->title,
+                    'category' => $goal->category,
+                    'status' => $goal->status,
+                    'progress' => (int) $goal->progress,
+                    'targetDate' => $goal->target_date?->toIso8601String(),
+                ])->values(),
+            ];
+        });
+
+        return response()->json(['roster' => $roster->values()]);
+    }
+
     public function show(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
