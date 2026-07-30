@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
@@ -7,10 +8,13 @@ import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.d
 /// Create or edit a quest through a 4-step wizard mirroring A12-Tracker's
 /// `goal-wizard.tsx`: What -> How -> When & qualities -> Declaration.
 ///
-/// This screen is built across two tasks: this one (the step *shell* --
-/// navigation, progress bar, per-step validation gating -- plus the first
-/// two steps' content) and a later task (steps 3-4 plus wiring the final
-/// Submit action into [_save]).
+/// The wizard never shows a separate title/description/notes field -- like
+/// A12's own wizard, it collects one declaration (step 0's "what"), the
+/// qualities to embody (step 2), and a deadline (step 2), then composes the
+/// sentence that gets stored. That composition (`_composeDeclaration`, a
+/// port of goal-wizard.tsx's `declarationTemplate`) runs in `_submit()`,
+/// which reconciles it into `_title`/`_description`/`_notes` immediately
+/// before delegating to the pre-existing `_save()`.
 class GoalFormScreen extends StatefulWidget {
   const GoalFormScreen({
     super.key,
@@ -37,6 +41,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   late final TextEditingController _unit;
   final _planEntry = TextEditingController();
   final _declarationController = TextEditingController();
+  final Set<String> _qualities = {};
+  final _qualitiesFreeTextController = TextEditingController();
   final _scrollController = ScrollController();
 
   // Nullable (unlike the other fields below): a new quest starts with no
@@ -61,6 +67,18 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     'Step 4 of 4 — Declaration',
   ];
   static const _stepLabels = ['What', 'How', 'When & qualities', 'Declaration'];
+
+  // Copied verbatim from A12's `QUALITY_RECOMMENDATIONS` in goal-wizard.tsx.
+  static const _qualityRecommendations = [
+    'Commitment',
+    'Discipline',
+    'Excellence',
+    'Integrity',
+    'Responsibility',
+    'Love',
+    'Compassion',
+    'Awareness',
+  ];
 
   bool get _isEdit => widget.existing != null;
 
@@ -92,10 +110,17 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     // question when editing an existing quest -- A12's own wizard recovers
     // this via `splitDeclaration(title, description)`, whose "what" half is
     // just the title, trimmed (see goal-wizard.tsx's `splitDeclaration`).
-    // Task 8 owns how the final declaration text maps back into
-    // title/description on save; this only seeds the initial display text.
+    // The reverse mapping (declaration + qualities -> title/description/
+    // notes) happens in `_submit()`, right before `_save()` runs.
     _declarationController.text = g?.title ?? '';
     _notes = TextEditingController(text: g?.notes ?? '');
+    // A12 stores the chosen qualities in the goal's `notes` field (see
+    // goal-wizard.tsx: `qualities` state seeded from `initial?.notes`, and
+    // posted back as `notes: qualities.trim()`). Mirrored here so editing an
+    // existing quest doesn't silently blank out its previously-set
+    // qualities the next time this wizard saves.
+    _qualities.addAll(_splitQualities(g?.notes ?? ''));
+    _qualitiesFreeTextController.text = _qualities.join(', ');
     _targetValue = TextEditingController(
         text: g == null || g.targetValue == 0 ? '' : '${g.targetValue}');
     _currentValue = TextEditingController(
@@ -120,13 +145,12 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     _unit.dispose();
     _planEntry.dispose();
     _declarationController.dispose();
+    _qualitiesFreeTextController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  // Kept for the "When & qualities" step a later task adds to this screen --
-  // that step shows the target-date picker these back.
-  // ignore: unused_element
+  // Backs step 2 ("When & qualities")'s deadline picker.
   Future<void> _pickTargetDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -176,6 +200,77 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     setState(() => _currentStep = (_currentStep - 1).clamp(0, 3));
   }
 
+  void _toggleQuality(String quality) {
+    setState(() {
+      if (_qualities.contains(quality)) {
+        _qualities.remove(quality);
+      } else {
+        _qualities.add(quality);
+      }
+      // One-way sync, chip -> text, matching the brief: the free-text field
+      // is only read back into `_qualities` at submit time (see
+      // `_parsedQualities`), so a member who has typed something by hand is
+      // not fought with on every chip tap.
+      _qualitiesFreeTextController.text = _qualities.join(', ');
+    });
+  }
+
+  /// Splits a comma-separated qualities string into a deduped,
+  /// order-preserving list -- mirrors A12's `qualityList()` in
+  /// goal-wizard.tsx.
+  List<String> _splitQualities(String text) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final raw in text.split(',')) {
+      final quality = raw.trim();
+      if (quality.isEmpty) continue;
+      if (seen.add(quality.toLowerCase())) result.add(quality);
+    }
+    return result;
+  }
+
+  /// The qualities actually in play right now: whatever is currently typed
+  /// into the free-text field, which is also what every chip tap keeps in
+  /// sync -- so this is correct whether the member used the chips, typed by
+  /// hand, or both.
+  List<String> _parsedQualities() =>
+      _splitQualities(_qualitiesFreeTextController.text);
+
+  /// "a, b, and c" -- mirrors A12's `naturalList()` in goal-wizard.tsx.
+  String _naturalList(List<String> values) {
+    if (values.isEmpty) return '';
+    if (values.length == 1) return values.first;
+    if (values.length == 2) return '${values[0]} and ${values[1]}';
+    return '${values.sublist(0, values.length - 1).join(', ')}, and '
+        '${values.last}';
+  }
+
+  /// Ported from A12's `declarationTemplate` (goal-wizard.tsx): composes the
+  /// sentence stored as the quest's `description` from the raw "what"
+  /// answer, the qualities chosen to embody, and the deadline -- e.g. "With
+  /// Commitment, I see myself finishing what I start on or before July 31,
+  /// 2026." `_title` gets the raw "what" alone (A12's hidden `title` input
+  /// is `what.trim()`) -- see `_submit`.
+  String _composeDeclaration(
+    String what,
+    List<String> qualities,
+    DateTime targetDate,
+  ) {
+    final goal = what.trim().replaceAll(RegExp(r'[.!?]+\s*$'), '');
+    if (goal.isEmpty) return '';
+    final embodied = _naturalList(qualities);
+    final alreadyVision = RegExp(
+      r'^i\s+(?:joyfully\s+)?see myself\b',
+      caseSensitive: false,
+    ).hasMatch(goal);
+    final vision = alreadyVision
+        ? goal
+        : 'I see myself ${goal.substring(0, 1).toLowerCase()}${goal.substring(1)}';
+    final prefix = embodied.isEmpty ? '' : 'With $embodied, ';
+    return '$prefix$vision on or before '
+        '${DateFormat('MMMM d, y').format(targetDate)}.';
+  }
+
   /// Deliberately a no-op beyond the snackbar. Real AI-suggestion behavior
   /// (see `A12-Tracker/src/app/(app)/goals/actions.ts`'s
   /// `suggestDeclarationAction`) is unconfirmed from source and out of scope
@@ -184,6 +279,32 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('AI suggestions are coming soon.')),
     );
+  }
+
+  /// Reconciles the wizard's declaration/qualities state into the fields
+  /// `_save()` actually persists, then delegates to it unchanged. The
+  /// wizard never shows a separate title/description/notes field, so this
+  /// is the one place that mapping happens, immediately before the
+  /// pre-existing save path runs:
+  ///  - `_title` <- the raw "what" (step 0's declaration field), trimmed.
+  ///  - `_description` <- `_composeDeclaration`, the full declaration
+  ///    sentence (qualities + deadline woven in), mirroring A12's
+  ///    `declarationTemplate`.
+  ///  - `_notes` <- the chosen qualities, comma-joined, mirroring A12's own
+  ///    wizard, which stores qualities in the goal's `notes` field.
+  Future<void> _submit() async {
+    final qualities = _parsedQualities();
+    _qualities
+      ..clear()
+      ..addAll(qualities);
+    _title.text = _declarationController.text.trim();
+    _description.text = _composeDeclaration(
+      _declarationController.text,
+      qualities,
+      _targetDate,
+    );
+    _notes.text = qualities.join(', ');
+    await _save();
   }
 
   Future<void> _save() async {
@@ -440,8 +561,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     return switch (_currentStep) {
       0 => _buildStepWhat(),
       1 => _buildStepHow(),
-      2 => _buildStepPlaceholder('When & qualities'),
-      _ => _buildStepPlaceholder('Declaration'),
+      2 => _buildStepWhenAndQualities(),
+      _ => _buildStepDeclaration(),
     };
   }
 
@@ -649,24 +770,196 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     );
   }
 
-  Widget _buildStepPlaceholder(String label) {
+  Widget _buildStepWhenAndQualities() {
     return _sectionCard(
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
+          const Text(
+            'Choose when and who you will be',
+            style: TextStyle(
               color: AbundanceColors.foreground,
               fontSize: 18,
               fontWeight: FontWeight.w800,
               fontFamily: 'Georgia',
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const Text(
-            'Built in a later task.',
-            style: TextStyle(color: AbundanceColors.muted, fontSize: 13.5),
+            'Choose a deadline, then select the qualities you will embody.',
+            style: TextStyle(
+              color: AbundanceColors.muted,
+              fontSize: 13.5,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Deadline',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildDeadlinePicker(),
+          const SizedBox(height: 18),
+          const Text(
+            'What qualities will you embody?',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final quality in _qualityRecommendations)
+                _QualityChip(
+                  label: quality,
+                  selected: _qualities.contains(quality),
+                  onTap: () => _toggleQuality(quality),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            key: const Key('quest-qualities-field'),
+            controller: _qualitiesFreeTextController,
+            maxLines: 2,
+            style: const TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 15,
+            ),
+            decoration: _fieldDecoration(
+              'Love, Compassion, Integrity, Excellence, Awareness',
+              helper: 'Separate each quality with a comma.',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeadlinePicker() {
+    return Material(
+      color: AbundanceColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _pickTargetDate,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AbundanceColors.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.event_outlined,
+                size: 18,
+                color: AbundanceColors.muted,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                DateFormat('MMMM d, y').format(_targetDate),
+                style: const TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStepDeclaration() {
+    final qualities = _parsedQualities();
+    // Computed live (not just at submit) so the review card always shows
+    // what will actually be saved if Submit is tapped right now.
+    final composed = _composeDeclaration(
+      _declarationController.text,
+      qualities,
+      _targetDate,
+    );
+    return _sectionCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Review your quest declaration',
+            style: TextStyle(
+              color: AbundanceColors.foreground,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'Georgia',
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Review the declaration and every answer before saving your '
+            'quest.',
+            style: TextStyle(
+              color: AbundanceColors.muted,
+              fontSize: 13.5,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AbundanceColors.primaryGold.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: AbundanceColors.primaryGold.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  composed.isEmpty
+                      ? _declarationController.text.trim()
+                      : composed,
+                  style: const TextStyle(
+                    color: AbundanceColors.foreground,
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Divider(color: AbundanceColors.border, height: 1),
+                const SizedBox(height: 12),
+                const Text(
+                  'QUALITIES',
+                  style: TextStyle(
+                    color: AbundanceColors.primaryGold,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  qualities.isEmpty ? 'None selected' : qualities.join(', '),
+                  style: const TextStyle(
+                    color: AbundanceColors.foreground,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -713,7 +1006,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
               )
             else
               FilledButton(
-                onPressed: _saving ? null : _save,
+                onPressed: _saving ? null : _submit,
                 style: FilledButton.styleFrom(
                   backgroundColor: AbundanceColors.primaryGold,
                   foregroundColor: Colors.black,
@@ -881,6 +1174,57 @@ class _DirectionButton extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A quality recommendation chip on step 2 -- toggles membership in
+/// `_qualities` when tapped. Mirrors the pill buttons in goal-wizard.tsx's
+/// `QUALITY_RECOMMENDATIONS` row.
+class _QualityChip extends StatelessWidget {
+  const _QualityChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? AbundanceColors.primaryGold.withValues(alpha: 0.15)
+          : AbundanceColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected
+                  ? AbundanceColors.primaryGold
+                  : AbundanceColors.border,
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? AbundanceColors.primaryGold
+                  : AbundanceColors.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),

@@ -5,6 +5,8 @@ import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 
+const _declaration = 'I see myself finishing what I start';
+
 void main() {
   testWidgets('wizard starts on step 1 of 4 and blocks Next until the declaration is filled',
       (tester) async {
@@ -106,5 +108,96 @@ void main() {
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
     expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+  });
+
+  testWidgets('completing all 4 steps and submitting creates the quest',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+    await FakeFirebaseFirestore().collection('users').doc('u1').set({
+      'companyId': 'c1',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      'I see myself finishing what I start',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '10');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
+    await tester.tap(find.text('Commitment'));
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 4 of 4 — Declaration'), findsOneWidget);
+    expect(find.textContaining('I see myself finishing what I start'), findsWidgets);
+    expect(find.text('Commitment'), findsWidgets);
+
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    // Submitting pops the wizard back to its caller.
+    expect(find.byType(GoalFormScreen), findsNothing);
+  });
+
+  testWidgets(
+      'submitting the wizard persists a non-blank title/description derived '
+      'from the declaration -- the gap this task must close is a quest '
+      'silently saved with a blank title/description',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({
+      'activeCompanyId': 'A12',
+      'companyId': 'A12',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '10');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Commitment'));
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    final docs = await firestore.collection('goals').get();
+    expect(docs.docs, hasLength(1));
+    final data = docs.docs.single.data();
+
+    // This is the assertion that actually closes the gap: if `_title`/
+    // `_description` were left wired to nothing (as they were before this
+    // task), these would be empty strings and the test below would fail --
+    // merely reaching and tapping Submit is not enough proof.
+    expect(data['title'], isNotEmpty);
+    expect(data['title'], contains(_declaration));
+    expect(data['description'], isNotEmpty);
+    expect(data['description'], contains(_declaration));
+    expect(data['description'], contains('Commitment'));
   });
 }
