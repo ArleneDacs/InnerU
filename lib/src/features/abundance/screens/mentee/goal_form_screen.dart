@@ -88,6 +88,13 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     final g = widget.existing;
     _title = TextEditingController(text: g?.title ?? '');
     _description = TextEditingController(text: g?.description ?? '');
+    // Step 0's declaration field must not present as an empty, required
+    // question when editing an existing quest -- A12's own wizard recovers
+    // this via `splitDeclaration(title, description)`, whose "what" half is
+    // just the title, trimmed (see goal-wizard.tsx's `splitDeclaration`).
+    // Task 8 owns how the final declaration text maps back into
+    // title/description on save; this only seeds the initial display text.
+    _declarationController.text = g?.title ?? '';
     _notes = TextEditingController(text: g?.notes ?? '');
     _targetValue = TextEditingController(
         text: g == null || g.targetValue == 0 ? '' : '${g.targetValue}');
@@ -232,7 +239,6 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final showAiBanner = _currentStep == 0 || _currentStep == 2;
     return Scaffold(
       backgroundColor: AbundanceColors.background,
       body: SafeArea(
@@ -258,10 +264,14 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
                         children: [
                           _buildHeader(),
                           const SizedBox(height: 16),
-                          if (showAiBanner) ...[
-                            _buildAiBanner(),
-                            const SizedBox(height: 16),
-                          ],
+                          // Shown on every step, unconditionally -- confirmed
+                          // against goal-wizard.tsx:880-926, where this banner
+                          // sits outside all four step <section> blocks with
+                          // no `step` gating at all. The brief's "step 0 and
+                          // step 2 only" instruction did not match the real
+                          // reference file.
+                          _buildAiBanner(),
+                          const SizedBox(height: 16),
                           _buildProgressBar(),
                           const SizedBox(height: 20),
                           _buildStepBody(),
