@@ -123,6 +123,8 @@ flutter:
   assets:
     - assets/images/
     - assets/images/login-image/
+    - assets/images/abundance/ranks/
+    - assets/images/abundance/scenes/
     - assets/logo/
     - assets/audio/
     - assets/videos/
