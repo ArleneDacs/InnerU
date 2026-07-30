@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
@@ -895,17 +896,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
   }
 
   bool _matchesAbundance12(String companyName, String companyCode) {
-    final normalizedName =
-        companyName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode =
-        companyCode.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') &&
-            normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(companyCode, companyName);
   }
 }
 
