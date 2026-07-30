@@ -106,6 +106,34 @@ class GoalSummary {
           : 0;
 }
 
+/// One coach roster row: a mentee and their quests, as returned by
+/// `GET /api/coach/goals`. Mirrors `A12-Tracker`'s `listMenteeGoals` shape.
+class CoachMenteeGoals {
+  const CoachMenteeGoals({
+    required this.menteeId,
+    required this.menteeName,
+    required this.goals,
+  });
+
+  factory CoachMenteeGoals.fromJson(Map<String, dynamic> json) {
+    final rawGoals = json['goals'];
+    return CoachMenteeGoals(
+      menteeId: json['menteeId']?.toString() ?? '',
+      menteeName: json['menteeName']?.toString() ?? '',
+      goals: rawGoals is List
+          ? rawGoals
+              .whereType<Map>()
+              .map((g) => GoalSummary.fromJson(Map<String, dynamic>.from(g)))
+              .toList()
+          : const <GoalSummary>[],
+    );
+  }
+
+  final String menteeId;
+  final String menteeName;
+  final List<GoalSummary> goals;
+}
+
 class ActionPlanItem {
   const ActionPlanItem({
     required this.id,
@@ -954,6 +982,20 @@ class GoalsService {
     return raw
         .whereType<Map>()
         .map((item) => MeritLogItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  /// Every mentee this coach is assigned, each with their quests — the data
+  /// backing the coach Quests roster screen. Read-only; coach visibility is
+  /// enforced server-side against `coach_mentees`, mirroring how the
+  /// per-mentee endpoint already works.
+  Future<List<CoachMenteeGoals>> fetchCoachGoalsRoster() async {
+    final response = await _api.getJson('/api/coach/goals', token: _token);
+    final raw = response['roster'];
+    if (raw is! List) return const <CoachMenteeGoals>[];
+    return raw
+        .whereType<Map>()
+        .map((entry) => CoachMenteeGoals.fromJson(Map<String, dynamic>.from(entry)))
         .toList();
   }
 
