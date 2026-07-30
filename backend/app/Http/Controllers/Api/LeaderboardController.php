@@ -10,13 +10,13 @@ use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class LeaderboardController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService)
-    {
-    }
+    public function __construct(private readonly UserScoreService $userScoreService) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -56,6 +56,7 @@ class LeaderboardController extends Controller
             ->values()
             ->map(function (array $entry, int $index): array {
                 $entry['rank'] = $index + 1;
+
                 return $entry;
             })
             ->values();
@@ -66,28 +67,12 @@ class LeaderboardController extends Controller
         $groupLeaderboards = $company !== null
             ? $allGroups
                 ->filter(function (CoachGroup $group) use ($company, $usersById): bool {
-                    // The group's own stored company_id (stamped at
-                    // creation time from its coach's company) is the
-                    // primary signal -- it doesn't drift if the coach's
-                    // own record later changes.
-                    if ($group->company_id !== null
-                        && (string) $group->company_id === (string) $company->id
-                    ) {
+                    if ($this->companyIdentifierMatches($group->company_id, $company)) {
                         return true;
                     }
 
-                    // company_code has been stamped on every group since
-                    // the group-creation feature was first built (long
-                    // before company_id existed), so it's reliably
-                    // present even when company_id was never backfilled
-                    // (e.g. the coach's own company_id is blank, so there
-                    // was nothing to copy). Codes are unique per company
-                    // (see CompanyController::generateUniqueCode), unlike
-                    // company_name, which two different companies could
-                    // share -- deliberately not matching on name here to
-                    // avoid re-opening that leak.
-                    $groupCode = trim((string) ($group->company_code ?? ''));
-                    if ($groupCode !== '' && $groupCode === trim((string) $company->code)) {
+                    $groupCode = $this->normalizedCode($group->company_code);
+                    if ($groupCode !== '' && $groupCode === $this->normalizedCode($company->code)) {
                         return true;
                     }
 
@@ -183,6 +168,7 @@ class LeaderboardController extends Controller
                     ->values()
                     ->map(function (array $entry, int $index): array {
                         $entry['rank'] = $index + 1;
+
                         return $entry;
                     })
                     ->values()
@@ -240,6 +226,7 @@ class LeaderboardController extends Controller
             ->values()
             ->map(function (array $entry, int $index): array {
                 $entry['rank'] = $index + 1;
+
                 return $entry;
             })
             ->values();
@@ -272,7 +259,7 @@ class LeaderboardController extends Controller
     }
 
     /**
-     * @param array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}> $breakdowns
+     * @param  array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}>  $breakdowns
      * @return array{goalScore:float, coreTaskScore:float, overallScore:float}
      */
     private function leaderboardBreakdownForUser(User $user, array $breakdowns): array
@@ -312,10 +299,11 @@ class LeaderboardController extends Controller
         }
 
         foreach ($this->companyLookupCandidates($user) as $candidate) {
+            $candidate = trim($candidate);
             $company = Company::query()
                 ->where('id', $candidate)
-                ->orWhere('code', $candidate)
-                ->orWhere('name', $candidate)
+                ->orWhereRaw('UPPER(TRIM(code)) = ?', [$this->normalizedCode($candidate)])
+                ->orWhereRaw('LOWER(TRIM(name)) = ?', [$this->normalizedName($candidate)])
                 ->first();
 
             if ($company !== null) {
@@ -327,17 +315,25 @@ class LeaderboardController extends Controller
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, User>
+     * @return Collection<int, User>
      */
-    private function companyUsersForScope(?Company $company, User $viewer): \Illuminate\Support\Collection {
+    private function companyUsersForScope(?Company $company, User $viewer): Collection
+    {
         if ($company === null) {
             return collect([$viewer]);
         }
 
-        $exactCompanyUsers = User::query()
+        // Imported Firestore users can still have the old company code in
+        // an *_company_id field, while companies now use UUID primary keys.
+        // Both values identify the same company.
+        $identifierUsers = User::query()
             ->where(function ($builder) use ($company): void {
-                $builder->where('company_id', $company->id)
-                    ->orWhere('active_company_id', $company->id);
+                $identifiers = [
+                    $this->normalizedCode($company->id),
+                    $this->normalizedCode($company->code),
+                ];
+                $builder->whereIn(DB::raw('UPPER(TRIM(company_id))'), $identifiers)
+                    ->orWhereIn(DB::raw('UPPER(TRIM(active_company_id))'), $identifiers);
             })
             ->orderBy('name')
             ->get();
@@ -347,8 +343,9 @@ class LeaderboardController extends Controller
         // the user even if their company_id has drifted elsewhere.
         $codeUsers = User::query()
             ->where(function ($builder) use ($company): void {
-                $builder->where('company_code', $company->code)
-                    ->orWhere('active_company_code', $company->code);
+                $normalizedCode = $this->normalizedCode($company->code);
+                $builder->whereRaw('UPPER(TRIM(company_code)) = ?', [$normalizedCode])
+                    ->orWhereRaw('UPPER(TRIM(active_company_code)) = ?', [$normalizedCode]);
             })
             ->orderBy('name')
             ->get();
@@ -365,8 +362,9 @@ class LeaderboardController extends Controller
                 $builder->whereNull('active_company_id')->orWhere('active_company_id', '');
             })
             ->where(function ($builder) use ($company): void {
-                $builder->where('company_name', $company->name)
-                    ->orWhere('active_company_name', $company->name);
+                $normalizedName = $this->normalizedName($company->name);
+                $builder->whereRaw('LOWER(TRIM(company_name)) = ?', [$normalizedName])
+                    ->orWhereRaw('LOWER(TRIM(active_company_name)) = ?', [$normalizedName]);
             })
             ->orderBy('name')
             ->get();
@@ -393,10 +391,11 @@ class LeaderboardController extends Controller
         // company_id. Without this, the viewer themselves could vanish
         // from their own company's leaderboard whenever anyone else in
         // the company has tidier data than they do.
-        $combined = $exactCompanyUsers
+        $combined = $identifierUsers
             ->concat($codeUsers)
             ->concat($nameUsers)
             ->concat($membershipUsers)
+            ->filter(fn (User $candidate): bool => $this->userBelongsToCompany($candidate, $company))
             ->unique(fn (User $candidate) => (string) $candidate->id)
             ->values();
 
@@ -409,27 +408,20 @@ class LeaderboardController extends Controller
 
     private function userBelongsToCompany(User $user, Company $company): bool
     {
-        if ((string) $user->company_id === (string) $company->id) {
+        if ($this->companyIdentifierMatches($user->company_id, $company)) {
             return true;
         }
 
-        if ((string) $user->active_company_id === (string) $company->id) {
+        if ($this->companyIdentifierMatches($user->active_company_id, $company)) {
             return true;
         }
 
-        if ((string) $user->company_code === (string) $company->code) {
+        $companyCode = $this->normalizedCode($company->code);
+        if ($companyCode !== '' && $this->normalizedCode($user->company_code) === $companyCode) {
             return true;
         }
 
-        if ((string) $user->active_company_code === (string) $company->code) {
-            return true;
-        }
-
-        if ((string) $user->company_name === (string) $company->name) {
-            return true;
-        }
-
-        if ((string) $user->active_company_name === (string) $company->name) {
+        if ($companyCode !== '' && $this->normalizedCode($user->active_company_code) === $companyCode) {
             return true;
         }
 
@@ -441,20 +433,37 @@ class LeaderboardController extends Controller
             return true;
         }
 
-        return $this->companyCodeArrayMatches($user->company_codes, (string) $company->code);
+        if ($this->companyCodeArrayMatches($user->company_ids, (string) $company->code)) {
+            return true;
+        }
+
+        if ($this->companyCodeArrayMatches($user->company_codes, (string) $company->code)) {
+            return true;
+        }
+
+        // Names are not unique. Only use one when no id is available.
+        if (trim((string) $user->company_id) !== '' || trim((string) $user->active_company_id) !== '') {
+            return false;
+        }
+
+        $companyName = $this->normalizedName($company->name);
+
+        return $companyName !== ''
+            && ($this->normalizedName($user->company_name) === $companyName
+                || $this->normalizedName($user->active_company_name) === $companyName);
     }
 
     private function groupBelongsToCompany(CoachGroup $group, Company $company): bool
     {
-        if ((string) $group->company_id === (string) $company->id) {
+        if ($this->companyIdentifierMatches($group->company_id, $company)) {
             return true;
         }
 
-        if ((string) $group->company_code === (string) $company->code) {
+        if ($this->normalizedCode($group->company_code) === $this->normalizedCode($company->code)) {
             return true;
         }
 
-        return (string) $group->company_name === (string) $company->name;
+        return $this->normalizedName($group->company_name) === $this->normalizedName($company->name);
     }
 
     /**
@@ -463,9 +472,12 @@ class LeaderboardController extends Controller
     private function companyLookupCandidates(User $user): array
     {
         $candidates = [
-            $this->activeCompanyValue($user->active_company_id, $user->company_id),
-            $this->activeCompanyValue($user->active_company_code, $user->company_code),
-            $this->activeCompanyValue($user->active_company_name, $user->company_name),
+            trim((string) $user->active_company_id),
+            trim((string) $user->active_company_code),
+            trim((string) $user->active_company_name),
+            trim((string) $user->company_id),
+            trim((string) $user->company_code),
+            trim((string) $user->company_name),
         ];
 
         foreach (is_array($user->company_ids) ? $user->company_ids : [] as $companyId) {
@@ -477,13 +489,25 @@ class LeaderboardController extends Controller
         }
 
         foreach (is_array($user->company_memberships) ? $user->company_memberships : [] as $membership) {
+            if (is_string($membership) || is_numeric($membership)) {
+                $candidates[] = trim((string) $membership);
+
+                continue;
+            }
+
             if (! is_array($membership)) {
                 continue;
             }
 
-            $candidates[] = trim((string) ($membership['companyId'] ?? $membership['id'] ?? ''));
-            $candidates[] = trim((string) ($membership['companyCode'] ?? $membership['code'] ?? ''));
-            $candidates[] = trim((string) ($membership['companyName'] ?? $membership['name'] ?? ''));
+            $candidates[] = trim((string) (
+                $membership['companyId'] ?? $membership['company_id'] ?? $membership['id'] ?? ''
+            ));
+            $candidates[] = trim((string) (
+                $membership['companyCode'] ?? $membership['company_code'] ?? $membership['code'] ?? ''
+            ));
+            $candidates[] = trim((string) (
+                $membership['companyName'] ?? $membership['company_name'] ?? $membership['name'] ?? ''
+            ));
         }
 
         return array_values(array_unique(array_filter($candidates)));
@@ -502,17 +526,15 @@ class LeaderboardController extends Controller
         return array_values(array_unique(array_filter($coachIds)));
     }
 
-    /**
-     * @param mixed $values
-     */
     private function companyIdArrayMatches(mixed $values, string $companyId): bool
     {
         if (! is_array($values)) {
             return false;
         }
 
+        $normalizedCompanyId = trim($companyId);
         foreach ($values as $value) {
-            if ((string) $value === $companyId) {
+            if (trim((string) $value) === $normalizedCompanyId) {
                 return true;
             }
         }
@@ -520,9 +542,6 @@ class LeaderboardController extends Controller
         return false;
     }
 
-    /**
-     * @param mixed $values
-     */
     private function companyCodeArrayMatches(mixed $values, string $companyCode): bool
     {
         if (! is_array($values)) {
@@ -539,9 +558,6 @@ class LeaderboardController extends Controller
         return false;
     }
 
-    /**
-     * @param mixed $memberships
-     */
     private function companyMembershipMatches(mixed $memberships, Company $company): bool
     {
         if (! is_array($memberships)) {
@@ -549,31 +565,73 @@ class LeaderboardController extends Controller
         }
 
         foreach ($memberships as $membership) {
+            if (is_string($membership) || is_numeric($membership)) {
+                if ($this->companyIdentifierMatches($membership, $company)) {
+                    return true;
+                }
+
+                continue;
+            }
+
             if (! is_array($membership)) {
                 continue;
             }
 
-            $membershipCompanyId = trim((string) ($membership['companyId'] ?? $membership['id'] ?? ''));
+            $membershipCompanyId = trim((string) (
+                $membership['companyId']
+                ?? $membership['company_id']
+                ?? $membership['id']
+                ?? ''
+            ));
             $membershipCompanyCode = strtoupper(trim((string) (
-                $membership['companyCode'] ?? $membership['code'] ?? ''
+                $membership['companyCode']
+                ?? $membership['company_code']
+                ?? $membership['code']
+                ?? ''
             )));
             $membershipCompanyName = trim((string) (
-                $membership['companyName'] ?? $membership['name'] ?? ''
+                $membership['companyName']
+                ?? $membership['company_name']
+                ?? $membership['name']
+                ?? ''
             ));
 
-            if ($membershipCompanyId !== '' && $membershipCompanyId === (string) $company->id) {
+            if ($this->companyIdentifierMatches($membershipCompanyId, $company)) {
                 return true;
             }
 
-            if ($membershipCompanyCode !== '' && $membershipCompanyCode === strtoupper((string) $company->code)) {
+            if ($membershipCompanyCode !== '' && $membershipCompanyCode === $this->normalizedCode($company->code)) {
                 return true;
             }
 
-            if ($membershipCompanyName !== '' && $membershipCompanyName === (string) $company->name) {
+            if ($membershipCompanyName !== ''
+                && $this->normalizedName($membershipCompanyName) === $this->normalizedName($company->name)
+            ) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function companyIdentifierMatches(mixed $value, Company $company): bool
+    {
+        $normalizedValue = $this->normalizedCode($value);
+        if ($normalizedValue === '') {
+            return false;
+        }
+
+        return $normalizedValue === $this->normalizedCode($company->id)
+            || $normalizedValue === $this->normalizedCode($company->code);
+    }
+
+    private function normalizedCode(mixed $value): string
+    {
+        return strtoupper(trim((string) ($value ?? '')));
+    }
+
+    private function normalizedName(mixed $value): string
+    {
+        return strtolower(trim((string) ($value ?? '')));
     }
 }

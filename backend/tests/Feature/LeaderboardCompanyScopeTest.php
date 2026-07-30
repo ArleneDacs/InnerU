@@ -253,6 +253,103 @@ class LeaderboardCompanyScopeTest extends TestCase
         $this->assertTrue($groupNames->contains('Array Membership Group'));
     }
 
+    public function test_migrated_users_with_the_company_code_in_company_id_are_included(): void
+    {
+        $company = $this->makeCompany('Gencys', 'GENCYS');
+        $otherCompany = $this->makeCompany('Other Company', 'OTHER');
+
+        $viewer = User::factory()->create([
+            'name' => 'Gencys Viewer',
+            'company_id' => 'gencys',
+            'active_company_id' => ' GENCYS ',
+            'company_code' => null,
+            'active_company_code' => null,
+            'company_name' => null,
+            'active_company_name' => null,
+        ]);
+        $migratedMember = User::factory()->create([
+            'name' => 'Migrated Gencys Member',
+            'company_id' => 'GENCYS',
+            'active_company_id' => 'gencys',
+            'company_code' => null,
+            'active_company_code' => null,
+            'company_name' => null,
+            'active_company_name' => null,
+        ]);
+        $outsider = User::factory()->create([
+            'name' => 'Other Member',
+            'company_id' => $otherCompany->id,
+            'company_code' => $otherCompany->code,
+            'company_name' => $otherCompany->name,
+        ]);
+
+        $group = CoachGroup::create([
+            'id' => (string) Str::uuid(),
+            'coach_id' => (string) $viewer->id,
+            'company_id' => 'gencys',
+            'coach_ids' => [(string) $viewer->id],
+            'name' => 'Migrated Gencys Group',
+            'member_ids' => [(string) $migratedMember->id],
+            'member_count' => 1,
+            'company_code' => null,
+            'company_name' => null,
+        ]);
+
+        CoachMentee::create([
+            'coach_id' => (string) $viewer->id,
+            'mentee_id' => (string) $migratedMember->id,
+            'group_id' => $group->id,
+            'group_name' => $group->name,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $ids = collect($response->json('companyLeaderboard'))->pluck('userId');
+        $this->assertTrue($ids->contains((string) $viewer->id));
+        $this->assertTrue($ids->contains((string) $migratedMember->id));
+        $this->assertFalse($ids->contains((string) $outsider->id));
+        $this->assertEqualsCanonicalizing(
+            ['Migrated Gencys Group'],
+            collect($response->json('groupLeaderboards'))->pluck('groupName')->all(),
+        );
+    }
+
+    public function test_snake_case_company_memberships_are_included(): void
+    {
+        $company = $this->makeCompany('Gencys', 'GENCYS');
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+        $member = User::factory()->create([
+            'company_id' => null,
+            'active_company_id' => null,
+            'company_code' => null,
+            'active_company_code' => null,
+            'company_name' => null,
+            'active_company_name' => null,
+            'company_memberships' => [[
+                'company_id' => strtolower($company->code),
+                'company_code' => ' gencys ',
+                'company_name' => ' gencys ',
+            ]],
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertContains(
+            (string) $member->id,
+            collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
+        );
+    }
+
     public function test_each_group_reports_the_viewers_own_company_id_and_name(): void
     {
         $company = $this->makeCompany('CompanyA', 'COMPA');
