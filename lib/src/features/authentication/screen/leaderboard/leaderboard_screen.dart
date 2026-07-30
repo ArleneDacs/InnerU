@@ -2590,9 +2590,10 @@ class _A12LeaderboardBoard extends StatelessWidget {
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
     final currentUserEntry = _currentUserEntry;
-    final remainingEntries = sorted.length > 3
-        ? sorted.skip(3).toList()
-        : const <A12LeaderboardEntry>[];
+    // Keep the list populated for small company datasets so the company
+    // leaderboard still shows the available users instead of a blank section.
+    final remainingEntries =
+        sorted.length >= 3 ? sorted.skip(3).toList() : sorted;
     final scoreColor = showRankLabels
         ? _rankColor(currentUserEntry?.rank ?? rankForPercent(0))
         : theme.primaryColor;
