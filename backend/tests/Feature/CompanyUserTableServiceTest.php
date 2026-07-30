@@ -69,9 +69,9 @@ class CompanyUserTableServiceTest extends TestCase
         app(CompanyUserTableService::class)->createFor($company);
 
         $company->refresh();
-        $this->assertSame('gencys_users', $company->user_table_name);
+        $this->assertSame('Gencys_users', $company->user_table_name);
 
-        $rows = DB::table('gencys_users')->get();
+        $rows = DB::table('Gencys_users')->get();
         $this->assertCount(1, $rows);
         $this->assertSame('Gencys Member', $rows->first()->name);
     }
