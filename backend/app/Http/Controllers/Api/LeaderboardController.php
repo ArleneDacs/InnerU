@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 class LeaderboardController extends Controller
 {
@@ -25,6 +26,17 @@ class LeaderboardController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
+        try {
+            return $this->buildLeaderboardResponse($user);
+        } catch (Throwable $error) {
+            report($error);
+
+            return $this->fallbackLeaderboardResponse($user);
+        }
+    }
+
+    private function buildLeaderboardResponse(User $user): JsonResponse
+    {
         $company = $this->resolveCompany($user);
         $isCoach = (bool) $user->is_coach;
 
@@ -256,6 +268,146 @@ class LeaderboardController extends Controller
                 'isCoach' => $isCoach,
             ],
         ]);
+    }
+
+    private function fallbackLeaderboardResponse(User $user): JsonResponse
+    {
+        $company = $this->resolveCompany($user);
+        $companyUsers = User::query()
+            ->orderBy('name')
+            ->get()
+            ->filter(
+                fn (User $candidate): bool => $company !== null
+                    ? $this->userBelongsToCompany($candidate, $company)
+                    : (string) $candidate->id === (string) $user->id,
+            )
+            ->values();
+
+        if (! $companyUsers->contains(fn (User $candidate): bool => (string) $candidate->id === (string) $user->id)) {
+            $companyUsers->push($user);
+        }
+
+        $companyLeaderboard = $companyUsers
+            ->sortByDesc(fn (User $candidate): float => (float) ($candidate->score ?? 0))
+            ->values()
+            ->map(
+                fn (User $candidate, int $index): array => $this->fallbackEntry(
+                    $candidate,
+                    $index + 1,
+                    $candidate->company_name,
+                ),
+            );
+        $usersById = $companyUsers->keyBy(fn (User $candidate): string => (string) $candidate->id);
+
+        $groupLeaderboards = CoachGroup::query()
+            ->orderBy('name')
+            ->get()
+            ->filter(function (CoachGroup $group) use ($company, $usersById): bool {
+                if ($company !== null && (
+                    $this->companyIdentifierMatches($group->company_id, $company)
+                    || $this->normalizedCode($group->company_code) === $this->normalizedCode($company->code)
+                )) {
+                    return true;
+                }
+
+                return collect($this->groupCoachIds($group))
+                    ->contains(fn (string $coachId): bool => $usersById->has($coachId))
+                    || collect(is_array($group->member_ids) ? $group->member_ids : [])
+                        ->contains(fn ($memberId): bool => $usersById->has((string) $memberId));
+            })
+            ->values()
+            ->map(function (CoachGroup $group) use ($usersById, $company): array {
+                $memberIds = collect(is_array($group->member_ids) ? $group->member_ids : [])
+                    ->map(static fn ($memberId): string => (string) $memberId)
+                    ->filter()
+                    ->unique()
+                    ->values();
+                $entries = $memberIds
+                    ->map(fn (string $memberId): ?User => $usersById->get($memberId))
+                    ->filter()
+                    ->sortByDesc(fn (User $member): float => (float) ($member->score ?? 0))
+                    ->values()
+                    ->map(
+                        fn (User $member, int $index): array => $this->fallbackEntry(
+                            $member,
+                            $index + 1,
+                            $group->name,
+                        ),
+                    )
+                    ->all();
+                $coachNames = collect($this->groupCoachIds($group))
+                    ->map(fn (string $coachId): ?string => $usersById->get($coachId)?->name)
+                    ->filter()
+                    ->values()
+                    ->all();
+
+                return [
+                    'groupId' => (string) $group->id,
+                    'groupName' => $group->name,
+                    'photoUrl' => $group->photo_url,
+                    'coachName' => $coachNames === [] ? 'Coach' : implode(', ', $coachNames),
+                    'coachIds' => $this->groupCoachIds($group),
+                    'coachNames' => $coachNames,
+                    'companyId' => $company?->id ?? '',
+                    'companyName' => $company?->name ?? '',
+                    'totalScore' => collect($entries)->sum('score'),
+                    'entries' => $entries,
+                ];
+            });
+
+        $currentUserEntry = $this->fallbackEntry($user, 0, $user->company_name);
+
+        return response()->json([
+            'company' => [
+                'companyId' => $company?->id ?? '',
+                'companyCode' => $company?->code ?? '',
+                'companyName' => $company?->name ?? '',
+                'leaderboardPeriodStart' => optional($company?->leaderboard_period_start)->toDateString(),
+                'leaderboardPeriodEnd' => optional($company?->leaderboard_period_end)->toDateString(),
+            ],
+            'companyLeaderboard' => $companyLeaderboard,
+            'entries' => $companyLeaderboard,
+            'groupLeaderboards' => $groupLeaderboards,
+            'menteeEntries' => [],
+            'a12Entries' => [],
+            'currentUser' => [
+                ...$currentUserEntry,
+                'isCoach' => (bool) $user->is_coach,
+            ],
+            'diagnostics' => [
+                'fallback' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * @return array{
+     *   userId:string,
+     *   name:string,
+     *   score:float,
+     *   goalScore:float,
+     *   coreTaskScore:float,
+     *   overallScore:float,
+     *   rank:int,
+     *   profilePic:?string,
+     *   teamName:?string
+     * }
+     */
+    private function fallbackEntry(User $user, int $rank, ?string $teamName): array
+    {
+        $score = max(0, min(100, (float) ($user->score ?? 0)));
+
+        return [
+            'userId' => (string) $user->id,
+            'name' => $user->name,
+            'score' => $score,
+            'goalScore' => $score,
+            'coreTaskScore' => 0.0,
+            'overallScore' => $score,
+            'rank' => $rank,
+            'profilePic' => $user->profile_pic,
+            'teamName' => $teamName,
+        ];
     }
 
     /**

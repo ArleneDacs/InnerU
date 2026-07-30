@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
+import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
@@ -184,6 +185,8 @@ class _LeaderboardState extends State<Leaderboard>
   bool _isRefreshing = false;
   bool _isAbundance12Company = false;
   bool _isCoachUser = false;
+  String? _loadError;
+  String? _loadErrorDetails;
   DateTime? _leaderboardPeriodStart;
   DateTime? _leaderboardPeriodEnd;
   ModalRoute<dynamic>? _route;
@@ -274,6 +277,8 @@ class _LeaderboardState extends State<Leaderboard>
         _isA12Loading = false;
         _isAbundance12Company = false;
         _isCoachUser = false;
+        _loadError = 'Your session has expired. Please sign in again.';
+        _loadErrorDetails = 'No active app session was available.';
         _leaderboardPeriodStart = null;
         _leaderboardPeriodEnd = null;
       });
@@ -359,12 +364,28 @@ class _LeaderboardState extends State<Leaderboard>
         _allEntries = rankedCompany;
         _menteeEntries = menteeEntries.isEmpty ? rankedCompany : menteeEntries;
         _groupLeaderboards = groups;
+        _loadError = null;
+        _loadErrorDetails = null;
         _isLoading = false;
         _isA12Loading = false;
       });
-    } catch (e) {
+    } catch (error, stackTrace) {
+      debugPrint('Leaderboard API load failed: $error');
+      debugPrintStack(
+        label: 'Leaderboard API stack trace',
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       setState(() {
+        _loadError = switch (error) {
+          ApiException(statusCode: 401) =>
+            'Your session has expired. Please sign in again.',
+          ApiException(statusCode: >= 500) =>
+            'The server could not load the leaderboard.',
+          ApiException() => error.message,
+          _ => 'Unable to load the leaderboard right now.',
+        };
+        _loadErrorDetails = error.toString();
         _isLoading = false;
         _isA12Loading = false;
       });
@@ -484,41 +505,49 @@ class _LeaderboardState extends State<Leaderboard>
                     child: RefreshIndicator(
                       key: _refreshKey,
                       onRefresh: _refreshLeaderboard,
-                      child: TabBarView(
-                        children: [
-                          _A12LeaderboardBoard(
-                            key: const ValueKey('company'),
-                            entries: _a12Entries,
-                            isLoading: _isA12Loading,
-                            theme: companyTheme,
-                            currentUserId: AuthService
-                                    .instance.currentSession?.id
-                                    .toString() ??
-                                '',
-                            showRankLabels: _isAbundance12Company,
-                            title: 'Company leaderboard',
-                            onEntryTap: (entry) => _showScoreBreakdown(
-                              context,
-                              entry,
-                              companyTheme,
+                      child: _loadError != null && _a12Entries.isEmpty
+                          ? _LeaderboardLoadError(
+                              message: _loadError!,
+                              details: _loadErrorDetails,
+                              theme: companyTheme,
+                              onRetry: _refreshLeaderboard,
+                            )
+                          : TabBarView(
+                              children: [
+                                _A12LeaderboardBoard(
+                                  key: const ValueKey('company'),
+                                  entries: _a12Entries,
+                                  isLoading: _isA12Loading,
+                                  theme: companyTheme,
+                                  currentUserId: AuthService
+                                          .instance.currentSession?.id
+                                          .toString() ??
+                                      '',
+                                  showRankLabels: _isAbundance12Company,
+                                  title: 'Company leaderboard',
+                                  onEntryTap: (entry) => _showScoreBreakdown(
+                                    context,
+                                    entry,
+                                    companyTheme,
+                                  ),
+                                ),
+                                _GroupLeaderboardsBoard(
+                                  groups: _groupLeaderboards,
+                                  allMenteeEntries: _isCoachUser
+                                      ? _menteeEntries
+                                      : _allEntries,
+                                  isLoading: _isLoading,
+                                  isCoachUser: _isCoachUser,
+                                  view: _CoachLeaderboardView.groups,
+                                  theme: companyTheme,
+                                  onEntryTap: (entry) => _showPointsBreakdown(
+                                    context,
+                                    entry,
+                                    companyTheme,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          _GroupLeaderboardsBoard(
-                            groups: _groupLeaderboards,
-                            allMenteeEntries:
-                                _isCoachUser ? _menteeEntries : _allEntries,
-                            isLoading: _isLoading,
-                            isCoachUser: _isCoachUser,
-                            view: _CoachLeaderboardView.groups,
-                            theme: companyTheme,
-                            onEntryTap: (entry) => _showPointsBreakdown(
-                              context,
-                              entry,
-                              companyTheme,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                 ],
@@ -745,6 +774,86 @@ class _LeaderboardState extends State<Leaderboard>
               theme: theme,
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+class _LeaderboardLoadError extends StatelessWidget {
+  const _LeaderboardLoadError({
+    required this.message,
+    required this.details,
+    required this.theme,
+    required this.onRetry,
+  });
+
+  final String message;
+  final String? details;
+  final CompanyThemeData theme;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: constraints.maxHeight,
+              child: Center(
+                child: Container(
+                  margin: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: theme.surfaceColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: theme.primaryColor.withValues(alpha: 0.24),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.cloud_off_rounded,
+                        color: theme.primaryColor,
+                        size: 34,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: theme.inkColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (details?.isNotEmpty == true) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          details!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: theme.mutedInkColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Try again'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );

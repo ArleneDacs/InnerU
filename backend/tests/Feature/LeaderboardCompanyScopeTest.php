@@ -7,10 +7,13 @@ use App\Models\CoachMentee;
 use App\Models\Company;
 use App\Models\DailyTracker;
 use App\Models\User;
+use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class LeaderboardCompanyScopeTest extends TestCase
@@ -346,6 +349,38 @@ class LeaderboardCompanyScopeTest extends TestCase
         $response->assertOk();
         $this->assertContains(
             (string) $member->id,
+            collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
+        );
+    }
+
+    public function test_users_still_load_when_score_calculation_throws(): void
+    {
+        $company = $this->makeCompany('Gencys', 'GENCYS');
+        $viewer = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+        $member = User::factory()->create([
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $scoreService = Mockery::mock(UserScoreService::class);
+        $scoreService
+            ->shouldReceive('resolveBreakdownForUsers')
+            ->once()
+            ->andThrow(new RuntimeException('Simulated score failure'));
+        $this->app->instance(UserScoreService::class, $scoreService);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk()->assertJsonPath('diagnostics.fallback', true);
+        $this->assertEqualsCanonicalizing(
+            [(string) $viewer->id, (string) $member->id],
             collect($response->json('companyLeaderboard'))->pluck('userId')->all(),
         );
     }
