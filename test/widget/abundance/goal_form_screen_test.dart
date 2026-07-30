@@ -200,4 +200,107 @@ void main() {
     expect(data['description'], contains(_declaration));
     expect(data['description'], contains('Commitment'));
   });
+
+  testWidgets(
+      'chip taps never clobber qualities the member typed directly into the '
+      'free-text field',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '10');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
+
+    // Tap a chip first -- syncs the free-text field to "Commitment".
+    await tester.tap(find.text('Commitment'));
+    await tester.pumpAndSettle();
+
+    // Now type directly into the free-text field, by hand, adding a quality
+    // no chip offers.
+    await tester.enterText(
+      find.byKey(const Key('quest-qualities-field')),
+      'Commitment, Vision',
+    );
+    await tester.pumpAndSettle();
+
+    // Tap a second chip.
+    await tester.tap(find.text('Discipline'));
+    await tester.pumpAndSettle();
+
+    final qualitiesField = tester.widget<TextField>(
+      find.byKey(const Key('quest-qualities-field')),
+    );
+    // The manually-typed "Vision" must survive the subsequent chip tap. If
+    // `_toggleQuality` recomputed off a stale Set instead of re-parsing the
+    // live text, "Vision" would have been silently discarded here.
+    expect(qualitiesField.controller!.text, 'Commitment, Vision, Discipline');
+  });
+
+  testWidgets(
+      'a punctuation-only declaration that clears the 3-character gate '
+      'still persists a non-blank composed description',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({
+      'activeCompanyId': 'A12',
+      'companyId': 'A12',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    // "..." is 3 characters -- the step-0 gate only counts characters, so
+    // this clears it and the wizard advances, even though the declaration is
+    // purely punctuation.
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      '...',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '10');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 4 of 4 — Declaration'), findsOneWidget);
+
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    final docs = await firestore.collection('goals').get();
+    expect(docs.docs, hasLength(1));
+    final data = docs.docs.single.data();
+
+    // With the buggy `+`-quantified regex (`[.!?]+\s*$`), stripping ALL
+    // trailing punctuation from "..." leaves an empty `goal`, so
+    // `_composeDeclaration` returns '' and `description` is persisted blank.
+    // The corrected regex (`[.!?]\s*$`, exactly one character) strips only
+    // the last dot, leaving ".." -- non-empty -- so a real composed sentence
+    // is persisted instead.
+    expect(data['description'], isNotEmpty);
+    expect(data['description'], contains('on or before'));
+  });
 }

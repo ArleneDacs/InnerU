@@ -41,7 +41,6 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   late final TextEditingController _unit;
   final _planEntry = TextEditingController();
   final _declarationController = TextEditingController();
-  final Set<String> _qualities = {};
   final _qualitiesFreeTextController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -119,8 +118,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     // posted back as `notes: qualities.trim()`). Mirrored here so editing an
     // existing quest doesn't silently blank out its previously-set
     // qualities the next time this wizard saves.
-    _qualities.addAll(_splitQualities(g?.notes ?? ''));
-    _qualitiesFreeTextController.text = _qualities.join(', ');
+    _qualitiesFreeTextController.text =
+        _splitQualities(g?.notes ?? '').join(', ');
     _targetValue = TextEditingController(
         text: g == null || g.targetValue == 0 ? '' : '${g.targetValue}');
     _currentValue = TextEditingController(
@@ -200,18 +199,29 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     setState(() => _currentStep = (_currentStep - 1).clamp(0, 3));
   }
 
+  /// Toggles `quality`'s membership in the qualities free-text field.
+  ///
+  /// Mirrors A12's `toggleQuality` (goal-wizard.tsx:720-730) exactly: there
+  /// is no separate Set tracking which qualities are "selected". The current
+  /// selection is always recomputed by re-parsing whatever text is *live* in
+  /// `_qualitiesFreeTextController` right now, then the new list is written
+  /// straight back to that same controller. A persistent Set here would be a
+  /// second source of truth that can go stale the moment a member types
+  /// directly into the free-text field -- the next chip tap would then
+  /// silently overwrite their typed text with a computation based on stale
+  /// state. Deriving from the live text on every call makes that impossible.
   void _toggleQuality(String quality) {
     setState(() {
-      if (_qualities.contains(quality)) {
-        _qualities.remove(quality);
-      } else {
-        _qualities.add(quality);
-      }
-      // One-way sync, chip -> text, matching the brief: the free-text field
-      // is only read back into `_qualities` at submit time (see
-      // `_parsedQualities`), so a member who has typed something by hand is
-      // not fought with on every chip tap.
-      _qualitiesFreeTextController.text = _qualities.join(', ');
+      final current = _parsedQualities();
+      final isSelected = current.any(
+        (q) => q.toLowerCase() == quality.toLowerCase(),
+      );
+      final next = isSelected
+          ? current
+              .where((q) => q.toLowerCase() != quality.toLowerCase())
+              .toList()
+          : [...current, quality];
+      _qualitiesFreeTextController.text = next.join(', ');
     });
   }
 
@@ -256,7 +266,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     List<String> qualities,
     DateTime targetDate,
   ) {
-    final goal = what.trim().replaceAll(RegExp(r'[.!?]+\s*$'), '');
+    final goal = what.trim().replaceAll(RegExp(r'[.!?]\s*$'), '');
     if (goal.isEmpty) return '';
     final embodied = _naturalList(qualities);
     final alreadyVision = RegExp(
@@ -294,9 +304,6 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   ///    wizard, which stores qualities in the goal's `notes` field.
   Future<void> _submit() async {
     final qualities = _parsedQualities();
-    _qualities
-      ..clear()
-      ..addAll(qualities);
     _title.text = _declarationController.text.trim();
     _description.text = _composeDeclaration(
       _declarationController.text,
@@ -771,6 +778,13 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   }
 
   Widget _buildStepWhenAndQualities() {
+    // Recomputed on every build from the live free-text field -- mirrors
+    // A12's chip rendering (goal-wizard.tsx:1287-1289), which also derives
+    // `selected` fresh from `qualityList(qualities)` rather than a separate
+    // Set, so a chip's highlighted state never disagrees with what the
+    // free-text field actually contains.
+    final selectedQualities =
+        _parsedQualities().map((q) => q.toLowerCase()).toSet();
     return _sectionCard(
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -821,7 +835,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
               for (final quality in _qualityRecommendations)
                 _QualityChip(
                   label: quality,
-                  selected: _qualities.contains(quality),
+                  selected: selectedQualities.contains(quality.toLowerCase()),
                   onTap: () => _toggleQuality(quality),
                 ),
             ],
@@ -1181,9 +1195,9 @@ class _DirectionButton extends StatelessWidget {
   }
 }
 
-/// A quality recommendation chip on step 2 -- toggles membership in
-/// `_qualities` when tapped. Mirrors the pill buttons in goal-wizard.tsx's
-/// `QUALITY_RECOMMENDATIONS` row.
+/// A quality recommendation chip on step 2 -- toggles the quality's
+/// membership in the qualities free-text field when tapped. Mirrors the pill
+/// buttons in goal-wizard.tsx's `QUALITY_RECOMMENDATIONS` row.
 class _QualityChip extends StatelessWidget {
   const _QualityChip({
     required this.label,
