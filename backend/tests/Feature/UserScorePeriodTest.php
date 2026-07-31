@@ -239,6 +239,33 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(0.0, $breakdown['overallScore']);
     }
 
+    public function test_a_period_starts_at_the_companys_local_midnight_even_when_utc_is_still_the_previous_day(): void
+    {
+        Carbon::setTestNow(Carbon::create(2026, 7, 31, 16, 0, 0, 'UTC'));
+
+        $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-12-31');
+        $user = $this->makeUserInCompany($company);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-08-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+            'todo_list_score' => 100,
+            'todo_list_included_in_total' => true,
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        $this->assertGreaterThan(0.0, $breakdown['coreTaskScore']);
+        $this->assertGreaterThan(0.0, $breakdown['overallScore']);
+    }
+
     public function test_batch_resolution_applies_period_scoring_too(): void
     {
         Carbon::setTestNow('2030-01-01');
