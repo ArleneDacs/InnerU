@@ -36,8 +36,8 @@ class UserScoreService
      */
     public function resolveBreakdownForUser(User $user): array
     {
-        $goalScore = $this->resolveGoalScoreForUser($user);
         $company = $this->resolveCompaniesForUsers(collect([$user]))[(string) $user->id] ?? null;
+        $goalScore = $this->resolveGoalScoreForUser($user, $company);
         if ($this->hasConfiguredPeriod($company)) {
             // The Goals-based score is a date-independent "current status"
             // snapshot -- the Goals page shows the same percentage
@@ -721,16 +721,16 @@ class UserScoreService
         ];
     }
 
-    private function resolveGoalScoreForUser(User $user): ?float
+    private function resolveGoalScoreForUser(User $user, ?Company $knownCompany = null): ?float
     {
-        return $this->resolveGoalScoresForUsers(collect([$user]))[(string) $user->id] ?? null;
+        return $this->resolveGoalScoresForUsers(collect([$user]), $knownCompany)[(string) $user->id] ?? null;
     }
 
     /**
      * @param  Collection<int, User>  $users
      * @return array<string, float>
      */
-    private function resolveGoalScoresForUsers(Collection $users): array
+    private function resolveGoalScoresForUsers(Collection $users, ?Company $knownCompany = null): array
     {
         $scores = $this->resolveGoalScoresFromGoalModel($users);
 
@@ -746,7 +746,44 @@ class UserScoreService
         );
 
         if ($usersWithoutGoalScore->isNotEmpty()) {
-            $scores += $this->resolveGoalScoresFromTodoTasks($usersWithoutGoalScore);
+            $companiesByUser = $knownCompany !== null
+                ? array_fill_keys(
+                    $usersWithoutGoalScore
+                        ->pluck('id')
+                        ->map(static fn ($id) => (string) $id)
+                        ->values()
+                        ->all(),
+                    $knownCompany,
+                )
+                : $this->resolveCompaniesForUsers($usersWithoutGoalScore);
+
+            $usersByCompanyKey = [];
+            foreach ($usersWithoutGoalScore as $user) {
+                $userId = (string) $user->id;
+                $company = $companiesByUser[$userId] ?? null;
+                $companyKey = $company !== null ? 'company:' . (string) $company->id : 'user:' . $userId;
+
+                $usersByCompanyKey[$companyKey] ??= [
+                    'company' => $company,
+                    'users' => collect(),
+                ];
+                $usersByCompanyKey[$companyKey]['users']->push($user);
+            }
+
+            foreach ($usersByCompanyKey as $group) {
+                $company = $group['company'];
+                $groupUsers = $group['users'];
+
+                $todoTaskScores = $company !== null && $this->hasConfiguredPeriod($company)
+                    ? $this->resolveGoalScoresFromTodoTasks(
+                        $groupUsers,
+                        $company->leaderboard_period_start,
+                        $company->leaderboard_period_end,
+                    )
+                    : $this->resolveGoalScoresFromTodoTasks($groupUsers);
+
+                $scores += $todoTaskScores;
+            }
         }
 
         return $scores;
@@ -822,7 +859,11 @@ class UserScoreService
      * @param  Collection<int, User>  $users
      * @return array<string, float>
      */
-    private function resolveGoalScoresFromTodoTasks(Collection $users): array
+    private function resolveGoalScoresFromTodoTasks(
+        Collection $users,
+        ?Carbon $periodStart = null,
+        ?Carbon $periodEnd = null
+    ): array
     {
         $userIds = $users
             ->pluck('id')
@@ -835,18 +876,27 @@ class UserScoreService
             return [];
         }
 
-        $tasks = TodoTask::query()
+        $query = TodoTask::query()
             ->whereIn('user_id', $userIds)
-            ->get([
-                'user_id',
-                'goal_type',
-                'start_date',
-                'due_date',
-                'is_completed',
-                'completed_at',
-                'completion_dates',
-                'sub_tasks',
-            ]);
+            ->orderBy('user_id')
+            ->orderBy('start_date')
+            ->orderBy('created_at');
+
+        if ($periodStart !== null && $periodEnd !== null) {
+            $query->whereDate('start_date', '>=', $periodStart->toDateString())
+                ->whereDate('start_date', '<=', $periodEnd->toDateString());
+        }
+
+        $tasks = $query->get([
+            'user_id',
+            'goal_type',
+            'start_date',
+            'due_date',
+            'is_completed',
+            'completed_at',
+            'completion_dates',
+            'sub_tasks',
+        ]);
 
         if ($tasks->isEmpty()) {
             return [];

@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\DailyTracker;
 use App\Models\Goal;
 use App\Models\GoalTask;
+use App\Models\TodoTask;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -237,6 +238,55 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(0.0, $breakdown['coreTaskScore']);
         $this->assertEquals(0.0, $breakdown['goalScore']);
         $this->assertEquals(0.0, $breakdown['overallScore']);
+    }
+
+    public function test_todo_tasks_only_count_when_their_start_date_is_within_the_period(): void
+    {
+        Carbon::setTestNow('2030-01-01');
+
+        $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-12-31');
+        $user = $this->makeUserInCompany($company);
+
+        // This task started before the period and must be ignored.
+        TodoTask::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'title' => 'Pre-period task',
+            'goal_type' => 'LONG_TERM',
+            'start_date' => '2026-07-15',
+            'due_date' => '2026-12-31',
+            'is_completed' => true,
+            'sub_tasks' => [],
+        ]);
+
+        // These tasks start inside the configured period and should count.
+        TodoTask::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'title' => 'In-period task one',
+            'goal_type' => 'LONG_TERM',
+            'start_date' => '2026-08-01',
+            'due_date' => '2026-12-31',
+            'is_completed' => true,
+            'sub_tasks' => [],
+        ]);
+        TodoTask::create([
+            'id' => (string) Str::uuid(),
+            'user_id' => $user->id,
+            'title' => 'In-period task two',
+            'goal_type' => 'LONG_TERM',
+            'start_date' => '2026-08-15',
+            'due_date' => '2026-12-31',
+            'is_completed' => false,
+            'sub_tasks' => [],
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        // Without the start-date filter this would be (100 + 100 + 0) / 3 = 66.7 -> 67.
+        // With the filter it is (100 + 0) / 2 = 50.
+        $this->assertEquals(50.0, $breakdown['goalScore']);
+        $this->assertEquals(50.0, $breakdown['overallScore']);
     }
 
     public function test_a_period_starts_at_the_companys_local_midnight_even_when_utc_is_still_the_previous_day(): void
