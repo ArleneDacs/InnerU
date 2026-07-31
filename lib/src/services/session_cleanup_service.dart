@@ -17,6 +17,8 @@ class SessionCleanupService {
   static String lastSavedDateKey(String userId) => 'last_saved_date_$userId';
   static String appleHealthLastSyncedAtKey(String userId) =>
       'apple_health_last_synced_at_$userId';
+  static String appleHealthLastReadableStepsKey(String userId) =>
+      'apple_health_last_readable_steps_$userId';
 
   static Future<void> clearLocalSession({String? userId}) async {
     final prefs = await SharedPreferences.getInstance();
@@ -40,6 +42,7 @@ class SessionCleanupService {
       await prefs.remove(stepOffsetKey(userId));
       await prefs.remove(lastSavedDateKey(userId));
       await prefs.remove(appleHealthLastSyncedAtKey(userId));
+      await prefs.remove(appleHealthLastReadableStepsKey(userId));
       await PendingStepSyncService.instance.clearForUser(userId);
     }
 
