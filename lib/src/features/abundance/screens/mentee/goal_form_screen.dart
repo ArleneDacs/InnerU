@@ -54,7 +54,20 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   late GoalStatus _status;
   late DateTime _startDate;
   late DateTime _targetDate;
+  /// Action plans typed into the wizard during THIS session. On create they
+  /// are handed to `createGoal(planTitles:)`; on edit they are created
+  /// afterwards through [GoalsService.addActionPlan] -- the same call the
+  /// quest detail screen's Action Plans card already uses, so there is only
+  /// one way a plan ever comes into existence.
   final List<String> _planTitles = [];
+
+  /// Action plans this quest ALREADY has, read once in [initState] on the
+  /// edit path. Before this existed the wizard behaved as if an existing
+  /// milestone quest had no plans at all, so its own step-2 blocker ("a
+  /// milestone quest needs at least one action plan") could never be
+  /// satisfied and the quest could never be edited and saved again.
+  List<String> _existingPlanTitles = const [];
+  bool _loadingExistingPlans = false;
   bool _saving = false;
 
   int _currentStep = 0; // 0=What, 1=How, 2=When & qualities, 3=Declaration
@@ -130,10 +143,18 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
         _ => null,
       };
 
+  /// Every action plan that will exist on this quest once the wizard is
+  /// done: the ones it already has (edit path) plus the ones typed here.
+  int get _totalPlanCount => _existingPlanTitles.length + _planTitles.length;
+
   String? get _step2Blocker {
     if (_category == null) return 'Choose a category.';
     if (_isMilestoneMeasure) {
-      return _planTitles.isEmpty
+      // While the existing plans are still loading, the count below is not
+      // yet trustworthy -- say so rather than accusing an edit of having no
+      // plans when it may well have several.
+      if (_loadingExistingPlans) return 'Loading this quest\'s action plans...';
+      return _totalPlanCount == 0
           ? 'A milestone quest needs at least one action plan.'
           : null;
     }
@@ -182,6 +203,31 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
     _status = g?.status ?? GoalStatus.inProgress;
     _startDate = _dateOnly(g?.startDate ?? DateTime.now());
     _targetDate = _dateOnly(g?.targetDate ?? addDays(DateTime.now(), 90));
+    if (g != null) {
+      _loadingExistingPlans = true;
+      _loadExistingPlans(g.id);
+    }
+  }
+
+  /// Reads the quest's already-persisted action plans once, so step 2 can
+  /// show them and count them toward the milestone requirement instead of
+  /// demanding the member retype plans the quest already has.
+  ///
+  /// A read failure is deliberately non-fatal: the wizard falls back to
+  /// "no known existing plans", which leaves step 2 blocked but with the
+  /// entry field right there to add one -- never a silent dead end.
+  Future<void> _loadExistingPlans(String goalId) async {
+    try {
+      final plans = await widget.service.fetchPlans(goalId);
+      if (!mounted) return;
+      setState(() {
+        _existingPlanTitles = plans.map((plan) => plan.title).toList();
+        _loadingExistingPlans = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingExistingPlans = false);
+    }
   }
 
   @override
@@ -378,6 +424,20 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           targetPeriod: _targetPeriod,
           status: _status,
         );
+        // `updateGoal` has no `planTitles` parameter and deliberately gets
+        // none: a saved quest's plans are owned by the quest detail screen's
+        // Action Plans card, which creates, re-statuses and deletes them one
+        // at a time. So the wizard only ever ADDS what was typed here, using
+        // that same `addActionPlan` call -- it never rewrites the list, and
+        // the plans already on the quest (`_existingPlanTitles`) are left
+        // exactly as they are.
+        for (final title in _planTitles) {
+          await widget.service.addActionPlan(
+            goalId: widget.existing!.id,
+            title: title,
+            actorId: widget.uid,
+          );
+        }
       } else {
         await widget.service.createGoal(
           uid: widget.uid,
@@ -826,6 +886,8 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           const SizedBox(height: 18),
           _ActionPlansPanel(
             isMilestone: _isMilestoneMeasure,
+            existingPlanTitles: _existingPlanTitles,
+            loadingExistingPlans: _loadingExistingPlans,
             planTitles: _planTitles,
             planEntry: _planEntry,
             onAdd: () {
@@ -1426,6 +1488,8 @@ class _QualityChip extends StatelessWidget {
 class _ActionPlansPanel extends StatelessWidget {
   const _ActionPlansPanel({
     required this.isMilestone,
+    required this.existingPlanTitles,
+    required this.loadingExistingPlans,
     required this.planTitles,
     required this.planEntry,
     required this.onAdd,
@@ -1436,6 +1500,13 @@ class _ActionPlansPanel extends StatelessWidget {
   /// one, whose entire score comes from them — the copy below says which,
   /// mirroring goal-wizard.tsx:1168-1171.
   final bool isMilestone;
+
+  /// Plans the quest already has (edit path only). Listed but not removable
+  /// here: deleting a saved plan is the quest detail screen's Action Plans
+  /// card's job, and duplicating it in the wizard would give the same list
+  /// two independent owners.
+  final List<String> existingPlanTitles;
+  final bool loadingExistingPlans;
   final List<String> planTitles;
   final TextEditingController planEntry;
   final VoidCallback onAdd;
@@ -1467,7 +1538,9 @@ class _ActionPlansPanel extends StatelessWidget {
                 ),
               ),
               Text(
-                '${planTitles.length} plans',
+                loadingExistingPlans
+                    ? 'Loading...'
+                    : '${existingPlanTitles.length + planTitles.length} plans',
                 style: const TextStyle(
                   color: AbundanceColors.muted,
                   fontSize: 12.5,
@@ -1489,6 +1562,55 @@ class _ActionPlansPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
+          // The plans this quest already has. Shown so the member can see
+          // what the quest carries (and so a milestone edit is visibly
+          // satisfied rather than mysteriously blocked), with their status
+          // and removal left to the quest page that owns them.
+          for (final title in existingPlanTitles) ...[
+            Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_outline,
+                  size: 18,
+                  color: AbundanceColors.muted,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AbundanceColors.surfaceRaised,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AbundanceColors.border),
+                    ),
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        color: AbundanceColors.foreground,
+                        fontSize: 14.5,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (existingPlanTitles.isNotEmpty) ...[
+            const Text(
+              'Already on this quest. Change or remove these from the quest '
+              'page.',
+              style: TextStyle(
+                color: AbundanceColors.muted,
+                fontSize: 12.5,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           for (final title in planTitles) ...[
             Row(
               children: [

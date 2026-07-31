@@ -532,4 +532,186 @@ void main() {
     );
     expect(measureField.controller!.text, 'MILESTONE');
   });
+
+  // ---------------------------------------------------------------------
+  // Round 2 Critical: restoring MILESTONE creation (091eb76) added a step-2
+  // blocker requiring >= 1 action plan, but `_planTitles` was never seeded
+  // from the quest's real, persisted plans on the EDIT path -- and
+  // `updateGoal` has no `planTitles` parameter at all. So an existing
+  // milestone quest could never be edited and saved again: the blocker was
+  // unsatisfiable except by converting the quest away from milestone, or by
+  // typing a plan that silently vanished on save.
+  // ---------------------------------------------------------------------
+
+  /// Creates a real milestone quest (with genuinely persisted action plans)
+  /// in the fake backend and returns the `GoalSummary` the wizard would be
+  /// handed by [GoalDetailScreen]'s Edit button.
+  ///
+  /// The summary is built by hand rather than read back through
+  /// `service.watchGoal(id).first`: `watchGoal` is a Firestore snapshot
+  /// stream whose first event never arrives inside `testWidgets`' FakeAsync
+  /// zone without pumping, so awaiting it here hangs the test.
+  Future<GoalSummary> seedMilestoneGoal(
+    GoalsService service, {
+    List<String> planTitles = const ['Book the venue'],
+  }) async {
+    final id = await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.professional,
+      title: 'Ship the launch',
+      description: 'Ship the launch on or before June 1, 2026.',
+      targetDate: DateTime(2026, 6, 1),
+      goalType: GoalType.milestone,
+      planTitles: planTitles,
+    );
+    return GoalSummary(
+      id: id,
+      userId: 'u1',
+      companyId: 'A12',
+      title: 'Ship the launch',
+      description: 'Ship the launch on or before June 1, 2026.',
+      notes: null,
+      status: GoalStatus.inProgress,
+      progress: 0,
+      category: GoalCategory.professional,
+      goalType: GoalType.milestone,
+      targetPeriod: TargetPeriod.none,
+      direction: GoalDirection.gain,
+      targetValue: 0,
+      currentValue: 0,
+      unit: '',
+      startDate: DateTime(2026, 1, 1),
+      targetDate: DateTime(2026, 6, 1),
+      completedAt: null,
+    );
+  }
+
+  testWidgets(
+      'an existing MILESTONE quest that already has an action plan can be '
+      'edited and saved -- the wizard must not treat its persisted plans as '
+      'absent', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    final existing = await seedMilestoneGoal(service);
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1', existing: existing),
+    ));
+    await tester.pumpAndSettle();
+
+    // Change something unrelated to the measure/plans.
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      'I see myself shipping the launch on time',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+
+    // The quest's one persisted plan is shown, and it satisfies the
+    // milestone blocker without the member having to retype it.
+    expect(find.text('Book the venue'), findsOneWidget);
+    expect(find.textContaining('at least one action plan'), findsNothing);
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 4 of 4 — Declaration'), findsOneWidget);
+
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    // Saving pops the wizard back to its caller, and the edit landed.
+    expect(find.byType(GoalFormScreen), findsNothing);
+    final data = (await firestore.collection('goals').doc(existing.id).get())
+        .data()!;
+    expect(data['title'], 'I see myself shipping the launch on time');
+    expect(data['goalType'], GoalType.milestone.code);
+  });
+
+  testWidgets(
+      'a plan typed into the wizard while editing is really persisted, not '
+      'silently dropped on save', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    final existing = await seedMilestoneGoal(service);
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1', existing: existing),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-plan-entry-field')),
+      'Print the banners',
+    );
+    await tester.ensureVisible(find.text('+ Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('+ Add'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    final plans = await firestore
+        .collection('goals')
+        .doc(existing.id)
+        .collection('tasks')
+        .get();
+    final titles = plans.docs.map((d) => d.data()['title']).toList();
+    // The pre-existing plan must survive (the wizard must not re-create or
+    // replace it), and the newly typed one must actually exist afterwards.
+    expect(titles, containsAll(<String>['Book the venue', 'Print the banners']));
+    expect(titles.where((t) => t == 'Book the venue'), hasLength(1));
+  });
+
+  testWidgets(
+      'editing a MILESTONE quest whose plans were all deleted is not a dead '
+      'end -- adding one in the wizard unblocks it', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    // Reachable in production: every plan can be deleted from the quest
+    // detail screen's Action Plans card after the quest was created.
+    final existing = await seedMilestoneGoal(service, planTitles: const []);
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1', existing: existing),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    // Blocked, but with a stated reason and a usable way out on the screen.
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+    expect(find.textContaining('at least one action plan'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('quest-plan-entry-field')),
+      'Rebuild the plan',
+    );
+    await tester.ensureVisible(find.text('+ Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('+ Add'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
+  });
 }

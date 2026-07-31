@@ -472,6 +472,17 @@ class GoalsService {
     });
   }
 
+  Future<List<ActionPlanItem>> _legacyFetchPlans(String goalId) async {
+    final snapshot = await _goalDoc(goalId).collection('tasks').get();
+    return snapshot.docs
+        .map((doc) => ActionPlanItem.fromJson({
+              ...doc.data(),
+              'id': doc.id,
+            }))
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
   Stream<List<GoalUpdateEntry>> _legacyWatchUpdates(String goalId) {
     return _goalDoc(goalId).collection('updates').snapshots().map((snapshot) {
       final updates = snapshot.docs
@@ -1040,6 +1051,14 @@ class GoalsService {
   Stream<List<ActionPlanItem>> watchPlans(String goalId) => _usesLegacyFirestore
       ? _legacyWatchPlans(goalId)
       : _poll(() => _fetchPlans(goalId), fallback: const <ActionPlanItem>[]);
+
+  /// A single read of a goal's action plans, for callers that need the list
+  /// once rather than a live stream (the quest wizard's edit path). Unlike
+  /// [watchPlans] this completes and stays completed, and unlike [_poll] it
+  /// lets a failure reach the caller instead of silently yielding an empty
+  /// list forever.
+  Future<List<ActionPlanItem>> fetchPlans(String goalId) =>
+      _usesLegacyFirestore ? _legacyFetchPlans(goalId) : _fetchPlans(goalId);
 
   Stream<List<GoalUpdateEntry>> watchUpdates(String goalId) =>
       _usesLegacyFirestore
