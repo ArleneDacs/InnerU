@@ -78,6 +78,20 @@ void main() {
 
       expect(result.isOutdated, isFalse);
     });
+
+    test('fails open when ios field has wrong type (string instead of map)',
+        () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'ios': '1.1.0', // Wrong type: string instead of map
+        },
+        isIOS: true,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isOutdated, isFalse);
+    });
   });
 
   group('AppUpdateService.evaluate — Android build number comparison', () {
@@ -135,6 +149,23 @@ void main() {
     test('fails open when the android payload is missing fields', () {
       final result = AppUpdateService.evaluate(
         response: {'android': <String, dynamic>{}},
+        isIOS: false,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isOutdated, isFalse);
+    });
+
+    test('fails open when android store_url has wrong type (int instead of string)',
+        () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'android': {
+            'latest_version_code': 40,
+            'store_url': 123, // Wrong type: int instead of string
+          },
+        },
         isIOS: false,
         installedVersion: '1.0.4',
         installedBuildNumber: '34',

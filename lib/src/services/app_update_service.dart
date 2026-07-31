@@ -51,9 +51,20 @@ class AppUpdateService {
     required String installedBuildNumber,
   }) {
     if (isIOS) {
-      final ios = response['ios'] as Map<String, dynamic>?;
-      final latestVersion = ios?['latest_version'] as String?;
-      final storeUrl = ios?['store_url'] as String?;
+      final iosRaw = response['ios'];
+      final ios =
+          iosRaw is Map<String, dynamic> ? iosRaw : null;
+
+      if (ios == null) {
+        return AppUpdateCheckResult.upToDate;
+      }
+
+      final latestVersionRaw = ios['latest_version'];
+      final latestVersion =
+          latestVersionRaw is String ? latestVersionRaw : null;
+
+      final storeUrlRaw = ios['store_url'];
+      final storeUrl = storeUrlRaw is String ? storeUrlRaw : null;
 
       if (latestVersion == null || storeUrl == null) {
         return AppUpdateCheckResult.upToDate;
@@ -64,14 +75,22 @@ class AppUpdateService {
           : AppUpdateCheckResult.upToDate;
     }
 
-    final android = response['android'] as Map<String, dynamic>?;
-    final latestVersionCodeRaw = android?['latest_version_code'];
-    final storeUrl = android?['store_url'] as String?;
+    final androidRaw = response['android'];
+    final android =
+        androidRaw is Map<String, dynamic> ? androidRaw : null;
 
+    if (android == null) {
+      return AppUpdateCheckResult.upToDate;
+    }
+
+    final latestVersionCodeRaw = android['latest_version_code'];
     final installedCode = int.tryParse(installedBuildNumber);
     final latestCode = latestVersionCodeRaw is int
         ? latestVersionCodeRaw
         : int.tryParse(latestVersionCodeRaw?.toString() ?? '');
+
+    final storeUrlRaw = android['store_url'];
+    final storeUrl = storeUrlRaw is String ? storeUrlRaw : null;
 
     if (installedCode == null || latestCode == null || storeUrl == null) {
       return AppUpdateCheckResult.upToDate;
