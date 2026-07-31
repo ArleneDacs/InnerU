@@ -313,6 +313,8 @@ class _MenteeQuestsGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final gaps = requiredGoalGaps(entry.goals);
+
     return Container(
       width: double.infinity,
       clipBehavior: Clip.antiAlias,
@@ -326,45 +328,70 @@ class _MenteeQuestsGroup extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MenteeAvatar(name: entry.menteeName),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    entry.menteeName,
-                    style: const TextStyle(
-                      color: AbundanceColors.foreground,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      fontFamily: 'Georgia',
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      const TextSpan(
-                        text: 'Quest Score ',
-                        style: TextStyle(
-                          color: AbundanceColors.muted,
-                          fontSize: 13.5,
-                        ),
-                      ),
-                      TextSpan(
-                        text: _formatScore(_questScore()),
+                Row(
+                  children: [
+                    _MenteeAvatar(name: entry.menteeName),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        entry.menteeName,
                         style: const TextStyle(
                           color: AbundanceColors.foreground,
-                          fontSize: 13.5,
+                          fontSize: 17,
                           fontWeight: FontWeight.w800,
+                          fontFamily: 'Georgia',
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          const TextSpan(
+                            text: 'Quest Score ',
+                            style: TextStyle(
+                              color: AbundanceColors.muted,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                          TextSpan(
+                            text: _formatScore(_questScore()),
+                            style: const TextStyle(
+                              color: AbundanceColors.foreground,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                // Mirrors `coach/goals/page.tsx`'s per-mentee "No {category}
+                // quest" danger badges in the group summary row: one
+                // _MiniBadge per category with no live goal, computed
+                // client-side from this mentee's own `goals` — the same
+                // `requiredGoalGaps` helper the mentee-facing dashboards
+                // already use to flag their own gaps.
+                if (gaps.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      for (final category in gaps)
+                        _MiniBadge(
+                          label: 'No ${category.label} quest',
+                          color: AbundanceColors.scoreCritical,
+                        ),
                     ],
                   ),
-                ),
+                ],
               ],
             ),
           ),

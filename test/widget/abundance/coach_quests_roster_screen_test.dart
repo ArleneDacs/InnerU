@@ -43,6 +43,29 @@ class _NavFakeGoalsService extends GoalsService {
       Stream.value(const <GoalUpdateEntry>[]);
 }
 
+GoalSummary goalIn(GoalCategory category, {String id = 'g'}) {
+  return GoalSummary(
+    id: id,
+    userId: 'mentee-1',
+    companyId: 'abu',
+    title: 'Goal $id',
+    description: null,
+    notes: null,
+    status: GoalStatus.inProgress,
+    progress: 40,
+    category: category,
+    goalType: GoalType.merit,
+    targetPeriod: TargetPeriod.none,
+    direction: GoalDirection.gain,
+    targetValue: 12,
+    currentValue: 5,
+    unit: 'books',
+    startDate: DateTime(2026, 1, 1),
+    targetDate: DateTime(2026, 12, 31),
+    completedAt: null,
+  );
+}
+
 void main() {
   testWidgets('roster groups quests by mentee, with an empty state for coaches with none',
       (tester) async {
@@ -151,5 +174,49 @@ void main() {
     expect(detail.goalId, 'goal-1');
     // The mentee's uid must be threaded through — never the coach's.
     expect(detail.uid, 'mentee-1');
+  });
+
+  testWidgets(
+      'a mentee missing PROFESSIONAL and CONTRIBUTION quests shows both gap badges',
+      (tester) async {
+    final service = _FakeGoalsService([
+      CoachMenteeGoals(
+        menteeId: '1',
+        menteeName: 'Maychell Alcorin',
+        goals: [goalIn(GoalCategory.personal, id: 'g1')],
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: CoachQuestsRosterScreen(service: service, coachUid: 'coach1'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No Professional quest'), findsOneWidget);
+    expect(find.text('No Contribution quest'), findsOneWidget);
+    expect(find.text('No Personal quest'), findsNothing);
+  });
+
+  testWidgets(
+      'a mentee with a quest in every required category shows no gap badges',
+      (tester) async {
+    final service = _FakeGoalsService([
+      CoachMenteeGoals(
+        menteeId: '1',
+        menteeName: 'Maychell Alcorin',
+        goals: [
+          goalIn(GoalCategory.personal, id: 'g1'),
+          goalIn(GoalCategory.professional, id: 'g2'),
+          goalIn(GoalCategory.contribution, id: 'g3'),
+        ],
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: CoachQuestsRosterScreen(service: service, coachUid: 'coach1'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('No '), findsNothing);
   });
 }
