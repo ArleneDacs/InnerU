@@ -49,7 +49,6 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   // unselected until the member chooses one. An edit still inherits its
   // existing category.
   GoalCategory? _category;
-  late GoalType _goalType;
   late GoalDirection _direction;
   late TargetPeriod _targetPeriod;
   late GoalStatus _status;
@@ -67,6 +66,37 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   ];
   static const _stepLabels = ['What', 'How', 'When & qualities', 'Declaration'];
 
+  /// The measures step 2 offers before a custom one, copied verbatim (and in
+  /// order) from A12's `STANDARD_UNITS` in `src/lib/goal-plan.ts:72`.
+  static const _standardUnits = [
+    'KG',
+    'KM',
+    'STEPS',
+    'HOURS',
+    'PROFIT(PESO)',
+    'VIDEOS',
+    'PROJECT',
+    _milestoneUnit,
+  ];
+
+  /// A12's `MILESTONE_UNIT` (goal-plan.ts:83): the one measure whose score
+  /// comes from action-plan statuses rather than a numeric amount.
+  static const _milestoneUnit = 'MILESTONE';
+
+  /// Whether the chosen measure makes this a milestone quest. Ported from
+  /// A12's `isMilestoneMeasure` (goal-plan.ts:90). A12 has no separate
+  /// merit/milestone toggle — the type is derived from the measure, and its
+  /// hidden `goalType` input is literally
+  /// `value={isMilestone ? "MILESTONE" : "MERIT"}` (goal-wizard.tsx:853).
+  bool get _isMilestoneMeasure =>
+      _unit.text.trim().toUpperCase() == _milestoneUnit;
+
+  /// Derived, never stored: see [_isMilestoneMeasure]. Before this was
+  /// derived, the wizard hardcoded [GoalType.merit], so a milestone quest
+  /// could not be created at all.
+  GoalType get _goalType =>
+      _isMilestoneMeasure ? GoalType.milestone : GoalType.merit;
+
   // Copied verbatim from A12's `QUALITY_RECOMMENDATIONS` in goal-wizard.tsx.
   static const _qualityRecommendations = [
     'Commitment',
@@ -82,8 +112,13 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   bool get _isEdit => widget.existing != null;
 
   bool get _step1Valid => _declarationController.text.trim().length >= 3;
-  bool get _step2Valid =>
-      _category != null && double.tryParse(_targetValue.text.trim()) != null;
+
+  /// Ported from A12's step-1 blocker (goal-wizard.tsx:812-818): a category is
+  /// always required; a milestone quest needs at least one action plan (its
+  /// only source of score); every other quest needs a target value strictly
+  /// greater than zero — A12 checks `Number(targetValue) > 0`, not merely
+  /// "parses as a number", so `0` and negatives are both rejected.
+  bool get _step2Valid => _step2Blocker == null;
 
   /// What the current step still needs, said out loud rather than left to a
   /// silently-dead Next button. Null once the step is satisfied.
@@ -91,13 +126,23 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
         0 => _step1Valid
             ? null
             : 'Answer the question with at least 3 characters.',
-        1 => _category == null
-            ? 'Choose a category.'
-            : double.tryParse(_targetValue.text.trim()) == null
-                ? 'Enter a target value.'
-                : null,
+        1 => _step2Blocker,
         _ => null,
       };
+
+  String? get _step2Blocker {
+    if (_category == null) return 'Choose a category.';
+    if (_isMilestoneMeasure) {
+      return _planTitles.isEmpty
+          ? 'A milestone quest needs at least one action plan.'
+          : null;
+    }
+    final target = double.tryParse(_targetValue.text.trim());
+    if (target == null || target <= 0) {
+      return 'A merit quest needs a target value greater than 0.';
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -124,9 +169,14 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
         text: g == null || g.targetValue == 0 ? '' : '${g.targetValue}');
     _currentValue = TextEditingController(
         text: g == null || g.currentValue == 0 ? '' : '${g.currentValue}');
-    _unit = TextEditingController(text: g?.unit ?? '');
+    // Mirrors goal-wizard.tsx:586 — an existing MILESTONE quest seeds the
+    // measure field with "MILESTONE" rather than its stored (blank) unit, so
+    // its type survives a round-trip through the wizard now that the type is
+    // derived from the measure.
+    _unit = TextEditingController(
+      text: g?.goalType == GoalType.milestone ? _milestoneUnit : (g?.unit ?? ''),
+    );
     _category = g?.category;
-    _goalType = g?.goalType ?? GoalType.merit;
     _direction = g?.direction ?? GoalDirection.gain;
     _targetPeriod = g?.targetPeriod ?? TargetPeriod.none;
     _status = g?.status ?? GoalStatus.inProgress;
@@ -163,24 +213,6 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       _targetDate = normalized;
       if (_startDate.isAfter(normalized)) {
         _startDate = normalized;
-      }
-    });
-  }
-
-  // ignore: unused_element
-  Future<void> _pickStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate,
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-    );
-    if (picked == null) return;
-    setState(() {
-      final normalized = _dateOnly(picked);
-      _startDate = normalized;
-      if (_targetDate.isBefore(normalized)) {
-        _targetDate = normalized;
       }
     });
   }
@@ -304,6 +336,15 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
   ///    wizard, which stores qualities in the goal's `notes` field.
   Future<void> _submit() async {
     final qualities = _parsedQualities();
+    // A milestone quest has no numeric measure: A12 posts targetValue=0 and
+    // targetPeriod=NONE for it (goal-wizard.tsx:1112-1113), and its score
+    // comes from action-plan statuses instead. Normalizing here rather than
+    // inside `_save()` keeps that method's persistence logic untouched.
+    if (_isMilestoneMeasure) {
+      _targetValue.text = '0';
+      _currentValue.text = '0';
+      _targetPeriod = TargetPeriod.none;
+    }
     _title.text = _declarationController.text.trim();
     _description.text = _composeDeclaration(
       _declarationController.text,
@@ -360,7 +401,7 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not save goal: $e')));
+            .showSnackBar(SnackBar(content: Text('Could not save quest: $e')));
       }
     }
   }
@@ -674,51 +715,117 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
           _buildDirectionToggle(),
           const SizedBox(height: 18),
           const Text(
-            'Target value',
+            'Measure',
             style: TextStyle(
               color: AbundanceColors.foreground,
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 4),
+          const Text(
+            "e.g. kg, km, books — or MILESTONE to score the quest from its "
+            'action plans instead of a number.',
+            style: TextStyle(
+              color: AbundanceColors.muted,
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
           const SizedBox(height: 8),
+          // A12 uses a "type or choose a measure" combobox
+          // (`SearchableUnitSelect`, goal-wizard.tsx:121) whose list is
+          // STANDARD_UNITS plus a custom entry. The Flutter equivalent here
+          // keeps both halves of that affordance: a free-text field for a
+          // custom measure, plus quick-pick chips for the standard ones.
           TextField(
-            key: const Key('quest-target-value-field'),
-            controller: _targetValue,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            key: const Key('quest-measure-field'),
+            controller: _unit,
+            textCapitalization: TextCapitalization.characters,
             style: const TextStyle(
               color: AbundanceColors.foreground,
               fontSize: 16,
             ),
-            decoration: _fieldDecoration('10'),
+            decoration: _fieldDecoration('Type or choose a measure'),
             onChanged: (_) => setState(() {}),
           ),
+          const SizedBox(height: 10),
+          _buildMeasurePicker(),
           const SizedBox(height: 18),
-          const Text(
-            'Target period',
-            style: TextStyle(
-              color: AbundanceColors.foreground,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
+          // A12 hides the numeric target entirely for a milestone quest and
+          // posts targetValue=0 / targetPeriod=NONE instead
+          // (goal-wizard.tsx:1111-1120); `_submit()` mirrors that on save.
+          if (_isMilestoneMeasure)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AbundanceColors.primaryGold.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AbundanceColors.primaryGold.withValues(alpha: 0.30),
+                ),
+              ),
+              child: const Text(
+                'This quest is measured by its action plans. Not started '
+                'counts as 0%, in progress as 50%, and done as 100%.',
+                style: TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontSize: 13.5,
+                  height: 1.4,
+                ),
+              ),
+            )
+          else ...[
+            const Text(
+              'Target value',
+              style: TextStyle(
+                color: AbundanceColors.foreground,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<TargetPeriod>(
-            initialValue: _targetPeriod,
-            dropdownColor: AbundanceColors.surfaceRaised,
-            decoration: _fieldDecoration('Daily'),
-            style: const TextStyle(
-              color: AbundanceColors.foreground,
-              fontSize: 16,
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('quest-target-value-field'),
+              controller: _targetValue,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(
+                color: AbundanceColors.foreground,
+                fontSize: 16,
+              ),
+              decoration: _fieldDecoration('10'),
+              onChanged: (_) => setState(() {}),
             ),
-            items: [
-              for (final p in TargetPeriod.values)
-                DropdownMenuItem(value: p, child: Text(p.label)),
-            ],
-            onChanged: (v) => setState(() => _targetPeriod = v!),
-          ),
+            const SizedBox(height: 18),
+            const Text(
+              'Target period',
+              style: TextStyle(
+                color: AbundanceColors.foreground,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<TargetPeriod>(
+              initialValue: _targetPeriod,
+              dropdownColor: AbundanceColors.surfaceRaised,
+              decoration: _fieldDecoration('Daily'),
+              style: const TextStyle(
+                color: AbundanceColors.foreground,
+                fontSize: 16,
+              ),
+              items: [
+                for (final p in TargetPeriod.values)
+                  DropdownMenuItem(value: p, child: Text(p.label)),
+              ],
+              onChanged: (v) => setState(() => _targetPeriod = v!),
+            ),
+          ],
           const SizedBox(height: 18),
           _ActionPlansPanel(
+            isMilestone: _isMilestoneMeasure,
             planTitles: _planTitles,
             planEntry: _planEntry,
             onAdd: () {
@@ -749,6 +856,28 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
             ),
           ),
         ],
+      ],
+    );
+  }
+
+  /// The "choose" half of A12's measure combobox: one chip per
+  /// `STANDARD_UNITS` entry, writing straight into the same `_unit`
+  /// controller the free-text field above edits, so there is only ever one
+  /// source of truth for the chosen measure.
+  Widget _buildMeasurePicker() {
+    final current = _unit.text.trim().toUpperCase();
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final unit in _standardUnits)
+          _MeasureChip(
+            label: unit,
+            selected: current == unit,
+            onTap: () => setState(() {
+              _unit.text = unit;
+            }),
+          ),
       ],
     );
   }
@@ -1074,6 +1203,54 @@ class _GoalFormScreenState extends State<GoalFormScreen> {
       DateTime(date.year, date.month, date.day);
 }
 
+/// One standard-measure quick pick. The gold outline is the same "selected"
+/// affordance [_CategoryChip] and [_DirectionButton] already use on this
+/// step, so all three pickers read as one control surface.
+class _MeasureChip extends StatelessWidget {
+  const _MeasureChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AbundanceColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color:
+                  selected ? AbundanceColors.primaryGold : AbundanceColors.border,
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? AbundanceColors.primaryGold
+                  : AbundanceColors.foreground,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CategoryChip extends StatelessWidget {
   const _CategoryChip({
     required this.category,
@@ -1248,12 +1425,17 @@ class _QualityChip extends StatelessWidget {
 
 class _ActionPlansPanel extends StatelessWidget {
   const _ActionPlansPanel({
+    required this.isMilestone,
     required this.planTitles,
     required this.planEntry,
     required this.onAdd,
     required this.onRemove,
   });
 
+  /// Action plans are optional for a merit quest but required for a milestone
+  /// one, whose entire score comes from them — the copy below says which,
+  /// mirroring goal-wizard.tsx:1168-1171.
+  final bool isMilestone;
   final List<String> planTitles;
   final TextEditingController planEntry;
   final VoidCallback onAdd;
@@ -1294,10 +1476,13 @@ class _ActionPlansPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Optional - the steps you\'ll take. The score comes from the '
-            'measure above; these just track the work.',
-            style: TextStyle(
+          Text(
+            isMilestone
+                ? 'Required - add the action plans that complete this quest. '
+                    'Their statuses determine the score.'
+                : 'Optional - the steps you\'ll take. The score comes from '
+                    'the measure above; these just track the work.',
+            style: const TextStyle(
               color: AbundanceColors.muted,
               fontSize: 13.5,
               height: 1.35,
@@ -1353,6 +1538,7 @@ class _ActionPlansPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: TextField(
+                  key: const Key('quest-plan-entry-field'),
                   controller: planEntry,
                   style: const TextStyle(color: AbundanceColors.foreground),
                   decoration: InputDecoration(

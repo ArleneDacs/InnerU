@@ -319,7 +319,7 @@ class _GoalsHeader extends StatelessWidget {
             ),
             SizedBox(height: 10),
             Text(
-              'Personal, professional and contribution - combined into your Life Power. In Todo List, new quests can include a start date and an end date.',
+              'Personal, professional and contribution - combined into your Life Power.',
               style: TextStyle(
                 color: _muted,
                 fontSize: 15.5,

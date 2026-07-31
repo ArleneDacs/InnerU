@@ -303,4 +303,233 @@ void main() {
     expect(data['description'], isNotEmpty);
     expect(data['description'], contains('on or before'));
   });
+  // ---------------------------------------------------------------------
+  // Critical 3 (whole-branch review): step 2 shipped with no measure/unit
+  // field at all, so `_goalType` was hardcoded to MERIT for every new quest
+  // and `unit` was always persisted blank. A12 derives MERIT vs MILESTONE
+  // from the chosen measure (`isMilestoneMeasure(unit)`, goal-plan.ts:90),
+  // it does not offer a separate type toggle.
+  // ---------------------------------------------------------------------
+
+  testWidgets(
+      'choosing the MILESTONE measure creates a milestone quest with a '
+      'non-empty unit persisted', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({
+      'activeCompanyId': 'A12',
+      'companyId': 'A12',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('quest-measure-field')),
+      'MILESTONE',
+    );
+    await tester.pumpAndSettle();
+
+    // A milestone quest is scored from its action plans, so it needs at
+    // least one before step 2 will let go (goal-wizard.tsx:814).
+    await tester.enterText(
+      find.byKey(const Key('quest-plan-entry-field')),
+      'Book the venue',
+    );
+    await tester.ensureVisible(find.text('+ Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('+ Add'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 3 of 4 — When & qualities'), findsOneWidget);
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    final docs = await firestore.collection('goals').get();
+    expect(docs.docs, hasLength(1));
+    final data = docs.docs.single.data();
+    expect(data['goalType'], GoalType.milestone.code);
+    expect(data['unit'], isNotEmpty);
+    expect(data['unit'], 'MILESTONE');
+  });
+
+  testWidgets('a non-milestone measure is persisted as the quest unit',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({
+      'activeCompanyId': 'A12',
+      'companyId': 'A12',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(
+      find.byKey(const Key('quest-measure-field')),
+      'KM',
+    );
+    await tester.enterText(
+      find.byKey(const Key('quest-target-value-field')),
+      '100',
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+
+    final data = (await firestore.collection('goals').get()).docs.single.data();
+    expect(data['goalType'], GoalType.merit.code);
+    expect(data['unit'], 'KM');
+  });
+
+  testWidgets('step 2 rejects a target value of exactly 0', (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '0');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+    expect(
+      find.textContaining('target value greater than 0'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('step 2 rejects a negative target value', (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(find.byKey(const Key('quest-target-value-field')), '-5');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+  });
+
+  testWidgets('step 2 rejects a milestone quest with zero action plans',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('quest-declaration-field')),
+      _declaration,
+    );
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Personal'));
+    await tester.enterText(
+      find.byKey(const Key('quest-measure-field')),
+      'MILESTONE',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Step 2 of 4 — How'), findsOneWidget);
+    expect(
+      find.textContaining('at least one action plan'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'editing an existing MILESTONE quest seeds the measure field so its '
+      'type survives a round-trip through the wizard', (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+    final existing = GoalSummary(
+      id: 'g1',
+      userId: 'u1',
+      companyId: 'A12',
+      title: 'Ship the launch',
+      description: 'Ship the launch on or before June 1, 2026.',
+      notes: null,
+      status: GoalStatus.inProgress,
+      progress: 0,
+      category: GoalCategory.professional,
+      goalType: GoalType.milestone,
+      targetPeriod: TargetPeriod.none,
+      direction: GoalDirection.gain,
+      targetValue: 0,
+      currentValue: 0,
+      unit: '',
+      startDate: DateTime(2026, 1, 1),
+      targetDate: DateTime(2026, 6, 1),
+      completedAt: null,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalFormScreen(service: service, uid: 'u1', existing: existing),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    final measureField = tester.widget<TextField>(
+      find.byKey(const Key('quest-measure-field')),
+    );
+    expect(measureField.controller!.text, 'MILESTONE');
+  });
 }

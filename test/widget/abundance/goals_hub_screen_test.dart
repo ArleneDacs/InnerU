@@ -38,10 +38,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Run 100 km'), findsOneWidget);
+    // Matches A12's own subtitle verbatim (goals/page.tsx:118-121), which
+    // stops at "Life Power." The sentence that used to follow pointed at a
+    // "Todo List" destination this shell does not have and claimed a start
+    // date the wizard never collects.
     expect(
-      find.textContaining('new quests can include a start date and an end date'),
+      find.textContaining('combined into your Life Power.'),
       findsOneWidget,
     );
+    expect(find.textContaining('Todo List'), findsNothing);
     // Personal is held; the other two required categories are named as gaps.
     expect(find.textContaining('Professional'), findsWidgets);
     expect(find.textContaining('Contribution'), findsWidgets);

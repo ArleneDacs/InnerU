@@ -136,7 +136,9 @@ class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
   @override
   void initState() {
     super.initState();
-    _index = widget.initialIndex.clamp(0, 4);
+    // Clamped to 0-3, not 0-4: index 4 ("More") is a bottom-sheet trigger,
+    // not a tab body, so landing on it would show an empty SizedBox.shrink().
+    _index = widget.initialIndex.clamp(0, 3);
     _ensureBuilt(_index);
   }
 
