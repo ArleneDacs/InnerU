@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -141,6 +144,7 @@ Future<void> stepTrackingServiceEntryPoint(ServiceInstance service) async {
 
 class _StepTrackingEngine {
   StreamSubscription<StepCount>? _stepCountSubscription;
+  StreamSubscription<Position>? _positionSubscription;
   Timer? _heartbeatTimer;
   ServiceInstance? _service;
 
@@ -152,6 +156,9 @@ class _StepTrackingEngine {
   int _dailyGoal = 5000;
   bool _initialized = false;
   bool _running = false;
+
+  static String _walkTrackingStateKey(String userId) =>
+      'walk_tracking_state_$userId';
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -179,14 +186,21 @@ class _StepTrackingEngine {
       await _shutdown();
       await service.stopSelf();
     });
+    service.on('stepTrackingEnabled').listen((event) async {
+      if (event is Map<String, dynamic> && event['enabled'] == true) {
+        await _startWalkLocationListener();
+      }
+    });
 
     await _applyDailyRolloverIfNeeded();
     await _startPedometerListener();
+    await _startWalkLocationListener();
 
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!_running) return;
       await _applyDailyRolloverIfNeeded();
+      await _persistWalkSessionProgress();
       await _persistState();
     });
   }
@@ -243,6 +257,53 @@ class _StepTrackingEngine {
     }
   }
 
+  Future<void> _startWalkLocationListener() async {
+    await _positionSubscription?.cancel();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      if (prefs.getString(_walkTrackingStateKey(_userId ?? '')) == null) {
+        return;
+      }
+
+      final locationSettings = Platform.isAndroid
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 5,
+              foregroundNotificationConfig:
+                  const ForegroundNotificationConfig(
+                notificationTitle: 'InnerU walk tracking',
+                notificationText: 'Your walk is still being recorded.',
+                enableWakeLock: true,
+                setOngoing: true,
+              ),
+            )
+          : Platform.isIOS
+              ? AppleSettings(
+                  accuracy: LocationAccuracy.high,
+                  distanceFilter: 5,
+                  allowBackgroundLocationUpdates: true,
+                  pauseLocationUpdatesAutomatically: false,
+                )
+              : const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                  distanceFilter: 5,
+                );
+
+      _positionSubscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        (position) => unawaited(_persistWalkLocation(position)),
+        onError: (error) {
+          debugPrint('Background walk location stream error: $error');
+        },
+      );
+    } catch (error) {
+      debugPrint('Failed to start background walk location listener: $error');
+    }
+  }
+
   Future<void> _applyRawStepCount(
     int currentSteps,
     DateTime eventTime, {
@@ -267,6 +328,7 @@ class _StepTrackingEngine {
     _steps = newSteps;
 
     await _persistState();
+    await _persistWalkSessionProgress(currentRawSteps: currentSteps);
 
     if (syncImmediately || _shouldSyncProgress()) {
       await _syncToServer();
@@ -392,6 +454,103 @@ class _StepTrackingEngine {
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
   }
 
+  Future<void> _persistWalkSessionProgress({int? currentRawSteps}) async {
+    final userId = _userId;
+    if (userId == null || userId.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final key = _walkTrackingStateKey(userId);
+      final encoded = prefs.getString(key);
+      if (encoded == null || encoded.isEmpty) return;
+
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return;
+      final snapshot = Map<String, dynamic>.from(decoded);
+      final startedAtMs = (snapshot['startedAtMs'] as num?)?.toInt();
+      if (startedAtMs == null) return;
+
+      if (currentRawSteps != null) {
+        final baseline = (snapshot['backgroundStepBaseline'] as num?)?.toInt() ??
+            currentRawSteps;
+        snapshot['backgroundStepBaseline'] = baseline;
+        final backgroundSessionSteps =
+            (currentRawSteps - baseline).clamp(0, 1000000).toInt();
+        final existingSessionSteps =
+            (snapshot['stepCount'] as num?)?.toInt() ?? 0;
+        snapshot['stepCount'] =
+            math.max(existingSessionSteps, backgroundSessionSteps);
+      }
+
+      snapshot['elapsedSeconds'] = math.max(
+        (snapshot['elapsedSeconds'] as num?)?.toInt() ?? 0,
+        DateTime.now()
+                .difference(DateTime.fromMillisecondsSinceEpoch(startedAtMs))
+                .inSeconds,
+      );
+      await prefs.setString(key, jsonEncode(snapshot));
+    } catch (error) {
+      debugPrint('Background walk snapshot persist failed: $error');
+    }
+  }
+
+  Future<void> _persistWalkLocation(Position position) async {
+    final userId = _userId;
+    if (userId == null || userId.isEmpty) return;
+    if (!position.latitude.isFinite || !position.longitude.isFinite) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final key = _walkTrackingStateKey(userId);
+      final encoded = prefs.getString(key);
+      if (encoded == null || encoded.isEmpty) return;
+
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return;
+      final snapshot = Map<String, dynamic>.from(decoded);
+      final rawRoute = snapshot['routePoints'];
+      final route = rawRoute is List
+          ? rawRoute
+              .whereType<Map>()
+              .map((point) => Map<String, dynamic>.from(point))
+              .toList()
+          : <Map<String, dynamic>>[];
+      final lastPoint = route.isEmpty ? null : route.last;
+      final lastLatitude = (lastPoint?['latitude'] as num?)?.toDouble();
+      final lastLongitude = (lastPoint?['longitude'] as num?)?.toDouble();
+      final segmentDistance = lastLatitude == null || lastLongitude == null
+          ? 0.0
+          : Geolocator.distanceBetween(
+              lastLatitude,
+              lastLongitude,
+              position.latitude,
+              position.longitude,
+            );
+
+      if (segmentDistance < 3 || segmentDistance > 120) {
+        await _persistWalkSessionProgress();
+        return;
+      }
+
+      route.add({
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+      });
+      if (route.length > 500) {
+        route.removeRange(0, route.length - 500);
+      }
+      snapshot['routePoints'] = route;
+      snapshot['distanceMeters'] =
+          ((snapshot['distanceMeters'] as num?)?.toDouble() ?? 0) +
+              segmentDistance;
+      await prefs.setString(key, jsonEncode(snapshot));
+    } catch (error) {
+      debugPrint('Background walk location persist failed: $error');
+    }
+  }
+
   Future<void> _saveDailyStepsToHistory({
     required String userId,
     required int steps,
@@ -478,8 +637,11 @@ class _StepTrackingEngine {
     _running = false;
     await _stepCountSubscription?.cancel();
     _stepCountSubscription = null;
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    await _persistWalkSessionProgress();
     await _persistState();
   }
 }

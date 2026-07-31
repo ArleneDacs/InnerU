@@ -19,11 +19,145 @@ import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/step_map_api_service.dart';
+import 'package:selfcare_projects/src/services/step_background_service.dart';
+import 'package:selfcare_projects/src/services/pending_recorded_walk_sync_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_tracker_utils.dart';
+
+enum _RecordedWalkShareStyle { transparent, paper, midnight, sunset }
+
+extension _RecordedWalkShareStyleDetails on _RecordedWalkShareStyle {
+  String get label {
+    switch (this) {
+      case _RecordedWalkShareStyle.transparent:
+        return 'Transparent';
+      case _RecordedWalkShareStyle.paper:
+        return 'Warm paper';
+      case _RecordedWalkShareStyle.midnight:
+        return 'Midnight';
+      case _RecordedWalkShareStyle.sunset:
+        return 'Sunset';
+    }
+  }
+
+  String get fileLabel => label.toLowerCase().replaceAll(' ', '-');
+}
+
+class _RecordedWalkSharePalette {
+  const _RecordedWalkSharePalette({
+    required this.backgroundStart,
+    required this.backgroundEnd,
+    required this.card,
+    required this.brand,
+    required this.title,
+    required this.muted,
+    required this.grid,
+    required this.route,
+    required this.routeGlow,
+    required this.start,
+    required this.end,
+    required this.statsCard,
+    required this.metricValue,
+    required this.metricLabel,
+    required this.footer,
+  });
+
+  final Color? backgroundStart;
+  final Color? backgroundEnd;
+  final Color card;
+  final Color brand;
+  final Color title;
+  final Color muted;
+  final Color grid;
+  final Color route;
+  final Color routeGlow;
+  final Color start;
+  final Color end;
+  final Color statsCard;
+  final Color metricValue;
+  final Color metricLabel;
+  final Color footer;
+}
+
+_RecordedWalkSharePalette _sharePalette(_RecordedWalkShareStyle style) {
+  switch (style) {
+    case _RecordedWalkShareStyle.transparent:
+      return const _RecordedWalkSharePalette(
+        backgroundStart: null,
+        backgroundEnd: null,
+        card: Color(0x00000000),
+        brand: Color(0xFFFFFFFF),
+        title: Color(0xFFFFFFFF),
+        muted: Color(0xDDFFFFFF),
+        grid: Color(0x33FFFFFF),
+        route: Color(0xFF67E8F9),
+        routeGlow: Color(0x6667E8F9),
+        start: Color(0xFF86EFAC),
+        end: Color(0xFFFDA4AF),
+        statsCard: Color(0x88101825),
+        metricValue: Color(0xFFFFFFFF),
+        metricLabel: Color(0xCCFFFFFF),
+        footer: Color(0xCCFFFFFF),
+      );
+    case _RecordedWalkShareStyle.midnight:
+      return const _RecordedWalkSharePalette(
+        backgroundStart: Color(0xFF101827),
+        backgroundEnd: Color(0xFF263B5D),
+        card: Color(0xCC101827),
+        brand: Color(0xFF7DD3FC),
+        title: Color(0xFFFFFFFF),
+        muted: Color(0xFFB8C7DB),
+        grid: Color(0x26FFFFFF),
+        route: Color(0xFF67E8F9),
+        routeGlow: Color(0x8867E8F9),
+        start: Color(0xFF86EFAC),
+        end: Color(0xFFFDA4AF),
+        statsCard: Color(0xCC18253A),
+        metricValue: Color(0xFFFFFFFF),
+        metricLabel: Color(0xFFB8C7DB),
+        footer: Color(0xFFB8C7DB),
+      );
+    case _RecordedWalkShareStyle.sunset:
+      return const _RecordedWalkSharePalette(
+        backgroundStart: Color(0xFFFFB36B),
+        backgroundEnd: Color(0xFFF472B6),
+        card: Color(0xDDFEF5EE),
+        brand: Color(0xFF8E3F53),
+        title: Color(0xFF321E2A),
+        muted: Color(0xFF70495A),
+        grid: Color(0x221F1020),
+        route: Color(0xFFB4235A),
+        routeGlow: Color(0x554D1731),
+        start: Color(0xFF2E8B57),
+        end: Color(0xFF8E3F53),
+        statsCard: Color(0xDDFEF5EE),
+        metricValue: Color(0xFF321E2A),
+        metricLabel: Color(0xFF70495A),
+        footer: Color(0xFF70495A),
+      );
+    case _RecordedWalkShareStyle.paper:
+      return const _RecordedWalkSharePalette(
+        backgroundStart: Color(0xFFF8F3EA),
+        backgroundEnd: Color(0xFFECD7BC),
+        card: Color(0xFFFDFBF7),
+        brand: Color(0xFF2A3B36),
+        title: Color(0xFF1F2A2E),
+        muted: Color(0xFF5C5C5C),
+        grid: Color(0x11000000),
+        route: Color(0xFF2E5BFF),
+        routeGlow: Color(0x332E5BFF),
+        start: Color(0xFF2E8B57),
+        end: Color(0xFFB96D40),
+        statsCard: Color(0xFFFDFBF7),
+        metricValue: Color(0xFF1F2A2E),
+        metricLabel: Color(0xFF6A655D),
+        footer: Color(0xFF6A655D),
+      );
+  }
+}
 
 class _StepMapTrackingController extends ChangeNotifier {
   static const LatLng _defaultCenter = LatLng(1.3521, 103.8198);
@@ -421,8 +555,11 @@ class _StepMapTrackingController extends ChangeNotifier {
       await FastingNotificationService.instance.ensurePermissions();
       await _updateWalkTrackingNotification(force: true);
 
-      await syncSharedSessionMember();
+      unawaited(syncSharedSessionMember());
       await _persistTrackingFlag();
+      if (Platform.isAndroid) {
+        await StepBackgroundService.instance.startTracking();
+      }
 
       _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (startedAt == null) return;
@@ -700,7 +837,7 @@ class _StepMapTrackingController extends ChangeNotifier {
         'route_points': serializeRoutePoints(routePoints),
         'current_location_lat': livePosition?.latitude,
         'current_location_lng': livePosition?.longitude,
-      });
+      }).timeout(const Duration(seconds: 5));
     } catch (error) {
       debugPrint('Failed to sync shared walk session: $error');
     }
@@ -722,6 +859,9 @@ class _StepMapTrackingController extends ChangeNotifier {
 
     await positionSubscription?.cancel();
     await stepSubscription?.cancel();
+    if (Platform.isAndroid) {
+      await StepBackgroundService.instance.stopTracking();
+    }
 
     statusText = hadRoute
         ? 'Session complete. You can review the route on screen or start again.'
@@ -731,7 +871,7 @@ class _StepMapTrackingController extends ChangeNotifier {
     await FastingNotificationService.instance.cancelWalkTrackingNotification();
     await _clearTrackingFlag();
     if (syncSharedSession) {
-      await syncSharedSessionMember();
+      unawaited(syncSharedSessionMember());
     }
   }
 
@@ -1042,9 +1182,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   String _statusText = 'Tap start to track your walk on the map.';
   bool _useSatelliteTiles = true;
   bool _isReplayingRecordedWalk = false;
-  int _replayRouteIndex = 0;
   List<LatLng> _replayRoutePoints = const [];
   LatLng? _replayCurrentPoint;
+  String _replayPhase = 'Overview';
 
   bool get _isSessionOwner {
     final currentUserId = _currentUserId;
@@ -1151,6 +1291,11 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     unawaited(_trackingController.reconcileStaleSession());
     _loadCurrentUser();
     _listenToWalkSessions();
+    if (_currentUserId != null) {
+      unawaited(
+        PendingRecordedWalkSyncService.instance.flush(userId: _currentUserId!),
+      );
+    }
     _loadInitialMapPreview();
   }
 
@@ -1178,6 +1323,12 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         );
         _trackingController.updateActiveSession(_activeSessionId);
         _listenToWalkSessions();
+        if (_currentUserId != null) {
+          unawaited(
+            PendingRecordedWalkSyncService.instance
+                .flush(userId: _currentUserId!),
+          );
+        }
         if (mounted) {
           _applyTrackingState(notify: true);
         }
@@ -1713,8 +1864,55 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   }
 
   double _replayZoomForProgress(double progress) {
-    final eased = math.sin(progress * math.pi);
-    return 19.0 + (eased * 0.25);
+    final routeZoom = _routeOverviewZoom(
+      _selectedRecordedWalk?.routePoints ?? const <LatLng>[],
+    );
+    if (progress < 0.14) {
+      final flyInProgress = _easeInOut(progress / 0.14);
+      return routeZoom - 1.6 + (flyInProgress * 1.6);
+    }
+    if (progress > 0.88) {
+      final flyOutProgress = _easeInOut((progress - 0.88) / 0.12);
+      return 17.2 - (flyOutProgress * 1.8);
+    }
+    return 17.2;
+  }
+
+  double _easeInOut(double value) {
+    final clamped = value.clamp(0.0, 1.0);
+    return clamped < 0.5
+        ? 2 * clamped * clamped
+        : 1 - (math.pow(-2 * clamped + 2, 2).toDouble() / 2);
+  }
+
+  LatLng _interpolateReplayPoint(List<LatLng> points, double progress) {
+    if (points.length < 2) return points.first;
+    final scaled = progress.clamp(0.0, 1.0) * (points.length - 1);
+    final index = math.min(scaled.floor(), points.length - 2);
+    final localProgress = scaled - index;
+    final start = points[index];
+    final end = points[index + 1];
+    return LatLng(
+      start.latitude + ((end.latitude - start.latitude) * localProgress),
+      start.longitude + ((end.longitude - start.longitude) * localProgress),
+    );
+  }
+
+  double _replayRotationForProgress(double progress) {
+    final route = _selectedRecordedWalk?.routePoints ?? const <LatLng>[];
+    if (route.length < 3 || progress < 0.14 || progress > 0.88) return 0;
+
+    final scaled = ((progress - 0.14) / 0.74).clamp(0.0, 1.0) * (route.length - 1);
+    final index = math.min(scaled.floor(), route.length - 2);
+    final previous = route[math.max(0, index - 1)];
+    final next = route[math.min(route.length - 1, index + 1)];
+    final bearing = Geolocator.bearingBetween(
+      previous.latitude,
+      previous.longitude,
+      next.latitude,
+      next.longitude,
+    );
+    return bearing * 0.12;
   }
 
   List<LatLng> _buildSmoothedReplayRoute(List<LatLng> points) {
@@ -1753,15 +1951,84 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
   }
 
   void _moveReplayCamera(LatLng point, double progress) {
-    _moveCamera(point, zoom: _replayZoomForProgress(progress));
+    final route = _selectedRecordedWalk?.routePoints ?? const <LatLng>[];
+    if (route.length < 2) {
+      _moveCamera(point, zoom: _replayZoomForProgress(progress));
+      return;
+    }
+
+    final routeCenter = _routeCenter(route);
+    LatLng cameraPoint = point;
+    if (progress < 0.14) {
+      final start = route.first;
+      final flyInProgress = _easeInOut(progress / 0.14);
+      cameraPoint = LatLng(
+        routeCenter.latitude + ((start.latitude - routeCenter.latitude) * flyInProgress),
+        routeCenter.longitude + ((start.longitude - routeCenter.longitude) * flyInProgress),
+      );
+    } else if (progress > 0.88) {
+      final flyOutProgress = _easeInOut((progress - 0.88) / 0.12);
+      cameraPoint = LatLng(
+        point.latitude + ((routeCenter.latitude - point.latitude) * flyOutProgress),
+        point.longitude + ((routeCenter.longitude - point.longitude) * flyOutProgress),
+      );
+    }
+    _moveCamera(cameraPoint, zoom: _replayZoomForProgress(progress));
+    final rotation = _replayRotationForProgress(progress);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _mapController.rotate(rotation);
+    });
+  }
+
+  Future<_RecordedWalkShareStyle?> _chooseRecordedWalkShareStyle() {
+    return showModalBottomSheet<_RecordedWalkShareStyle>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Save walk style',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 6),
+                const Text('Choose how your recorded walk image should look.'),
+                const SizedBox(height: 16),
+                ..._RecordedWalkShareStyle.values.map(
+                  (style) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: _ShareStyleSwatch(style: style),
+                    title: Text(style.label),
+                    subtitle: Text(
+                      style == _RecordedWalkShareStyle.transparent
+                          ? 'Transparent PNG for overlays and stickers'
+                          : 'Styled background with route and stats',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(sheetContext).pop(style),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _shareRecordedWalk(_RecordedWalk walk) async {
     try {
-      final imageBytes = await _buildRecordedWalkShareImage(walk);
+      final style = await _chooseRecordedWalkShareStyle();
+      if (!mounted || style == null) return;
+      final imageBytes = await _buildRecordedWalkShareImage(walk, style: style);
       final tempDir = await getTemporaryDirectory();
       final safeFileName =
-          'inneru_walk_${walk.id}_${DateTime.now().millisecondsSinceEpoch}.png';
+          'inneru_walk_${style.fileLabel}_${walk.id}_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File('${tempDir.path}/$safeFileName');
       await file.writeAsBytes(imageBytes, flush: true);
 
@@ -1785,61 +2052,73 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     }
   }
 
-  Future<Uint8List> _buildRecordedWalkShareImage(_RecordedWalk walk) async {
+  Future<Uint8List> _buildRecordedWalkShareImage(
+    _RecordedWalk walk, {
+    required _RecordedWalkShareStyle style,
+  }) async {
+    if (style == _RecordedWalkShareStyle.transparent) {
+      return _buildTransparentWalkShareImage(walk);
+    }
+
     const width = 1080.0;
     const height = 1350.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final size = const Size(width, height);
+    final palette = _sharePalette(style);
 
-    final backgroundPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFF8F3EA), Color(0xFFECD7BC)],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, backgroundPaint);
+    if (palette.backgroundStart != null && palette.backgroundEnd != null) {
+      final backgroundPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [palette.backgroundStart!, palette.backgroundEnd!],
+        ).createShader(Offset.zero & size);
+      canvas.drawRect(Offset.zero & size, backgroundPaint);
+    }
 
-    canvas.drawCircle(
-      const Offset(930, 200),
-      260,
-      Paint()..color = const Color(0x20FFFFFF),
-    );
-    canvas.drawCircle(
-      const Offset(170, 1140),
-      200,
-      Paint()..color = const Color(0x14B96D40),
-    );
+    if (style != _RecordedWalkShareStyle.transparent) {
+      canvas.drawCircle(
+        const Offset(930, 200),
+        260,
+        Paint()..color = const Color(0x20FFFFFF),
+      );
+      canvas.drawCircle(
+        const Offset(170, 1140),
+        200,
+        Paint()..color = palette.routeGlow,
+      );
+    }
 
     _paintShareText(
       canvas,
       'InnerU',
       const Offset(72, 64),
-      const TextStyle(
-        fontSize: 30,
-        fontWeight: FontWeight.w800,
-        color: Color(0xFF2A3B36),
-        letterSpacing: 0.4,
+    TextStyle(
+      fontSize: 30,
+      fontWeight: FontWeight.w800,
+      color: palette.brand,
+      letterSpacing: 0.4,
       ),
     );
     _paintShareText(
       canvas,
       'Recorded Walk',
       const Offset(72, 112),
-      const TextStyle(
-        fontSize: 56,
-        fontWeight: FontWeight.w900,
-        color: Color(0xFF1F2A2E),
+    TextStyle(
+      fontSize: 56,
+      fontWeight: FontWeight.w900,
+      color: palette.title,
       ),
     );
     _paintShareText(
       canvas,
       _formatRecordedWalkDate(walk.endedAt),
       const Offset(74, 182),
-      const TextStyle(
-        fontSize: 24,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF5C5C5C),
+    TextStyle(
+      fontSize: 24,
+      fontWeight: FontWeight.w600,
+      color: palette.muted,
       ),
     );
 
@@ -1848,10 +2127,12 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       const Radius.circular(42),
     );
     final routePath = ui.Path()..addRRect(routeCard);
-    canvas.drawShadow(routePath, Colors.black26, 18, true);
+    if (style != _RecordedWalkShareStyle.transparent) {
+      canvas.drawShadow(routePath, Colors.black26, 18, true);
+    }
     canvas.drawRRect(
       routeCard,
-      Paint()..color = const Color(0xFFFDFBF7),
+      Paint()..color = palette.card,
     );
 
     final routeBounds = walk.routePoints.fold<_RouteBounds?>(
@@ -1893,7 +2174,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     }
 
     final gridPaint = Paint()
-      ..color = const Color(0x11000000)
+      ..color = palette.grid
       ..strokeWidth = 2;
     for (double x = plotRect.left; x <= plotRect.right; x += 120) {
       canvas.drawLine(Offset(x, plotRect.top), Offset(x, plotRect.bottom), gridPaint);
@@ -1908,13 +2189,13 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..strokeWidth = 22
-      ..color = const Color(0x332E5BFF);
+      ..color = palette.routeGlow;
     final routePaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..strokeWidth = 14
-      ..color = const Color(0xFF2E5BFF);
+      ..color = palette.route;
 
     final path = ui.Path()..moveTo(routePoints.first.dx, routePoints.first.dy);
     for (final point in routePoints.skip(1)) {
@@ -1924,22 +2205,30 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     canvas.drawPath(path, routePaint);
 
     void drawEndpoint(Offset point, Color color) {
-      canvas.drawCircle(point, 22, Paint()..color = Colors.white);
+      canvas.drawCircle(
+        point,
+        22,
+        Paint()..color = style == _RecordedWalkShareStyle.transparent
+            ? const Color(0xCC101825)
+            : palette.card,
+      );
       canvas.drawCircle(point, 15, Paint()..color = color);
     }
 
-    drawEndpoint(routePoints.first, const Color(0xFF2E8B57));
-    drawEndpoint(routePoints.last, const Color(0xFFB96D40));
+    drawEndpoint(routePoints.first, palette.start);
+    drawEndpoint(routePoints.last, palette.end);
 
     final statsTop = 1060.0;
     final statsCard = RRect.fromRectAndRadius(
       Rect.fromLTWH(72, statsTop, 936, 196),
       const Radius.circular(36),
     );
-    canvas.drawShadow(ui.Path()..addRRect(statsCard), Colors.black26, 14, true);
+    if (style != _RecordedWalkShareStyle.transparent) {
+      canvas.drawShadow(ui.Path()..addRRect(statsCard), Colors.black26, 14, true);
+    }
     canvas.drawRRect(
       statsCard,
-      Paint()..color = const Color(0xFFFDFBF7),
+      Paint()..color = palette.statsCard,
     );
 
     _drawMetricCard(
@@ -1947,28 +2236,37 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       Rect.fromLTWH(96, statsTop + 28, 276, 120),
       'Distance',
       _formatDistance(walk.distanceMeters),
+      cardColor: palette.statsCard,
+      valueColor: palette.metricValue,
+      labelColor: palette.metricLabel,
     );
     _drawMetricCard(
       canvas,
       Rect.fromLTWH(402, statsTop + 28, 276, 120),
       'Steps',
       walk.stepCount.toString(),
+      cardColor: palette.statsCard,
+      valueColor: palette.metricValue,
+      labelColor: palette.metricLabel,
     );
     _drawMetricCard(
       canvas,
       Rect.fromLTWH(708, statsTop + 28, 276, 120),
       'Time',
       _formatDuration(Duration(seconds: walk.elapsedSeconds)),
+      cardColor: palette.statsCard,
+      valueColor: palette.metricValue,
+      labelColor: palette.metricLabel,
     );
 
     _paintShareText(
       canvas,
       'Shared from InnerU',
       const Offset(72, 1280),
-      const TextStyle(
+      TextStyle(
         fontSize: 22,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF6A655D),
+        color: palette.footer,
       ),
     );
 
@@ -1977,6 +2275,149 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
         .toImage(width.toInt(), height.toInt());
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     return data!.buffer.asUint8List();
+  }
+
+  Future<Uint8List> _buildTransparentWalkShareImage(_RecordedWalk walk) async {
+    const width = 1080.0;
+    const height = 1350.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final distanceKm = walk.distanceMeters / 1000;
+    final paceText = distanceKm > 0 && walk.elapsedSeconds > 0
+        ? _formatPace(walk.elapsedSeconds / distanceKm)
+        : '-- /km';
+
+    void drawMetric(String label, String value, double y) {
+      _paintShareText(
+        canvas,
+        label,
+        Offset(82, y),
+        const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: Color(0xEEFFFFFF),
+          letterSpacing: 0.2,
+        ),
+      );
+      _paintShareText(
+        canvas,
+        value,
+        Offset(82, y + 25),
+        const TextStyle(
+          fontSize: 42,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: 0.3,
+        ),
+      );
+    }
+
+    drawMetric('Distance', _formatDistance(walk.distanceMeters), 70);
+    drawMetric('Pace', paceText, 172);
+    drawMetric('Time', _formatShortShareDuration(walk.elapsedSeconds), 274);
+
+    final routeBounds = walk.routePoints.fold<_RouteBounds?>(
+      null,
+      (previous, point) {
+        if (previous == null) {
+          return _RouteBounds(
+            minLat: point.latitude,
+            maxLat: point.latitude,
+            minLng: point.longitude,
+            maxLng: point.longitude,
+          );
+        }
+        return _RouteBounds(
+          minLat: math.min(previous.minLat, point.latitude),
+          maxLat: math.max(previous.maxLat, point.latitude),
+          minLng: math.min(previous.minLng, point.longitude),
+          maxLng: math.max(previous.maxLng, point.longitude),
+        );
+      },
+    );
+
+    if (routeBounds != null && walk.routePoints.length > 1) {
+      final plotRect = const Rect.fromLTWH(110, 560, 860, 500);
+      final latSpan = (routeBounds.maxLat - routeBounds.minLat)
+          .abs()
+          .clamp(0.000001, double.infinity);
+      final lngSpan = (routeBounds.maxLng - routeBounds.minLng)
+          .abs()
+          .clamp(0.000001, double.infinity);
+      final scale = math.min(
+        plotRect.width / lngSpan,
+        plotRect.height / latSpan,
+      );
+      final routeWidth = lngSpan * scale;
+      final routeHeight = latSpan * scale;
+      final routeLeft = plotRect.center.dx - routeWidth / 2;
+      final routeTop = plotRect.center.dy - routeHeight / 2;
+
+      Offset toCanvasPoint(LatLng point) {
+        final x = routeLeft + (point.longitude - routeBounds.minLng) * scale;
+        final y = routeTop + (routeBounds.maxLat - point.latitude) * scale;
+        return Offset(x, y);
+      }
+
+      final routePoints = walk.routePoints.map(toCanvasPoint).toList();
+      final path = ui.Path()..moveTo(routePoints.first.dx, routePoints.first.dy);
+      for (final point in routePoints.skip(1)) {
+        path.lineTo(point.dx, point.dy);
+      }
+
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = 14
+          ..color = const Color(0x554D6A45),
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = 6
+          ..color = const Color(0xFF4D8B52),
+      );
+    }
+
+    _paintShareText(
+      canvas,
+      'INNERU',
+      const Offset(82, 1200),
+      const TextStyle(
+        fontSize: 27,
+        fontWeight: FontWeight.w900,
+        color: Color(0xEEFFFFFF),
+        letterSpacing: 1.2,
+      ),
+    );
+
+    final image = await recorder
+        .endRecording()
+        .toImage(width.toInt(), height.toInt());
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  }
+
+  String _formatPace(double secondsPerKilometer) {
+    final totalSeconds = secondsPerKilometer.round();
+    final minutes = totalSeconds ~/ 60;
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds /km';
+  }
+
+  String _formatShortShareDuration(int seconds) {
+    final duration = Duration(seconds: seconds);
+    if (duration.inHours > 0) {
+      return '${duration.inHours}h ${(duration.inMinutes % 60)}m';
+    }
+    return '${duration.inMinutes}m ${(duration.inSeconds % 60).toString().padLeft(2, '0')}s';
   }
 
   void _paintShareText(
@@ -1999,28 +2440,33 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     Rect rect,
     String label,
     String value,
+    {
+      required Color cardColor,
+      required Color valueColor,
+      required Color labelColor,
+    }
   ) {
     final cardPath = RRect.fromRectAndRadius(rect, const Radius.circular(24));
-    canvas.drawRRect(cardPath, Paint()..color = const Color(0xFFF6F0E8));
+    canvas.drawRRect(cardPath, Paint()..color = cardColor);
 
     _paintShareText(
       canvas,
       value,
       Offset(rect.left + 18, rect.top + 18),
-      const TextStyle(
+      TextStyle(
         fontSize: 34,
         fontWeight: FontWeight.w900,
-        color: Color(0xFF1F2A2E),
+        color: valueColor,
       ),
     );
     _paintShareText(
       canvas,
       label,
       Offset(rect.left + 18, rect.top + 72),
-      const TextStyle(
+      TextStyle(
         fontSize: 18,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF6A655D),
+        color: labelColor,
       ),
     );
   }
@@ -2232,9 +2678,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     if (!mounted) return;
     setState(() {
       _isReplayingRecordedWalk = false;
-      _replayRouteIndex = 0;
       _replayRoutePoints = const [];
       _replayCurrentPoint = null;
+      _replayPhase = 'Overview';
       if (clearSelection) {
         _selectedRecordedWalk = null;
         _isTrackerDockVisible = true;
@@ -2250,47 +2696,64 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
     _routeReplayTimer?.cancel();
     final replayPoints = _buildSmoothedReplayRoute(walk.routePoints);
-
-    final totalPoints = replayPoints.length;
-    final intervalMs = (22000 / totalPoints).round().clamp(120, 520);
+    final replayStartedAt = DateTime.now();
+    const replayDuration = Duration(seconds: 32);
 
     setState(() {
       _isReplayingRecordedWalk = true;
-      _replayRouteIndex = 1;
       _replayRoutePoints = replayPoints.take(1).toList();
       _replayCurrentPoint = replayPoints.first;
+      _replayPhase = 'Overview · flying to start';
     });
     _moveReplayCamera(replayPoints.first, 0);
 
     _routeReplayTimer = Timer.periodic(
-      Duration(milliseconds: intervalMs),
+      const Duration(milliseconds: 80),
       (timer) {
         if (!mounted) {
           timer.cancel();
           return;
         }
 
-        if (_selectedRecordedWalk == null ||
-            _replayRouteIndex >= replayPoints.length) {
+        if (_selectedRecordedWalk == null) {
+          timer.cancel();
+          return;
+        }
+
+        final progress = (DateTime.now().difference(replayStartedAt).inMilliseconds /
+                replayDuration.inMilliseconds)
+            .clamp(0.0, 1.0);
+        final routeProgress = progress < 0.14
+            ? 0.0
+            : progress > 0.88
+                ? 1.0
+                : (progress - 0.14) / 0.74;
+        final easedRouteProgress = _easeInOut(routeProgress).toDouble();
+        final nextPoint = _interpolateReplayPoint(replayPoints, easedRouteProgress);
+        final nextIndex = math.max(1, (easedRouteProgress * (replayPoints.length - 1)).floor() + 1);
+        final phase = progress < 0.14
+            ? 'Overview · flying to start'
+            : progress > 0.88
+                ? 'Complete · route reveal'
+                : 'In flight · following route';
+        setState(() {
+          _replayRoutePoints = replayPoints
+              .take(math.min(nextIndex, replayPoints.length))
+              .toList()
+            ..add(nextPoint);
+          _replayCurrentPoint = nextPoint;
+          _replayPhase = phase;
+        });
+        _moveReplayCamera(nextPoint, progress.toDouble());
+        if (progress >= 1) {
           timer.cancel();
           setState(() {
             _isReplayingRecordedWalk = false;
             _replayRoutePoints = List<LatLng>.from(replayPoints);
             _replayCurrentPoint = replayPoints.last;
+            _replayPhase = 'Complete · route reveal';
           });
-          return;
         }
-
-        final nextPoint = replayPoints[_replayRouteIndex];
-        final nextIndex = _replayRouteIndex + 1;
-        final progress = (nextIndex / replayPoints.length).clamp(0.0, 1.0);
-        setState(() {
-          _replayRouteIndex = nextIndex;
-          _replayRoutePoints =
-              replayPoints.take(_replayRouteIndex).toList();
-          _replayCurrentPoint = nextPoint;
-        });
-        _moveReplayCamera(nextPoint, progress);
       },
     );
   }
@@ -2304,31 +2767,60 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
 
     final endedAt = DateTime.now();
     final docId = '${startedAt.millisecondsSinceEpoch}';
+    final payload = <String, dynamic>{
+      'id': docId,
+      'username': _currentUsername,
+      'started_at': startedAt.toIso8601String(),
+      'ended_at': endedAt.toIso8601String(),
+      'step_count': _sessionSteps,
+      'distance_meters': _distanceMeters,
+      'elapsed_seconds': _elapsedSeconds(),
+      'route_points': _serializeRoutePoints(_routePoints),
+      'interrupted': false,
+    };
 
     try {
-      await _api.saveRecordedWalk({
-        'id': docId,
-        'username': _currentUsername,
-        'started_at': startedAt.toIso8601String(),
-        'ended_at': endedAt.toIso8601String(),
-        'step_count': _sessionSteps,
-        'distance_meters': _distanceMeters,
-        'elapsed_seconds': _elapsedSeconds(),
-        'route_points': _serializeRoutePoints(_routePoints),
-        'interrupted': false,
-      });
+      await _api
+          .saveRecordedWalk(payload)
+          .timeout(const Duration(seconds: 5));
       if (!mounted) return;
+      final savedWalk = _RecordedWalk(
+        id: docId,
+        endedAt: endedAt,
+        stepCount: _sessionSteps,
+        distanceMeters: _distanceMeters,
+        elapsedSeconds: _elapsedSeconds(),
+        routePoints: List<LatLng>.from(_routePoints),
+      );
+      _openRecordedWalk(savedWalk);
+      _startRecordedWalkReplay();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Walk saved! Open History to view or share it.'),
+          content: Text('Walk saved! Your cinematic flyover is ready.'),
         ),
       );
     } catch (error) {
       debugPrint('Failed to save recorded walk: $error');
+      await PendingRecordedWalkSyncService.instance.queue(
+        userId: _currentUserId ?? '',
+        payload: payload,
+      );
       if (!mounted) return;
+      final offlineWalk = _RecordedWalk(
+        id: docId,
+        endedAt: endedAt,
+        stepCount: _sessionSteps,
+        distanceMeters: _distanceMeters,
+        elapsedSeconds: _elapsedSeconds(),
+        routePoints: List<LatLng>.from(_routePoints),
+      );
+      _openRecordedWalk(offlineWalk);
+      _startRecordedWalkReplay();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save this walk recording: $error'),
+          content: Text(
+            'Walk saved on this device. It will upload when data returns.',
+          ),
         ),
       );
     }
@@ -2340,9 +2832,9 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
       _selectedRecordedWalk = walk;
       _isReplayingRecordedWalk = false;
       _isTrackerDockVisible = false;
-      _replayRouteIndex = 0;
       _replayRoutePoints = const [];
       _replayCurrentPoint = null;
+      _replayPhase = 'Overview';
     });
 
     if (walk.routePoints.isNotEmpty) {
@@ -3652,8 +4144,8 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
     final dockStatusText = _selectedRecordedWalk == null
         ? _statusText
         : (_isReplayingRecordedWalk
-            ? 'Replaying the street route with follow zoom.'
-            : 'Recorded walk ready. Replay to follow the route with cinematic zoom.');
+            ? _replayPhase
+            : 'Recorded walk ready. Replay the cinematic flyover anytime.');
 
     return CompanyThemeBuilder(
       builder: (context, companyTheme) {
@@ -3785,7 +4277,7 @@ class _StepMapTrackerScreenState extends State<StepMapTrackerScreen>
                         _ReplaySummaryCard(
                           title: 'Recorded Walk',
                           subtitle:
-                              '${_formatRecordedWalkDate(_selectedRecordedWalk!.endedAt)} | ${_formatDistance(_selectedRecordedWalk!.distanceMeters)} | street replay',
+                              '${_formatRecordedWalkDate(_selectedRecordedWalk!.endedAt)} | ${_formatDistance(_selectedRecordedWalk!.distanceMeters)} | 3D flyover',
                           isReplaying: _isReplayingRecordedWalk,
                           onClose: () =>
                               _resetRecordedWalkReplay(clearSelection: true),
@@ -4112,6 +4604,40 @@ class _ReplaySummaryCard extends StatelessWidget {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ShareStyleSwatch extends StatelessWidget {
+  const _ShareStyleSwatch({required this.style});
+
+  final _RecordedWalkShareStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _sharePalette(style);
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: palette.route.withValues(alpha: 0.5)),
+        gradient: palette.backgroundStart == null
+            ? null
+            : LinearGradient(
+                colors: [palette.backgroundStart!, palette.backgroundEnd!],
+              ),
+        color: palette.backgroundStart == null
+            ? const Color(0xFF253044)
+            : null,
+      ),
+      child: Icon(
+        style == _RecordedWalkShareStyle.transparent
+            ? Icons.texture_rounded
+            : Icons.route_rounded,
+        color: palette.route,
+        size: 22,
       ),
     );
   }

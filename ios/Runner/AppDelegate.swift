@@ -44,7 +44,7 @@ import UIKit
       }
 
       DispatchQueue.main.async {
-        guard let host = self?.window?.rootViewController else {
+        guard let host = self?.sharePresenterViewController() else {
           result(FlutterError(code: "NO_VIEW_CONTROLLER", message: "Unable to present share sheet.", details: nil))
           return
         }
@@ -143,6 +143,28 @@ import UIKit
         result(FlutterMethodNotImplemented)
       }
     }
+  }
+
+  private func sharePresenterViewController() -> UIViewController? {
+    let activeScene = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first { $0.activationState == .foregroundActive }
+    let sceneWindow = activeScene?.windows.first { $0.isKeyWindow }
+    let root = sceneWindow?.rootViewController ?? window?.rootViewController
+    return topViewController(from: root)
+  }
+
+  private func topViewController(from root: UIViewController?) -> UIViewController? {
+    if let presented = root?.presentedViewController {
+      return topViewController(from: presented)
+    }
+    if let navigation = root as? UINavigationController {
+      return topViewController(from: navigation.visibleViewController)
+    }
+    if let tab = root as? UITabBarController {
+      return topViewController(from: tab.selectedViewController)
+    }
+    return root
   }
 
   private func openHealthApp(result: @escaping FlutterResult) {
