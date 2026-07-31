@@ -294,6 +294,36 @@ class GoalsService {
     return '';
   }
 
+  /// The company code/name currently active for [uid], read directly from
+  /// this service's own data source instead of the untestable
+  /// `CompanyMembershipService.loadForUser` singleton (which ignores its
+  /// `uid` argument and reads whatever the current auth session happens to
+  /// be). Returns `null` when this service isn't backed by a legacy
+  /// Firestore instance — i.e. in every real production call site, which
+  /// always constructs `GoalsService()` with no Firestore argument and runs
+  /// entirely through the Laravel API instead. Callers must treat `null` as
+  /// "no opinion" and fall back to their existing resolution path; this is a
+  /// safe no-op everywhere except tests that inject a legacy Firestore.
+  Future<({String code, String name})?> fetchActiveCompanyIdentity(
+    String uid,
+  ) async {
+    if (!_usesLegacyFirestore) return null;
+    final snapshot = await _firestore.collection('users').doc(uid).get();
+    final data = snapshot.data();
+    if (data == null) return (code: '', name: '');
+    String pick(String activeKey, String legacyKey) {
+      final active = (data[activeKey] as String?)?.trim() ?? '';
+      return active.isNotEmpty
+          ? active
+          : (data[legacyKey] as String?)?.trim() ?? '';
+    }
+
+    return (
+      code: pick('activeCompanyCode', 'companyCode'),
+      name: pick('activeCompanyName', 'companyName'),
+    );
+  }
+
   Map<String, dynamic> _goalPayload({
     required String id,
     required String uid,

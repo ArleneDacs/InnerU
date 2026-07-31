@@ -50,6 +50,14 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
     if (accessResolver != null) {
       return accessResolver(_uid);
     }
+    // Prefer resolving access from this screen's own GoalsService, which is
+    // injectable/testable. This only returns non-null when a legacy
+    // Firestore is configured (test mode); in production, GoalsService()
+    // never carries one, so this is a no-op and behavior below is unchanged.
+    final identity = await _service.fetchActiveCompanyIdentity(_uid);
+    if (identity != null) {
+      return AbundanceCompany.matches(identity.code, identity.name);
+    }
     final membership = await CompanyMembershipService.loadForUser(_uid);
     return _isAbundance12Company(membership.activeMembership);
   }
