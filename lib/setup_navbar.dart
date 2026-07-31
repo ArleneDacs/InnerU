@@ -7,6 +7,9 @@ import 'package:selfcare_projects/src/features/authentication/screen/dashboard/d
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
+import 'package:selfcare_projects/src/features/abundance/screens/abundance_shell_screen.dart';
+import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
@@ -93,6 +96,14 @@ class _SetuppageState extends State<Setuppage> {
   @override
   Widget build(BuildContext context) {
     final theme = _companyTheme;
+    if (AbundanceCompany.matches(theme.companyCode, theme.companyName)) {
+      return AbundanceShellScreen(
+        isCoach: false,
+        service: GoalsService(),
+        uid: AuthService.instance.currentUserId ?? '',
+        companyTheme: theme,
+      );
+    }
     return Theme(
       data: AppTheme.company(theme),
       child: Scaffold(
@@ -216,6 +227,14 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
   @override
   Widget build(BuildContext context) {
     final theme = _companyTheme;
+    if (AbundanceCompany.matches(theme.companyCode, theme.companyName)) {
+      return AbundanceShellScreen(
+        isCoach: true,
+        service: GoalsService(),
+        uid: AuthService.instance.currentUserId ?? '',
+        companyTheme: theme,
+      );
+    }
     return Theme(
       data: AppTheme.company(theme),
       child: Scaffold(
