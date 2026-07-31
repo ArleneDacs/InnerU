@@ -6047,6 +6047,131 @@ class CoachManageMenteesPage extends StatelessWidget {
     return summaries;
   }
 
+  Future<void> _showMoveMenteeToGroupDialog(
+    BuildContext context, {
+    required String menteeId,
+    required String menteeName,
+    required String currentGroupName,
+    required List<Map<String, dynamic>> groups,
+    required VoidCallback refresh,
+  }) async {
+    final availableGroups = List<Map<String, dynamic>>.from(groups)
+      ..sort((a, b) {
+        final aName = (a['name'] as String?)?.trim() ?? '';
+        final bName = (b['name'] as String?)?.trim() ?? '';
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      });
+
+    if (availableGroups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Create a group first.')),
+      );
+      return;
+    }
+
+    final selectedGroup = await showModalBottomSheet<Map<String, dynamic>?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final colors = Theme.of(sheetContext).colorScheme;
+        final normalizedCurrent = currentGroupName.trim().toLowerCase();
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Move $menteeName to a group',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: colors.onSurface,
+                  ),
+                ),
+                if (currentGroupName.trim().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Current group: $currentGroupName',
+                    style: TextStyle(
+                      color: colors.onSurface.withValues(alpha: 0.65),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: availableGroups.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final group = availableGroups[index];
+                      final groupName =
+                          (group['name'] as String?)?.trim() ?? 'Group';
+                      final memberCount =
+                          (group['memberCount'] as num?)?.toInt() ??
+                              ((group['memberIds'] as List?)?.length ?? 0);
+                      final isCurrentGroup = normalizedCurrent.isNotEmpty &&
+                          groupName.toLowerCase() == normalizedCurrent;
+
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundColor: const Color(0xFFDDE7D5),
+                          child: Icon(
+                            CupertinoIcons.rectangle_grid_2x2_fill,
+                            color: colors.primary,
+                          ),
+                        ),
+                        title: Text(groupName),
+                        subtitle: Text(
+                          isCurrentGroup
+                              ? '$memberCount mentees • current group'
+                              : '$memberCount mentees',
+                        ),
+                        trailing: isCurrentGroup
+                            ? const Icon(
+                                CupertinoIcons.checkmark_alt_circle_fill,
+                              )
+                            : null,
+                        enabled: !isCurrentGroup,
+                        onTap: isCurrentGroup
+                            ? null
+                            : () => Navigator.pop(sheetContext, group),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedGroup == null || !context.mounted) return;
+
+    final groupId = selectedGroup['id']?.toString() ?? '';
+    final groupName = (selectedGroup['name'] as String?)?.trim() ?? 'Group';
+    if (groupId.isEmpty) return;
+
+    await onAssignMentee(
+      menteeId: menteeId,
+      teamName: teamName,
+      groupId: groupId,
+      groupName: groupName,
+    );
+
+    if (!context.mounted) return;
+    refresh();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$menteeName moved to $groupName.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return CompanyThemeBuilder(
@@ -6165,14 +6290,11 @@ class CoachManageMenteesPage extends StatelessWidget {
                                   true
                               ? (mentee['teamName'] as String).trim()
                               : teamName;
+                      final currentGroupName = groupName;
                       final email = (mentee['email'] as String?)?.trim() ?? '';
                       final userId =
                           (mentee['userId'] as String?)?.trim() ?? '';
                       final badgeColor = _badgeColorForRank(rank);
-                      final onPrimary =
-                          companyTheme.primaryColor.computeLuminance() > 0.48
-                              ? Colors.black
-                              : Colors.white;
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 14),
@@ -6323,26 +6445,72 @@ class CoachManageMenteesPage extends StatelessWidget {
                             Row(
                               children: [
                                 Expanded(
-                                  child: ElevatedButton.icon(
+                                  child: OutlinedButton.icon(
                                     onPressed: () =>
                                         _openChatWithMenteeApi(context, mentee),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor:
-                                          companyTheme.primaryColor,
-                                      foregroundColor: onPrimary,
+                                    style: OutlinedButton.styleFrom(
+                                      backgroundColor: companyTheme.primaryColor
+                                          .withValues(
+                                        alpha: companyTheme.isDark ? 0.30 : 0.14,
+                                      ),
+                                      foregroundColor: companyTheme.isDark
+                                          ? Colors.white
+                                          : companyTheme.inkColor,
+                                      side: BorderSide(
+                                        color: companyTheme.primaryColor
+                                            .withValues(alpha: 0.32),
+                                      ),
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 12,
                                       ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(16),
                                       ),
-                                      elevation: 0,
                                     ),
                                     icon: const Icon(
                                       CupertinoIcons.chat_bubble_2_fill,
                                       size: 18,
                                     ),
-                                    label: const Text('Message'),
+                                    label: const Text(
+                                      'Message',
+                                      style: TextStyle(fontWeight: FontWeight.w800),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: userId.isEmpty
+                                        ? null
+                                        : () => _showMoveMenteeToGroupDialog(
+                                              context,
+                                              menteeId: userId,
+                                              menteeName: name,
+                                              currentGroupName:
+                                                  currentGroupName,
+                                              groups: groups,
+                                              refresh: refresh,
+                                            ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor:
+                                          companyTheme.primaryColor,
+                                      side: BorderSide(
+                                        color: companyTheme.primaryColor
+                                            .withValues(alpha: 0.28),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16),
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      CupertinoIcons.rectangle_grid_2x2_fill,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Move'),
                                   ),
                                 ),
                                 const SizedBox(width: 10),

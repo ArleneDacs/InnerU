@@ -66,6 +66,13 @@ class NotificationApiService {
         token: _token);
   }
 
+  Future<void> deleteNotification(String notificationId) async {
+    await _api.deleteJson(
+      '/api/notifications/$notificationId',
+      token: _token,
+    );
+  }
+
   Future<void> reportStreakMilestone({
     required String milestone,
     required int days,

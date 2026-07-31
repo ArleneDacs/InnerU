@@ -8,12 +8,22 @@ Future<bool?> showScheduleMeetingDialog(
   BuildContext context, {
   required String groupId,
   required String groupName,
+  String? meetingId,
+  String? initialTitle,
+  String? initialZoomLink,
+  String? initialNotes,
+  DateTime? initialScheduledAt,
 }) {
   return showDialog<bool>(
     context: context,
     builder: (context) => _ScheduleMeetingDialog(
       groupId: groupId,
       groupName: groupName,
+      meetingId: meetingId,
+      initialTitle: initialTitle,
+      initialZoomLink: initialZoomLink,
+      initialNotes: initialNotes,
+      initialScheduledAt: initialScheduledAt,
     ),
   );
 }
@@ -22,23 +32,54 @@ class _ScheduleMeetingDialog extends StatefulWidget {
   const _ScheduleMeetingDialog({
     required this.groupId,
     required this.groupName,
+    this.meetingId,
+    this.initialTitle,
+    this.initialZoomLink,
+    this.initialNotes,
+    this.initialScheduledAt,
   });
 
   final String groupId;
   final String groupName;
+  final String? meetingId;
+  final String? initialTitle;
+  final String? initialZoomLink;
+  final String? initialNotes;
+  final DateTime? initialScheduledAt;
 
   @override
   State<_ScheduleMeetingDialog> createState() => _ScheduleMeetingDialogState();
 }
 
 class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _zoomLinkController = TextEditingController();
-  final TextEditingController _notesController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _zoomLinkController;
+  late final TextEditingController _notesController;
   DateTime? _date;
   TimeOfDay? _time;
   bool _isSubmitting = false;
   String? _error;
+
+  bool get _isEditing => widget.meetingId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.initialTitle ?? '');
+    _zoomLinkController =
+        TextEditingController(text: widget.initialZoomLink ?? '');
+    _notesController = TextEditingController(text: widget.initialNotes ?? '');
+
+    final initialScheduledAt = widget.initialScheduledAt;
+    if (initialScheduledAt != null) {
+      _date = DateTime(
+        initialScheduledAt.year,
+        initialScheduledAt.month,
+        initialScheduledAt.day,
+      );
+      _time = TimeOfDay.fromDateTime(initialScheduledAt);
+    }
+  }
 
   @override
   void dispose() {
@@ -53,7 +94,7 @@ class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _date ?? now,
-      firstDate: now,
+      firstDate: _isEditing ? DateTime(2000) : now,
       lastDate: now.add(const Duration(days: 365)),
     );
     if (picked != null && mounted) {
@@ -95,7 +136,7 @@ class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
       _time!.hour,
       _time!.minute,
     );
-    if (!scheduledAt.isAfter(DateTime.now())) {
+    if (!_isEditing && !scheduledAt.isAfter(DateTime.now())) {
       setState(() => _error = 'Pick a time in the future.');
       return;
     }
@@ -106,19 +147,31 @@ class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
     });
 
     try {
-      await AccountabilityMeetingApiService.instance.schedule(
-        groupId: widget.groupId,
-        title: title,
-        zoomLink: zoomLink,
-        scheduledAt: scheduledAt,
-        notes: _notesController.text,
-      );
+      if (_isEditing) {
+        await AccountabilityMeetingApiService.instance.update(
+          meetingId: widget.meetingId!,
+          title: title,
+          zoomLink: zoomLink,
+          scheduledAt: scheduledAt,
+          notes: _notesController.text,
+        );
+      } else {
+        await AccountabilityMeetingApiService.instance.schedule(
+          groupId: widget.groupId,
+          title: title,
+          zoomLink: zoomLink,
+          scheduledAt: scheduledAt,
+          notes: _notesController.text,
+        );
+      }
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not schedule the meeting. Please try again.';
+        _error = _isEditing
+            ? 'Could not save the changes. Please try again.'
+            : 'Could not schedule the meeting. Please try again.';
         _isSubmitting = false;
       });
     }
@@ -132,7 +185,11 @@ class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      title: Text('Schedule meeting — ${widget.groupName}'),
+      title: Text(
+        _isEditing
+            ? 'Edit meeting — ${widget.groupName}'
+            : 'Schedule meeting — ${widget.groupName}',
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -203,7 +260,7 @@ class _ScheduleMeetingDialogState extends State<_ScheduleMeetingDialog> {
                   width: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Schedule'),
+              : Text(_isEditing ? 'Save changes' : 'Schedule'),
         ),
       ],
     );

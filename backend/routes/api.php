@@ -156,6 +156,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+    Route::delete('/notifications/{notification}', [NotificationController::class, 'destroy']);
     Route::post('/notifications/streak', [NotificationController::class, 'store']);
     Route::post('/step-submissions', [StepSubmissionController::class, 'store']);
     Route::get('/step-submissions/mine', [StepSubmissionController::class, 'mine']);
@@ -163,6 +164,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::patch('/coach/step-submissions/{stepSubmission}/approve', [StepSubmissionController::class, 'approve']);
     Route::patch('/coach/step-submissions/{stepSubmission}/decline', [StepSubmissionController::class, 'decline']);
     Route::post('/accountability-meetings', [AccountabilityMeetingController::class, 'store']);
+    Route::patch('/accountability-meetings/{accountabilityMeeting}', [AccountabilityMeetingController::class, 'update']);
+    Route::delete('/accountability-meetings/{accountabilityMeeting}', [AccountabilityMeetingController::class, 'destroy']);
     Route::get('/accountability-meetings/mine', [AccountabilityMeetingController::class, 'mine']);
     Route::post('/accountability-meetings/{accountabilityMeeting}/join', [AccountabilityMeetingController::class, 'join']);
     Route::get('/coach/accountability-meetings', [AccountabilityMeetingController::class, 'index']);

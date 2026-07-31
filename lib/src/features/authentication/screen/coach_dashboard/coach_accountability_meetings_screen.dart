@@ -86,6 +86,90 @@ class _CoachAccountabilityMeetingsScreenState
     );
   }
 
+  Future<void> _editMeeting(Map<String, dynamic> meeting) async {
+    final groupId = (meeting['groupId'] as String?)?.trim() ?? '';
+    final groupName = (meeting['groupName'] as String?)?.trim() ?? 'Group';
+    final meetingId = (meeting['id'] as String?)?.trim() ?? '';
+    final title = (meeting['title'] as String?)?.trim() ?? '';
+    final zoomLink = (meeting['zoomLink'] as String?)?.trim() ?? '';
+    final notes = (meeting['notes'] as String?)?.trim() ?? '';
+    final scheduledAtRaw = meeting['scheduledAt'] as String?;
+    final scheduledAt =
+        scheduledAtRaw != null ? DateTime.tryParse(scheduledAtRaw) : null;
+
+    if (meetingId.isEmpty || groupId.isEmpty) return;
+
+    final updated = await showScheduleMeetingDialog(
+      context,
+      groupId: groupId,
+      groupName: groupName,
+      meetingId: meetingId,
+      initialTitle: title,
+      initialZoomLink: zoomLink,
+      initialNotes: notes,
+      initialScheduledAt: scheduledAt,
+    );
+
+    if (updated != true || !mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$title updated.')),
+    );
+  }
+
+  Future<void> _deleteMeeting(Map<String, dynamic> meeting) async {
+    final meetingId = (meeting['id'] as String?)?.trim() ?? '';
+    final title = (meeting['title'] as String?)?.trim().isNotEmpty == true
+        ? (meeting['title'] as String).trim()
+        : 'Accountability meeting';
+    if (meetingId.isEmpty) return;
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text('Delete meeting?'),
+          content: Text(
+            'This will permanently delete "$title".',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE56B6F),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      await AccountabilityMeetingApiService.instance.delete(meetingId);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$title deleted.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not delete the meeting.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return CompanyThemeBuilder(
@@ -235,6 +319,52 @@ class _CoachAccountabilityMeetingsScreenState
               ],
             ),
           ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _editMeeting(meeting),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: theme.primaryColor,
+                    side: BorderSide(
+                      color: theme.primaryColor.withValues(alpha: 0.30),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text(
+                    'Edit',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _deleteMeeting(meeting),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE56B6F),
+                    side: BorderSide(
+                      color: const Color(0xFFE56B6F).withValues(alpha: 0.30),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text(
+                    'Delete',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

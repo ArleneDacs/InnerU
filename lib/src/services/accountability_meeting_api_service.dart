@@ -65,6 +65,37 @@ class AccountabilityMeetingApiService {
     return raw;
   }
 
+  Future<Map<String, dynamic>> update({
+    required String meetingId,
+    required String title,
+    required String zoomLink,
+    required DateTime scheduledAt,
+    String? notes,
+  }) async {
+    final response = await _api.patchJson(
+      '/api/accountability-meetings/$meetingId',
+      {
+        'title': title,
+        'zoom_link': zoomLink,
+        'scheduled_at': scheduledAt.toIso8601String(),
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      },
+      token: _token,
+    );
+    final raw = response['meeting'];
+    if (raw is! Map<String, dynamic>) {
+      throw ApiException(500, 'Update meeting response was invalid.');
+    }
+    return raw;
+  }
+
+  Future<void> delete(String meetingId) async {
+    await _api.deleteJson(
+      '/api/accountability-meetings/$meetingId',
+      token: _token,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> fetchForCoach() async {
     final response = await _api.getJson(
       '/api/coach/accountability-meetings',

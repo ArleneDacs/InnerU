@@ -82,6 +82,22 @@ class NotificationController extends Controller
         return response()->json(['message' => 'All notifications marked read.']);
     }
 
+    public function destroy(Request $request, Notification $notification): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if ((string) $notification->user_id !== (string) $user->id) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $notification->delete();
+
+        return response()->json(['message' => 'Notification deleted.']);
+    }
+
     // Client-driven streak milestone notify-myself endpoint. Streaks are
     // computed and tracked entirely on the client today (no backend streak
     // model), so this is the one notification type with no server-side

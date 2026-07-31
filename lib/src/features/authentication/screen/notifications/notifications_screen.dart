@@ -27,6 +27,9 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final NotificationApiService _api = NotificationApiService.instance;
   final Set<String> _locallyReadIds = <String>{};
+  final Set<String> _locallyDeletedIds = <String>{};
+  final Set<String> _selectedNotificationIds = <String>{};
+  bool _isDeleteSelectionMode = false;
   CompanyThemeData _theme = CompanyThemeData.standard;
 
   @override
@@ -63,6 +66,112 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _api.markAllRead();
     } catch (_) {
       // Next poll tick will reconcile if this failed silently.
+    }
+  }
+
+  void _startDeleteSelectionMode() {
+    setState(() {
+      _isDeleteSelectionMode = true;
+      _selectedNotificationIds.clear();
+    });
+  }
+
+  void _cancelDeleteSelectionMode() {
+    setState(() {
+      _isDeleteSelectionMode = false;
+      _selectedNotificationIds.clear();
+    });
+  }
+
+  void _toggleNotificationSelection(String id) {
+    if (id.isEmpty) return;
+    setState(() {
+      _isDeleteSelectionMode = true;
+      if (_selectedNotificationIds.contains(id)) {
+        _selectedNotificationIds.remove(id);
+      } else {
+        _selectedNotificationIds.add(id);
+      }
+    });
+  }
+
+  Future<void> _deleteSelectedNotifications(
+    BuildContext context,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final selectedIds = _selectedNotificationIds.toList();
+    if (selectedIds.isEmpty) return;
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text('Delete notifications?'),
+          content: Text(
+            'Remove ${selectedIds.length} selected notification${selectedIds.length == 1 ? '' : 's'} from your feed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE56B6F),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true) return;
+
+    setState(() {
+      _locallyDeletedIds.addAll(selectedIds);
+    });
+
+    final failedIds = <String>[];
+    for (final id in selectedIds) {
+      try {
+        await _api.deleteNotification(id);
+      } catch (_) {
+        failedIds.add(id);
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      for (final id in failedIds) {
+        _locallyDeletedIds.remove(id);
+      }
+      _selectedNotificationIds.clear();
+      _isDeleteSelectionMode = false;
+    });
+
+    if (failedIds.isNotEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Deleted ${selectedIds.length - failedIds.length} notification${selectedIds.length - failedIds.length == 1 ? '' : 's'}, but ${failedIds.length} could not be deleted.',
+          ),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Deleted ${selectedIds.length} notification${selectedIds.length == 1 ? '' : 's'}.',
+          ),
+        ),
+      );
     }
   }
 
@@ -117,6 +226,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           'Notifications',
           style: TextStyle(color: theme.inkColor, fontWeight: FontWeight.w800),
         ),
+        actions: [
+          if (_isDeleteSelectionMode) ...[
+            IconButton(
+              tooltip: 'Cancel delete',
+              icon: const Icon(CupertinoIcons.xmark),
+              onPressed: _cancelDeleteSelectionMode,
+            ),
+            IconButton(
+              tooltip: 'Delete selected',
+              icon: const Icon(CupertinoIcons.trash),
+              onPressed: _selectedNotificationIds.isEmpty
+                  ? null
+                  : () => _deleteSelectedNotifications(context),
+            ),
+          ] else
+            IconButton(
+              tooltip: 'Delete notifications',
+              icon: const Icon(CupertinoIcons.trash),
+              onPressed: _startDeleteSelectionMode,
+            ),
+        ],
       ),
       body: StreamBuilder<Map<String, dynamic>>(
         stream: _api.watchNotifications(),
@@ -125,13 +255,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           final notifications =
               (payload?['notifications'] as List<Map<String, dynamic>>?) ??
                   const <Map<String, dynamic>>[];
+          final visibleNotifications = notifications
+              .where((notification) {
+                final id = (notification['id'] as String?) ?? '';
+                return !_locallyDeletedIds.contains(id);
+              })
+              .toList();
 
           if (snapshot.connectionState == ConnectionState.waiting &&
-              notifications.isEmpty) {
+              visibleNotifications.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (notifications.isEmpty) {
+          if (visibleNotifications.isEmpty) {
             return Center(
               child: Text(
                 "You're all caught up.",
@@ -142,7 +278,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
           final hasUnread = notifications.any((n) {
             final id = (n['id'] as String?) ?? '';
-            return n['readAt'] == null && !_locallyReadIds.contains(id);
+            return n['readAt'] == null &&
+                !_locallyReadIds.contains(id) &&
+                !_locallyDeletedIds.contains(id);
           });
 
           return Column(
@@ -158,13 +296,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: notifications.length,
+                  itemCount: visibleNotifications.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final notification = notifications[index];
+                    final notification = visibleNotifications[index];
                     final id = (notification['id'] as String?) ?? '';
                     final isRead = notification['readAt'] != null ||
                         _locallyReadIds.contains(id);
+                    final isSelected = _selectedNotificationIds.contains(id);
                     final title = (notification['title'] as String?) ?? '';
                     final body = (notification['body'] as String?)?.trim();
                     final type = (notification['type'] as String?) ?? '';
@@ -181,6 +320,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
                         onTap: () {
+                          if (_isDeleteSelectionMode) {
+                            _toggleNotificationSelection(id);
+                            return;
+                          }
                           if (!isRead && id.isNotEmpty) {
                             _markRead(id);
                           }
@@ -191,20 +334,35 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: theme.primaryColor
-                                      .withValues(alpha: isRead ? 0.10 : 0.18),
-                                  borderRadius: BorderRadius.circular(14),
+                              if (_isDeleteSelectionMode)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Checkbox(
+                                    value: isSelected,
+                                    onChanged: id.isEmpty
+                                        ? null
+                                        : (_) => _toggleNotificationSelection(
+                                              id,
+                                            ),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                )
+                              else
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: theme.primaryColor.withValues(
+                                      alpha: isRead ? 0.10 : 0.18,
+                                    ),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Icon(
+                                    _iconForType(type),
+                                    color: theme.primaryColor,
+                                    size: 20,
+                                  ),
                                 ),
-                                child: Icon(
-                                  _iconForType(type),
-                                  color: theme.primaryColor,
-                                  size: 20,
-                                ),
-                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(

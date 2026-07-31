@@ -73,6 +73,63 @@ class AccountabilityMeetingController extends Controller
         return response()->json(['meeting' => $this->payload($meeting, groupName: $group->name)], Response::HTTP_CREATED);
     }
 
+    public function update(Request $request, AccountabilityMeeting $accountabilityMeeting): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if ((string) $accountabilityMeeting->coach_id !== (string) $user->id) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'zoom_link' => ['required', 'string', 'max:500', 'url'],
+            'scheduled_at' => ['required', 'date'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $accountabilityMeeting->update([
+            'title' => $validated['title'],
+            'zoom_link' => $validated['zoom_link'],
+            'notes' => $validated['notes'] ?? null,
+            'scheduled_at' => $validated['scheduled_at'],
+        ]);
+
+        $group = CoachGroup::query()->find((string) $accountabilityMeeting->group_id);
+
+        return response()->json([
+            'meeting' => $this->payload(
+                $accountabilityMeeting->refresh(),
+                groupName: $group?->name,
+            ),
+        ]);
+    }
+
+    public function destroy(Request $request, AccountabilityMeeting $accountabilityMeeting): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if ((string) $accountabilityMeeting->coach_id !== (string) $user->id) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_FORBIDDEN);
+        }
+
+        DB::transaction(function () use ($accountabilityMeeting): void {
+            MeetingAttendance::query()
+                ->where('meeting_id', (string) $accountabilityMeeting->id)
+                ->delete();
+
+            $accountabilityMeeting->delete();
+        });
+
+        return response()->json(['message' => 'Meeting deleted.']);
+    }
+
     /**
      * The authenticated coach's own scheduled meetings — scoped to
      * coach_id === the acting coach, not "every group they co-coach", so
