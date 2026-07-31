@@ -23,7 +23,7 @@ class _FakeCoachGoalsService extends GoalsService {
 }
 
 void main() {
-  testWidgets('shows the Quests tab body by default and switches tabs on tap',
+  testWidgets('shows the header chrome and switches tabs on tap',
       (tester) async {
     final service = GoalsService(FakeFirebaseFirestore());
 
@@ -68,16 +68,63 @@ void main() {
           companyName: 'Abundance',
           isCompanyTheme: true,
         ),
+        // The shell's real default landing tab is Home (0), matching every
+        // A12 reference screenshot. This test overrides that to land on
+        // Quests instead, purely to avoid building CoachDashboardScreen
+        // (the coach-mode Home tab), which touches FirebaseFirestore.instance
+        // synchronously in a field initializer and crashes with no live
+        // Firebase app in this widget-test environment. This is a test-only
+        // override, not a change to production behavior.
+        initialIndex: 1,
       ),
     ));
     await tester.pumpAndSettle();
 
-    // The shell already lands on the Quests tab by default (see
-    // AbundanceShellScreen's landing-tab rationale), so the roster is
-    // visible without any tap here — tapping the "Quests" nav label would
-    // be ambiguous anyway once its content is showing, since
+    // Landed directly on the Quests tab (via initialIndex above), so the
+    // roster is visible without any tap here — tapping the "Quests" nav
+    // label would be ambiguous anyway once its content is showing, since
     // CoachQuestsRosterScreen renders its own "Quests" heading too.
     expect(find.textContaining('No students yet'), findsOneWidget);
+  });
+
+  testWidgets(
+      'defaults to the Home tab and shows the mentee dashboard when initialIndex is not supplied',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+        // initialIndex deliberately omitted: this is the regression guard
+        // that the shell's real default landing tab is Home (0), matching
+        // every A12 reference screenshot — not Quests.
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // The bottom nav shows Home as selected and the Quests tab body
+    // ("Life Power", GoalsHubScreen's own header text) has not been built.
+    expect(find.textContaining('Life Power'), findsNothing);
+
+    // AbundanceMenteeDashboardScreen (the mentee Home tab) is on screen. In
+    // this test harness there's no authenticated session, so the dashboard
+    // resolves to its own access-denied state — but that state's text is
+    // unique to AbundanceMenteeDashboardScreen itself, so finding it proves
+    // the Home tab body is genuinely that screen, not a placeholder or the
+    // Quests tab.
+    expect(find.text('A12 access only'), findsOneWidget);
+
+    // Switching to Quests still works from this default landing point.
+    await tester.tap(find.text('Quests'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Life Power'), findsWidgets);
   });
 
   testWidgets(
@@ -99,8 +146,11 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // Quests is the landing tab; confirm its content is showing before More
-    // is tapped, so the "still there after" check below is meaningful.
+    // Navigate to Quests first (the shell's real default landing tab is now
+    // Home) and confirm its content is showing before More is tapped, so the
+    // "still there after" check below is meaningful.
+    await tester.tap(find.text('Quests'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('Life Power'), findsWidgets);
 
     await tester.tap(find.text('More'));

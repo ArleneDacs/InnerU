@@ -28,6 +28,7 @@ class AbundanceShellScreen extends StatefulWidget {
     required this.service,
     required this.uid,
     required this.companyTheme,
+    this.initialIndex = 0,
   });
 
   final bool isCoach;
@@ -35,15 +36,24 @@ class AbundanceShellScreen extends StatefulWidget {
   final String uid;
   final CompanyThemeData companyTheme;
 
+  /// Which tab the shell lands on. Defaults to Home (0), matching every A12
+  /// reference screenshot — real callers should not need to override this.
+  /// Exposed (mirroring the established `Setuppage`/`CoachSetuppage` pattern
+  /// in `lib/setup_navbar.dart`) so tests/callers can start on a different
+  /// tab without changing the real default — e.g. this shell's own coach
+  /// test starts on Quests to avoid building `CoachDashboardScreen`, which
+  /// touches `FirebaseFirestore.instance` synchronously and crashes without
+  /// a live Firebase app.
+  final int initialIndex;
+
   @override
   State<AbundanceShellScreen> createState() => _AbundanceShellScreenState();
 }
 
 class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
-  // Tab order is Home(0)/Quests(1)/Guild(2)/Profile(3)/More(4), but this
-  // shell lands on Quests: it exists to house the Abundance Quests redesign,
-  // and the reference app opens straight into it.
-  int _index = 1;
+  // Tab order is Home(0)/Quests(1)/Guild(2)/Profile(3)/More(4). Seeded from
+  // widget.initialIndex (defaults to Home) in initState below.
+  late int _index;
 
   // Each tab body is constructed at most once, the first time it's
   // selected, then cached here and reused for the rest of the shell's
@@ -111,6 +121,7 @@ class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
   @override
   void initState() {
     super.initState();
+    _index = widget.initialIndex.clamp(0, 4);
     _ensureBuilt(_index);
   }
 
