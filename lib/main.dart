@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goals_hub_screen.dart';
@@ -37,6 +39,7 @@ import 'package:selfcare_projects/src/features/meditation_song/meditation_song.d
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/app_session_service.dart';
+import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/onesignal_push_service.dart';
 import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
@@ -53,44 +56,69 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 void main() {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-    PlatformDispatcher.instance.onError = (error, stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-      return true;
-    };
+    if (!kIsWeb) {
+      FlutterError.onError =
+          FirebaseCrashlytics.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+    }
 
     try {
       await AuthService.instance.initialize();
     } catch (error, stack) {
-      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+      await _recordError(error, stack);
     }
     try {
       await FastingNotificationService.instance.initialize();
     } catch (error, stack) {
-      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+      await _recordError(error, stack);
     }
     try {
       await OneSignalPushService.instance.initialize(appNavigatorKey);
     } catch (error, stack) {
-      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+      await _recordError(error, stack);
     }
     try {
       await StepBackgroundService.instance.configure();
+      await AppleHealthStepsService.instance.syncTodaySteps();
+      await StepBackgroundService.instance.startTrackingIfAvailable();
     } catch (error, stack) {
-      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+      await _recordError(error, stack);
     }
     try {
       WatchStepsReceiver.instance.start();
     } catch (error, stack) {
-      await FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+      await _recordError(error, stack);
     }
 
     runApp(const App());
   }, (error, stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    if (!kIsWeb) {
+      unawaited(
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true),
+      );
+    } else {
+      debugPrint('Uncaught app error: $error');
+    }
   });
+}
+
+Future<void> _recordError(
+  Object error,
+  StackTrace stack, {
+  bool fatal = false,
+}) async {
+  if (!kIsWeb) {
+    await FirebaseCrashlytics.instance.recordError(error, stack, fatal: fatal);
+  } else {
+    debugPrint('App startup warning: $error');
+  }
 }
 
 class App extends StatelessWidget {
@@ -203,12 +231,16 @@ class GlobalPaddingWrapper extends StatefulWidget {
   State<GlobalPaddingWrapper> createState() => _GlobalPaddingWrapperState();
 }
 
-class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
+class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
+    with WidgetsBindingObserver {
   String? _lastSeenUserId;
+  String? _lastStepServiceUserId;
+  bool _appleHealthPromptShowing = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(
       EmailLinkAuthService.instance.init(navigatorKey: appNavigatorKey),
     );
@@ -216,9 +248,72 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(EmailLinkAuthService.instance.dispose());
     unawaited(OneSignalPushService.instance.dispose());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_requireAppleHealthStepsAccess());
+    unawaited(StepBackgroundService.instance.startTrackingIfAvailable());
+  }
+
+  Future<void> _requireAppleHealthStepsAccess() async {
+    if (kIsWeb || !Platform.isIOS || _appleHealthPromptShowing) return;
+    if (AuthService.instance.currentSession == null) return;
+
+    final steps = await AppleHealthStepsService.instance.syncTodaySteps();
+    if (steps != null) return;
+
+    final dialogContext = appNavigatorKey.currentContext;
+    if (dialogContext == null || !dialogContext.mounted) return;
+
+    _appleHealthPromptShowing = true;
+    var shouldPromptAgain = false;
+    try {
+      final action = await showDialog<String>(
+        context: dialogContext,
+        barrierDismissible: false,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Apple Health access required'),
+            content: const Text(
+              'InnerU uses Apple Health as the step source on iPhone. '
+              'Allow Steps access so your daily step count can sync.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('settings'),
+                child: const Text('Open Settings'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop('retry'),
+                child: const Text('Try Again'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (action == 'settings') {
+        await openAppSettings();
+      } else if (action == 'retry') {
+        final retrySteps =
+            await AppleHealthStepsService.instance.syncTodaySteps();
+        if (retrySteps == null) {
+          shouldPromptAgain = true;
+        }
+      }
+    } finally {
+      _appleHealthPromptShowing = false;
+    }
+
+    if (shouldPromptAgain) {
+      unawaited(_requireAppleHealthStepsAccess());
+    }
   }
 
   @override
@@ -231,6 +326,16 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper> {
         final previousUserId = _lastSeenUserId;
         if (previousUserId != currentUserId) {
           _lastSeenUserId = currentUserId;
+          if (currentUserId != null &&
+              currentUserId != _lastStepServiceUserId) {
+            _lastStepServiceUserId = currentUserId;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              unawaited(_requireAppleHealthStepsAccess());
+              unawaited(
+                StepBackgroundService.instance.startTrackingIfAvailable(),
+              );
+            });
+          }
           if (previousUserId != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!context.mounted) return;
