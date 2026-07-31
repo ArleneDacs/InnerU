@@ -65,22 +65,28 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       if (confirmed != true) return;
     }
 
-    await widget.service.updateGoal(
-      goalId: widget.goalId,
-      actorId: widget.uid,
-      status: status,
+    await _runWrite(
+      () => widget.service.updateGoal(
+        goalId: widget.goalId,
+        actorId: widget.uid,
+        status: status,
+      ),
+      'Could not update the quest status',
     );
   }
 
   Future<void> _editCurrentValue(GoalSummary goal) async {
     final value = double.tryParse(_currentValueController.text.trim());
     if (value == null) return;
-    await widget.service.setGoalMeasure(
-      goalId: widget.goalId,
-      actorId: widget.uid,
-      currentValue: value,
+    final saved = await _runWrite(
+      () => widget.service.setGoalMeasure(
+        goalId: widget.goalId,
+        actorId: widget.uid,
+        currentValue: value,
+      ),
+      'Could not save progress',
     );
-    if (mounted) {
+    if (saved && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Progress saved')),
       );
@@ -88,11 +94,14 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
   }
 
   Future<void> _logPeriodTarget() async {
-    await widget.service.logMeritTarget(
-      goalId: widget.goalId,
-      actorId: widget.uid,
+    final logged = await _runWrite(
+      () => widget.service.logMeritTarget(
+        goalId: widget.goalId,
+        actorId: widget.uid,
+      ),
+      'Could not log the period target',
     );
-    if (mounted) {
+    if (logged && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Period target logged')),
       );
@@ -125,12 +134,32 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
       ),
     );
     if (amount != null && amount > 0) {
-      await widget.service.goExtraMile(
-        goalId: widget.goalId,
-        actorId: widget.uid,
-        amount: amount,
+      await _runWrite(
+        () => widget.service.goExtraMile(
+          goalId: widget.goalId,
+          actorId: widget.uid,
+          amount: amount,
+        ),
+        'Could not log the extra mile',
       );
     }
+  }
+
+  /// Runs one mutating call and turns any failure into a visible message.
+  /// Returns whether the write actually landed, so callers only show their
+  /// success snackbar (or navigate) when it did.
+  ///
+  /// Every write on this screen goes through here. Without it a rejected
+  /// write was completely invisible: a coach has read access to a mentee's
+  /// quest but no write access, so the API 401s their Edit/Delete/status
+  /// actions — and an unhandled rejection left the screen looking as if
+  /// nothing had been tapped. This is not coach-specific; an offline device
+  /// or a 500 failed exactly as silently.
+  Future<bool> _runWrite(
+    Future<void> Function() write,
+    String failureLabel,
+  ) async {
+    return _reportWriteFailures(context, write, failureLabel);
   }
 
   Future<void> _deleteGoal() async {
@@ -154,10 +183,16 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      await widget.service.deleteGoal(widget.goalId);
-      if (mounted) Navigator.of(context).pop();
-    }
+    if (confirmed != true) return;
+
+    final deleted = await _runWrite(
+      () => widget.service.deleteGoal(widget.goalId),
+      'Could not delete quest',
+    );
+    // Only leave the screen when the quest is really gone. Popping on a
+    // failed delete would tell the member their quest was destroyed while
+    // it is still sitting in their hub.
+    if (deleted && mounted) Navigator.of(context).pop();
   }
 
   void _syncCurrentValue(GoalSummary goal) {
@@ -906,16 +941,24 @@ class _ActionPlansCard extends StatelessWidget {
                     for (final plan in plans) ...[
                       _ActionPlanRow(
                         plan: plan,
-                        onCycleStatus: () => service.setActionPlanStatus(
-                          goalId: goalId,
-                          planId: plan.id,
-                          status: plan.status.next,
-                          actorId: uid,
+                        onCycleStatus: () => _reportWriteFailures(
+                          context,
+                          () => service.setActionPlanStatus(
+                            goalId: goalId,
+                            planId: plan.id,
+                            status: plan.status.next,
+                            actorId: uid,
+                          ),
+                          'Could not update the action plan',
                         ),
-                        onDelete: () => service.deleteActionPlan(
-                          goalId: goalId,
-                          planId: plan.id,
-                          actorId: uid,
+                        onDelete: () => _reportWriteFailures(
+                          context,
+                          () => service.deleteActionPlan(
+                            goalId: goalId,
+                            planId: plan.id,
+                            actorId: uid,
+                          ),
+                          'Could not delete the action plan',
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -938,10 +981,14 @@ class _ActionPlansCard extends StatelessWidget {
                     onPressed: () {
                       final text = planEntryController.text.trim();
                       if (text.isEmpty) return;
-                      service.addActionPlan(
-                        goalId: goalId,
-                        title: text,
-                        actorId: uid,
+                      _reportWriteFailures(
+                        context,
+                        () => service.addActionPlan(
+                          goalId: goalId,
+                          title: text,
+                          actorId: uid,
+                        ),
+                        'Could not add the action plan',
                       );
                       planEntryController.clear();
                     },
@@ -1079,7 +1126,15 @@ class _CommentsCard extends StatelessWidget {
                   onPressed: () {
                     final body = controller.text.trim();
                     if (body.isEmpty) return;
-                    service.addComment(goalId: goalId, authorId: uid, body: body);
+                    _reportWriteFailures(
+                      context,
+                      () => service.addComment(
+                        goalId: goalId,
+                        authorId: uid,
+                        body: body,
+                      ),
+                      'Could not post the comment',
+                    );
                     controller.clear();
                   },
                   icon: const Icon(Icons.send_rounded, size: 18),
@@ -1613,6 +1668,29 @@ class _MetaPill extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Shared by [_GoalDetailScreenState._runWrite] and by the stateless cards
+/// below, which issue their own writes (action plans, comments) and were
+/// just as silent on failure. One implementation so every write on this
+/// screen fails the same visible way, with the same wording shape the quest
+/// wizard already uses ('Could not save quest: $e').
+Future<bool> _reportWriteFailures(
+  BuildContext context,
+  Future<void> Function() write,
+  String failureLabel,
+) async {
+  try {
+    await write();
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$failureLabel: $e')),
+      );
+    }
+    return false;
   }
 }
 
