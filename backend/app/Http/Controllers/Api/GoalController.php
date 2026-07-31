@@ -81,7 +81,7 @@ class GoalController extends Controller
     public function show(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
-        if (!$this->ownsGoal($user, $goal)) {
+        if (!$this->canReadGoal($user, $goal)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -91,7 +91,7 @@ class GoalController extends Controller
     public function tasks(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
-        if (!$this->ownsGoal($user, $goal)) {
+        if (!$this->canReadGoal($user, $goal)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -108,7 +108,7 @@ class GoalController extends Controller
     public function updates(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
-        if (!$this->ownsGoal($user, $goal)) {
+        if (!$this->canReadGoal($user, $goal)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -124,7 +124,7 @@ class GoalController extends Controller
     public function comments(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
-        if (!$this->ownsGoal($user, $goal)) {
+        if (!$this->canReadGoal($user, $goal)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -140,7 +140,7 @@ class GoalController extends Controller
     public function merits(Request $request, Goal $goal): JsonResponse
     {
         $user = $this->currentUser($request);
-        if (!$this->ownsGoal($user, $goal)) {
+        if (!$this->canReadGoal($user, $goal)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -801,6 +801,34 @@ class GoalController extends Controller
     private function ownsGoal(?User $user, Goal $goal): bool
     {
         return $user !== null && (int) $goal->user_id === (int) $user->id;
+    }
+
+    /**
+     * Read authorization for a single goal: its owner, or a coach with an
+     * active `coach_mentees` assignment to that owner.
+     *
+     * Deliberately read-only. Every write endpoint on this controller still
+     * gates on {@see ownsGoal()} alone, so a coach attempting to edit,
+     * delete, comment on, or log merits against a mentee's quest still gets a
+     * 401 — the coach Quests roster is a read-only view. Uses the same
+     * assignment lookup as `CoachManagementController::menteeGoals` and
+     * `coachGoalsRoster` above, so all three answer "is this coach related to
+     * this mentee" identically.
+     */
+    private function canReadGoal(?User $user, Goal $goal): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        if ($this->ownsGoal($user, $goal)) {
+            return true;
+        }
+
+        return CoachMentee::query()
+            ->where('coach_id', (string) $user->id)
+            ->where('mentee_id', (string) $goal->user_id)
+            ->exists();
     }
 
     private function activeCompanyValue(?string $primary, ?string $fallback): ?string
