@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_detail_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_assets.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 
-/// The Abundance 12 goals hub. This keeps the feature isolated to A12
+/// The Abundance 12 quests hub. This keeps the feature isolated to A12
 /// company users while giving them the richer dashboard-style layout.
 class GoalsHubScreen extends StatefulWidget {
   const GoalsHubScreen({
@@ -52,19 +55,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
   }
 
   bool _isAbundance12Company(CompanyMembership? membership) {
-    final companyName = membership?.name ?? '';
-    final companyCode = membership?.code ?? '';
-    final normalizedName =
-        companyName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode =
-        companyCode.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') &&
-            normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(membership?.code, membership?.name);
   }
 
   void _openForm({GoalSummary? existing}) {
@@ -119,7 +110,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
 
         if (accessSnapshot.data != true) {
           return Scaffold(
-            backgroundColor: const Color(0xFF050714),
+            backgroundColor: _bg,
             body: SafeArea(
               child: Center(
                 child: ConstrainedBox(
@@ -128,9 +119,9 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                     margin: const EdgeInsets.all(24),
                     padding: const EdgeInsets.all(28),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0E1539),
+                      color: _panel,
                       borderRadius: BorderRadius.circular(28),
-                      border: Border.all(color: const Color(0xFF25336A)),
+                      border: Border.all(color: _border),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -139,16 +130,16 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                         const Text(
                           'A12 only',
                           style: TextStyle(
-                            color: Color(0xFFF0D6A1),
+                            color: _accentGold,
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                         const SizedBox(height: 10),
                         const Text(
-                          'The My Goals experience is available for Abundance 12 company members only.',
+                          'The Quests experience is available for Abundance 12 company members only.',
                           style: TextStyle(
-                            color: Color(0xFFB7C0E5),
+                            color: _muted,
                             height: 1.5,
                             fontSize: 16,
                           ),
@@ -157,7 +148,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                         FilledButton(
                           onPressed: () => Navigator.of(context).maybePop(),
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFF0B93C),
+                            backgroundColor: _accentGold,
                             foregroundColor: Colors.black,
                             padding: const EdgeInsets.symmetric(
                               horizontal: 18,
@@ -212,7 +203,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                     .toList();
 
             return Scaffold(
-              backgroundColor: const Color(0xFF050714),
+              backgroundColor: _bg,
               body: SafeArea(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -308,9 +299,9 @@ class _GoalsHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'MY GOALS',
+              'Quests',
               style: TextStyle(
-                color: Color(0xFFF0E6CF),
+                color: _text,
                 fontSize: 28,
                 height: 1.05,
                 fontWeight: FontWeight.w800,
@@ -320,9 +311,9 @@ class _GoalsHeader extends StatelessWidget {
             ),
             SizedBox(height: 10),
             Text(
-              'Personal, professional and contribution - combined into your Goal Total Score. In Todo List, new goals can include a start date and an end date.',
+              'Personal, professional and contribution - combined into your Life Power. In Todo List, new quests can include a start date and an end date.',
               style: TextStyle(
-                color: Color(0xFFB7C0E5),
+                color: _muted,
                 fontSize: 15.5,
                 height: 1.45,
               ),
@@ -336,12 +327,12 @@ class _GoalsHeader extends StatelessWidget {
           label: const Padding(
             padding: EdgeInsets.symmetric(vertical: 6),
             child: Text(
-              'New goal',
+              'New quest',
               style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
             ),
           ),
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFFF0B93C),
+            backgroundColor: _accentGold,
             foregroundColor: Colors.black,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -412,7 +403,7 @@ class _GoalsSummaryGrid extends StatelessWidget {
                       children: [
                         Expanded(
                           child: _MetricCard(
-                            label: 'TOTAL GOALS',
+                            label: 'TOTAL QUESTS',
                             value: '$totalGoals',
                             icon: Icons.adjust_rounded,
                           ),
@@ -423,7 +414,7 @@ class _GoalsSummaryGrid extends StatelessWidget {
                             label: 'COMPLETED',
                             value: '$completedGoals',
                             icon: Icons.flag_outlined,
-                            valueColor: const Color(0xFF63E0B7),
+                            valueColor: AbundanceColors.scoreExcellent,
                           ),
                         ),
                       ],
@@ -468,7 +459,7 @@ class _GoalsSummaryGrid extends StatelessWidget {
                 SizedBox(
                   width: tileWidth,
                   child: _MetricCard(
-                    label: 'TOTAL GOALS',
+                    label: 'TOTAL QUESTS',
                     value: '$totalGoals',
                     icon: Icons.adjust_rounded,
                   ),
@@ -479,7 +470,7 @@ class _GoalsSummaryGrid extends StatelessWidget {
                     label: 'COMPLETED',
                     value: '$completedGoals',
                     icon: Icons.flag_outlined,
-                    valueColor: const Color(0xFF63E0B7),
+                    valueColor: AbundanceColors.scoreExcellent,
                   ),
                 ),
                 SizedBox(
@@ -520,9 +511,9 @@ class _ScorePanel extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(outerPadding),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F173D),
+        color: _panel,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFF27336C)),
+        border: Border.all(color: _border),
         boxShadow: const [
           BoxShadow(
             color: Color(0x44000000),
@@ -543,12 +534,15 @@ class _ScorePanel extends StatelessWidget {
                 SizedBox(
                   width: ringSize,
                   height: ringSize,
+                  // A12 treats this ring as the headline "Life Power" arc — a
+                  // gold accent rather than the score-critical palette, since
+                  // a low aggregate score is expected, not an error state.
                   child: CircularProgressIndicator(
                     value: score / 100,
                     strokeWidth: compact ? 10 : 12,
-                    backgroundColor: const Color(0xFF0A0F2B),
+                    backgroundColor: _trackBg,
                     valueColor: const AlwaysStoppedAnimation<Color>(
-                      Color(0xFFFF6B86),
+                      _accentGold,
                     ),
                   ),
                 ),
@@ -558,7 +552,7 @@ class _ScorePanel extends StatelessWidget {
                     Text(
                       '$score',
                       style: const TextStyle(
-                        color: Color(0xFFFF6B86),
+                        color: _accentGold,
                         fontSize: 44,
                         fontWeight: FontWeight.w800,
                         height: 1.0,
@@ -568,7 +562,7 @@ class _ScorePanel extends StatelessWidget {
                     const Text(
                       'of 100',
                       style: TextStyle(
-                        color: Color(0xFFB7C0E5),
+                        color: _muted,
                         fontSize: 14,
                       ),
                     ),
@@ -579,9 +573,9 @@ class _ScorePanel extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Goal Total Score',
+            'Life Power',
             style: TextStyle(
-              color: Color(0xFFF0E6CF),
+              color: _text,
               fontSize: 20,
               fontWeight: FontWeight.w800,
               fontFamily: 'Georgia',
@@ -592,7 +586,7 @@ class _ScorePanel extends StatelessWidget {
             'Your Personal, Professional and Contribution scores, combined into one out of 100.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Color(0xFFB7C0E5),
+              color: _muted,
               fontSize: 13.5,
               height: 1.6,
             ),
@@ -622,9 +616,9 @@ class _MetricCard extends StatelessWidget {
       height: 104,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F173D),
+        color: _panel,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF27336C)),
+        border: Border.all(color: _border),
       ),
       child: Row(
         children: [
@@ -632,12 +626,12 @@ class _MetricCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFF0A0F2B),
+              color: _trackBg,
               borderRadius: BorderRadius.circular(999),
             ),
             child: Icon(
               icon,
-              color: const Color(0xFFCFD6FF),
+              color: _chipGray,
               size: 22,
             ),
           ),
@@ -650,7 +644,7 @@ class _MetricCard extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    color: Color(0xFF9EA8D6),
+                    color: _muted,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -661,7 +655,7 @@ class _MetricCard extends StatelessWidget {
                 Text(
                   value,
                   style: TextStyle(
-                    color: valueColor ?? const Color(0xFFF0E6CF),
+                    color: valueColor ?? _text,
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                   ),
@@ -736,17 +730,19 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF2D2744) : const Color(0xFF101737),
+          color: selected
+              ? _accentGold.withValues(alpha: 0.16)
+              : _panel,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: selected ? const Color(0xFFF0B93C) : const Color(0xFF27336C),
+            color: selected ? _accentGold : _border,
             width: selected ? 1.4 : 1,
           ),
         ),
         child: Text(
           '$label  $count',
           style: TextStyle(
-            color: selected ? const Color(0xFFF0B93C) : const Color(0xFFB7C0E5),
+            color: selected ? _accentGold : _muted,
             fontSize: 14.5,
             fontWeight: FontWeight.w700,
           ),
@@ -768,9 +764,9 @@ class _GoalCard extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get _progressColor {
-    if (goal.status == GoalStatus.completed) return const Color(0xFF63E0B7);
-    if (goal.isOverdue) return const Color(0xFFF36D8A);
-    return const Color(0xFFF0B93C);
+    if (goal.status == GoalStatus.completed) return AbundanceColors.scoreExcellent;
+    if (goal.isOverdue) return AbundanceColors.scoreCritical;
+    return AbundanceColors.primaryGold;
   }
 
   String _statusLabel(GoalStatus status) {
@@ -783,20 +779,42 @@ class _GoalCard extends StatelessWidget {
     };
   }
 
+  Color _statusForeground(GoalStatus status) {
+    return switch (status) {
+      GoalStatus.notStarted => _chipGray,
+      GoalStatus.inProgress => _chipBlue,
+      GoalStatus.atRisk => _chipPink,
+      GoalStatus.completed => _chipGreen,
+      GoalStatus.abandoned => AbundanceColors.scoreCritical,
+    };
+  }
+
+  // A12's QuestCard: `${overdue} ${overdue === 1 ? "day" : "days"} overdue`,
+  // "Due today", or `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`.
+  String _daysLabel(int daysLeft) {
+    if (daysLeft < 0) {
+      final overdue = -daysLeft;
+      return '$overdue ${overdue == 1 ? 'day' : 'days'} overdue';
+    }
+    if (daysLeft == 0) return 'Due today';
+    return '$daysLeft ${daysLeft == 1 ? 'day' : 'days'} left';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final categoryColor = AbundanceColors.categoryColor(goal.category.code);
+    final scoreColor = AbundanceColors.scoreColorFor(goal.progress);
+
     return StreamBuilder<List<ActionPlanItem>>(
       stream: service.watchPlans(goal.id),
       builder: (context, snapshot) {
         final plans = snapshot.data ?? const <ActionPlanItem>[];
         final completedPlans =
             plans.where((plan) => plan.status == ActionPlanStatus.done).length;
-        final planLabel = plans.isEmpty
-            ? 'No tasks yet'
-            : '$completedPlans/${plans.length} tasks';
-        final dueLabel = goal.isOverdue
-            ? '${-goal.daysUntilDue}d overdue'
-            : '${goal.daysUntilDue}d left';
+        final missionsLabel =
+            '$completedPlans / ${plans.length} ${plans.length == 1 ? 'Mission' : 'Missions'}';
+        final overdue = goal.isOverdue;
+        final dueLabel = _daysLabel(goal.daysUntilDue);
 
         return InkWell(
           onTap: onTap,
@@ -804,9 +822,9 @@ class _GoalCard extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F173D),
+              color: _panel,
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: const Color(0xFF27336C)),
+              border: Border.all(color: _border),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x33000000),
@@ -821,34 +839,46 @@ class _GoalCard extends StatelessWidget {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _Badge(
                       text: goal.category.label,
-                      color: Color(goal.category.accent),
-                      background: const Color(0xFF241F37),
+                      color: categoryColor,
+                      background: categoryColor.withValues(alpha: 0.12),
                     ),
                     _Badge(
                       text: _statusLabel(goal.status),
-                      color: const Color(0xFF56C7F4),
-                      background: const Color(0xFF142339),
+                      color: _statusForeground(goal.status),
+                      background: _statusForeground(goal.status).withValues(alpha: 0.12),
                     ),
                     _Badge(
                       text: 'Score ${goal.progress}',
-                      color: const Color(0xFFFF6B86),
-                      background: const Color(0xFF2A2030),
+                      color: scoreColor,
+                      background: scoreColor.withValues(alpha: 0.12),
                     ),
-                    _Badge(
-                      text: goal.rank.name,
-                      color: const Color(0xFFCFD6FF),
-                      background: const Color(0xFF232A47),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          abundanceRankMedalAsset(goal.rank.key),
+                          width: 20,
+                          height: 20,
+                        ),
+                        const SizedBox(width: 6),
+                        _Badge(
+                          text: goal.rank.name,
+                          color: _chipGray,
+                          background: _chipGrayBg,
+                        ),
+                      ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  goal.title.toUpperCase(),
+                  goal.title,
                   style: const TextStyle(
-                    color: Color(0xFFF0E6CF),
+                    color: _text,
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.2,
@@ -862,7 +892,7 @@ class _GoalCard extends StatelessWidget {
                   Text(
                     goal.description!,
                     style: const TextStyle(
-                      color: Color(0xFFB7C0E5),
+                      color: _muted,
                       height: 1.45,
                     ),
                     maxLines: 3,
@@ -884,39 +914,58 @@ class _GoalCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     minHeight: 8,
                     value: (goal.progress / 100).clamp(0.0, 1.0),
-                    backgroundColor: const Color(0xFF09102A),
+                    backgroundColor: _trackBg,
                     valueColor: AlwaysStoppedAnimation<Color>(_progressColor),
                   ),
                 ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    const Icon(
-                      Icons.calendar_today_outlined,
-                      color: Color(0xFF9EA8D6),
-                      size: 16,
-                    ),
-                    const SizedBox(width: 6),
                     Expanded(
-                      child: Text(
-                        '${goal.targetDate.month}/${goal.targetDate.day}/${goal.targetDate.year}  -  $dueLabel',
-                        style: const TextStyle(
-                          color: Color(0xFF9EA8D6),
-                          fontSize: 12.5,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.checklist_rounded,
+                            color: _muted,
+                            size: 15,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              missionsLabel,
+                              style: const TextStyle(
+                                color: _muted,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    const SizedBox(width: 10),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_today_outlined,
+                          color: overdue ? AbundanceColors.scoreCritical : _muted,
+                          size: 15,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          dueLabel,
+                          style: TextStyle(
+                            color: overdue ? AbundanceColors.scoreCritical : _muted,
+                            fontSize: 12.5,
+                            fontWeight: overdue ? FontWeight.w700 : FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  planLabel,
-                  style: const TextStyle(
-                    color: Color(0xFF9EA8D6),
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
                 ),
               ],
             ),
@@ -974,23 +1023,23 @@ class _EmptyGoalsState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F173D),
+        color: _panel,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFF27336C)),
+        border: Border.all(color: _border),
       ),
       child: Column(
         children: [
           const Icon(
             Icons.adjust_rounded,
             size: 40,
-            color: Color(0xFF9EA8D6),
+            color: _muted,
           ),
           const SizedBox(height: 10),
           Text(
-            hasFilter ? 'No goals in this category yet' : 'No goals yet',
+            hasFilter ? 'No quests in this category yet' : 'No quests yet',
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Color(0xFFF0E6CF),
+              color: _text,
               fontSize: 18,
               fontWeight: FontWeight.w800,
               fontFamily: 'Georgia',
@@ -998,10 +1047,10 @@ class _EmptyGoalsState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Tap New goal in Todo List to create your first A12 goal and set its start and end dates.',
+            'Tap New quest in Todo List to create your first A12 quest and set its start and end dates.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Color(0xFFB7C0E5),
+              color: _muted,
               fontSize: 13.5,
               height: 1.5,
             ),
@@ -1010,17 +1059,36 @@ class _EmptyGoalsState extends StatelessWidget {
           FilledButton(
             onPressed: onNewGoal,
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFF0B93C),
+              backgroundColor: _accentGold,
               foregroundColor: Colors.black,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: const Text('New goal'),
+            child: const Text('New quest'),
           ),
         ],
       ),
     );
   }
 }
+
+// Sourced from AbundanceColors (lib/src/features/abundance/theme/abundance_theme.dart)
+// rather than new magic hex, mirroring the same alias approach used in
+// goal_detail_screen.dart so both Quests screens trace every solid color
+// back to the single shared source of truth. The "*Bg" variants below are
+// subtle tinted backgrounds with no AbundanceColors equivalent (chip/badge
+// backgrounds only) and remain as bespoke hex, same as the detail screen.
+const Color _bg = AbundanceColors.background;
+const Color _panel = AbundanceColors.surfaceRaised;
+const Color _border = AbundanceColors.border;
+const Color _text = AbundanceColors.foreground;
+const Color _muted = AbundanceColors.muted;
+const Color _accentGold = AbundanceColors.primaryGold;
+const Color _trackBg = AbundanceColors.surfaceSunken;
+const Color _chipGray = AbundanceColors.muted;
+const Color _chipGrayBg = Color(0xFF232A47);
+const Color _chipBlue = AbundanceColors.accentCyan;
+const Color _chipPink = AbundanceColors.scoreCritical;
+const Color _chipGreen = AbundanceColors.scoreExcellent;

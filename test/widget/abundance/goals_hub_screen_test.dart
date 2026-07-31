@@ -37,13 +37,67 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('RUN 100 KM'), findsOneWidget);
+    expect(find.text('Run 100 km'), findsOneWidget);
     expect(
-      find.textContaining('new goals can include a start date and an end date'),
+      find.textContaining('new quests can include a start date and an end date'),
       findsOneWidget,
     );
     // Personal is held; the other two required categories are named as gaps.
     expect(find.textContaining('Professional'), findsWidgets);
     expect(find.textContaining('Contribution'), findsWidgets);
+  });
+
+  testWidgets('quest title is not forced to uppercase', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'c1'});
+    await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.personal,
+      title: 'Run 100 km',
+      targetDate: DateTime(2026, 9, 1),
+      targetValue: 100,
+      currentValue: 40,
+      unit: 'km',
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalsHubScreen(
+        service: service,
+        uid: 'u1',
+        accessResolver: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Run 100 km'), findsOneWidget);
+    expect(find.text('RUN 100 KM'), findsNothing);
+  });
+
+  testWidgets('access resolution does not depend on the loadForUser singleton',
+      (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({
+      'companyId': 'c1',
+      'activeCompanyCode': 'ABU15DN',
+      'activeCompanyName': 'Abundance',
+    });
+
+    // No accessResolver override here — this must resolve access from the
+    // GoalsService/user data passed in, not from a CompanyMembershipService
+    // singleton that isn't configured in this test.
+    await tester.pumpWidget(MaterialApp(
+      home: GoalsHubScreen(service: service, uid: 'u1'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Quests'), findsWidgets);
+    // The assertion above is satisfiable by a false positive: the
+    // access-DENIED gate panel's copy also contains the word "Quests", so
+    // this guard additionally proves access was actually GRANTED (the gate
+    // did not render) rather than merely that some text says "Quests"
+    // somewhere on screen.
+    expect(find.text('A12 only'), findsNothing);
   });
 }
