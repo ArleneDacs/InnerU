@@ -3,6 +3,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_map_tracker_screen.dart';
 import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/pending_step_sync_service.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,6 +37,7 @@ class SessionCleanupService {
       await prefs.remove(initialStepsKey(userId));
       await prefs.remove(stepOffsetKey(userId));
       await prefs.remove(lastSavedDateKey(userId));
+      await PendingStepSyncService.instance.clearForUser(userId);
     }
 
     await AudioHelper.stopAudio();
@@ -43,7 +45,8 @@ class SessionCleanupService {
     await FastingNotificationService.instance.cancelDailySleepBedtimeReminder();
     await FastingNotificationService.instance.cancelSleepWakeNotification();
     await FastingNotificationService.instance.cancelSleepOngoingNotification();
-    await FastingNotificationService.instance.cancelExerciseCompleteNotification();
+    await FastingNotificationService.instance
+        .cancelExerciseCompleteNotification();
     FlutterBackgroundService().invoke('stopService');
     await clearStepMapTrackerStateForSignOut();
   }

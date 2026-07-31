@@ -21,9 +21,11 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
+import 'package:selfcare_projects/src/services/pending_step_sync_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/step_background_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
@@ -113,6 +115,15 @@ class _StepTrackerState extends State<StepTracker>
   Future<void> _initializeApp() async {
     await _loadDailyGoal();
     await _loadSteps();
+    if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
+      if (!mounted || _isDisposed) return;
+      setState(() {
+        _stepCounterInitialized = true;
+        _hasStepPermission = _stepPermissionMessage == null;
+      });
+      return;
+    }
+
     if (widget.debugAutoGrantStepPermission) {
       setState(() {
         _hasStepPermission = true;
@@ -188,6 +199,11 @@ class _StepTrackerState extends State<StepTracker>
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
+    final appleHealthSteps = Platform.isIOS
+        ? await AppleHealthStepsService.instance.syncTodaySteps()
+        : null;
+    await prefs.reload();
+
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final savedStepsKey = SessionCleanupService.savedStepsKey(userId);
     final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
@@ -210,20 +226,33 @@ class _StepTrackerState extends State<StepTracker>
       await prefs.setInt(initialStepsKey, -1); // Reset initial steps
       await prefs.setString(lastSavedDateKey, today);
 
-      _steps = await _loadRemoteTodaySteps(userId, today);
+      _steps = Platform.isIOS ? 0 : await _loadRemoteTodaySteps(userId, today);
       await prefs.setInt(savedStepsKey, _steps);
       await prefs.setInt(stepOffsetKey, 0);
       _initialSteps = -1;
       _stepCountOffset = 0;
     } else {
       final cachedSteps = prefs.getInt(savedStepsKey) ?? 0;
-      final remoteSteps = await _loadRemoteTodaySteps(userId, today);
-      _steps = resolveDisplayedStepCount(
-        cachedSteps: cachedSteps,
-        remoteSteps: remoteSteps,
-      );
+      if (Platform.isIOS) {
+        _steps = cachedSteps;
+      } else {
+        final remoteSteps = await _loadRemoteTodaySteps(userId, today);
+        _steps = resolveDisplayedStepCount(
+          cachedSteps: cachedSteps,
+          remoteSteps: remoteSteps,
+        );
+      }
       _stepCountOffset = prefs.getInt(stepOffsetKey) ?? 0;
     }
+
+    if (Platform.isIOS) {
+      _stepCounterInitialized = true;
+      _hasStepPermission = appleHealthSteps != null;
+      _stepPermissionMessage = appleHealthSteps == null
+          ? 'Allow InnerU to read steps from Apple Health so your iOS step count can sync when you open the app.'
+          : null;
+    }
+
     _lastRawStepCount = _steps;
     _lastStepEventAt = null;
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
@@ -373,11 +402,25 @@ class _StepTrackerState extends State<StepTracker>
       print("Saved $steps steps for $date");
     } catch (error) {
       debugPrint("Failed to save step history: $error");
+      final userId = _currentUserId;
+      if (userId != null && userId.isNotEmpty) {
+        await PendingStepSyncService.instance.queueStepProgress(
+          userId: userId,
+          date: date,
+          stepCount: steps,
+          stepGoal: _dailyGoal,
+          steps: true,
+        );
+      }
     }
   }
 
   void _initStepCounter() async {
     if (_stepCounterInitialized) return;
+    if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
+      await _loadSteps();
+      return;
+    }
     final userId = _currentUserId;
     if (userId == null || userId.isEmpty) return;
 
@@ -571,26 +614,39 @@ class _StepTrackerState extends State<StepTracker>
       {bool meditation = false, bool steps = false}) async {
     final userId = _currentUserId;
     if (userId == null) return;
-    final userData = await _loadUserData();
-    final username = userData['username']?.toString() ??
-        userData['name']?.toString() ??
-        userData['displayName']?.toString();
-
     final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    await _dailyTrackerApiService.upsert(
-      date: formattedDate,
-      stepCount: _steps,
-      stepGoal: _dailyGoal,
-      meditation: meditation,
-      steps: steps,
-      username: username,
-      companyId: userData['company_id']?.toString() ??
-          userData['companyId']?.toString(),
-      companyCode: userData['company_code']?.toString() ??
-          userData['companyCode']?.toString(),
-      companyName: userData['company_name']?.toString() ??
-          userData['companyName']?.toString(),
-    );
+
+    try {
+      final userData = await _loadUserData();
+      final username = userData['username']?.toString() ??
+          userData['name']?.toString() ??
+          userData['displayName']?.toString();
+
+      await PendingStepSyncService.instance.flush(userId: userId);
+      await _dailyTrackerApiService.upsert(
+        date: formattedDate,
+        stepCount: _steps,
+        stepGoal: _dailyGoal,
+        meditation: meditation,
+        steps: steps,
+        username: username,
+        companyId: userData['company_id']?.toString() ??
+            userData['companyId']?.toString(),
+        companyCode: userData['company_code']?.toString() ??
+            userData['companyCode']?.toString(),
+        companyName: userData['company_name']?.toString() ??
+            userData['companyName']?.toString(),
+      );
+    } catch (error) {
+      debugPrint('Failed to save daily step activity: $error');
+      await PendingStepSyncService.instance.queueStepProgress(
+        userId: userId,
+        date: formattedDate,
+        stepCount: _steps,
+        stepGoal: _dailyGoal,
+        steps: steps,
+      );
+    }
   }
 
   void _setWalkingState(bool isWalking) {
@@ -649,6 +705,7 @@ class _StepTrackerState extends State<StepTracker>
     final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     try {
+      await PendingStepSyncService.instance.flush(userId: userId);
       await _dailyTrackerApiService.upsert(
         date: formattedDate,
         stepCount: _steps,
@@ -658,6 +715,13 @@ class _StepTrackerState extends State<StepTracker>
       _lastSyncedStepCount = _steps;
     } catch (error) {
       debugPrint("Failed to sync step progress: $error");
+      await PendingStepSyncService.instance.queueStepProgress(
+        userId: userId,
+        date: formattedDate,
+        stepCount: _steps,
+        stepGoal: _dailyGoal,
+        steps: _steps > 0,
+      );
     }
   }
 
@@ -1002,6 +1066,15 @@ class _StepTrackerState extends State<StepTracker>
   Future<void> _resumeStepCounterIfNeeded() async {
     if (!mounted) return;
 
+    if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
+      await _loadSteps();
+      if (!mounted || _isDisposed) return;
+      setState(() {
+        _stepCounterInitialized = true;
+      });
+      return;
+    }
+
     if (widget.debugAutoGrantStepPermission) {
       setState(() {
         _hasStepPermission = true;
@@ -1048,6 +1121,11 @@ class _StepTrackerState extends State<StepTracker>
   }
 
   Future<void> _enableStepCounter() async {
+    if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
+      await _loadSteps();
+      return;
+    }
+
     if (_stepCounterInitialized) return;
 
     final hasPermission = await _requestPermission();
@@ -1242,7 +1320,8 @@ class _StepTrackerState extends State<StepTracker>
                                         ),
                                       ),
                                       if (!_hasStepPermission &&
-                                          !_stepCounterInitialized) ...[
+                                          (!_stepCounterInitialized ||
+                                              Platform.isIOS)) ...[
                                         SizedBox(
                                             height:
                                                 context.responsiveValue(10)),
@@ -1254,8 +1333,10 @@ class _StepTrackerState extends State<StepTracker>
                                           ),
                                           icon:
                                               const Icon(Icons.directions_walk),
-                                          label: const Text(
-                                            'Enable Step Tracking',
+                                          label: Text(
+                                            Platform.isIOS
+                                                ? 'Sync Apple Health'
+                                                : 'Enable Step Tracking',
                                             style: TextStyle(
                                                 fontWeight: FontWeight.w700),
                                           ),

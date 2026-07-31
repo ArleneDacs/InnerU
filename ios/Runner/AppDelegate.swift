@@ -1,14 +1,17 @@
 import Flutter
 import AVFoundation
 import flutter_background_service_ios
+import HealthKit
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var shareChannel: FlutterMethodChannel?
+  private var appleHealthChannel: FlutterMethodChannel?
   private var meditationKeepAwakeChannel: FlutterMethodChannel?
   private var meditationFeedbackChannel: FlutterMethodChannel?
   private let meditationSynthesizer = AVSpeechSynthesizer()
+  private let healthStore = HKHealthStore()
 
   override func application(
     _ application: UIApplication,
@@ -56,6 +59,24 @@ import UIKit
         host.present(activityViewController, animated: true) {
           result(nil)
         }
+      }
+    }
+
+    appleHealthChannel = FlutterMethodChannel(
+      name: "inneru/apple_health",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    appleHealthChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+
+      switch call.method {
+      case "readTodaySteps":
+        self.readTodayHealthSteps(result: result)
+      default:
+        result(FlutterMethodNotImplemented)
       }
     }
 
@@ -117,6 +138,52 @@ import UIKit
       default:
         result(FlutterMethodNotImplemented)
       }
+    }
+  }
+
+  private func readTodayHealthSteps(result: @escaping FlutterResult) {
+    guard HKHealthStore.isHealthDataAvailable(),
+          let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+      result(FlutterError(code: "HEALTH_UNAVAILABLE", message: "Apple Health is not available on this device.", details: nil))
+      return
+    }
+
+    healthStore.requestAuthorization(toShare: [], read: [stepType]) { [weak self] granted, error in
+      if let error {
+        result(FlutterError(code: "HEALTH_AUTH_FAILED", message: error.localizedDescription, details: nil))
+        return
+      }
+
+      guard granted else {
+        result(FlutterError(code: "HEALTH_PERMISSION_DENIED", message: "Apple Health step access was not granted.", details: nil))
+        return
+      }
+
+      let calendar = Calendar.current
+      let startOfDay = calendar.startOfDay(for: Date())
+      let predicate = HKQuery.predicateForSamples(
+        withStart: startOfDay,
+        end: Date(),
+        options: [.strictStartDate]
+      )
+
+      let query = HKStatisticsQuery(
+        quantityType: stepType,
+        quantitySamplePredicate: predicate,
+        options: .cumulativeSum
+      ) { _, statistics, error in
+        if let error {
+          result(FlutterError(code: "HEALTH_QUERY_FAILED", message: error.localizedDescription, details: nil))
+          return
+        }
+
+        let steps = statistics?
+          .sumQuantity()?
+          .doubleValue(for: HKUnit.count()) ?? 0
+        result(Int(steps.rounded()))
+      }
+
+      self?.healthStore.execute(query)
     }
   }
 }

@@ -60,6 +60,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Allow InnerU to scan barcodes and capture meal photos.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Allow InnerU to read your Apple Health step count and sync it to your daily tracker.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Allow InnerU to show your walking route and track step sessions on the map.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

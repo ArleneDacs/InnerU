@@ -2,17 +2,20 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
+import 'package:selfcare_projects/src/services/pending_step_sync_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
@@ -30,6 +33,11 @@ class StepBackgroundService {
 
   Future<void> configure() async {
     if (_configured) return;
+
+    if (kIsWeb || Platform.isIOS) {
+      _configured = true;
+      return;
+    }
 
     if (Platform.isAndroid) {
       const channel = AndroidNotificationChannel(
@@ -86,6 +94,21 @@ class StepBackgroundService {
     }
   }
 
+  Future<void> startTrackingIfAvailable() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    final session = AuthService.instance.currentSession;
+    if (session == null) return;
+
+    if (!await Permission.activityRecognition.status.isGranted) return;
+
+    await startTracking();
+    unawaited(
+      PendingStepSyncService.instance.flush(
+        userId: session.id.toString(),
+      ),
+    );
+  }
+
   Future<void> stopTracking() async {
     if (await _service.isRunning()) {
       _service.invoke('stopService');
@@ -97,6 +120,7 @@ class StepBackgroundService {
 Future<bool> stepTrackingServiceBackgroundFetch(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
+  await AuthService.instance.initialize();
 
   final engine = _StepTrackingEngine();
   await engine.initialize();
@@ -108,6 +132,7 @@ Future<bool> stepTrackingServiceBackgroundFetch(ServiceInstance service) async {
 Future<void> stepTrackingServiceEntryPoint(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
+  await AuthService.instance.initialize();
 
   final engine = _StepTrackingEngine();
   await engine.initialize();
@@ -274,7 +299,8 @@ class _StepTrackingEngine {
     try {
       final userData = await UserService.getUserData();
       final rawGoal = userData['dailyStepGoal'] ?? userData['daily_step_goal'];
-      final goal = rawGoal is int ? rawGoal : int.tryParse(rawGoal?.toString() ?? '');
+      final goal =
+          rawGoal is int ? rawGoal : int.tryParse(rawGoal?.toString() ?? '');
       if (goal != null && goal > 0) {
         await prefs.setInt('daily_step_goal_$userId', goal);
         return goal;
@@ -290,23 +316,42 @@ class _StepTrackingEngine {
     final userId = _userId;
     if (userId == null || userId.isEmpty) return;
 
+    final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    String? companyId;
+    String? companyCode;
+    String? companyName;
+
     try {
-      final formattedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      await PendingStepSyncService.instance.flush(userId: userId);
       final membershipData = await CompanyMembershipService.loadForUser(userId);
+      companyId = membershipData.activeMembership?.id;
+      companyCode = membershipData.activeMembership?.code;
+      companyName = membershipData.activeMembership?.name;
       await DailyTrackerApiService.instance.upsert(
         date: formattedDate,
         stepCount: _steps,
         stepGoal: _dailyGoal,
         steps: true,
         username: AuthService.instance.currentSession?.name,
-        companyId: membershipData.activeMembership?.id,
-        companyCode: membershipData.activeMembership?.code,
-        companyName: membershipData.activeMembership?.name,
+        companyId: companyId,
+        companyCode: companyCode,
+        companyName: companyName,
       );
 
       _lastSyncedStepCount = _steps;
     } catch (error) {
       debugPrint('Background step sync failed: $error');
+      await PendingStepSyncService.instance.queueStepProgress(
+        userId: userId,
+        date: formattedDate,
+        stepCount: _steps,
+        stepGoal: _dailyGoal,
+        steps: true,
+        username: AuthService.instance.currentSession?.name,
+        companyId: companyId,
+        companyCode: companyCode,
+        companyName: companyName,
+      );
     }
   }
 
@@ -355,6 +400,7 @@ class _StepTrackingEngine {
     if (date == null) return;
 
     try {
+      await PendingStepSyncService.instance.flush(userId: userId);
       final membershipData = await CompanyMembershipService.loadForUser(userId);
       await DailyTrackerApiService.instance.upsert(
         date: date,
@@ -368,6 +414,14 @@ class _StepTrackingEngine {
       );
     } catch (error) {
       debugPrint('Background step history save failed: $error');
+      await PendingStepSyncService.instance.queueStepProgress(
+        userId: userId,
+        date: date,
+        stepCount: steps,
+        stepGoal: _dailyGoal,
+        steps: true,
+        username: AuthService.instance.currentSession?.name,
+      );
     }
   }
 
@@ -385,15 +439,11 @@ class _StepTrackingEngine {
     await prefs.reload();
 
     _steps = prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0;
-    _initialSteps = prefs.getInt(SessionCleanupService.initialStepsKey(userId)) ?? -1;
-    _stepCountOffset = prefs.getInt(SessionCleanupService.stepOffsetKey(userId)) ?? 0;
+    _initialSteps =
+        prefs.getInt(SessionCleanupService.initialStepsKey(userId)) ?? -1;
+    _stepCountOffset =
+        prefs.getInt(SessionCleanupService.stepOffsetKey(userId)) ?? 0;
     _lastSyncedStepCount = _steps;
-
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final lastSavedDate = prefs.getString(SessionCleanupService.lastSavedDateKey(userId));
-    if (lastSavedDate != today) {
-      await prefs.setString(SessionCleanupService.lastSavedDateKey(userId), today);
-    }
 
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
   }
@@ -406,10 +456,19 @@ class _StepTrackingEngine {
       final prefs = await SharedPreferences.getInstance();
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       await prefs.setInt(SessionCleanupService.savedStepsKey(userId), _steps);
-      await prefs.setInt(SessionCleanupService.initialStepsKey(userId), _initialSteps);
-      await prefs.setInt(SessionCleanupService.stepOffsetKey(userId), _stepCountOffset);
+      await prefs.setInt(
+        SessionCleanupService.initialStepsKey(userId),
+        _initialSteps,
+      );
+      await prefs.setInt(
+        SessionCleanupService.stepOffsetKey(userId),
+        _stepCountOffset,
+      );
       await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
-      await prefs.setString(SessionCleanupService.lastSavedDateKey(userId), today);
+      await prefs.setString(
+        SessionCleanupService.lastSavedDateKey(userId),
+        today,
+      );
     } catch (error) {
       debugPrint('Background step state persist failed: $error');
     }
