@@ -146,4 +146,81 @@ void main() {
     expect(assetNames, contains(abundanceBackdropAsset));
     expect(assetNames, contains(abundanceQuestSceneAsset('PERSONAL')));
   });
+
+  // ---------------------------------------------------------------------
+  // Round 2: the header's off-source "Todo List" claim was fixed, but the
+  // identical claim survived in the EMPTY STATE -- which the header's own
+  // regression test could never catch, because it seeds a goal and so the
+  // empty state never renders. These seed NO goals on purpose.
+  // ---------------------------------------------------------------------
+
+  testWidgets(
+      'the empty state names no destination this shell does not have and no '
+      'field the wizard does not collect', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    // Deliberately no goals: this is the branch the header test can't reach.
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalsHubScreen(
+        service: service,
+        uid: 'u1',
+        accessResolver: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Proves the empty state is really what's on screen.
+    expect(find.text('No quests yet'), findsOneWidget);
+
+    // There is no "Todo List" anywhere in this experience, and the wizard
+    // collects one deadline -- never a start date and an end date.
+    expect(find.textContaining('Todo List'), findsNothing);
+    expect(find.textContaining('start and end dates'), findsNothing);
+    // The way to create a quest is the button right here.
+    expect(find.widgetWithText(FilledButton, 'New quest'), findsWidgets);
+  });
+
+  testWidgets(
+      'the category-filtered empty state carries A12\'s own reason for why '
+      'the gap matters', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.personal,
+      title: 'Run 100 km',
+      targetDate: DateTime(2026, 12, 31),
+      targetValue: 100,
+      currentValue: 40,
+      unit: 'km',
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalsHubScreen(
+        service: service,
+        uid: 'u1',
+        accessResolver: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Filter to a category the member holds no quest in. The filter chip's
+    // label is "<category>  <count>" -- matched exactly so this cannot
+    // accidentally tap the category's tile in the summary grid instead.
+    await tester.ensureVisible(find.text('Professional  0'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Professional  0'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No quests in this category yet'), findsOneWidget);
+    // Verbatim from A12's own empty state (goals/page.tsx:263).
+    expect(
+      find.textContaining('an empty one scores 0'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Todo List'), findsNothing);
+  });
 }

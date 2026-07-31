@@ -218,78 +218,78 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
               // rather than the shared shell chrome every company uses).
               body: AbundanceBackdrop(
                 child: SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1500),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _GoalsHeader(
-                            onNewGoal: _openForm,
-                          ),
-                          const SizedBox(height: 20),
-                          _GoalsSummaryGrid(
-                            goalScore: overallScore,
-                            totalGoals: activeGoals.length,
-                            completedGoals: completedCount,
-                            inProgressGoals: inProgressCount,
-                            overdueGoals: overdueCount,
-                            categoryScores: categories,
-                          ),
-                          const SizedBox(height: 20),
-                          _CategoryChipsRow(
-                            selectedCategory: _selectedCategory,
-                            counts: categoryCounts,
-                            onSelect: (category) {
-                              setState(() => _selectedCategory = category);
-                            },
-                          ),
-                          const SizedBox(height: 20),
-                          if (visibleGoals.isEmpty)
-                            _EmptyGoalsState(
-                              hasFilter: _selectedCategory != null,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1500),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _GoalsHeader(
                               onNewGoal: _openForm,
-                            )
-                          else
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final columns = constraints.maxWidth >= 1280
-                                    ? 3
-                                    : constraints.maxWidth >= 860
-                                        ? 2
-                                        : 1;
-                                const gap = 18.0;
-                                final cardWidth = columns == 1
-                                    ? constraints.maxWidth
-                                    : (constraints.maxWidth -
-                                            (gap * (columns - 1))) /
-                                        columns;
-
-                                return Wrap(
-                                  spacing: gap,
-                                  runSpacing: gap,
-                                  children: [
-                                    for (final goal in visibleGoals)
-                                      SizedBox(
-                                        width: cardWidth,
-                                        child: _GoalCard(
-                                          goal: goal,
-                                          service: _service,
-                                          onTap: () => _openDetail(goal),
-                                        ),
-                                      ),
-                                  ],
-                                );
+                            ),
+                            const SizedBox(height: 20),
+                            _GoalsSummaryGrid(
+                              goalScore: overallScore,
+                              totalGoals: activeGoals.length,
+                              completedGoals: completedCount,
+                              inProgressGoals: inProgressCount,
+                              overdueGoals: overdueCount,
+                              categoryScores: categories,
+                            ),
+                            const SizedBox(height: 20),
+                            _CategoryChipsRow(
+                              selectedCategory: _selectedCategory,
+                              counts: categoryCounts,
+                              onSelect: (category) {
+                                setState(() => _selectedCategory = category);
                               },
                             ),
-                        ],
+                            const SizedBox(height: 20),
+                            if (visibleGoals.isEmpty)
+                              _EmptyGoalsState(
+                                hasFilter: _selectedCategory != null,
+                                onNewGoal: _openForm,
+                              )
+                            else
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final columns = constraints.maxWidth >= 1280
+                                      ? 3
+                                      : constraints.maxWidth >= 860
+                                          ? 2
+                                          : 1;
+                                  const gap = 18.0;
+                                  final cardWidth = columns == 1
+                                      ? constraints.maxWidth
+                                      : (constraints.maxWidth -
+                                              (gap * (columns - 1))) /
+                                          columns;
+
+                                  return Wrap(
+                                    spacing: gap,
+                                    runSpacing: gap,
+                                    children: [
+                                      for (final goal in visibleGoals)
+                                        SizedBox(
+                                          width: cardWidth,
+                                          child: _GoalCard(
+                                            goal: goal,
+                                            service: _service,
+                                            onTap: () => _openDetail(goal),
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
               ),
             );
           },
@@ -744,9 +744,7 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: selected
-              ? _accentGold.withValues(alpha: 0.16)
-              : _panel,
+          color: selected ? _accentGold.withValues(alpha: 0.16) : _panel,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: selected ? _accentGold : _border,
@@ -778,7 +776,8 @@ class _GoalCard extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get _progressColor {
-    if (goal.status == GoalStatus.completed) return AbundanceColors.scoreExcellent;
+    if (goal.status == GoalStatus.completed)
+      return AbundanceColors.scoreExcellent;
     if (goal.isOverdue) return AbundanceColors.scoreCritical;
     return AbundanceColors.primaryGold;
   }
@@ -860,141 +859,149 @@ class _GoalCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _Badge(
-                      text: goal.category.label,
-                      color: categoryColor,
-                      background: categoryColor.withValues(alpha: 0.12),
-                    ),
-                    _Badge(
-                      text: _statusLabel(goal.status),
-                      color: _statusForeground(goal.status),
-                      background: _statusForeground(goal.status).withValues(alpha: 0.12),
-                    ),
-                    _Badge(
-                      text: 'Score ${goal.progress}',
-                      color: scoreColor,
-                      background: scoreColor.withValues(alpha: 0.12),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Image.asset(
-                          abundanceRankMedalAsset(goal.rank.key),
-                          width: 20,
-                          height: 20,
-                        ),
-                        const SizedBox(width: 6),
-                        _Badge(
-                          text: goal.rank.name,
-                          color: _chipGray,
-                          background: _chipGrayBg,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  goal.title,
-                  style: const TextStyle(
-                    color: _text,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.2,
-                    fontFamily: 'Georgia',
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if ((goal.description ?? '').trim().isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    goal.description!,
-                    style: const TextStyle(
-                      color: _muted,
-                      height: 1.45,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-                const SizedBox(height: 14),
-                Text(
-                  '${goal.progress}',
-                  style: TextStyle(
-                    color: _progressColor,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    minHeight: 8,
-                    value: (goal.progress / 100).clamp(0.0, 1.0),
-                    backgroundColor: _trackBg,
-                    valueColor: AlwaysStoppedAnimation<Color>(_progressColor),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.checklist_rounded,
-                            color: _muted,
-                            size: 15,
+                          _Badge(
+                            text: goal.category.label,
+                            color: categoryColor,
+                            background: categoryColor.withValues(alpha: 0.12),
                           ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              missionsLabel,
-                              style: const TextStyle(
-                                color: _muted,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
+                          _Badge(
+                            text: _statusLabel(goal.status),
+                            color: _statusForeground(goal.status),
+                            background: _statusForeground(goal.status)
+                                .withValues(alpha: 0.12),
+                          ),
+                          _Badge(
+                            text: 'Score ${goal.progress}',
+                            color: scoreColor,
+                            background: scoreColor.withValues(alpha: 0.12),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Image.asset(
+                                abundanceRankMedalAsset(goal.rank.key),
+                                width: 20,
+                                height: 20,
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                              const SizedBox(width: 6),
+                              _Badge(
+                                text: goal.rank.name,
+                                color: _chipGray,
+                                background: _chipGrayBg,
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.calendar_today_outlined,
-                          color: overdue ? AbundanceColors.scoreCritical : _muted,
-                          size: 15,
+                      const SizedBox(height: 18),
+                      Text(
+                        goal.title,
+                        style: const TextStyle(
+                          color: _text,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          fontFamily: 'Georgia',
                         ),
-                        const SizedBox(width: 6),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if ((goal.description ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 10),
                         Text(
-                          dueLabel,
-                          style: TextStyle(
-                            color: overdue ? AbundanceColors.scoreCritical : _muted,
-                            fontSize: 12.5,
-                            fontWeight: overdue ? FontWeight.w700 : FontWeight.w600,
+                          goal.description!,
+                          style: const TextStyle(
+                            color: _muted,
+                            height: 1.45,
                           ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                      const SizedBox(height: 14),
+                      Text(
+                        '${goal.progress}',
+                        style: TextStyle(
+                          color: _progressColor,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 8,
+                          value: (goal.progress / 100).clamp(0.0, 1.0),
+                          backgroundColor: _trackBg,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(_progressColor),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.checklist_rounded,
+                                  color: _muted,
+                                  size: 15,
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    missionsLabel,
+                                    style: const TextStyle(
+                                      color: _muted,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.calendar_today_outlined,
+                                color: overdue
+                                    ? AbundanceColors.scoreCritical
+                                    : _muted,
+                                size: 15,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                dueLabel,
+                                style: TextStyle(
+                                  color: overdue
+                                      ? AbundanceColors.scoreCritical
+                                      : _muted,
+                                  fontSize: 12.5,
+                                  fontWeight: overdue
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1075,10 +1082,23 @@ class _EmptyGoalsState extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Tap New quest in Todo List to create your first A12 quest and set its start and end dates.',
+          // The header's version of this claim was already corrected; the
+          // same off-source sentence survived here because the header's
+          // regression test seeds a goal, so the empty state never renders.
+          // It named a "Todo List" destination this shell does not have and
+          // a start/end date pair the wizard never collects (it collects one
+          // deadline). The filtered case is now A12's own copy verbatim
+          // (goals/page.tsx:263); the unfiltered case has no A12 equivalent
+          // -- A12 always renders this page under a category -- so it gets
+          // neutral copy pointing at the button directly below it.
+          Text(
+            hasFilter
+                ? 'All three categories are required — an empty one scores 0. '
+                    'Set a quest here to lift your Quest Total Score.'
+                : 'Tap New quest to set your first quest and start building '
+                    'your Life Power.',
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               color: _muted,
               fontSize: 13.5,
               height: 1.5,
