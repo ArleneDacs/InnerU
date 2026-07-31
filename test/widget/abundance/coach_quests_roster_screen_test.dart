@@ -43,6 +43,29 @@ class _NavFakeGoalsService extends GoalsService {
       Stream.value(const <GoalUpdateEntry>[]);
 }
 
+/// A fake whose roster fetch always fails, plus a call counter so a retry can
+/// be observed. Covers the whole-branch review's Important 6: the screen used
+/// to branch only on `!snapshot.hasData`, so any failure (network error, 500,
+/// the coach-authorization 401 that Critical 2 fixed) rendered an indefinite
+/// spinner with no error and no way back.
+class _FailingGoalsService extends GoalsService {
+  _FailingGoalsService() : super(null);
+
+  int calls = 0;
+  bool shouldFail = true;
+
+  @override
+  Future<List<CoachMenteeGoals>> fetchCoachGoalsRoster() async {
+    calls++;
+    if (shouldFail) {
+      throw Exception('roster unavailable');
+    }
+    return const [
+      CoachMenteeGoals(menteeId: '1', menteeName: 'Maychell Alcorin', goals: []),
+    ];
+  }
+}
+
 GoalSummary goalIn(GoalCategory category, {String id = 'g'}) {
   return GoalSummary(
     id: id,
@@ -218,5 +241,37 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No '), findsNothing);
+  });
+  testWidgets('a failed roster fetch shows an error state with retry, not a spinner',
+      (tester) async {
+    final service = _FailingGoalsService();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CoachQuestsRosterScreen(service: service, coachUid: 'coach1'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.textContaining("Couldn't load the roster"), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    expect(service.calls, 1);
+  });
+
+  testWidgets('tapping retry re-attempts the fetch and renders the roster on success',
+      (tester) async {
+    final service = _FailingGoalsService();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CoachQuestsRosterScreen(service: service, coachUid: 'coach1'),
+    ));
+    await tester.pumpAndSettle();
+
+    service.shouldFail = false;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+
+    expect(service.calls, 2);
+    expect(find.text('Maychell Alcorin'), findsOneWidget);
+    expect(find.textContaining("Couldn't load the roster"), findsNothing);
   });
 }

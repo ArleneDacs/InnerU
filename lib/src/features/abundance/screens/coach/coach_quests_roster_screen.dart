@@ -34,7 +34,10 @@ class CoachQuestsRosterScreen extends StatefulWidget {
 }
 
 class _CoachQuestsRosterScreenState extends State<CoachQuestsRosterScreen> {
-  late final Future<List<CoachMenteeGoals>> _rosterFuture;
+  // Not `final`: the error state's retry action re-assigns this to a fresh
+  // fetch, so a transient failure (network blip, 500) is recoverable without
+  // leaving and re-entering the screen.
+  late Future<List<CoachMenteeGoals>> _rosterFuture;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -42,6 +45,12 @@ class _CoachQuestsRosterScreenState extends State<CoachQuestsRosterScreen> {
   void initState() {
     super.initState();
     _rosterFuture = widget.service.fetchCoachGoalsRoster();
+  }
+
+  void _retryRoster() {
+    setState(() {
+      _rosterFuture = widget.service.fetchCoachGoalsRoster();
+    });
   }
 
   @override
@@ -78,6 +87,13 @@ class _CoachQuestsRosterScreenState extends State<CoachQuestsRosterScreen> {
         child: FutureBuilder<List<CoachMenteeGoals>>(
           future: _rosterFuture,
           builder: (context, snapshot) {
+            // Error is checked before "no data": a failed Future never gets
+            // data, so branching on `!snapshot.hasData` alone would render
+            // the spinner forever on any failure.
+            if (snapshot.hasError) {
+              return _RosterErrorState(onRetry: _retryRoster);
+            }
+
             if (!snapshot.hasData) {
               return const Center(
                 child: CircularProgressIndicator(
@@ -210,6 +226,77 @@ class _RosterHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Shown when the roster fetch itself fails. Styled to match
+/// [_RosterEmptyState] rather than inventing a second visual language for
+/// "nothing on screen".
+class _RosterErrorState extends StatelessWidget {
+  const _RosterErrorState({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AbundanceColors.surfaceRaised,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AbundanceColors.border),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.cloud_off_outlined,
+                size: 40,
+                color: AbundanceColors.scoreCritical,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "Couldn't load the roster",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'Georgia',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Your students\' quests could not be fetched. Check your '
+                'connection and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AbundanceColors.muted,
+                  fontSize: 13.5,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: onRetry,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AbundanceColors.primaryGold,
+                  foregroundColor: AbundanceColors.surfaceSunken,
+                ),
+                child: const Text(
+                  'Try again',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
