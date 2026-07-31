@@ -25,23 +25,24 @@ class AppUpdateService {
 
   Future<AppUpdateCheckResult> checkForUpdate() async {
     try {
-      final response = await ApiClient.instance
-          .getJson('/api/app-version')
-          .timeout(const Duration(seconds: 5));
-
-      final packageInfo = await PackageInfo.fromPlatform();
-
-      return evaluate(
-        response: response,
-        isIOS: Platform.isIOS,
-        installedVersion: packageInfo.version,
-        installedBuildNumber: packageInfo.buildNumber,
-      );
+      return await _fetchAndEvaluate().timeout(const Duration(seconds: 5));
     } catch (error, stack) {
       await FirebaseCrashlytics.instance
           .recordError(error, stack, fatal: false);
       return AppUpdateCheckResult.upToDate;
     }
+  }
+
+  Future<AppUpdateCheckResult> _fetchAndEvaluate() async {
+    final response = await ApiClient.instance.getJson('/api/app-version');
+    final packageInfo = await PackageInfo.fromPlatform();
+
+    return evaluate(
+      response: response,
+      isIOS: Platform.isIOS,
+      installedVersion: packageInfo.version,
+      installedBuildNumber: packageInfo.buildNumber,
+    );
   }
 
   static AppUpdateCheckResult evaluate({

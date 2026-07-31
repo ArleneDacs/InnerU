@@ -52,6 +52,26 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text('A new version is available'), findsNothing);
+    });
+
+    testWidgets('waits for a slow check before navigating', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: SplashScreen(
+          checkForUpdate: () => Future.delayed(
+            const Duration(seconds: 4),
+            () => AppUpdateCheckResult.outdated('https://apps.apple.com/app/id1'),
+          ),
+          onUpdateNow: (_) async {},
+        ),
+      ));
+
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.byType(LoginScreen), findsNothing); // 3s branding delay elapsed, but check isn't done yet — must not have navigated
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(find.text('A new version is available'), findsOneWidget); // now the slow check has resolved and blocked correctly
     });
   });
 }

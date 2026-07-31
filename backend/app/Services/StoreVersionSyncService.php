@@ -45,7 +45,7 @@ class StoreVersionSyncService
             }
             $appVersion->save();
         } catch (Throwable $e) {
-            Log::warning('Failed to sync iOS store version: ' . $e->getMessage());
+            Log::warning('Failed to sync iOS store version.', ['exception' => $e]);
         }
     }
 
@@ -65,7 +65,7 @@ class StoreVersionSyncService
             $appVersion->android_store_url = $result['store_url'];
             $appVersion->save();
         } catch (Throwable $e) {
-            Log::warning('Failed to sync Android store version: ' . $e->getMessage());
+            Log::warning('Failed to sync Android store version.', ['exception' => $e]);
         }
     }
 }

@@ -1,3 +1,4 @@
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/constants/image_strings.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/login_screen.dart';
@@ -62,7 +63,28 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _launchStoreUrl(String storeUrl) async {
     final uri = Uri.parse(storeUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showLaunchFailureMessage();
+      }
+    } catch (error, stack) {
+      await FirebaseCrashlytics.instance
+          .recordError(error, stack, fatal: false);
+      _showLaunchFailureMessage();
+    }
+  }
+
+  void _showLaunchFailureMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Could not open the store automatically. Please update the app manually from the App Store or Play Store.',
+        ),
+      ),
+    );
   }
 
   void navigateToLogin() {

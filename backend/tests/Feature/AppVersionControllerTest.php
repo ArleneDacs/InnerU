@@ -39,4 +39,27 @@ class AppVersionControllerTest extends TestCase
             ],
         ]);
     }
+
+    public function test_app_version_endpoint_handles_a_null_ios_store_url(): void
+    {
+        AppVersion::current()->update([
+            'ios_latest_version' => '1.0.4',
+            'ios_store_url' => null,
+            'android_latest_version_code' => 34,
+            'android_store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+        ]);
+
+        $response = $this->getJson('/api/app-version');
+
+        $response->assertOk()->assertExactJson([
+            'ios' => [
+                'latest_version' => '1.0.4',
+                'store_url' => null,
+            ],
+            'android' => [
+                'latest_version_code' => 34,
+                'store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+            ],
+        ]);
+    }
 }

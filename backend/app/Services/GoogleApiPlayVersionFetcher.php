@@ -42,7 +42,11 @@ class GoogleApiPlayVersionFetcher implements GooglePlayVersionFetcher
                 'store_url' => "https://play.google.com/store/apps/details?id={$packageName}",
             ];
         } finally {
-            $service->edits->delete($packageName, $editId);
+            try {
+                $service->edits->delete($packageName, $editId);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to clean up a Google Play edit (it will auto-expire).', ['exception' => $e]);
+            }
         }
     }
 
