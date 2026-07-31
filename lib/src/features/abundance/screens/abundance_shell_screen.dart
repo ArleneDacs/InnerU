@@ -1,0 +1,176 @@
+import 'package:flutter/material.dart';
+
+import 'package:selfcare_projects/src/features/abundance/screens/coach/coach_quests_roster_screen.dart';
+import 'package:selfcare_projects/src/features/abundance/screens/mentee/abundance_mentee_dashboard_screen.dart';
+import 'package:selfcare_projects/src/features/abundance/screens/mentee/goals_hub_screen.dart';
+import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/coach_dashboard_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
+import 'package:selfcare_projects/src/models/bottom_sheet.dart';
+import 'package:selfcare_projects/src/services/company_theme_service.dart';
+
+/// The custom app shell (header + 5-tab bottom nav) A12-Tracker wraps every
+/// screen in, built only for Abundance members. Only the Quests tab has a
+/// finished redesign so far (mentee: [GoalsHubScreen]; coach:
+/// [CoachQuestsRosterScreen]) — Home/Guild/Profile/More render InnerU's
+/// existing equivalent screens verbatim as placeholders until their own
+/// specs land (see the design spec's "App shell" section).
+///
+/// The "ABUNDANCE 12" / "THE GAME OF MY LIFE" header copy is static ported
+/// brand text, not derived from [companyTheme]'s company name — A12 is
+/// single-tenant, so its own wordmark is fixed, not tenant-derived.
+class AbundanceShellScreen extends StatefulWidget {
+  const AbundanceShellScreen({
+    super.key,
+    required this.isCoach,
+    required this.service,
+    required this.uid,
+    required this.companyTheme,
+  });
+
+  final bool isCoach;
+  final GoalsService service;
+  final String uid;
+  final CompanyThemeData companyTheme;
+
+  @override
+  State<AbundanceShellScreen> createState() => _AbundanceShellScreenState();
+}
+
+class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
+  // Tab order is Home(0)/Quests(1)/Guild(2)/Profile(3)/More(4), but this
+  // shell lands on Quests: it exists to house the Abundance Quests redesign,
+  // and the reference app opens straight into it.
+  int _index = 1;
+
+  // Each tab body is constructed at most once, the first time it's
+  // selected, then cached here and reused for the rest of the shell's
+  // lifetime (so switching tabs preserves scroll position / in-progress
+  // state instead of re-fetching). Slots that have never been visited stay
+  // a cheap SizedBox.shrink() placeholder rather than eagerly building the
+  // real screen — several of the embedded screens (e.g. CoachDashboardScreen)
+  // touch Firebase/network state directly in their State's field
+  // initializers, which is unsafe to do for tabs the user hasn't opened yet
+  // (and, in widget tests without a live Firebase app, throws outright).
+  final List<Widget> _builtTabs = List<Widget>.filled(5, const SizedBox.shrink());
+  final Set<int> _visited = {};
+
+  static const _tabLabels = ['Home', 'Quests', 'Guild', 'Profile', 'More'];
+  static const _tabIcons = [
+    Icons.home_outlined,
+    Icons.military_tech_outlined,
+    Icons.groups_outlined,
+    Icons.person_outline,
+    Icons.more_horiz,
+  ];
+
+  Widget get _questsTabBody => widget.isCoach
+      ? CoachQuestsRosterScreen(service: widget.service, coachUid: widget.uid)
+      : GoalsHubScreen(
+          service: widget.service,
+          uid: widget.uid,
+          // This shell is only ever constructed after the caller (Task 13's
+          // integration point) has already confirmed Abundance membership
+          // via AbundanceCompany.matches, so GoalsHubScreen's own internal
+          // access re-check would be redundant here — and, unlike the
+          // caller's check, it depends on Firestore/company data this shell
+          // has no reason to seed. Skip it.
+          accessResolver: (_) async => true,
+        );
+
+  Widget get _homeTabBody => widget.isCoach
+      ? const CoachDashboardScreen()
+      : AbundanceMenteeDashboardScreen(
+          initialCompanyTheme: widget.companyTheme,
+          service: widget.service,
+        );
+
+  Widget _tabBodyFor(int index) {
+    switch (index) {
+      case 0:
+        return _homeTabBody;
+      case 1:
+        return _questsTabBody;
+      case 2:
+        return const Leaderboard();
+      case 3:
+        return const ProfileSettings();
+      default:
+        return const SizedBox.shrink(); // "More" never actually renders.
+    }
+  }
+
+  void _ensureBuilt(int index) {
+    if (_visited.add(index)) {
+      _builtTabs[index] = _tabBodyFor(index);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureBuilt(_index);
+  }
+
+  void _onTabTapped(int newIndex) {
+    if (newIndex == 4) {
+      BottomSheetWidget.show(context);
+      return; // stay on the current tab; More is a trigger, not a screen.
+    }
+    setState(() {
+      _index = newIndex;
+      _ensureBuilt(newIndex);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AbundanceColors.background,
+      appBar: AppBar(
+        backgroundColor: AbundanceColors.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('ABUNDANCE 12',
+                style: TextStyle(
+                    color: AbundanceColors.foreground,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14)),
+            Text('THE GAME OF MY LIFE',
+                style: TextStyle(
+                    color: AbundanceColors.primaryGold, fontSize: 10)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.notifications_none, color: AbundanceColors.foreground),
+            onPressed: () {},
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: IndexedStack(index: _index, children: _builtTabs),
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: AbundanceColors.surfaceRaised,
+        selectedItemColor: AbundanceColors.primaryGold,
+        unselectedItemColor: AbundanceColors.muted,
+        currentIndex: _index,
+        onTap: _onTabTapped,
+        items: [
+          for (var i = 0; i < _tabLabels.length; i++)
+            BottomNavigationBarItem(
+              icon: Icon(_tabIcons[i]),
+              label: _tabLabels[i],
+            ),
+        ],
+      ),
+    );
+  }
+}
