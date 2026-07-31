@@ -14,22 +14,102 @@ import 'package:selfcare_projects/src/services/pending_step_sync_service.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/watch_sync_service.dart';
 
+enum AppleHealthStepSyncStatus {
+  success,
+  skipped,
+  permissionDenied,
+  unavailable,
+  accessMayBeDisabled,
+  queryFailed,
+}
+
+class AppleHealthStepSyncResult {
+  const AppleHealthStepSyncResult({
+    required this.status,
+    this.steps,
+  });
+
+  final AppleHealthStepSyncStatus status;
+  final int? steps;
+
+  bool get shouldRequestAccess =>
+      status == AppleHealthStepSyncStatus.permissionDenied ||
+      status == AppleHealthStepSyncStatus.unavailable ||
+      status == AppleHealthStepSyncStatus.accessMayBeDisabled;
+}
+
 class AppleHealthStepsService {
   AppleHealthStepsService._();
 
   static final AppleHealthStepsService instance = AppleHealthStepsService._();
 
   static const MethodChannel _channel = MethodChannel('inneru/apple_health');
+  static const Duration _errorLogThrottle = Duration(seconds: 30);
+
+  DateTime? _lastErrorLoggedAt;
+  String? _lastErrorCode;
 
   Future<int?> syncTodaySteps() async {
-    if (kIsWeb || !Platform.isIOS) return null;
+    final result = await checkTodaySteps();
+    return result.steps;
+  }
+
+  Future<bool> requestStepsAccess() async {
+    if (kIsWeb || !Platform.isIOS) return false;
+
+    try {
+      final result = await _channel.invokeMethod<bool>('requestStepsAccess');
+      return result == true;
+    } on PlatformException catch (error) {
+      _logSyncError(
+        'Apple Health access request failed: ${error.code}'
+        '${error.message == null ? '' : ' - ${error.message}'}',
+      );
+      return false;
+    } catch (error) {
+      _logSyncError('Apple Health access request failed: $error');
+      return false;
+    }
+  }
+
+  Future<bool> openHealthApp() async {
+    if (kIsWeb || !Platform.isIOS) return false;
+
+    try {
+      final result = await _channel.invokeMethod<bool>('openHealthApp');
+      return result == true;
+    } on PlatformException catch (error) {
+      _logSyncError(
+        'Apple Health app open failed: ${error.code}'
+        '${error.message == null ? '' : ' - ${error.message}'}',
+      );
+      return false;
+    } catch (error) {
+      _logSyncError('Apple Health app open failed: $error');
+      return false;
+    }
+  }
+
+  Future<AppleHealthStepSyncResult> checkTodaySteps() async {
+    if (kIsWeb || !Platform.isIOS) {
+      return const AppleHealthStepSyncResult(
+        status: AppleHealthStepSyncStatus.skipped,
+      );
+    }
 
     final session = AuthService.instance.currentSession;
     final userId = session?.id.toString();
-    if (userId == null || userId.isEmpty) return null;
+    if (userId == null || userId.isEmpty) {
+      return const AppleHealthStepSyncResult(
+        status: AppleHealthStepSyncStatus.skipped,
+      );
+    }
 
-    final healthSteps = await _readTodaySteps();
-    if (healthSteps == null) return null;
+    final healthRead = await _readTodaySteps();
+    final healthSteps = healthRead.steps;
+    if (healthSteps == null) {
+      return AppleHealthStepSyncResult(status: healthRead.status);
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
@@ -41,7 +121,10 @@ class AppleHealthStepsService {
     final lastSavedDate = prefs.getString(lastSavedDateKey);
     final localSteps =
         lastSavedDate == today ? prefs.getInt(savedStepsKey) ?? 0 : 0;
-    final resolvedSteps = localSteps > healthSteps ? localSteps : healthSteps;
+    final resolvedSteps = resolveAppleHealthStepCount(
+      healthSteps: healthSteps,
+      localSteps: localSteps,
+    );
 
     await prefs.setInt(savedStepsKey, resolvedSteps);
     await prefs.setString(lastSavedDateKey, today);
@@ -60,20 +143,61 @@ class AppleHealthStepsService {
       username: session?.name,
     ));
 
-    return resolvedSteps;
+    return AppleHealthStepSyncResult(
+      status: AppleHealthStepSyncStatus.success,
+      steps: resolvedSteps,
+    );
   }
 
-  Future<int?> _readTodaySteps() async {
+  Future<AppleHealthStepSyncResult> _readTodaySteps() async {
     try {
       final result = await _channel.invokeMethod<int>('readTodaySteps');
-      return result == null || result < 0 ? null : result;
+      if (result == null || result < 0) {
+        return const AppleHealthStepSyncResult(
+          status: AppleHealthStepSyncStatus.queryFailed,
+        );
+      }
+      return AppleHealthStepSyncResult(
+        status: AppleHealthStepSyncStatus.success,
+        steps: result,
+      );
     } on PlatformException catch (error) {
-      debugPrint('Apple Health step sync unavailable: ${error.code}');
-      return null;
+      _logSyncError(
+        'Apple Health step sync unavailable: ${error.code}'
+        '${error.message == null ? '' : ' - ${error.message}'}',
+      );
+      return AppleHealthStepSyncResult(
+        status: _statusForPlatformException(error),
+      );
     } catch (error) {
-      debugPrint('Apple Health step sync failed: $error');
-      return null;
+      _logSyncError('Apple Health step sync failed: $error');
+      return const AppleHealthStepSyncResult(
+        status: AppleHealthStepSyncStatus.queryFailed,
+      );
     }
+  }
+
+  void _logSyncError(String message) {
+    final now = DateTime.now();
+    if (_lastErrorCode == message &&
+        _lastErrorLoggedAt != null &&
+        now.difference(_lastErrorLoggedAt!) < _errorLogThrottle) {
+      return;
+    }
+
+    _lastErrorCode = message;
+    _lastErrorLoggedAt = now;
+    debugPrint(message);
+  }
+
+  AppleHealthStepSyncStatus _statusForPlatformException(
+    PlatformException error,
+  ) {
+    return switch (error.code) {
+      'HEALTH_PERMISSION_DENIED' => AppleHealthStepSyncStatus.permissionDenied,
+      'HEALTH_UNAVAILABLE' => AppleHealthStepSyncStatus.unavailable,
+      _ => AppleHealthStepSyncStatus.queryFailed,
+    };
   }
 
   Future<int> _loadDailyGoal(String userId, SharedPreferences prefs) async {
@@ -136,7 +260,16 @@ class AppleHealthStepsService {
         companyId: companyId,
         companyCode: companyCode,
         companyName: companyName,
+        preferLatestStepCount: true,
       );
     }
   }
+}
+
+@visibleForTesting
+int resolveAppleHealthStepCount({
+  required int healthSteps,
+  required int localSteps,
+}) {
+  return healthSteps;
 }

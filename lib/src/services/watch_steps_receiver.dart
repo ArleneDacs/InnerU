@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watch_connectivity/watch_connectivity.dart';
 
+import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
@@ -84,6 +85,13 @@ class WatchStepsReceiver {
     final alreadyRecorded = prefs.getInt(recordedKey) ?? 0;
     if (steps <= alreadyRecorded) return;
     await prefs.setInt(recordedKey, steps);
+
+    final healthSteps = await AppleHealthStepsService.instance.syncTodaySteps();
+    if (healthSteps != null) {
+      debugPrint(
+          'Apple Health kept as step source of truth ($healthSteps steps).');
+      return;
+    }
 
     // Both devices count the same walk: record the higher, never the sum.
     final phoneSteps =
@@ -270,8 +278,7 @@ class WatchStepsReceiver {
     await StepMapApiService.instance.saveRecordedWalk({
       'id': 'watch-${at.millisecondsSinceEpoch}',
       'username': username,
-      'started_at':
-          at.subtract(Duration(seconds: seconds)).toIso8601String(),
+      'started_at': at.subtract(Duration(seconds: seconds)).toIso8601String(),
       'ended_at': at.toIso8601String(),
       'distance_meters': distance,
       'elapsed_seconds': seconds,

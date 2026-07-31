@@ -5,7 +5,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:selfcare_projects/firebase_options.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goals_hub_screen.dart';
@@ -257,62 +256,91 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    if (_appleHealthPromptShowing) {
+      unawaited(_dismissAppleHealthPromptIfReady());
+      return;
+    }
     unawaited(_requireAppleHealthStepsAccess());
     unawaited(StepBackgroundService.instance.startTrackingIfAvailable());
+  }
+
+  Future<void> _dismissAppleHealthPromptIfReady() async {
+    if (kIsWeb || !Platform.isIOS) return;
+
+    final healthSync = await AppleHealthStepsService.instance.checkTodaySteps();
+    if (healthSync.shouldRequestAccess || (healthSync.steps ?? 0) <= 0) {
+      return;
+    }
+
+    final dialogContext = appNavigatorKey.currentContext;
+    if (dialogContext == null || !dialogContext.mounted) return;
+    Navigator.of(dialogContext, rootNavigator: true).pop('synced');
   }
 
   Future<void> _requireAppleHealthStepsAccess() async {
     if (kIsWeb || !Platform.isIOS || _appleHealthPromptShowing) return;
     if (AuthService.instance.currentSession == null) return;
 
-    final steps = await AppleHealthStepsService.instance.syncTodaySteps();
-    if (steps != null) return;
+    await AppleHealthStepsService.instance.requestStepsAccess();
+    final healthSync = await AppleHealthStepsService.instance.checkTodaySteps();
+    if (!healthSync.shouldRequestAccess) return;
+
+    final retryHealthSync =
+        await AppleHealthStepsService.instance.checkTodaySteps();
+    if (!retryHealthSync.shouldRequestAccess) return;
 
     final dialogContext = appNavigatorKey.currentContext;
     if (dialogContext == null || !dialogContext.mounted) return;
 
     _appleHealthPromptShowing = true;
-    var shouldPromptAgain = false;
     try {
       final action = await showDialog<String>(
         context: dialogContext,
         barrierDismissible: false,
         builder: (context) {
           return AlertDialog(
-            title: const Text('Apple Health access required'),
+            title: const Text('Apple Health Steps access'),
             content: const Text(
-              'InnerU uses Apple Health as the step source on iPhone. '
-              'Allow Steps access so your daily step count can sync.',
+              'Steps access is turned off for InnerU. Open Health > tap your profile picture > Apps > InnerU > Steps, set it to Full Access, then return to InnerU and sync again.',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop('settings'),
-                child: const Text('Open Settings'),
+                onPressed: () async {
+                  final retryHealthSync =
+                      await AppleHealthStepsService.instance.checkTodaySteps();
+                  if (!context.mounted) return;
+                  if (!retryHealthSync.shouldRequestAccess &&
+                      (retryHealthSync.steps ?? 0) > 0) {
+                    Navigator.of(context).pop('synced');
+                  }
+                },
+                child: const Text('Try Again'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop('retry'),
-                child: const Text('Try Again'),
+                onPressed: () => Navigator.of(context).pop('health'),
+                child: const Text('Open Health'),
               ),
             ],
           );
         },
       );
 
-      if (action == 'settings') {
-        await openAppSettings();
-      } else if (action == 'retry') {
-        final retrySteps =
-            await AppleHealthStepsService.instance.syncTodaySteps();
-        if (retrySteps == null) {
-          shouldPromptAgain = true;
+      if (action == 'health') {
+        final openedHealth =
+            await AppleHealthStepsService.instance.openHealthApp();
+        if (!dialogContext.mounted) return;
+        if (!openedHealth) {
+          ScaffoldMessenger.of(dialogContext).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Open Health > tap your profile picture > Apps > InnerU > Steps.',
+              ),
+            ),
+          );
         }
       }
     } finally {
       _appleHealthPromptShowing = false;
-    }
-
-    if (shouldPromptAgain) {
-      unawaited(_requireAppleHealthStepsAccess());
     }
   }
 

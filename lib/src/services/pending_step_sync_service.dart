@@ -28,6 +28,7 @@ class PendingStepSyncService {
     String? companyId,
     String? companyCode,
     String? companyName,
+    bool preferLatestStepCount = false,
   }) async {
     if (userId.isEmpty || date.isEmpty) return;
 
@@ -35,11 +36,16 @@ class PendingStepSyncService {
     final pending = await _loadQueue(prefs, userId);
     final existing = pending[date];
     final existingSteps = _asInt(existing?['step_count']);
+    final resolvedStepCount = preferLatestStepCount
+        ? stepCount
+        : stepCount > existingSteps
+            ? stepCount
+            : existingSteps;
 
     pending[date] = <String, dynamic>{
       ...?existing,
       'date': date,
-      'step_count': stepCount > existingSteps ? stepCount : existingSteps,
+      'step_count': resolvedStepCount,
       'step_goal': stepGoal,
       'steps': steps || existing?['steps'] == true,
       if (username != null && username.isNotEmpty) 'username': username,

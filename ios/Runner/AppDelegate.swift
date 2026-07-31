@@ -75,6 +75,10 @@ import UIKit
       switch call.method {
       case "readTodaySteps":
         self.readTodayHealthSteps(result: result)
+      case "requestStepsAccess":
+        self.requestStepHealthAccess(result: result)
+      case "openHealthApp":
+        self.openHealthApp(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -141,6 +145,51 @@ import UIKit
     }
   }
 
+  private func openHealthApp(result: @escaping FlutterResult) {
+    let healthURLs = [
+      "x-apple-health://",
+      "x-apple-health:",
+      "x-argonaut-app://",
+      "x-argonaut-app:"
+    ].compactMap { URL(string: $0) }
+
+    DispatchQueue.main.async {
+      func openNext(_ index: Int) {
+        guard index < healthURLs.count else {
+          result(false)
+          return
+        }
+
+        UIApplication.shared.open(healthURLs[index], options: [:]) { opened in
+          if opened {
+            result(true)
+          } else {
+            openNext(index + 1)
+          }
+        }
+      }
+
+      openNext(0)
+    }
+  }
+
+  private func requestStepHealthAccess(result: @escaping FlutterResult) {
+    guard HKHealthStore.isHealthDataAvailable(),
+          let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+      result(FlutterError(code: "HEALTH_UNAVAILABLE", message: "Apple Health is not available on this device.", details: nil))
+      return
+    }
+
+    healthStore.requestAuthorization(toShare: [], read: [stepType]) { granted, error in
+      if let error {
+        result(FlutterError(code: "HEALTH_AUTH_FAILED", message: error.localizedDescription, details: nil))
+        return
+      }
+
+      result(granted)
+    }
+  }
+
   private func readTodayHealthSteps(result: @escaping FlutterResult) {
     guard HKHealthStore.isHealthDataAvailable(),
           let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
@@ -173,7 +222,12 @@ import UIKit
         options: .cumulativeSum
       ) { _, statistics, error in
         if let error {
-          result(FlutterError(code: "HEALTH_QUERY_FAILED", message: error.localizedDescription, details: nil))
+          self?.readTodayHealthStepsBySamples(
+            stepType: stepType,
+            predicate: predicate,
+            originalError: error,
+            result: result
+          )
           return
         }
 
@@ -185,5 +239,36 @@ import UIKit
 
       self?.healthStore.execute(query)
     }
+  }
+
+  private func readTodayHealthStepsBySamples(
+    stepType: HKQuantityType,
+    predicate: NSPredicate,
+    originalError: Error,
+    result: @escaping FlutterResult
+  ) {
+    let query = HKSampleQuery(
+      sampleType: stepType,
+      predicate: predicate,
+      limit: HKObjectQueryNoLimit,
+      sortDescriptors: nil
+    ) { _, samples, sampleError in
+      if let sampleError {
+        result(FlutterError(
+          code: "HEALTH_QUERY_FAILED",
+          message: sampleError.localizedDescription,
+          details: ["statisticsError": originalError.localizedDescription]
+        ))
+        return
+      }
+
+      let steps = (samples as? [HKQuantitySample])?
+        .reduce(0.0) { total, sample in
+          total + sample.quantity.doubleValue(for: HKUnit.count())
+        } ?? 0
+      result(Int(steps.rounded()))
+    }
+
+    healthStore.execute(query)
   }
 }

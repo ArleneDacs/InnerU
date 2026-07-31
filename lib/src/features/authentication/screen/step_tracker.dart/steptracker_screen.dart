@@ -61,6 +61,8 @@ class _StepTrackerState extends State<StepTracker>
   static const int _maxInitialStepJump = 150;
   static const int _maxInstantStepJump = 80;
   static const double _maxStepsPerSecond = 4.5;
+  static const Duration _appleHealthRefreshInterval = Duration(minutes: 5);
+  static const Duration _iosLiveDisplayHold = Duration(seconds: 30);
 
   late AnimationController _lottieController;
   late StreamController<int> _stepStreamController;
@@ -73,6 +75,7 @@ class _StepTrackerState extends State<StepTracker>
   int _lastSyncedStepCount = -1;
   int _dailyGoal = 5000;
   int _lastRawStepCount = 0;
+  int _lastAppleHealthStepCount = 0;
   int _stepCountOffset = 0;
   DateTime? _lastStepEventAt;
   bool _isWalking = false;
@@ -80,9 +83,16 @@ class _StepTrackerState extends State<StepTracker>
   bool _hasStepPermission = false;
   bool _isDisposed = false;
   bool _stepGoalDialogVisible = false;
+  bool _isAppleHealthSyncing = false;
+  bool _iosLiveStepCounterStarted = false;
+  bool _didRequestAppleHealthAccessThisSession = false;
+  bool _appleHealthAccessDialogVisible = false;
   String? _stepPermissionMessage;
+  DateTime? _appleHealthLastSyncedAt;
+  int? _lastPedometerRawSteps;
   Timer? _checkTimer;
   Timer? _statePersistTimer;
+  Timer? _appleHealthRefreshTimer;
   final ImagePicker _memoryPicker = ImagePicker();
   final ActivityStreakService _activityStreakService = ActivityStreakService();
   final DailyTrackerApiService _dailyTrackerApiService =
@@ -110,10 +120,12 @@ class _StepTrackerState extends State<StepTracker>
       unawaited(_applyExternalStepUpdate(steps.toInt()));
     });
     _initializeApp();
+    _startAppleHealthRefreshTimer();
   }
 
   Future<void> _initializeApp() async {
     await _loadDailyGoal();
+    await _requestAppleHealthAccessForSession();
     await _loadSteps();
     if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
       if (!mounted || _isDisposed) return;
@@ -121,6 +133,8 @@ class _StepTrackerState extends State<StepTracker>
         _stepCounterInitialized = true;
         _hasStepPermission = _stepPermissionMessage == null;
       });
+      await _startIosLiveStepCounter();
+      await _showAppleHealthAccessDialogIfNeeded();
       return;
     }
 
@@ -188,20 +202,21 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
-  Future<void> _loadSteps() async {
+  Future<AppleHealthStepSyncStatus?> _loadSteps() async {
     final userId = _currentUserId;
     if (userId == null || userId.isEmpty) {
       _steps = 0;
       _initialSteps = -1;
       _lastRawStepCount = 0;
-      return;
+      return AppleHealthStepSyncStatus.skipped;
     }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
-    final appleHealthSteps = Platform.isIOS
-        ? await AppleHealthStepsService.instance.syncTodaySteps()
+    final appleHealthSync = Platform.isIOS
+        ? await AppleHealthStepsService.instance.checkTodaySteps()
         : null;
+    final appleHealthSteps = appleHealthSync?.steps;
     await prefs.reload();
 
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -209,7 +224,15 @@ class _StepTrackerState extends State<StepTracker>
     final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
     final stepOffsetKey = SessionCleanupService.stepOffsetKey(userId);
     final lastSavedDateKey = SessionCleanupService.lastSavedDateKey(userId);
+    final appleHealthLastSyncedAtKey =
+        SessionCleanupService.appleHealthLastSyncedAtKey(userId);
     final lastSavedDate = prefs.getString(lastSavedDateKey);
+    _appleHealthLastSyncedAt =
+        _parseDateTime(prefs.getString(appleHealthLastSyncedAtKey));
+    final didReadAppleHealth = appleHealthSteps != null;
+    final shouldRequestHealthAccess =
+        appleHealthSync?.shouldRequestAccess == true;
+    final holdIosLiveDisplay = _shouldHoldIosLiveDisplay();
 
     // If the last saved date is not today, reset steps
     if (lastSavedDate != today) {
@@ -221,20 +244,36 @@ class _StepTrackerState extends State<StepTracker>
         date: lastSavedDate,
       );
 
-      // Reset steps and update last saved date
-      await prefs.setInt(savedStepsKey, 0);
-      await prefs.setInt(initialStepsKey, -1); // Reset initial steps
-      await prefs.setString(lastSavedDateKey, today);
-
-      _steps = Platform.isIOS ? 0 : await _loadRemoteTodaySteps(userId, today);
-      await prefs.setInt(savedStepsKey, _steps);
-      await prefs.setInt(stepOffsetKey, 0);
-      _initialSteps = -1;
-      _stepCountOffset = 0;
+      if (Platform.isIOS && !didReadAppleHealth) {
+        _steps = prefs.getInt(savedStepsKey) ?? _steps;
+        if (shouldRequestHealthAccess) {
+          _lastAppleHealthStepCount = 0;
+        }
+        _initialSteps = -1;
+        _stepCountOffset = 0;
+      } else {
+        // Reset steps and update last saved date.
+        _steps = Platform.isIOS
+            ? appleHealthSteps ?? 0
+            : await _loadRemoteTodaySteps(userId, today);
+        await prefs.setInt(savedStepsKey, _steps);
+        await prefs.setInt(initialStepsKey, -1);
+        await prefs.setString(lastSavedDateKey, today);
+        await prefs.setInt(stepOffsetKey, 0);
+        _initialSteps = -1;
+        _stepCountOffset = 0;
+      }
     } else {
       final cachedSteps = prefs.getInt(savedStepsKey) ?? 0;
       if (Platform.isIOS) {
-        _steps = cachedSteps;
+        if (didReadAppleHealth) {
+          _lastAppleHealthStepCount = cachedSteps;
+        } else if (shouldRequestHealthAccess) {
+          _lastAppleHealthStepCount = 0;
+        }
+        if (!holdIosLiveDisplay) {
+          _steps = cachedSteps;
+        }
       } else {
         final remoteSteps = await _loadRemoteTodaySteps(userId, today);
         _steps = resolveDisplayedStepCount(
@@ -244,17 +283,36 @@ class _StepTrackerState extends State<StepTracker>
       }
       _stepCountOffset = prefs.getInt(stepOffsetKey) ?? 0;
     }
+    if (Platform.isIOS && didReadAppleHealth && !holdIosLiveDisplay) {
+      _lastAppleHealthStepCount = _steps;
+    }
 
     if (Platform.isIOS) {
       _stepCounterInitialized = true;
-      _hasStepPermission = appleHealthSteps != null;
-      _stepPermissionMessage = appleHealthSteps == null
-          ? 'Allow InnerU to read steps from Apple Health so your iOS step count can sync when you open the app.'
+      _hasStepPermission = !shouldRequestHealthAccess;
+      _stepPermissionMessage = shouldRequestHealthAccess
+          ? 'Turn on Steps access for InnerU in Apple Health so your iOS step count can sync.'
           : null;
+      if (appleHealthSteps != null) {
+        _appleHealthLastSyncedAt = DateTime.now();
+        await prefs.setString(
+          appleHealthLastSyncedAtKey,
+          _appleHealthLastSyncedAt!.toIso8601String(),
+        );
+      }
+      if (!holdIosLiveDisplay) {
+        await _rebaseIosLiveStepBaseline(
+          prefs: prefs,
+          initialStepsKey: initialStepsKey,
+          stepOffsetKey: stepOffsetKey,
+        );
+      }
     }
 
-    _lastRawStepCount = _steps;
-    _lastStepEventAt = null;
+    if (!holdIosLiveDisplay) {
+      _lastRawStepCount = _steps;
+      _lastStepEventAt = null;
+    }
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
     WatchSyncService.instance.syncSteps(_steps, goal: _dailyGoal, force: true);
 
@@ -266,6 +324,8 @@ class _StepTrackerState extends State<StepTracker>
         _stepStreamController.add(_steps);
       }
     }
+
+    return appleHealthSync?.status;
   }
 
   Future<void> _persistCurrentStepState() async {
@@ -275,9 +335,13 @@ class _StepTrackerState extends State<StepTracker>
     try {
       final prefs = await SharedPreferences.getInstance();
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final stepsToPersist =
+          Platform.isIOS && !widget.debugAutoGrantStepPermission
+              ? _lastAppleHealthStepCount
+              : _steps;
       await prefs.setInt(
         SessionCleanupService.savedStepsKey(userId),
-        _steps,
+        stepsToPersist,
       );
       await prefs.setInt(
         SessionCleanupService.initialStepsKey(userId),
@@ -292,6 +356,355 @@ class _StepTrackerState extends State<StepTracker>
           SessionCleanupService.lastSavedDateKey(userId), today);
     } catch (error) {
       debugPrint("Failed to persist local step state: $error");
+    }
+  }
+
+  Future<void> _rebaseIosLiveStepBaseline({
+    required SharedPreferences prefs,
+    required String initialStepsKey,
+    required String stepOffsetKey,
+  }) async {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+
+    _stepCountOffset = _steps;
+    _initialSteps = _lastPedometerRawSteps ?? -1;
+    _lastRawStepCount = _steps;
+    _lastStepEventAt = null;
+
+    await prefs.setInt(initialStepsKey, _initialSteps);
+    await prefs.setInt(stepOffsetKey, _stepCountOffset);
+  }
+
+  Future<void> _startIosLiveStepCounter() async {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+    if (_iosLiveStepCounterStarted || _stepCountStream != null) return;
+
+    var motionStatus = await Permission.sensors.status;
+    if (!motionStatus.isGranted) {
+      motionStatus = await Permission.sensors.request();
+      if (!motionStatus.isGranted) {
+        debugPrint('iOS live step counter needs Motion & Fitness permission.');
+        return;
+      }
+    }
+
+    _iosLiveStepCounterStarted = true;
+    _stepCountStream =
+        (widget.debugStepCountStream ?? Pedometer.stepCountStream).listen(
+      (event) {
+        unawaited(_handleIosLiveStepEvent(event));
+      },
+      onError: (error) {
+        debugPrint('iOS live step counter unavailable: $error');
+      },
+    );
+
+    _startStepWatchdogTimer();
+    _startStepStateAutosave();
+  }
+
+  Future<void> _handleIosLiveStepEvent(StepCount event) async {
+    if (!mounted || _isDisposed) return;
+
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final initialStepsKey = SessionCleanupService.initialStepsKey(userId);
+    final stepOffsetKey = SessionCleanupService.stepOffsetKey(userId);
+    final currentSteps = event.steps;
+    final eventTime = event.timeStamp;
+    _lastPedometerRawSteps = currentSteps;
+
+    if (_initialSteps == -1 || currentSteps < _initialSteps) {
+      _stepCountOffset = _steps;
+      _initialSteps = currentSteps;
+      _lastRawStepCount = _steps;
+      _lastStepEventAt = eventTime;
+      await prefs.setInt(initialStepsKey, _initialSteps);
+      await prefs.setInt(stepOffsetKey, _stepCountOffset);
+      return;
+    }
+
+    var newSteps = _stepCountOffset + currentSteps - _initialSteps;
+    if (newSteps < 0) newSteps = 0;
+
+    if (_isUnrealisticStepJump(newSteps, eventTime)) {
+      _stepCountOffset = _steps;
+      _initialSteps = currentSteps;
+      _lastRawStepCount = _steps;
+      _lastStepEventAt = eventTime;
+      await prefs.setInt(initialStepsKey, _initialSteps);
+      await prefs.setInt(stepOffsetKey, _stepCountOffset);
+      debugPrint(
+        'Ignored unrealistic iOS live step jump. Rebased step baseline for $userId.',
+      );
+      return;
+    }
+
+    _lastStepEventAt = eventTime;
+    if (newSteps != _lastRawStepCount) {
+      _lastRawStepCount = newSteps;
+      _updateIosLiveStepDisplay(newSteps);
+    }
+  }
+
+  void _updateIosLiveStepDisplay(int newSteps) {
+    if (!mounted || _isDisposed || newSteps <= _steps) return;
+
+    setState(() {
+      _isWalking = true;
+      _steps = newSteps;
+    });
+
+    if (!_stepStreamController.isClosed) {
+      _stepStreamController.add(_steps);
+    }
+
+    if (_lottieController.isAnimating == false && mounted) {
+      _lottieController.repeat();
+    }
+
+    if (_lastAppleHealthStepCount == 0) {
+      unawaited(_showAppleHealthAccessDialogIfNeeded());
+    }
+  }
+
+  DateTime? _parseDateTime(String? value) {
+    if (value == null || value.isEmpty) return null;
+    return DateTime.tryParse(value);
+  }
+
+  bool _shouldHoldIosLiveDisplay() {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return false;
+    if (!_hasRecentIosLiveMovement()) return false;
+    if (_steps <= _lastAppleHealthStepCount) return false;
+    return true;
+  }
+
+  bool _hasRecentIosLiveMovement() {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return false;
+    final lastStepEventAt = _lastStepEventAt;
+    if (lastStepEventAt == null) return false;
+    return DateTime.now().difference(lastStepEventAt) <= _iosLiveDisplayHold;
+  }
+
+  void _startAppleHealthRefreshTimer() {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+    _appleHealthRefreshTimer?.cancel();
+    _appleHealthRefreshTimer = Timer.periodic(
+      _appleHealthRefreshInterval,
+      (_) {
+        if (!mounted || _isDisposed) return;
+        unawaited(_syncAppleHealthSteps());
+      },
+    );
+  }
+
+  void _stopAppleHealthRefreshTimer() {
+    _appleHealthRefreshTimer?.cancel();
+    _appleHealthRefreshTimer = null;
+  }
+
+  Future<void> _requestAppleHealthAccessForSession() async {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+    if (_didRequestAppleHealthAccessThisSession) return;
+
+    _didRequestAppleHealthAccessThisSession = true;
+    await AppleHealthStepsService.instance.requestStepsAccess();
+  }
+
+  Future<void> _syncAppleHealthSteps({
+    bool showFeedback = false,
+  }) async {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+    if (_isAppleHealthSyncing) return;
+
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _isAppleHealthSyncing = true;
+      });
+    }
+
+    final previousSteps = _steps;
+    AppleHealthStepSyncStatus? syncStatus;
+    try {
+      syncStatus = await _loadSteps();
+    } finally {
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isAppleHealthSyncing = false;
+        });
+      }
+    }
+
+    if (!mounted || _isDisposed) return;
+
+    final effectiveSyncStatus =
+        _effectiveAppleHealthSyncStatus(syncStatus, previousSteps);
+
+    if (!showFeedback) {
+      if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+        await _handleStepGoalCompleted();
+      }
+      return;
+    }
+
+    if (_shouldRequestAppleHealthAccess(effectiveSyncStatus)) {
+      setState(() {
+        _hasStepPermission = false;
+        _stepPermissionMessage =
+            'Turn on Steps access for InnerU in Apple Health so your iOS step count can sync.';
+      });
+      await AppleHealthStepsService.instance.requestStepsAccess();
+      if (!mounted || _isDisposed) return;
+      final retryStatus = await _loadSteps();
+      if (!mounted || _isDisposed) return;
+      if (!_shouldRequestAppleHealthAccess(
+        _effectiveAppleHealthSyncStatus(retryStatus, previousSteps),
+      )) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Apple Health synced.')),
+        );
+        if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+          await _handleStepGoalCompleted();
+        }
+        return;
+      }
+      await _showAppleHealthAccessRequiredDialog();
+      if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+        await _handleStepGoalCompleted();
+      }
+      return;
+    }
+
+    final message = switch (effectiveSyncStatus) {
+      AppleHealthStepSyncStatus.success => 'Apple Health synced.',
+      _ => 'Apple Health sync requested.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+
+    if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
+      await _handleStepGoalCompleted();
+    }
+  }
+
+  AppleHealthStepSyncStatus? _effectiveAppleHealthSyncStatus(
+    AppleHealthStepSyncStatus? syncStatus,
+    int previousSteps,
+  ) {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) {
+      return syncStatus;
+    }
+    if (syncStatus != AppleHealthStepSyncStatus.success) {
+      return syncStatus;
+    }
+
+    final hadLiveStepsOnScreen = previousSteps > 0;
+    final hasHealthAccessWarning = _stepPermissionMessage != null;
+    final healthReturnedZero = _lastAppleHealthStepCount == 0;
+    if ((hadLiveStepsOnScreen || hasHealthAccessWarning) &&
+        healthReturnedZero) {
+      return AppleHealthStepSyncStatus.accessMayBeDisabled;
+    }
+
+    return syncStatus;
+  }
+
+  bool _shouldRequestAppleHealthAccess(AppleHealthStepSyncStatus? syncStatus) {
+    return syncStatus == AppleHealthStepSyncStatus.permissionDenied ||
+        syncStatus == AppleHealthStepSyncStatus.unavailable ||
+        syncStatus == AppleHealthStepSyncStatus.accessMayBeDisabled;
+  }
+
+  Future<void> _showAppleHealthAccessDialogIfNeeded() async {
+    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) return;
+    if (!mounted || _isDisposed) return;
+    if (_appleHealthAccessDialogVisible) return;
+
+    if (_stepPermissionMessage == null && _steps <= _lastAppleHealthStepCount) {
+      return;
+    }
+
+    setState(() {
+      _hasStepPermission = false;
+      _stepPermissionMessage =
+          'Turn on Steps access for InnerU in Apple Health so your iOS step count can sync.';
+    });
+
+    await _showAppleHealthAccessRequiredDialog();
+  }
+
+  void _dismissAppleHealthAccessDialogIfReady() {
+    if (!_appleHealthAccessDialogVisible) return;
+    if (_stepPermissionMessage != null || _lastAppleHealthStepCount <= 0) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pop('synced');
+  }
+
+  Future<void> _showAppleHealthAccessRequiredDialog() async {
+    if (!mounted || _isDisposed) return;
+
+    _appleHealthAccessDialogVisible = true;
+    try {
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Apple Health Steps access'),
+            content: const Text(
+              'Steps access is turned off for InnerU. Open Health > tap your profile picture > Apps > InnerU > Steps, set it to Full Access, then return to InnerU and sync again.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  final retryStatus = await _loadSteps();
+                  if (!dialogContext.mounted || !mounted || _isDisposed) {
+                    return;
+                  }
+                  if (!_shouldRequestAppleHealthAccess(
+                        _effectiveAppleHealthSyncStatus(retryStatus, _steps),
+                      ) &&
+                      _lastAppleHealthStepCount > 0) {
+                    Navigator.of(dialogContext).pop('synced');
+                  }
+                },
+                child: const Text('Try Again'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop('health'),
+                child: const Text('Open Health'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (!mounted || _isDisposed) return;
+      if (action == 'health') {
+        final openedHealth =
+            await AppleHealthStepsService.instance.openHealthApp();
+        if (!mounted || _isDisposed) return;
+        if (!openedHealth) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Open Health > tap your profile picture > Apps > InnerU > Steps.',
+              ),
+            ),
+          );
+        }
+      } else if (action == 'synced') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Apple Health synced.')),
+        );
+      }
+    } finally {
+      _appleHealthAccessDialogVisible = false;
     }
   }
 
@@ -506,7 +919,7 @@ class _StepTrackerState extends State<StepTracker>
     _checkTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (!mounted || _isDisposed) return;
 
-      if (_steps == _lastSteps) {
+      if (_steps == _lastSteps && _isWalking) {
         _setWalkingState(false);
       }
       _lastSteps = _steps;
@@ -530,10 +943,12 @@ class _StepTrackerState extends State<StepTracker>
     _statePersistTimer?.cancel();
     _statePersistTimer = null;
     _stepCounterInitialized = false;
+    _iosLiveStepCounterStarted = false;
     _steps = 0;
     _initialSteps = -1;
     _lastSteps = 0;
     _lastRawStepCount = 0;
+    _lastPedometerRawSteps = null;
     _stepCountOffset = 0;
     _lastStepEventAt = null;
     if (!_stepStreamController.isClosed) {
@@ -559,6 +974,7 @@ class _StepTrackerState extends State<StepTracker>
     _statePersistTimer?.cancel();
     _statePersistTimer = null;
     _stepCounterInitialized = false;
+    _iosLiveStepCounterStarted = false;
   }
 
   void _updateStepCount(int newSteps) async {
@@ -652,10 +1068,20 @@ class _StepTrackerState extends State<StepTracker>
   void _setWalkingState(bool isWalking) {
     if (!mounted || _isDisposed) return;
 
+    if (_isWalking != isWalking) {
+      setState(() {
+        _isWalking = isWalking;
+      });
+    }
+
     if (isWalking) {
       _lottieController.forward(); // Start animation smoothly
     } else {
       _lottieController.stop();
+      _lottieController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 500),
+      );
     }
   }
 
@@ -1067,11 +1493,16 @@ class _StepTrackerState extends State<StepTracker>
     if (!mounted) return;
 
     if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
+      await _requestAppleHealthAccessForSession();
       await _loadSteps();
       if (!mounted || _isDisposed) return;
       setState(() {
         _stepCounterInitialized = true;
       });
+      _dismissAppleHealthAccessDialogIfReady();
+      if (!mounted || _isDisposed) return;
+      await _startIosLiveStepCounter();
+      await _showAppleHealthAccessDialogIfNeeded();
       return;
     }
 
@@ -1122,7 +1553,8 @@ class _StepTrackerState extends State<StepTracker>
 
   Future<void> _enableStepCounter() async {
     if (Platform.isIOS && !widget.debugAutoGrantStepPermission) {
-      await _loadSteps();
+      await _syncAppleHealthSteps(showFeedback: true);
+      await _startIosLiveStepCounter();
       return;
     }
 
@@ -1138,18 +1570,22 @@ class _StepTrackerState extends State<StepTracker>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
+        _startAppleHealthRefreshTimer();
         unawaited(_resumeStepCounterIfNeeded());
         break;
       case AppLifecycleState.paused:
+        _stopAppleHealthRefreshTimer();
         unawaited(_persistCurrentStepState());
         unawaited(_pauseStepCounterForLifecycle());
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
+        _stopAppleHealthRefreshTimer();
         unawaited(_persistCurrentStepState());
         unawaited(_pauseStepCounterForLifecycle());
         break;
       case AppLifecycleState.detached:
+        _stopAppleHealthRefreshTimer();
         unawaited(_persistCurrentStepState());
         unawaited(_stopStepCounterForLifecycle());
         break;
@@ -1165,6 +1601,7 @@ class _StepTrackerState extends State<StepTracker>
     _stepCountStream?.cancel();
     _checkTimer?.cancel();
     _statePersistTimer?.cancel();
+    _stopAppleHealthRefreshTimer();
     _stepStreamController.close();
     _lottieController.dispose();
     super.dispose();
@@ -1293,6 +1730,43 @@ class _StepTrackerState extends State<StepTracker>
                                 },
                               ),
                               SizedBox(height: context.responsiveValue(10)),
+                              if (Platform.isIOS &&
+                                  !widget.debugAutoGrantStepPermission &&
+                                  !_hasRecentIosLiveMovement()) ...[
+                                TextButton.icon(
+                                  onPressed: _isAppleHealthSyncing
+                                      ? null
+                                      : () => unawaited(
+                                            _syncAppleHealthSteps(
+                                              showFeedback: true,
+                                            ),
+                                          ),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: companyTheme.iconColor,
+                                  ),
+                                  icon: _isAppleHealthSyncing
+                                      ? SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                              companyTheme.iconColor,
+                                            ),
+                                          ),
+                                        )
+                                      : const Icon(Icons.refresh_rounded),
+                                  label: Text(
+                                    'Sync Apple Health Steps',
+                                    style: TextStyle(
+                                      fontSize: context.responsiveFont(14),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: context.responsiveValue(10)),
+                              ],
                               if (!_stepCounterInitialized ||
                                   _stepPermissionMessage != null)
                                 Container(
@@ -1326,7 +1800,9 @@ class _StepTrackerState extends State<StepTracker>
                                             height:
                                                 context.responsiveValue(10)),
                                         TextButton.icon(
-                                          onPressed: _enableStepCounter,
+                                          onPressed: _isAppleHealthSyncing
+                                              ? null
+                                              : _enableStepCounter,
                                           style: TextButton.styleFrom(
                                             foregroundColor:
                                                 companyTheme.iconColor,
@@ -1335,7 +1811,7 @@ class _StepTrackerState extends State<StepTracker>
                                               const Icon(Icons.directions_walk),
                                           label: Text(
                                             Platform.isIOS
-                                                ? 'Sync Apple Health'
+                                                ? 'Sync Apple Health Steps'
                                                 : 'Enable Step Tracking',
                                             style: TextStyle(
                                                 fontWeight: FontWeight.w700),
