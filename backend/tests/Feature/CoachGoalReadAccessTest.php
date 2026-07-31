@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\CoachMentee;
 use App\Models\Company;
 use App\Models\Goal;
+use App\Models\GoalTask;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -128,5 +129,49 @@ class CoachGoalReadAccessTest extends TestCase
         $this->deleteJson("/api/goals/{$this->goal->id}")->assertUnauthorized();
 
         $this->assertSame('Run 100 km', $this->goal->fresh()->title);
+    }
+
+    /**
+     * The two per-task write endpoints were the only members of the nine-strong
+     * write set with no negative coverage. They already share `ownsGoal` with
+     * the other seven; these pin that, so a later refactor of the task routes
+     * cannot quietly widen them to coaches the way the read routes were widened.
+     */
+    public function test_a_related_coach_cannot_change_a_task_status(): void
+    {
+        $task = $this->createTask();
+        Sanctum::actingAs($this->coach);
+
+        $this->patchJson(
+            "/api/goals/{$this->goal->id}/tasks/{$task->id}",
+            ['status' => 'DONE'],
+        )->assertUnauthorized();
+
+        $this->assertSame('NOT_STARTED', $task->fresh()->status);
+        $this->assertFalse((bool) $task->fresh()->is_complete);
+    }
+
+    public function test_a_related_coach_cannot_delete_a_task(): void
+    {
+        $task = $this->createTask();
+        Sanctum::actingAs($this->coach);
+
+        $this->deleteJson("/api/goals/{$this->goal->id}/tasks/{$task->id}")
+            ->assertUnauthorized();
+
+        $this->assertNotNull(GoalTask::query()->find($task->id));
+    }
+
+    private function createTask(): GoalTask
+    {
+        return GoalTask::create([
+            'id' => (string) Str::uuid(),
+            'goal_id' => $this->goal->id,
+            'title' => 'Walk the first 10 km',
+            'status' => 'NOT_STARTED',
+            'is_complete' => false,
+            'sort_order' => 0,
+            'weight' => 1,
+        ]);
     }
 }
