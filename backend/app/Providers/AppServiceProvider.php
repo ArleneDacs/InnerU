@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Contracts\GooglePlayVersionFetcher;
 use App\Models\Company;
 use App\Observers\CompanyObserver;
 use App\Services\FirebaseScryptVerifier;
+use App\Services\GoogleApiPlayVersionFetcher;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Schema;
@@ -21,6 +23,10 @@ class AppServiceProvider extends ServiceProvider
                 config('services.firebase_scrypt.node_verifier_path'),
                 config('services.firebase_scrypt.hash_config_path'),
             );
+        });
+
+        $this->app->bind(GooglePlayVersionFetcher::class, function () {
+            return new GoogleApiPlayVersionFetcher(config('services.google_play.credentials_path'));
         });
     }
 

@@ -55,6 +55,11 @@ return [
         'service_id' => env('APPLE_SERVICE_ID', 'com.valenin.inneru'),
     ],
 
+    'google_play' => [
+        'package_name' => env('GOOGLE_PLAY_PACKAGE_NAME', 'com.valenin.inneru'),
+        'credentials_path' => env('GOOGLE_PLAY_CREDENTIALS_PATH'),
+    ],
+
     'onesignal' => [
         'app_id' => env('ONESIGNAL_APP_ID'),
         'rest_api_key' => env('ONESIGNAL_REST_API_KEY'),
