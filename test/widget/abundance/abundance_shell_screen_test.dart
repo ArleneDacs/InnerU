@@ -37,6 +37,12 @@ void main() {
           companyName: 'Abundance',
           isCompanyTheme: true,
         ),
+        // Test-only override: this test's GoalsService is backed by a
+        // FakeFirebaseFirestore with no seeded `users/u1` doc, so
+        // GoalsHubScreen's real access check would otherwise (correctly, for
+        // that setup) deny access. See questsAccessResolverOverride's doc
+        // comment on AbundanceShellScreen.
+        questsAccessResolverOverride: (_) async => true,
       ),
     ));
     await tester.pumpAndSettle();
@@ -105,6 +111,14 @@ void main() {
         // initialIndex deliberately omitted: this is the regression guard
         // that the shell's real default landing tab is Home (0), matching
         // every A12 reference screenshot — not Quests.
+        //
+        // questsAccessResolverOverride is supplied here purely so the
+        // tab-switch assertion below (tapping into Quests) can observe real
+        // GoalsHubScreen content — this test's GoalsService has no seeded
+        // `users/u1` doc, so the real access check would otherwise deny
+        // access. See questsAccessResolverOverride's doc comment for why
+        // this is safe as a test-only bypass.
+        questsAccessResolverOverride: (_) async => true,
       ),
     ));
     await tester.pumpAndSettle();
@@ -128,6 +142,42 @@ void main() {
   });
 
   testWidgets(
+      'Quests tab uses GoalsHubScreen\'s own real access check when no override is supplied',
+      (tester) async {
+    // Bare GoalsService(), no legacy Firestore — matches how production
+    // constructs it. No questsAccessResolverOverride is supplied: this is
+    // the regression guard that production code no longer force-bypasses
+    // GoalsHubScreen's access gate.
+    final service = GoalsService();
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+        initialIndex: 1, // land directly on Quests
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // With no legacy Firestore, GoalsService.fetchActiveCompanyIdentity
+    // returns null immediately, so GoalsHubScreen's real access chain falls
+    // through to CompanyMembershipService.loadForUser('u1'). There's no
+    // authenticated AuthService session in this test harness, so
+    // UserService.getUserData() short-circuits to `{}` and that resolves to
+    // an empty membership — correctly denying access. This proves the shell
+    // is no longer forcing `accessResolver: (_) async => true` in
+    // production: the real gate is reachable and can actually deny.
+    expect(find.text('A12 only'), findsOneWidget);
+    expect(find.textContaining('Life Power'), findsNothing);
+  });
+
+  testWidgets(
       'tapping More opens the bottom sheet without changing the selected tab',
       (tester) async {
     final service = GoalsService(FakeFirebaseFirestore());
@@ -142,6 +192,9 @@ void main() {
           companyName: 'Abundance',
           isCompanyTheme: true,
         ),
+        // Test-only override: see the header-chrome test above for why this
+        // test's GoalsService needs it to reach real Quests content.
+        questsAccessResolverOverride: (_) async => true,
       ),
     ));
     await tester.pumpAndSettle();

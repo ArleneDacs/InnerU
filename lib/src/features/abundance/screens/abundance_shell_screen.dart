@@ -29,6 +29,7 @@ class AbundanceShellScreen extends StatefulWidget {
     required this.uid,
     required this.companyTheme,
     this.initialIndex = 0,
+    this.questsAccessResolverOverride,
   });
 
   final bool isCoach;
@@ -45,6 +46,18 @@ class AbundanceShellScreen extends StatefulWidget {
   /// touches `FirebaseFirestore.instance` synchronously and crashes without
   /// a live Firebase app.
   final int initialIndex;
+
+  /// Forwarded verbatim to `GoalsHubScreen.accessResolver` on the mentee
+  /// Quests tab. Left `null` in production so `GoalsHubScreen` falls through
+  /// to its own real access resolution
+  /// (`GoalsService.fetchActiveCompanyIdentity` ->
+  /// `CompanyMembershipService.loadForUser`) — exactly the same
+  /// production-real-default-with-test-override shape as [initialIndex].
+  /// This shell's own widget test supplies a value here because it
+  /// constructs `GoalsService(FakeFirebaseFirestore())` with no seeded
+  /// `users/{uid}` doc, which would otherwise make the real check correctly
+  /// (but inconveniently, for that test) deny access.
+  final Future<bool> Function(String uid)? questsAccessResolverOverride;
 
   @override
   State<AbundanceShellScreen> createState() => _AbundanceShellScreenState();
@@ -81,13 +94,15 @@ class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
       : GoalsHubScreen(
           service: widget.service,
           uid: widget.uid,
-          // This shell is only ever constructed after the caller (Task 13's
-          // integration point) has already confirmed Abundance membership
-          // via AbundanceCompany.matches, so GoalsHubScreen's own internal
-          // access re-check would be redundant here — and, unlike the
-          // caller's check, it depends on Firestore/company data this shell
-          // has no reason to seed. Skip it.
-          accessResolver: (_) async => true,
+          // No hardcoded bypass here: in production this is null, so
+          // GoalsHubScreen runs its own real access check
+          // (GoalsService.fetchActiveCompanyIdentity ->
+          // CompanyMembershipService.loadForUser), the same check every
+          // other GoalsHubScreen caller relies on. Only this shell's own
+          // widget test supplies a non-null override, via
+          // widget.questsAccessResolverOverride, to bypass the check in its
+          // specific test setup (see that field's doc comment).
+          accessResolver: widget.questsAccessResolverOverride,
         );
 
   Widget get _homeTabBody => widget.isCoach
