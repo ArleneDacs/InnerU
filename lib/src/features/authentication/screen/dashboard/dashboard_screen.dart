@@ -2096,87 +2096,36 @@ class _DashboardScreenState extends State<DashboardScreen>
     final theme = _companyTheme;
     final color = _streakTierColor(medal.tier);
     final unlocked = medal.unlockedCount > 0;
+    final progress = medal.totalCount == 0
+        ? 0.0
+        : (medal.unlockedCount / medal.totalCount).clamp(0.0, 1.0).toDouble();
+    final medalColor = unlocked
+        ? color
+        : Color.alphaBlend(
+            theme.mutedInkColor.withValues(alpha: theme.isDark ? 0.36 : 0.54),
+            theme.surfaceColor,
+          );
 
     return InkWell(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(20),
       onTap: () => _openStreakRewards(medal.type),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 2),
         child: Column(
           children: [
             AnimatedScale(
-              scale: unlocked ? 1.08 : 0.92,
+              scale: unlocked ? 1 : 0.94,
               duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutBack,
-              child: SizedBox(
-                width: 76,
-                height: 94,
-                child: Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 18,
-                      child: Transform.rotate(
-                        angle: -0.16,
-                        child: _DashboardMedalRibbon(
-                          color: unlocked ? color : theme.mutedInkColor,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: 18,
-                      child: Transform.rotate(
-                        angle: 0.16,
-                        child: _DashboardMedalRibbon(
-                          color: unlocked ? color : theme.mutedInkColor,
-                        ),
-                      ),
-                    ),
-                    ClipPath(
-                      clipper: const _DashboardMedalBodyClipper(),
-                      child: Container(
-                        width: 72,
-                        height: 72,
-                        padding: EdgeInsets.all(unlocked ? 3 : 2),
-                        decoration: BoxDecoration(
-                          color: unlocked
-                              ? color.withValues(alpha: 0.86)
-                              : theme.mutedInkColor.withValues(alpha: 0.24),
-                        ),
-                        child: ClipPath(
-                          clipper: const _DashboardMedalBodyClipper(),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: unlocked
-                                  ? color.withValues(
-                                      alpha: theme.isDark ? 0.2 : 0.18,
-                                    )
-                                  : theme.mutedInkColor.withValues(alpha: 0.08),
-                              boxShadow: [
-                                if (unlocked)
-                                  BoxShadow(
-                                    color: color.withValues(alpha: 0.2),
-                                    blurRadius: 18,
-                                    offset: const Offset(0, 8),
-                                  ),
-                              ],
-                            ),
-                            child: Icon(
-                              _streakIcon(medal.type, unlocked: unlocked),
-                              color: unlocked ? color : theme.mutedInkColor,
-                              size: unlocked ? 32 : 26,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              curve: Curves.easeOutCubic,
+              child: _DashboardStreakMedalMark(
+                color: medalColor,
+                icon: _streakIcon(medal.type, unlocked: unlocked),
+                progress: progress,
+                unlocked: unlocked,
+                isDark: theme.isDark,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
               medal.type.label,
               maxLines: 1,
@@ -3303,25 +3252,43 @@ class _DashboardTileTransition {
 }
 
 class _DashboardMedalRibbon extends StatelessWidget {
-  const _DashboardMedalRibbon({required this.color});
+  const _DashboardMedalRibbon({
+    required this.color,
+    required this.unlocked,
+  });
 
   final Color color;
+  final bool unlocked;
 
   @override
   Widget build(BuildContext context) {
     return ClipPath(
       clipper: const _DashboardMedalRibbonClipper(),
       child: Container(
-        width: 28,
-        height: 40,
+        width: 48,
+        height: 54,
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [
-              color.withValues(alpha: 0.92),
-              Color.alphaBlend(Colors.black.withValues(alpha: 0.35), color),
+              Color.alphaBlend(
+                Colors.white.withValues(alpha: unlocked ? 0.38 : 0.16),
+                color,
+              ),
+              color,
+              Color.alphaBlend(
+                Colors.black.withValues(alpha: unlocked ? 0.28 : 0.14),
+                color,
+              ),
             ],
+          ),
+        ),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: Container(
+            width: 13,
+            color: Colors.white.withValues(alpha: unlocked ? 0.13 : 0.07),
           ),
         ),
       ),
@@ -3329,27 +3296,143 @@ class _DashboardMedalRibbon extends StatelessWidget {
   }
 }
 
-class _DashboardMedalBodyClipper extends CustomClipper<Path> {
-  const _DashboardMedalBodyClipper();
+class _DashboardStreakMedalMark extends StatelessWidget {
+  const _DashboardStreakMedalMark({
+    required this.color,
+    required this.icon,
+    required this.progress,
+    required this.unlocked,
+    required this.isDark,
+  });
+
+  final Color color;
+  final IconData icon;
+  final double progress;
+  final bool unlocked;
+  final bool isDark;
 
   @override
-  Path getClip(Size size) {
-    return Path()
-      ..moveTo(size.width * 0.5, 0)
-      ..lineTo(size.width * 0.73, size.height * 0.08)
-      ..lineTo(size.width * 0.92, size.height * 0.28)
-      ..lineTo(size.width, size.height * 0.56)
-      ..lineTo(size.width * 0.84, size.height * 0.86)
-      ..lineTo(size.width * 0.5, size.height)
-      ..lineTo(size.width * 0.16, size.height * 0.86)
-      ..lineTo(0, size.height * 0.56)
-      ..lineTo(size.width * 0.08, size.height * 0.28)
-      ..lineTo(size.width * 0.27, size.height * 0.08)
-      ..close();
+  Widget build(BuildContext context) {
+    final highlight = Color.alphaBlend(
+      Colors.white.withValues(alpha: unlocked ? 0.38 : 0.15),
+      color,
+    );
+    final shade = Color.alphaBlend(
+      Colors.black.withValues(alpha: unlocked ? 0.3 : 0.12),
+      color,
+    );
+    final ringTrack = (isDark ? Colors.white : Colors.black).withValues(
+      alpha: isDark ? 0.12 : 0.14,
+    );
+    final iconColor = (unlocked || isDark ? Colors.white : Colors.black)
+        .withValues(alpha: unlocked ? 0.96 : 0.65);
+
+    return SizedBox(
+      width: 84,
+      height: 100,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          Positioned(
+            top: 0,
+            child: _DashboardMedalRibbon(
+              color: color,
+              unlocked: unlocked,
+            ),
+          ),
+          SizedBox(
+            width: 80,
+            height: 80,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 2.5,
+                  strokeCap: StrokeCap.round,
+                  color: unlocked ? color : color.withValues(alpha: 0.65),
+                  backgroundColor: ringTrack,
+                ),
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      center: const Alignment(-0.38, -0.48),
+                      radius: 0.95,
+                      colors: [highlight, color, shade],
+                    ),
+                    border: Border.all(
+                      color: Colors.white.withValues(
+                        alpha: unlocked ? 0.42 : 0.2,
+                      ),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (unlocked ? color : Colors.black).withValues(
+                          alpha: unlocked ? 0.3 : 0.12,
+                        ),
+                        blurRadius: unlocked ? 18 : 10,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white.withValues(
+                              alpha: unlocked ? 0.18 : 0.09,
+                            ),
+                            Colors.black.withValues(
+                              alpha: unlocked ? 0.1 : 0.04,
+                            ),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withValues(
+                            alpha: unlocked ? 0.2 : 0.1,
+                          ),
+                        ),
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: unlocked ? 38 : 34,
+                          height: unlocked ? 38 : 34,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(
+                              alpha: unlocked ? 0.17 : 0.1,
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(
+                                alpha: unlocked ? 0.24 : 0.12,
+                              ),
+                            ),
+                          ),
+                          child: Icon(
+                            icon,
+                            color: iconColor,
+                            size: unlocked ? 22 : 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
 class _DashboardMedalRibbonClipper extends CustomClipper<Path> {
@@ -3358,10 +3441,11 @@ class _DashboardMedalRibbonClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
     return Path()
+      ..moveTo(0, 0)
       ..lineTo(size.width, 0)
-      ..lineTo(size.width, size.height)
-      ..lineTo(size.width * 0.5, size.height * 0.76)
-      ..lineTo(0, size.height)
+      ..lineTo(size.width, size.height * 0.74)
+      ..lineTo(size.width * 0.5, size.height)
+      ..lineTo(0, size.height * 0.74)
       ..close();
   }
 
