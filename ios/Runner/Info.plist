@@ -62,6 +62,8 @@
 	<string>Allow InnerU to scan barcodes and capture meal photos.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Allow InnerU to read your Apple Health step count and sync it to your daily tracker.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Allow InnerU to use Apple Health permissions for daily step tracking and sync your step count to your InnerU tracker.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Allow InnerU to show your walking route and track step sessions on the map.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
