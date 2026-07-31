@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
@@ -39,17 +40,8 @@ bool isIamPlusCompany(String name, String code) {
       normalizedCode.startsWith('IAM');
 }
 
-bool isAbundance12Company(String name, String code) {
-  final normalizedName =
-      name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  final normalizedCode =
-      code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-  return normalizedName.contains('abundance12') ||
-      (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
-      normalizedCode.contains('ABUNDANCE12') ||
-      normalizedCode.contains('ABUND12') ||
-      normalizedCode == 'A12' ||
-      normalizedCode.startsWith('AB12');
+bool isAbundanceCompany(String name, String code) {
+  return AbundanceCompany.matches(code, name);
 }
 
 class ManageCompaniesScreen extends StatefulWidget {
@@ -1478,7 +1470,7 @@ class _CompanyManagementCard extends StatelessWidget {
       company.name,
       company.code,
     );
-    final isAbundance12 = isAbundance12Company(
+    final isAbundance12 = isAbundanceCompany(
       company.name,
       company.code,
     );

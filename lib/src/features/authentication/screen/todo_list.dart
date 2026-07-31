@@ -657,7 +657,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
       final membershipData =
           await CompanyMembershipService.loadForUser(session.id.toString());
       final useGoalsHub =
-          _isAbundance12Company(membershipData.activeMembership);
+          _isAbundanceCompany(membershipData.activeMembership);
 
       if (!mounted) return;
       setState(() {
@@ -680,7 +680,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
     }
   }
 
-  bool _isAbundance12Company(CompanyMembership? membership) {
+  bool _isAbundanceCompany(CompanyMembership? membership) {
     return AbundanceCompany.matches(membership?.code, membership?.name);
   }
 

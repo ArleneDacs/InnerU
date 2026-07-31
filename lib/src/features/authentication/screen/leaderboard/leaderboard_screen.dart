@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/services/api_client.dart';
@@ -183,7 +184,7 @@ class _LeaderboardState extends State<Leaderboard>
   bool _isLoading = true;
   bool _isA12Loading = true;
   bool _isRefreshing = false;
-  bool _isAbundance12Company = false;
+  bool _isAbundanceCompany = false;
   bool _isCoachUser = false;
   String? _loadError;
   String? _loadErrorDetails;
@@ -191,21 +192,11 @@ class _LeaderboardState extends State<Leaderboard>
   DateTime? _leaderboardPeriodEnd;
   ModalRoute<dynamic>? _route;
 
-  bool _isAbundance12CompanyByIdentity({
+  bool _isAbundanceCompanyByIdentity({
     String name = '',
     String code = '',
   }) {
-    final normalizedName =
-        name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode =
-        code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') &&
-            normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(code, name);
   }
 
   @override
@@ -275,7 +266,7 @@ class _LeaderboardState extends State<Leaderboard>
         _groupLeaderboards = const <GroupLeaderboardSummary>[];
         _isLoading = false;
         _isA12Loading = false;
-        _isAbundance12Company = false;
+        _isAbundanceCompany = false;
         _isCoachUser = false;
         _loadError = 'Your session has expired. Please sign in again.';
         _loadErrorDetails = 'No active app session was available.';
@@ -353,7 +344,7 @@ class _LeaderboardState extends State<Leaderboard>
 
       if (!mounted) return;
       setState(() {
-        _isAbundance12Company = _isAbundance12CompanyByIdentity(
+        _isAbundanceCompany = _isAbundanceCompanyByIdentity(
           name: snapshot.companyName,
           code: snapshot.companyCode,
         );
@@ -523,7 +514,7 @@ class _LeaderboardState extends State<Leaderboard>
                                           .instance.currentSession?.id
                                           .toString() ??
                                       '',
-                                  showRankLabels: _isAbundance12Company,
+                                  showRankLabels: _isAbundanceCompany,
                                   title: 'Company leaderboard',
                                   onEntryTap: (entry) => _showScoreBreakdown(
                                     context,
@@ -746,7 +737,7 @@ class _LeaderboardState extends State<Leaderboard>
     CompanyThemeData theme,
   ) {
     final accentColor =
-        _isAbundance12Company ? _rankColor(entry.rank) : theme.primaryColor;
+        _isAbundanceCompany ? _rankColor(entry.rank) : theme.primaryColor;
 
     showModalBottomSheet(
       context: context,

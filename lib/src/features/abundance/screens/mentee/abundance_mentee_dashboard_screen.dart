@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/day_keys.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
@@ -20,6 +21,21 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
+
+/// Whether this screen grants an Abundance member access, given the company
+/// identity resolved for the signed-in user.
+///
+/// Top-level (rather than a private method on the State) purely so the
+/// gating regression can be tested directly: this screen is the Abundance
+/// shell's default Home tab, and resolving a real dashboard load in a widget
+/// test would need an authenticated session plus five network singletons this
+/// codebase has no mocking seam for.
+bool abundanceMenteeDashboardAccessAllowed({
+  String name = '',
+  String code = '',
+}) {
+  return AbundanceCompany.matches(code, name);
+}
 
 class AbundanceMenteeDashboardScreen extends StatefulWidget {
   const AbundanceMenteeDashboardScreen({
@@ -74,7 +90,7 @@ class _AbundanceMenteeDashboardScreenState
     final companyCode = (activeMembership?.code.isNotEmpty == true)
         ? activeMembership!.code
         : theme.companyCode;
-    final isAllowed = _isAbundance12Company(
+    final isAllowed = abundanceMenteeDashboardAccessAllowed(
       name: companyName,
       code: companyCode,
     );
@@ -244,20 +260,6 @@ class _AbundanceMenteeDashboardScreenState
     if (value is String) return DateTime.tryParse(value);
     if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
     return null;
-  }
-
-  bool _isAbundance12Company({
-    String name = '',
-    String code = '',
-  }) {
-    final normalizedName = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode = code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
   }
 
   Future<void> _openGoalForm() async {

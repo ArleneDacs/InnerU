@@ -607,7 +607,7 @@ class CompanyThemeService {
     if (_matchesIamPlus(companyName, companyCode)) {
       return 'assets/images/iamplus.png';
     }
-    if (_matchesAbundance12(companyName, companyCode)) {
+    if (_matchesAbundanceCompany(companyName, companyCode)) {
       return 'assets/images/abundance12_loading.jpg';
     }
     return null;
@@ -805,7 +805,7 @@ class CompanyThemeService {
         normalizedCode.startsWith('IAM');
   }
 
-  static bool _matchesAbundance12(String companyName, String companyCode) {
+  static bool _matchesAbundanceCompany(String companyName, String companyCode) {
     return AbundanceCompany.matches(companyCode, companyName);
   }
 }

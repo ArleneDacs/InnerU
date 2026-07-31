@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/abundance_dashboard_section.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
@@ -1528,7 +1529,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       child: _buildQuickOverviewSection(),
                     ),
                     const SizedBox(height: 28),
-                    if (_isAbundance12Company(
+                    if (_isAbundanceCompany(
                       name: companyTheme.companyName,
                       code: companyTheme.companyCode,
                     )) ...[
@@ -2023,21 +2024,11 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  bool _isAbundance12Company({
+  bool _isAbundanceCompany({
     String name = '',
     String code = '',
   }) {
-    final normalizedName =
-        name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode =
-        code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') &&
-            normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(code, name);
   }
 
   Widget _buildStreakMedalsSection() {

@@ -810,7 +810,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
     if (_matchesIamPlus(companyName, companyCode)) {
       return _CompanyLoadingBrand.iamPlus;
     }
-    if (_matchesAbundance12(companyName, companyCode)) {
+    if (_matchesAbundanceCompany(companyName, companyCode)) {
       return _CompanyLoadingBrand.abundance12;
     }
     return null;
@@ -895,7 +895,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
         normalizedCode.startsWith('IAM');
   }
 
-  bool _matchesAbundance12(String companyName, String companyCode) {
+  bool _matchesAbundanceCompany(String companyName, String companyCode) {
     return AbundanceCompany.matches(companyCode, companyName);
   }
 }

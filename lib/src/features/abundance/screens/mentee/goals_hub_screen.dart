@@ -59,10 +59,10 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
       return AbundanceCompany.matches(identity.code, identity.name);
     }
     final membership = await CompanyMembershipService.loadForUser(_uid);
-    return _isAbundance12Company(membership.activeMembership);
+    return _isAbundanceCompany(membership.activeMembership);
   }
 
-  bool _isAbundance12Company(CompanyMembership? membership) {
+  bool _isAbundanceCompany(CompanyMembership? membership) {
     return AbundanceCompany.matches(membership?.code, membership?.name);
   }
 

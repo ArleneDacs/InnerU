@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/scoring.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
@@ -63,7 +64,7 @@ class _AbundanceDashboardSectionState extends State<AbundanceDashboardSection> {
     final companyCode = _stringValue(userData['companyCode']).isNotEmpty
         ? _stringValue(userData['companyCode']).toUpperCase()
         : widget.theme.companyCode;
-    final allowed = _isAbundance12Company(name: companyName, code: companyCode);
+    final allowed = _isAbundanceCompany(name: companyName, code: companyCode);
 
     if (!allowed) {
       return _AbundanceDashboardData.denied(theme: widget.theme);
@@ -427,20 +428,11 @@ class _AbundanceDashboardSectionState extends State<AbundanceDashboardSection> {
     return fallback;
   }
 
-  bool _isAbundance12Company({
+  bool _isAbundanceCompany({
     String name = '',
     String code = '',
   }) {
-    final normalizedName =
-        name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode =
-        code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(code, name);
   }
 
   List<DateTime> _lastNDays(int count) {

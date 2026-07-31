@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/adminscreen/admin_dashboard.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/daily_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
@@ -47,7 +48,7 @@ class _AbundanceHubScreenState extends State<AbundanceHubScreen> {
     final uid = session.id.toString();
     final membershipData = await CompanyMembershipService.loadForUser(uid);
     final activeMembership = membershipData.activeMembership;
-    final allowed = _isAbundance12Membership(activeMembership);
+    final allowed = _isAbundanceMembership(activeMembership);
     final isAdmin = await AdminAccess.isAdmin();
 
     final theme = widget.initialCompanyTheme ??
@@ -62,23 +63,16 @@ class _AbundanceHubScreenState extends State<AbundanceHubScreen> {
     );
   }
 
-  bool _isAbundance12Membership(CompanyMembership? membership) {
+  bool _isAbundanceMembership(CompanyMembership? membership) {
     if (membership == null) return false;
-    return _isAbundance12Company(name: membership.name, code: membership.code);
+    return _isAbundanceCompany(name: membership.name, code: membership.code);
   }
 
-  bool _isAbundance12Company({
+  bool _isAbundanceCompany({
     String name = '',
     String code = '',
   }) {
-    final normalizedName = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final normalizedCode = code.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
-    return normalizedName.contains('abundance12') ||
-        (normalizedName.contains('abundance') && normalizedName.contains('12')) ||
-        normalizedCode.contains('ABUNDANCE12') ||
-        normalizedCode.contains('ABUND12') ||
-        normalizedCode == 'A12' ||
-        normalizedCode.startsWith('AB12');
+    return AbundanceCompany.matches(code, name);
   }
 
   void _open(BuildContext context, Widget page) {
