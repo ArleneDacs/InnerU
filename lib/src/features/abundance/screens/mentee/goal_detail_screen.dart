@@ -4,6 +4,7 @@ import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/features/abundance/theme/abundance_assets.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_backdrop.dart';
 import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
 
 /// Goal detail page for Abundance 12. It keeps the original actions and
@@ -184,7 +185,11 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
 
         return Scaffold(
           backgroundColor: _bg,
-          body: SafeArea(
+          // Same ambient hero plate the Quests hub carries — the design
+          // spec scopes A12's PageBackdrop to the Quests screens rather
+          // than the shell chrome every company shares.
+          body: AbundanceBackdrop(
+            child: SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 1180;
@@ -329,6 +334,7 @@ class _GoalDetailScreenState extends State<GoalDetailScreen> {
                 );
               },
             ),
+          ),
           ),
         );
       },

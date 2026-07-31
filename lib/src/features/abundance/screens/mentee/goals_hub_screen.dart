@@ -6,6 +6,7 @@ import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_det
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goal_form_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
 import 'package:selfcare_projects/src/features/abundance/theme/abundance_assets.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_backdrop.dart';
 import 'package:selfcare_projects/src/features/abundance/theme/abundance_theme.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
@@ -212,7 +213,11 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
 
             return Scaffold(
               backgroundColor: _bg,
-              body: SafeArea(
+              // The Quests screens carry A12's ambient hero plate behind
+              // them (design spec, "Image assets": scoped to these screens
+              // rather than the shared shell chrome every company uses).
+              body: AbundanceBackdrop(
+                child: SafeArea(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   child: Center(
@@ -284,6 +289,7 @@ class _GoalsHubScreenState extends State<GoalsHubScreen> {
                     ),
                   ),
                 ),
+              ),
               ),
             );
           },
@@ -828,7 +834,7 @@ class _GoalCard extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(24),
           child: Container(
-            padding: const EdgeInsets.all(16),
+            clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: _panel,
               borderRadius: BorderRadius.circular(22),
@@ -841,7 +847,19 @@ class _GoalCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: Column(
+            // The category's own scene sits behind the card content under a
+            // bottom-up scrim, mirroring A12's `rpg/quest-card.tsx`, which
+            // renders `<Scene imageUrl={SCENES.quest[category]} tone={category}
+            // scrimVariant="card" />` in an absolutely-positioned layer
+            // beneath the badge row and title.
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: AbundanceQuestScene(categoryCode: goal.category.code),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Wrap(
@@ -974,6 +992,9 @@ class _GoalCard extends StatelessWidget {
                       ],
                     ),
                   ],
+                ),
+              ],
+            ),
                 ),
               ],
             ),

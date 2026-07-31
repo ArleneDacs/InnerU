@@ -1,6 +1,7 @@
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:selfcare_projects/src/features/abundance/theme/abundance_assets.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/domain.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/mentee/goals_hub_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/services/goals_service.dart';
@@ -104,5 +105,45 @@ void main() {
     // did not render) rather than merely that some text says "Quests"
     // somewhere on screen.
     expect(find.text('A12 only'), findsNothing);
+  });
+  // -------------------------------------------------------------------
+  // Whole-branch review, Important 5: abundanceQuestSceneAsset and
+  // abundanceBackdropAsset (Task 4) shipped four WebP plates into the app
+  // bundle with zero production call sites — they were referenced only from
+  // their own unit test. These assert the art is genuinely on screen.
+  // -------------------------------------------------------------------
+  testWidgets('quest cards render their category scene art and the page '
+      'carries the backdrop plate', (tester) async {
+    final firestore = FakeFirebaseFirestore();
+    final service = GoalsService(firestore);
+    await firestore.collection('users').doc('u1').set({'companyId': 'A12'});
+    await service.createGoal(
+      uid: 'u1',
+      category: GoalCategory.personal,
+      title: 'Run 100 km',
+      targetDate: DateTime(2026, 12, 31),
+      targetValue: 100,
+      currentValue: 40,
+      unit: 'km',
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GoalsHubScreen(
+        service: service,
+        uid: 'u1',
+        accessResolver: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final assetNames = tester
+        .widgetList<Image>(find.byType(Image))
+        .map((image) => image.image)
+        .whereType<AssetImage>()
+        .map((provider) => provider.assetName)
+        .toSet();
+
+    expect(assetNames, contains(abundanceBackdropAsset));
+    expect(assetNames, contains(abundanceQuestSceneAsset('PERSONAL')));
   });
 }
