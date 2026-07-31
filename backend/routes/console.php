@@ -16,3 +16,4 @@ Artisan::command('inspire', function () {
 // Laravel's scheduler:
 //   * * * * * php artisan schedule:run >> /dev/null 2>&1
 Schedule::command('meetings:sweep-reminders')->everyFifteenMinutes();
+Schedule::command('app:sync-store-versions')->hourly();
