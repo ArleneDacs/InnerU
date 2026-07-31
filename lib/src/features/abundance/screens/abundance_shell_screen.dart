@@ -153,36 +153,54 @@ class _AbundanceShellScreenState extends State<AbundanceShellScreen> {
     });
   }
 
+  static const int _questsTabIndex = 1;
+
+  PreferredSizeWidget _buildShellHeader() {
+    return AppBar(
+      backgroundColor: AbundanceColors.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      automaticallyImplyLeading: false,
+      title: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('ABUNDANCE 12',
+              style: TextStyle(
+                  color: AbundanceColors.foreground,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14)),
+          Text('THE GAME OF MY LIFE',
+              style: TextStyle(
+                  color: AbundanceColors.primaryGold, fontSize: 10)),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.notifications_none,
+              color: AbundanceColors.foreground),
+          onPressed: () {},
+        ),
+        const SizedBox(width: 8),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AbundanceColors.background,
-      appBar: AppBar(
-        backgroundColor: AbundanceColors.surfaceRaised,
-        surfaceTintColor: Colors.transparent,
-        automaticallyImplyLeading: false,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('ABUNDANCE 12',
-                style: TextStyle(
-                    color: AbundanceColors.foreground,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14)),
-            Text('THE GAME OF MY LIFE',
-                style: TextStyle(
-                    color: AbundanceColors.primaryGold, fontSize: 10)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.notifications_none, color: AbundanceColors.foreground),
-            onPressed: () {},
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+      // Only the Quests tab gets the shell's own header. The other four tabs
+      // embed InnerU screens that each bring their own root Scaffold+AppBar
+      // (AbundanceMenteeDashboardScreen, CoachDashboardScreen, Leaderboard,
+      // ProfileSettings), so rendering the shell's header there stacked two
+      // headers on top of each other. This mirrors how Setuppage/
+      // CoachSetuppage in lib/setup_navbar.dart already solve the same
+      // problem (`appBar: index == 2 ? null : AppBar(...)`).
+      //
+      // Neither Quests-tab body has an AppBar of its own — GoalsHubScreen has
+      // no Scaffold at all and CoachQuestsRosterScreen's Scaffold passes no
+      // appBar — so this is the one tab that needs the shell to supply one.
+      appBar: _index == _questsTabIndex ? _buildShellHeader() : null,
       body: IndexedStack(index: _index, children: _builtTabs),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,

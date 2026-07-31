@@ -47,17 +47,20 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // The shell's own header belongs to the Quests tab only — every other
+    // tab embeds a screen that brings its own AppBar (see the appBar
+    // suppression in AbundanceShellScreen.build).
+    await tester.tap(find.text('Quests'));
+    await tester.pumpAndSettle();
+
     expect(find.text('ABUNDANCE 12'), findsOneWidget);
     expect(find.text('THE GAME OF MY LIFE'), findsOneWidget);
     expect(find.byIcon(Icons.notifications_none), findsOneWidget);
+    expect(find.textContaining('Life Power'), findsWidgets);
 
     await tester.tap(find.text('Home'));
     await tester.pumpAndSettle();
     expect(find.text('Home'), findsWidgets); // the tab label itself, still visible
-
-    await tester.tap(find.text('Quests'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Life Power'), findsWidgets);
   });
 
   testWidgets('coach shell shows the coach roster on the Quests tab',
@@ -216,12 +219,146 @@ void main() {
     expect(find.textContaining('Life Power'), findsWidgets);
   });
 
-  testWidgets(
-      'AbundanceShellScreen is never constructed for a non-Abundance company',
+  // -------------------------------------------------------------------
+  // Whole-branch review, Important 4: the shell's own Scaffold+AppBar wrapped
+  // four placeholder screens that each have a root Scaffold+AppBar of their
+  // own, so three of the five tabs rendered two headers stacked on top of
+  // each other. The shell now suppresses its own header for those tabs, the
+  // same way Setuppage/CoachSetuppage in lib/setup_navbar.dart already do.
+  // -------------------------------------------------------------------
+
+  testWidgets('the Guild tab renders exactly one AppBar, not two',
       (tester) async {
-    // This is a documentation test: AbundanceShellScreen has no internal
-    // gating of its own — Task 13's integration point is what decides
-    // whether to build it at all. See abundance_company_test.dart (Task 1)
-    // for the actual gating-logic coverage.
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Guild'));
+    await tester.pumpAndSettle();
+
+    // Leaderboard brings its own AppBar; the shell must not add a second.
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(find.text('ABUNDANCE 12'), findsNothing);
+  });
+
+  testWidgets('the Profile tab renders exactly one AppBar, not two',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+
+    // ProfileSettings brings its own AppBar; the shell must not add a second.
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(find.text('ABUNDANCE 12'), findsNothing);
+  });
+
+  testWidgets(
+      'the Quests tab renders exactly one AppBar — the shell\'s own, since '
+      'neither Quests body has one', (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+        questsAccessResolverOverride: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Quests'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppBar), findsOneWidget);
+    expect(find.text('ABUNDANCE 12'), findsOneWidget);
+  });
+
+  testWidgets('the Home tab never stacks the shell header over its own chrome',
+      (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // There is no authenticated session in this harness, so
+    // AbundanceMenteeDashboardScreen resolves to its own access-denied panel,
+    // which has a Scaffold but no AppBar — hence "at most one" rather than
+    // "exactly one" here. What this asserts either way is the actual fix: the
+    // shell contributes no header of its own on this tab, so a real Abundance
+    // session (whose dashboard does carry an "Abundance Dashboard" AppBar)
+    // sees one header rather than two.
+    expect(find.byType(AppBar).evaluate().length, lessThanOrEqualTo(1));
+    expect(find.text('ABUNDANCE 12'), findsNothing);
+  });
+
+  testWidgets('initialIndex can never land on the More trigger', (tester) async {
+    final service = GoalsService(FakeFirebaseFirestore());
+
+    await tester.pumpWidget(MaterialApp(
+      home: AbundanceShellScreen(
+        isCoach: false,
+        service: service,
+        uid: 'u1',
+        companyTheme: CompanyThemeData.standard.copyWith(
+          companyCode: 'ABU15DN',
+          companyName: 'Abundance',
+          isCompanyTheme: true,
+        ),
+        // 4 is "More" — a bottom-sheet trigger, not a tab body. It must clamp
+        // down to a real tab (3, Profile) instead of showing a blank screen.
+        initialIndex: 4,
+        questsAccessResolverOverride: (_) async => true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final nav = tester.widget<BottomNavigationBar>(
+      find.byType(BottomNavigationBar),
+    );
+    expect(nav.currentIndex, 3);
   });
 }
