@@ -776,8 +776,9 @@ class _GoalCard extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get _progressColor {
-    if (goal.status == GoalStatus.completed)
+    if (goal.status == GoalStatus.completed) {
       return AbundanceColors.scoreExcellent;
+    }
     if (goal.isOverdue) return AbundanceColors.scoreCritical;
     return AbundanceColors.primaryGold;
   }
