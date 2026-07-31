@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AppVersionController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ExerciseController;
 use App\Http\Controllers\Api\CoachManagementController;
@@ -30,6 +31,8 @@ Route::get('/health', fn () => response()->json([
     'service' => config('app.name'),
     'timestamp' => now()->toIso8601String(),
 ]));
+
+Route::get('/app-version', [AppVersionController::class, 'show']);
 
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register']);
