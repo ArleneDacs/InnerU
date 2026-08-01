@@ -62,6 +62,27 @@ void main() {
       expect(summary.totalPoints, 100);
     });
 
+    test('automatic activity fields override a stale default-task snapshot',
+        () {
+      final tracker = <String, dynamic>{
+        'meditation': true,
+        'steps': true,
+        'learning': true,
+        'customDailyTasks': {
+          'meditation': {'completed': false},
+          'steps': {'completed': false},
+          'learning': {'completed': false},
+        },
+      };
+
+      final summary = DailyScoreService.summarizeTracker(
+        tracker,
+        dailyTrackerIds: const ['meditation', 'steps', 'learning'],
+      );
+
+      expect(summary.dailyTrackerScore, 100);
+    });
+
     test('resolveDisplayTotalPoints prefers the shared 0-100 formula', () {
       final score = DailyScoreService.resolveDisplayTotalPoints({
         'dailyTrackerScore': 60,

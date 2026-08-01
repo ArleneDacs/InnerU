@@ -250,7 +250,7 @@ class AppleHealthStepsService {
       companyId = membershipData.activeMembership?.id;
       companyCode = membershipData.activeMembership?.code;
       companyName = membershipData.activeMembership?.name;
-      await DailyTrackerApiService.instance.upsert(
+      await DailyTrackerApiService.instance.recordCompletedActivities(
         date: date,
         stepCount: steps,
         stepGoal: goal,

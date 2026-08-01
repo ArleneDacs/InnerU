@@ -518,7 +518,7 @@ class _NotesTypeState extends State<NotesType> {
         sessionUser?.name ??
         'Unknown';
     final membershipData = await CompanyMembershipService.loadForUser(userId);
-    await DailyTrackerApiService.instance.upsert(
+    await DailyTrackerApiService.instance.recordCompletedActivities(
       date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
       meditation: meditation,
       steps: steps,

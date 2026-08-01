@@ -257,49 +257,71 @@ class DailyTrackerController extends Controller
             ? Carbon::parse($validated['date'])->toDateString()
             : now()->toDateString();
 
-        $existingTracker = DailyTracker::query()
-            ->where('user_id', $user->id)
-            ->whereDate('date', $date)
-            ->first();
-
-        $customDailyTasks = $validated['custom_daily_tasks'] ?? $existingTracker?->custom_daily_tasks ?? [];
-        if (! is_array($customDailyTasks)) {
-            $customDailyTasks = [];
-        }
-
-        $tracker = DailyTracker::updateOrCreate(
+        $tracker = DailyTracker::query()->firstOrCreate(
             [
                 'user_id' => $user->id,
                 'date' => $date,
             ],
             [
-                'username' => $validated['username'] ?? $existingTracker?->username ?? $user->name,
-                'step_count' => $validated['step_count'] ?? $existingTracker?->step_count ?? 0,
-                'step_goal' => $validated['step_goal'] ?? $existingTracker?->step_goal ?? 5000,
-                'meditation' => $validated['meditation'] ?? $existingTracker?->meditation ?? false,
-                'steps' => $validated['steps'] ?? $existingTracker?->steps ?? false,
-                'call' => $validated['call'] ?? $existingTracker?->call ?? false,
-                'exercise' => $validated['exercise'] ?? $existingTracker?->exercise ?? false,
-                'learning' => $validated['learning'] ?? $existingTracker?->learning ?? false,
-                'add_value' => $validated['add_value'] ?? $existingTracker?->add_value ?? false,
-                'todo_list' => $validated['todo_list'] ?? $existingTracker?->todo_list ?? false,
-                'call_count' => $validated['call_count'] ?? $existingTracker?->call_count ?? 0,
-                'exercise_count' => $validated['exercise_count'] ?? $existingTracker?->exercise_count ?? 0,
-                'exercise_minutes' => $validated['exercise_minutes'] ?? $existingTracker?->exercise_minutes ?? 0,
-                'learning_count' => $validated['learning_count'] ?? $existingTracker?->learning_count ?? 0,
-                'value_count' => $validated['value_count'] ?? $existingTracker?->value_count ?? 0,
-                'todo_list_count' => $validated['todo_list_count'] ?? $existingTracker?->todo_list_count ?? 0,
-                'todo_list_score' => $validated['todo_list_score'] ?? $existingTracker?->todo_list_score ?? 0,
-                'todo_list_score_daily_contribution' => $validated['todo_list_score_daily_contribution'] ?? $existingTracker?->todo_list_score_daily_contribution ?? 0,
-                'todo_list_included_in_total' => $validated['todo_list_included_in_total'] ?? $existingTracker?->todo_list_included_in_total ?? false,
-                'user_total_score' => $validated['user_total_score'] ?? $existingTracker?->user_total_score ?? 0,
-                'custom_daily_tasks' => $customDailyTasks,
-                'meditation_minutes' => $validated['meditation_minutes'] ?? $existingTracker?->meditation_minutes ?? 0,
-                'company_id' => $validated['company_id'] ?? $existingTracker?->company_id ?? $user->company_code,
-                'company_code' => $validated['company_code'] ?? $existingTracker?->company_code ?? $user->company_code,
-                'company_name' => $validated['company_name'] ?? $existingTracker?->company_name ?? $user->company_name,
+                'username' => $validated['username'] ?? $user->name,
+                'custom_daily_tasks' => [],
+                'company_id' => $validated['company_id'] ?? $user->company_code,
+                'company_code' => $validated['company_code'] ?? $user->company_code,
+                'company_name' => $validated['company_name'] ?? $user->company_name,
             ]
         );
+
+        $wasRecentlyCreated = $tracker->wasRecentlyCreated;
+        $requestToColumn = [
+            'username' => 'username',
+            'step_count' => 'step_count',
+            'step_goal' => 'step_goal',
+            'meditation' => 'meditation',
+            'steps' => 'steps',
+            'call' => 'call',
+            'exercise' => 'exercise',
+            'learning' => 'learning',
+            'add_value' => 'add_value',
+            'todo_list' => 'todo_list',
+            'call_count' => 'call_count',
+            'exercise_count' => 'exercise_count',
+            'exercise_minutes' => 'exercise_minutes',
+            'learning_count' => 'learning_count',
+            'value_count' => 'value_count',
+            'todo_list_count' => 'todo_list_count',
+            'todo_list_score' => 'todo_list_score',
+            'todo_list_score_daily_contribution' => 'todo_list_score_daily_contribution',
+            'todo_list_included_in_total' => 'todo_list_included_in_total',
+            'user_total_score' => 'user_total_score',
+            'custom_daily_tasks' => 'custom_daily_tasks',
+            'meditation_minutes' => 'meditation_minutes',
+            'company_id' => 'company_id',
+            'company_code' => 'company_code',
+            'company_name' => 'company_name',
+        ];
+        $updates = [];
+        foreach ($requestToColumn as $requestField => $column) {
+            if (array_key_exists($requestField, $validated)
+                && $validated[$requestField] !== null) {
+                $updates[$column] = $validated[$requestField];
+            }
+        }
+        if (array_key_exists('custom_daily_tasks', $updates)) {
+            $updates['custom_daily_tasks'] = json_encode(
+                $updates['custom_daily_tasks'],
+                JSON_THROW_ON_ERROR,
+            );
+        }
+
+        // Only update fields present in this request. Writing a full snapshot
+        // assembled from an earlier read lets an automatic activity save erase
+        // manual checks that commit between that read and this update.
+        if ($updates !== []) {
+            DailyTracker::query()
+                ->whereKey($tracker->getKey())
+                ->update($updates);
+            $tracker->refresh();
+        }
 
         try {
             $resolvedScore = $this->userScoreService->syncForUser($user);
@@ -314,7 +336,7 @@ class DailyTrackerController extends Controller
         // user+date, not on every subsequent field edit within the same
         // day (upsert is called repeatedly as the mentee checks off
         // individual tasks).
-        if ($existingTracker === null) {
+        if ($wasRecentlyCreated) {
             foreach (CoachMentee::coachIdsForMentee((string) $user->id) as $coachId) {
                 Notification::createFor(
                     $coachId,

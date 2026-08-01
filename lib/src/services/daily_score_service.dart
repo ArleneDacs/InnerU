@@ -17,6 +17,15 @@ class DailyScoreSummary {
 class DailyScoreService {
   DailyScoreService._();
 
+  static const _defaultActivityIds = {
+    'call',
+    'steps',
+    'exercise',
+    'meditation',
+    'learning',
+    'addValue',
+  };
+
   static int _readInt(dynamic value, {int fallback = 0}) {
     if (value is int) return value;
     if (value is num) return value.round();
@@ -28,6 +37,10 @@ class DailyScoreService {
     Map<String, dynamic> tracker,
     String taskId,
   ) {
+    if (_defaultActivityIds.contains(taskId)) {
+      return tracker[taskId] == true;
+    }
+
     final customDailyTasks = tracker['customDailyTasks'];
     if (customDailyTasks is Map) {
       final customTask = customDailyTasks[taskId];
@@ -49,13 +62,10 @@ class DailyScoreService {
 
     if (filteredIds.isEmpty) return 0;
 
-    final completedCount = filteredIds
-        .where((taskId) => _isTaskCompleted(tracker, taskId))
-        .length;
+    final completedCount =
+        filteredIds.where((taskId) => _isTaskCompleted(tracker, taskId)).length;
 
-    return ((completedCount / filteredIds.length) * 100)
-        .round()
-        .clamp(0, 100);
+    return ((completedCount / filteredIds.length) * 100).round().clamp(0, 100);
   }
 
   static DailyScoreSummary summarizeTracker(
@@ -73,12 +83,12 @@ class DailyScoreService {
         : todoListScore;
     final effectiveTodoListScore =
         todoListScore > 0 ? todoListScore : todoListScoreContribution;
-    final todoListIncludedInTotal = tracker['todoListIncludedInTotal'] == true ||
-        todoListScore > 0 ||
-        todoListScoreContribution > 0;
+    final todoListIncludedInTotal =
+        tracker['todoListIncludedInTotal'] == true ||
+            todoListScore > 0 ||
+            todoListScoreContribution > 0;
     final totalPoints = todoListIncludedInTotal
-        ? ((dailyTrackerScore + effectiveTodoListScore) / 2)
-            .clamp(0, 100)
+        ? ((dailyTrackerScore + effectiveTodoListScore) / 2).clamp(0, 100)
         : dailyTrackerScore.toDouble();
 
     return DailyScoreSummary(
@@ -106,20 +116,19 @@ class DailyScoreService {
         data.containsKey('todoListIncludedInTotal');
 
     if (hasDerivedFields) {
-      final dailyTrackerScore =
-          _readInt(rawDailyTrackerScore).clamp(0, 100);
+      final dailyTrackerScore = _readInt(rawDailyTrackerScore).clamp(0, 100);
       final todoListScore = _readInt(rawTodoListScore).clamp(0, 100);
       final todoListScoreContribution =
           _readInt(rawTodoListContribution).clamp(0, 100);
       final effectiveTodoListScore =
           todoListScore > 0 ? todoListScore : todoListScoreContribution;
       return includeTodoListScore
-          ? ((dailyTrackerScore + effectiveTodoListScore) / 2)
-              .clamp(0, 100)
+          ? ((dailyTrackerScore + effectiveTodoListScore) / 2).clamp(0, 100)
           : dailyTrackerScore;
     }
 
-    final rawTotal = data['totalPoints'] ?? data['userTotalScore'] ?? data['score'];
+    final rawTotal =
+        data['totalPoints'] ?? data['userTotalScore'] ?? data['score'];
     if (rawTotal is num) return rawTotal.clamp(0, 100);
     return 0;
   }

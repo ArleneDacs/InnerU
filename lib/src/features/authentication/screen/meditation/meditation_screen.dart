@@ -136,7 +136,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
         ? null
         : (meditationSeconds / Duration.secondsPerMinute).ceil();
 
-    await _dailyTrackerApiService.upsert(
+    await _dailyTrackerApiService.recordCompletedActivities(
       date: formattedDate,
       meditation: meditation,
       steps: steps,

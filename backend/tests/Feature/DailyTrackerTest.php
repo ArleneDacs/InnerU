@@ -33,6 +33,11 @@ class DailyTrackerTest extends TestCase
             'step_goal' => 8200,
             'steps' => true,
             'meditation' => false,
+            'custom_daily_tasks' => [
+                '__snapshotTaskIds' => ['steps', 'meditation'],
+                'steps' => ['title' => 'Steps', 'completed' => true],
+                'meditation' => ['title' => 'Meditation', 'completed' => false],
+            ],
             'username' => 'Step User',
             'company_id' => 'ABC',
             'company_code' => 'ABC',
@@ -42,7 +47,11 @@ class DailyTrackerTest extends TestCase
         $save->assertOk()
             ->assertJsonPath('tracker.stepCount', 1432)
             ->assertJsonPath('tracker.stepGoal', 8200)
-            ->assertJsonPath('tracker.steps', true);
+            ->assertJsonPath('tracker.steps', true)
+            ->assertJsonPath(
+                'tracker.customDailyTasks.__snapshotTaskIds.0',
+                'steps',
+            );
 
         $this->assertDatabaseHas('daily_trackers', [
             'user_id' => $user->id,
@@ -58,6 +67,79 @@ class DailyTrackerTest extends TestCase
             ->assertJsonPath('tracker.stepCount', 1432)
             ->assertJsonPath('tracker.stepGoal', 8200)
             ->assertJsonPath('tracker.username', 'Step User');
+    }
+
+    public function test_activity_update_preserves_manual_checks_saved_concurrently(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Concurrent Tracker User',
+            'email' => 'concurrent-tracker@example.com',
+            'daily_tracker_items' => [
+                ['id' => 'steps', 'title' => 'Steps', 'isDefault' => true],
+                ['id' => 'learning', 'title' => 'Learning', 'isDefault' => true],
+                ['id' => 'meditation', 'title' => 'Meditation', 'isDefault' => true],
+            ],
+        ]);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-07-21',
+            'steps' => false,
+            'learning' => false,
+            'meditation' => false,
+            'custom_daily_tasks' => [
+                '__snapshotTaskIds' => ['steps', 'learning', 'meditation'],
+                'steps' => ['title' => 'Steps', 'completed' => true],
+                'learning' => ['title' => 'Learning', 'completed' => true],
+                'meditation' => ['title' => 'Meditation', 'completed' => false],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        // Simulate the manual checklist request committing after the activity
+        // request has read the row, but before that activity request writes.
+        // A partial activity update must only touch the fields it received.
+        $injectManualUpdate = true;
+        $manualUpdateWasInjected = false;
+        DB::listen(function ($query) use (
+            &$injectManualUpdate,
+            &$manualUpdateWasInjected,
+            $user,
+        ): void {
+            $sql = strtolower($query->sql);
+            if (! $injectManualUpdate
+                || ! str_contains($sql, 'select')
+                || ! str_contains($sql, 'daily_trackers')) {
+                return;
+            }
+
+            $injectManualUpdate = false;
+            $manualUpdateWasInjected = true;
+            DB::table('daily_trackers')
+                ->where('user_id', $user->id)
+                ->where('date', '2026-07-21')
+                ->update([
+                    'steps' => true,
+                    'learning' => true,
+                ]);
+        });
+
+        $response = $this->postJson('/api/daily-tracker', [
+            'date' => '2026-07-21',
+            'meditation' => true,
+        ]);
+
+        $this->assertTrue($manualUpdateWasInjected);
+        $response->assertOk()
+            ->assertJsonPath('tracker.steps', true)
+            ->assertJsonPath('tracker.learning', true)
+            ->assertJsonPath('tracker.meditation', true);
+
+        $breakdown = app(UserScoreService::class)
+            ->resolveBreakdownForUser($user->fresh());
+        $this->assertEquals(100.0, $breakdown['coreTaskScore']);
     }
 
     public function test_user_can_save_daily_tracker_even_if_score_sync_fails(): void

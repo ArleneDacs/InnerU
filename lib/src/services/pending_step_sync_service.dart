@@ -73,7 +73,7 @@ class PendingStepSyncService {
     for (final entry in entries) {
       final payload = entry.value;
       try {
-        await DailyTrackerApiService.instance.upsert(
+        await DailyTrackerApiService.instance.recordCompletedActivities(
           date: payload['date']?.toString() ?? entry.key,
           stepCount: _asInt(payload['step_count']),
           stepGoal: _asInt(payload['step_goal'], fallback: 5000),

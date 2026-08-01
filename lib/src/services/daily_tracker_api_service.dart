@@ -39,7 +39,8 @@ class DailyTrackerApiService {
       'Exercise': _asBool(tasks['Exercise'] ?? tasks['exercise']),
       'Meditation': _asBool(tasks['Meditation'] ?? tasks['meditation']),
       'Learning': _asBool(tasks['Learning'] ?? tasks['learning']),
-      'Add Value': _asBool(tasks['Add Value'] ?? tasks['addValue'] ?? tasks['add_value']),
+      'Add Value': _asBool(
+          tasks['Add Value'] ?? tasks['addValue'] ?? tasks['add_value']),
     };
   }
 
@@ -127,8 +128,7 @@ class DailyTrackerApiService {
       if (dailyTrackerScore != null) 'daily_tracker_score': dailyTrackerScore,
       if (todoListScore != null) 'todo_list_score': todoListScore,
       if (todoListScoreDailyContribution != null)
-        'todo_list_score_daily_contribution':
-            todoListScoreDailyContribution,
+        'todo_list_score_daily_contribution': todoListScoreDailyContribution,
       if (todoListIncludedInTotal != null)
         'todo_list_included_in_total': todoListIncludedInTotal,
       if (userTotalScore != null) 'user_total_score': userTotalScore,
@@ -141,6 +141,60 @@ class DailyTrackerApiService {
     };
 
     return _api.postJson('/api/daily-tracker', payload, token: _token);
+  }
+
+  static Map<String, bool> completedActivityFields({
+    bool meditation = false,
+    bool steps = false,
+    bool learning = false,
+    bool addValue = false,
+  }) {
+    return {
+      if (meditation) 'meditation': true,
+      if (steps) 'steps': true,
+      if (learning) 'learning': true,
+      if (addValue) 'addValue': true,
+    };
+  }
+
+  /// Records automatic activity completions without sending `false` for
+  /// unrelated checklist items. Automatic checks are additive; they must not
+  /// undo selections the user made manually.
+  Future<Map<String, dynamic>> recordCompletedActivities({
+    String? date,
+    int? stepCount,
+    int? stepGoal,
+    bool meditation = false,
+    bool steps = false,
+    bool learning = false,
+    bool addValue = false,
+    int? meditationMinutes,
+    String? username,
+    String? companyId,
+    String? companyCode,
+    String? companyName,
+  }) {
+    final completed = completedActivityFields(
+      meditation: meditation,
+      steps: steps,
+      learning: learning,
+      addValue: addValue,
+    );
+
+    return upsert(
+      date: date,
+      stepCount: stepCount,
+      stepGoal: stepGoal,
+      meditation: completed['meditation'],
+      steps: completed['steps'],
+      learning: completed['learning'],
+      addValue: completed['addValue'],
+      meditationMinutes: meditationMinutes,
+      username: username,
+      companyId: companyId,
+      companyCode: companyCode,
+      companyName: companyName,
+    );
   }
 
   Future<Map<String, dynamic>> fetch({String? date}) async {

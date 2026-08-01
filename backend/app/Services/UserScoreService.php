@@ -584,11 +584,15 @@ class UserScoreService
         }
 
         $column = match ($taskId) {
+            'call', 'steps', 'exercise', 'meditation', 'learning' => $taskId,
             'addValue' => 'add_value',
-            default => $taskId,
+            default => null,
         };
 
-        if ((bool) $tracker->{$column}) {
+        // Snapshot completion, the live checklist field, and recorded
+        // activity evidence are additive. An automatic completion can update
+        // the live field without rewriting the whole snapshot.
+        if ($column !== null && (bool) $tracker->{$column}) {
             return true;
         }
 

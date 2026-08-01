@@ -93,5 +93,21 @@ void main() {
       ]);
       expect(tasks.last.completed, isFalse);
     });
+
+    test('uses live default fields when an automatic check updated them', () {
+      final tasks = resolveDayTrackerTasks({
+        'steps': true,
+        'learning': true,
+        'meditation': true,
+        'customDailyTasks': {
+          '__snapshotTaskIds': ['steps', 'learning', 'meditation'],
+          'steps': {'title': 'Steps', 'completed': true},
+          'learning': {'title': 'Learning', 'completed': true},
+          'meditation': {'title': 'Meditation', 'completed': false},
+        },
+      });
+
+      expect(tasks.map((task) => task.completed), [true, true, true]);
+    });
   });
 }

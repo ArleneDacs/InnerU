@@ -55,7 +55,8 @@ int? _readIntField(
 Map<String, dynamic>? _readTaskMap(
   Map<String, dynamic> trackerData,
 ) {
-  final raw = trackerData['customDailyTasks'] ?? trackerData['custom_daily_tasks'];
+  final raw =
+      trackerData['customDailyTasks'] ?? trackerData['custom_daily_tasks'];
   if (raw is Map) {
     return Map<String, dynamic>.from(raw);
   }
@@ -120,6 +121,21 @@ List<DailyTrackerHistoryTask> resolveDayTrackerTasks(
   if (snapshotTaskIds.isNotEmpty) {
     for (final key in snapshotTaskIds) {
       final customTask = taskMap?[key];
+      if (_dailyTrackerTaskOrder.contains(key) &&
+          _hasTaskField(trackerData, key)) {
+        final snapshotTitle = customTask is Map
+            ? customTask['title']?.toString().trim() ?? ''
+            : '';
+        tasks.add(
+          DailyTrackerHistoryTask(
+            title:
+                snapshotTitle.isEmpty ? _titleForTaskKey(key) : snapshotTitle,
+            completed: _readBoolField(trackerData, key),
+          ),
+        );
+        continue;
+      }
+
       if (customTask is Map) {
         final title = customTask['title']?.toString().trim() ?? '';
         if (title.isEmpty) continue;

@@ -1039,7 +1039,7 @@ class _StepTrackerState extends State<StepTracker>
           userData['displayName']?.toString();
 
       await PendingStepSyncService.instance.flush(userId: userId);
-      await _dailyTrackerApiService.upsert(
+      await _dailyTrackerApiService.recordCompletedActivities(
         date: formattedDate,
         stepCount: _steps,
         stepGoal: _dailyGoal,
@@ -1132,7 +1132,7 @@ class _StepTrackerState extends State<StepTracker>
 
     try {
       await PendingStepSyncService.instance.flush(userId: userId);
-      await _dailyTrackerApiService.upsert(
+      await _dailyTrackerApiService.recordCompletedActivities(
         date: formattedDate,
         stepCount: _steps,
         stepGoal: _dailyGoal,

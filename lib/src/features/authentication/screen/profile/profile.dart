@@ -517,19 +517,16 @@ class _ProfilePageState extends State<ProfilePage> {
       todayTasks[item.id] = value;
     });
 
-    // Each sync below POSTs the *entire* current checklist snapshot, not
-    // just this one field. Two rapid taps used to fire concurrently, so
-    // whichever request's response arrived last would win regardless of
-    // which tap actually happened last -- silently overwriting newer
-    // state with a stale snapshot. Chaining onto _pendingTaskSync forces
-    // syncs to run strictly in the order they were tapped.
+    // Keep rapid manual changes ordered. Each request patches only the task
+    // that was tapped, so it cannot overwrite an automatic completion for a
+    // different task while the user is editing the checklist.
     final previous = _pendingTaskSync;
     final completer = Completer<void>();
     _pendingTaskSync = completer.future;
     await previous;
 
     try {
-      await _syncTodayTask(session.id.toString());
+      await _syncTodayTask(session.id.toString(), item, value);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -547,33 +544,32 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _syncTodayTask(String userId) async {
+  Future<void> _syncTodayTask(
+    String userId,
+    _DailyTaskItem item,
+    bool value,
+  ) async {
     final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final membershipData = await CompanyMembershipService.loadForUser(userId);
+    final manualCount = value ? 1 : 0;
 
     await DailyTrackerApiService.instance.upsert(
       date: todayDate,
       username: username,
-      meditation: todayTasks['meditation'],
-      steps: todayTasks['steps'],
-      call: todayTasks['call'],
-      exercise: todayTasks['exercise'],
-      learning: todayTasks['learning'],
-      addValue: todayTasks['addValue'],
-      todoList: todayTasks['todoList'],
-      callCount: todayTasks['call'] == true ? 1 : 0,
-      exerciseCount: todayTasks['exercise'] == true ? 1 : 0,
-      exerciseMinutes: todayTasks['exercise'] == true ? 10 : 0,
-      learningCount: todayTasks['learning'] == true ? 1 : 0,
-      valueCount: todayTasks['addValue'] == true ? 1 : 0,
-      todoListCount: _todayTodoListScore,
-      dailyTrackerScore: _dailyTrackerScore.round(),
-      todoListScore: _todayTodoListScore,
-      todoListScoreDailyContribution: _todayTodoListScoreContribution,
-      todoListIncludedInTotal: _todayTodoListIncludedInTotal,
-      userTotalScore: _combinedDailyAndTodoScore.round(),
+      meditation: item.id == 'meditation' ? value : null,
+      steps: item.id == 'steps' ? value : null,
+      call: item.id == 'call' ? value : null,
+      exercise: item.id == 'exercise' ? value : null,
+      learning: item.id == 'learning' ? value : null,
+      addValue: item.id == 'addValue' ? value : null,
+      todoList: item.id == 'todoList' ? value : null,
+      callCount: item.id == 'call' ? manualCount : null,
+      exerciseCount: item.id == 'exercise' ? manualCount : null,
+      exerciseMinutes: item.id == 'exercise' ? (value ? 10 : 0) : null,
+      learningCount: item.id == 'learning' ? manualCount : null,
+      valueCount: item.id == 'addValue' ? manualCount : null,
       customDailyTasks: _dailyTrackerSnapshotTasks(),
-      meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
+      meditationMinutes: item.id == 'meditation' ? manualCount : null,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
       companyName: membershipData.activeMembership?.name,
