@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
 use App\Models\NoteComment;
 use App\Models\Notification;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -111,8 +113,23 @@ class CommentController extends Controller
             'userId' => (string) $comment->user_id,
             'username' => $comment->username,
             'comment' => $comment->comment,
-            'createdAt' => $comment->created_at?->toIso8601String(),
-            'updatedAt' => $comment->updated_at?->toIso8601String(),
+            'createdAt' => $this->serializeAppDate($comment->created_at),
+            'updatedAt' => $this->serializeAppDate($comment->updated_at),
         ];
+    }
+
+    private function serializeAppDate(?CarbonInterface $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return CarbonImmutable::createFromFormat(
+            'Y-m-d H:i:s.u',
+            $value->format('Y-m-d H:i:s.u'),
+            'UTC',
+        )
+            ->setTimezone(config('app.timezone', 'Asia/Manila'))
+            ->toIso8601String();
     }
 }

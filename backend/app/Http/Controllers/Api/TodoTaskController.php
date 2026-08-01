@@ -54,6 +54,13 @@ class TodoTaskController extends Controller
             'sub_tasks' => ['nullable', 'array'],
         ]);
 
+        $goalType = $this->normalizeGoalType($validated['goal_type'] ?? null);
+        $startDate = isset($validated['start_date'])
+            ? Carbon::parse($validated['start_date'])->startOfDay()
+            : Carbon::parse($validated['due_date'])->startOfDay();
+        $dueDate = Carbon::parse($validated['due_date'])->startOfDay();
+        $dueDate = $this->normalizeLongTermRange($goalType, $startDate, $dueDate);
+
         $task = TodoTask::updateOrCreate(
             [
                 'id' => $validated['id'] ?? (string) Str::uuid(),
@@ -62,11 +69,9 @@ class TodoTaskController extends Controller
             [
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? '',
-                'goal_type' => $this->normalizeGoalType($validated['goal_type'] ?? null),
-                'start_date' => isset($validated['start_date'])
-                    ? Carbon::parse($validated['start_date'])->toDateString()
-                    : Carbon::parse($validated['due_date'])->toDateString(),
-                'due_date' => Carbon::parse($validated['due_date'])->toDateString(),
+                'goal_type' => $goalType,
+                'start_date' => $startDate->toDateString(),
+                'due_date' => $dueDate?->toDateString() ?? $startDate->addDay()->toDateString(),
                 'tag' => $this->normalizeTag(
                     $validated['tag'] ?? null,
                     $validated['tag_index'] ?? null,
@@ -148,6 +153,15 @@ class TodoTaskController extends Controller
             $todoTask->sub_tasks = $validated['sub_tasks'];
         }
 
+        if (
+            $todoTask->goal_type === 'LONG_TERM'
+            && $todoTask->start_date !== null
+            && $todoTask->due_date !== null
+            && $todoTask->due_date->startOfDay()->lte($todoTask->start_date->startOfDay())
+        ) {
+            $todoTask->due_date = $todoTask->start_date->copy()->addDay()->startOfDay();
+        }
+
         $todoTask->save();
 
         // Throttled: only on the NOT completed -> completed transition, not
@@ -218,6 +232,19 @@ class TodoTaskController extends Controller
             'EVERYDAY', 'DAILY' => 'EVERYDAY',
             default => 'LONG_TERM',
         };
+    }
+
+    private function normalizeLongTermRange(string $goalType, ?Carbon $startDate, ?Carbon $dueDate): ?Carbon
+    {
+        if ($goalType !== 'LONG_TERM' || $startDate === null || $dueDate === null) {
+            return $dueDate;
+        }
+
+        if ($dueDate->startOfDay()->lte($startDate->startOfDay())) {
+            return $startDate->copy()->addDay()->startOfDay();
+        }
+
+        return $dueDate;
     }
 
     /**

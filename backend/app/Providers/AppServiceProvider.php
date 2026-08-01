@@ -7,9 +7,12 @@ use App\Models\Company;
 use App\Observers\CompanyObserver;
 use App\Services\FirebaseScryptVerifier;
 use App\Services\GoogleApiPlayVersionFetcher;
+use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,6 +39,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Company::observe(CompanyObserver::class);
+
+        $this->bootApplicationTimezone();
 
         if ($this->app->runningInConsole()) {
             return;
@@ -73,6 +78,37 @@ class AppServiceProvider extends ServiceProvider
             }
         } catch (\Throwable) {
             // If the database is unavailable, let the request fail naturally.
+        }
+    }
+
+    private function bootApplicationTimezone(): void
+    {
+        $timezone = (string) config('app.timezone', 'Asia/Manila');
+        if ($timezone === '') {
+            return;
+        }
+
+        date_default_timezone_set($timezone);
+
+        try {
+            $connection = DB::connection();
+            $driver = $connection->getDriverName();
+
+            if ($driver === 'pgsql') {
+                $escapedTimezone = str_replace("'", "''", $timezone);
+                $connection->unprepared("SET TIME ZONE '{$escapedTimezone}'");
+
+                return;
+            }
+
+            if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                $offset = (new DateTimeImmutable('now', new DateTimeZone($timezone)))
+                    ->format('P');
+
+                $connection->statement('SET time_zone = ?', [$offset]);
+            }
+        } catch (\Throwable) {
+            // Keep the app running even if the DB timezone cannot be adjusted.
         }
     }
 }

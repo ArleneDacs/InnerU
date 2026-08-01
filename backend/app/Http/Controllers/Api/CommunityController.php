@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -48,7 +50,7 @@ class CommunityController extends Controller
                 'title' => $post->title,
                 'note' => $post->note,
                 'color' => $post->color,
-                'createdAt' => $post->created_at?->toIso8601String(),
+                'createdAt' => $this->serializeAppDate($post->created_at),
                 'category' => $post->category,
                 'saved' => $post->saved,
                 'companyId' => $post->company_id,
@@ -130,12 +132,29 @@ class CommunityController extends Controller
             'title' => $post->title,
             'note' => $post->note,
             'color' => $post->color,
-            'createdAt' => $post->created_at?->toIso8601String(),
+            'createdAt' => $this->serializeAppDate($post->created_at),
             'category' => $post->category,
             'saved' => $post->saved,
             'companyId' => $post->company_id,
             'companyCode' => $post->company_code,
             'companyName' => $post->company_name,
         ];
+    }
+
+    private function serializeAppDate(?CarbonInterface $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $timezone = (string) config('app.timezone', 'Asia/Manila');
+
+        return CarbonImmutable::createFromFormat(
+            'Y-m-d H:i:s.u',
+            $value->format('Y-m-d H:i:s.u'),
+            'UTC',
+        )
+            ->setTimezone($timezone)
+            ->toIso8601String();
     }
 }

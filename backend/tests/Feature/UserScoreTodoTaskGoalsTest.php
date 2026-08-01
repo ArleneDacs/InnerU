@@ -117,4 +117,82 @@ class UserScoreTodoTaskGoalsTest extends TestCase
             Carbon::setTestNow();
         }
     }
+
+    public function test_period_goal_score_divides_one_time_completion_by_the_full_program_length(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-01 12:00:00'));
+
+        try {
+            $company = Company::create([
+                'id' => (string) Str::uuid(),
+                'name' => 'Gencys',
+                'code' => 'GEN0KUS',
+                'leaderboard_period_start' => '2026-08-01',
+                'leaderboard_period_end' => '2026-12-31',
+            ]);
+            $user = User::factory()->create(['company_code' => $company->code]);
+
+            TodoTask::create([
+                'id' => (string) Str::uuid(),
+                'user_id' => $user->id,
+                'title' => 'Finish one easy goal',
+                'goal_type' => 'LONG_TERM',
+                'start_date' => '2026-08-01',
+                'due_date' => '2026-08-01',
+                'tag' => 'personal',
+                'is_completed' => true,
+                'completed_at' => '2026-08-01 08:00:00',
+                'completion_dates' => [],
+                'sub_tasks' => [],
+            ]);
+
+            $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+            // Aug 1-Dec 31 inclusive is 153 days. A one-time goal earns
+            // one day-credit, so it must not become 100% on day one.
+            $this->assertEqualsWithDelta(0.65, $breakdown['goalScore'], 0.01);
+            $this->assertEqualsWithDelta(0.65, $breakdown['overallScore'], 0.01);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_period_everyday_goal_score_uses_completed_days_over_the_full_program_length(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-03 12:00:00'));
+
+        try {
+            $company = Company::create([
+                'id' => (string) Str::uuid(),
+                'name' => 'Gencys',
+                'code' => 'GEN0KUS',
+                'leaderboard_period_start' => '2026-08-01',
+                'leaderboard_period_end' => '2026-12-31',
+            ]);
+            $user = User::factory()->create(['company_code' => $company->code]);
+
+            TodoTask::create([
+                'id' => (string) Str::uuid(),
+                'user_id' => $user->id,
+                'title' => 'Walk every day',
+                'goal_type' => 'EVERYDAY',
+                'start_date' => '2026-08-01',
+                'due_date' => '2026-12-31',
+                'tag' => 'personal',
+                'is_completed' => false,
+                'completion_dates' => [
+                    '2026-08-01',
+                    '2026-08-03',
+                ],
+                'sub_tasks' => [],
+            ]);
+
+            $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+            // 2 completed days / 153 program days = 1.31%.
+            $this->assertEqualsWithDelta(1.31, $breakdown['goalScore'], 0.01);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
 }

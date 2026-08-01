@@ -138,9 +138,10 @@ class UserScorePeriodTest extends TestCase
         // Period is Aug 1-5 inclusive = 5 days. Only Aug 3 counts, at 100% completion.
         // coreTaskScore = 100 / 5 = 20.
         $this->assertEquals(20.0, $breakdown['coreTaskScore']);
-        // goalScore = the one in-period record's todo_list_score (50), not 90 or 99.
-        $this->assertEquals(50.0, $breakdown['goalScore']);
-        $this->assertEquals(35.0, $breakdown['overallScore']);
+        // Legacy tracker goal score is spread across the full 5-day period:
+        // 50 / 5 = 10.
+        $this->assertEquals(10.0, $breakdown['goalScore']);
+        $this->assertEquals(15.0, $breakdown['overallScore']);
     }
 
     public function test_the_divisor_is_the_full_period_length_not_the_recorded_day_count(): void
@@ -182,6 +183,47 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(20.0, $breakdown['coreTaskScore']);
     }
 
+    public function test_period_core_task_score_uses_the_saved_daily_tracker_task_snapshot_when_present(): void
+    {
+        Carbon::setTestNow('2030-01-01');
+
+        $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-10');
+        $user = $this->makeUserInCompany($company);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-08-02',
+            'call' => true,
+            'steps' => false,
+            'exercise' => false,
+            'meditation' => false,
+            'learning' => false,
+            'add_value' => false,
+            'custom_daily_tasks' => [
+                '__snapshotTaskIds' => ['steps', 'meditation'],
+                'steps' => [
+                    'title' => 'Steps',
+                    'completed' => true,
+                    'isDefault' => true,
+                ],
+                'meditation' => [
+                    'title' => 'Meditation',
+                    'completed' => false,
+                    'isDefault' => true,
+                ],
+            ],
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        // Custom daily tracker lists can vary per user/day. The saved
+        // snapshot says this day had 2 tasks with 1 complete, so the period
+        // contribution is 50 / 10 days = 5, not the fallback 1-of-6 default
+        // task score.
+        $this->assertEquals(5.0, $breakdown['coreTaskScore']);
+    }
+
     public function test_goal_score_is_the_latest_within_period_record_not_averaged(): void
     {
         Carbon::setTestNow('2030-01-01');
@@ -207,8 +249,9 @@ class UserScorePeriodTest extends TestCase
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
         // Latest record by date is Aug 20 (score 30) -- must not be
-        // averaged with Aug 5's 80.
-        $this->assertEquals(30.0, $breakdown['goalScore']);
+        // averaged with Aug 5's 80. It is still spread across the full
+        // 31-day period, so 30 / 31 rounds to 1.0.
+        $this->assertEquals(1.0, $breakdown['goalScore']);
     }
 
     public function test_a_company_with_a_period_and_zero_records_in_it_scores_zero(): void
@@ -240,7 +283,7 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(0.0, $breakdown['overallScore']);
     }
 
-    public function test_todo_tasks_only_count_when_their_start_date_is_within_the_period(): void
+    public function test_todo_tasks_starting_in_the_period_are_divided_by_the_full_period_length(): void
     {
         Carbon::setTestNow('2030-01-01');
 
@@ -283,10 +326,11 @@ class UserScorePeriodTest extends TestCase
 
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
-        // Without the start-date filter this would be (100 + 100 + 0) / 3 = 66.7 -> 67.
-        // With the filter it is (100 + 0) / 2 = 50.
-        $this->assertEquals(50.0, $breakdown['goalScore']);
-        $this->assertEquals(50.0, $breakdown['overallScore']);
+        // The pre-period task is ignored. One completed in-period task
+        // earns one day-credit across the 153-day period, averaged with
+        // the incomplete in-period task: (0.65 + 0) / 2 = 0.33.
+        $this->assertEqualsWithDelta(0.33, $breakdown['goalScore'], 0.01);
+        $this->assertEqualsWithDelta(0.33, $breakdown['overallScore'], 0.01);
     }
 
     public function test_a_period_starts_at_the_companys_local_midnight_even_when_utc_is_still_the_previous_day(): void
@@ -363,20 +407,16 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(100.0, $breakdowns[(string) $userWithoutPeriod->id]['coreTaskScore']);
     }
 
-    public function test_the_goals_based_score_still_applies_even_when_a_leaderboard_period_is_configured(): void
+    public function test_the_goals_based_score_is_spread_across_the_configured_period(): void
     {
         Carbon::setTestNow('2030-01-01');
 
         $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-05');
         $user = $this->makeUserInCompany($company);
 
-        // Goals are a date-independent "current status" snapshot -- the
-        // Goals page shows the exact same percentage no matter what
-        // leaderboard period is configured, so goalScore must match it
-        // exactly rather than falling back to a DailyTracker's legacy
-        // todo-list score. One PERSONAL goal at 100%, PROFESSIONAL and
-        // CONTRIBUTION empty at 0% each -> (100+0+0)/3 = 33.3, the same
-        // math the Goals page itself uses.
+        // The raw Goals page score is still 33.3, but leaderboard scoring
+        // now spreads that across the full configured period. For an
+        // 5-day window, 33.3 / 5 = 6.7.
         Goal::create([
             'id' => (string) Str::uuid(),
             'user_id' => (string) $user->id,
@@ -407,7 +447,7 @@ class UserScorePeriodTest extends TestCase
 
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
-        $this->assertEquals(33.3, $breakdown['goalScore']);
+        $this->assertEquals(6.7, $breakdown['goalScore']);
     }
 
     public function test_the_full_leaderboard_formula_matches_spec_for_a_configured_period(): void
@@ -423,7 +463,8 @@ class UserScorePeriodTest extends TestCase
         $user = $this->makeUserInCompany($company);
 
         // Goals: Personal 100, Professional 75 (1 DONE + 1 IN_PROGRESS
-        // milestone task), Contribution 20 -> avg = (100+75+20)/3 = 65.
+        // milestone task), Contribution 20 -> raw avg = (100+75+20)/3 = 65.
+        // With a 10-day period, that becomes 6.5 on the leaderboard.
         Goal::create([
             'id' => (string) Str::uuid(),
             'user_id' => (string) $user->id,
@@ -525,8 +566,8 @@ class UserScorePeriodTest extends TestCase
 
         $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
 
-        $this->assertEquals(65.0, $breakdown['goalScore']);
+        $this->assertEquals(6.5, $breakdown['goalScore']);
         $this->assertEquals(15.0, $breakdown['coreTaskScore']);
-        $this->assertEquals(40.0, $breakdown['overallScore']);
+        $this->assertEqualsWithDelta(10.75, $breakdown['overallScore'], 0.01);
     }
 }

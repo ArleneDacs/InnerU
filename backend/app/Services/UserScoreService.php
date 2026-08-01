@@ -39,13 +39,10 @@ class UserScoreService
         $company = $this->resolveCompaniesForUsers(collect([$user]))[(string) $user->id] ?? null;
         $goalScore = $this->resolveGoalScoreForUser($user, $company);
         if ($this->hasConfiguredPeriod($company)) {
-            // The Goals-based score is a date-independent "current status"
-            // snapshot -- the Goals page shows the same percentage
-            // regardless of any configured leaderboard period, so it's
-            // passed straight through here rather than being replaced by a
-            // DailyTracker's legacy per-day todo-list score. Only
-            // coreTaskScore stays period-bound (it only reads DailyTracker
-            // rows within the period).
+            // The Goals page itself still shows raw completion status, but
+            // leaderboard scoring should spread that score across the
+            // configured period so an early-completed goal does not show up
+            // as a full 100 immediately.
             return $this->scoreBreakdownForPeriod(
                 $user,
                 $company->leaderboard_period_start,
@@ -191,9 +188,6 @@ class UserScoreService
             $company = $companiesByUser[$userId] ?? null;
 
             if ($this->hasConfiguredPeriod($company)) {
-                // See resolveBreakdownForUser: the Goals-based score is
-                // passed straight through since it's date-independent and
-                // must match the Goals page regardless of period.
                 $scores[$userId] = $this->scoreBreakdownForPeriod(
                     $user,
                     $company->leaderboard_period_start,
@@ -425,18 +419,7 @@ class UserScoreService
         ?float $goalScore = null
     ): array
     {
-        $dailyTrackerIds = $this->dailyTrackerIdsForUser($user);
-        $completedCount = 0;
-
-        foreach ($dailyTrackerIds as $taskId) {
-            if ($this->dailyTrackerTaskCompleted($tracker, $taskId)) {
-                $completedCount++;
-            }
-        }
-
-        $dailyTrackerScore = count($dailyTrackerIds) > 0
-            ? (($completedCount / count($dailyTrackerIds)) * 100)
-            : (float) ($tracker->user_total_score ?? 0);
+        $dailyTrackerScore = $this->scoreDailyTrackerTasks($user, $tracker);
 
         $resolvedGoalScore = $goalScore ?? $this->legacyGoalScoreFromTracker($tracker);
         $effectiveGoalScore = $resolvedGoalScore > 0
@@ -539,6 +522,47 @@ class UserScoreService
         }
 
         return $ids === [] ? self::DEFAULT_DAILY_TRACKER_IDS : array_values(array_unique($ids));
+    }
+
+    private function scoreDailyTrackerTasks(User $user, DailyTracker $tracker): float
+    {
+        $dailyTrackerIds = $this->dailyTrackerIdsForTracker($user, $tracker);
+        $completedCount = 0;
+
+        foreach ($dailyTrackerIds as $taskId) {
+            if ($this->dailyTrackerTaskCompleted($tracker, $taskId)) {
+                $completedCount++;
+            }
+        }
+
+        return count($dailyTrackerIds) > 0
+            ? (($completedCount / count($dailyTrackerIds)) * 100)
+            : (float) ($tracker->user_total_score ?? 0);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function dailyTrackerIdsForTracker(User $user, DailyTracker $tracker): array
+    {
+        $customDailyTasks = $tracker->custom_daily_tasks;
+        if (is_array($customDailyTasks)) {
+            $snapshotTaskIds = $customDailyTasks['__snapshotTaskIds'] ?? null;
+            if (is_array($snapshotTaskIds)) {
+                $ids = collect($snapshotTaskIds)
+                    ->map(fn ($id) => trim((string) $id))
+                    ->filter(fn (string $id) => $id !== '' && $id !== 'todoList')
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if ($ids !== []) {
+                    return $ids;
+                }
+            }
+        }
+
+        return $this->dailyTrackerIdsForUser($user);
     }
 
     private function dailyTrackerTaskCompleted(DailyTracker $tracker, string $taskId): bool
@@ -682,6 +706,7 @@ class UserScoreService
             ->get();
 
         $totalDays = $start->diffInDays($end) + 1;
+        $normalizeLegacyGoalScore = $goalScore === null;
 
         $coreTaskScoreSum = 0.0;
         $latestGoalScore = $goalScore;
@@ -696,10 +721,14 @@ class UserScoreService
 
         if ($trackers->isEmpty()) {
             if ($latestGoalScore !== null) {
+                $goalScoreValue = $normalizeLegacyGoalScore && $totalDays > 0
+                    ? $this->roundOne(((float) $latestGoalScore) / $totalDays)
+                    : (float) $latestGoalScore;
+
                 return [
-                    'goalScore' => (float) $latestGoalScore,
+                    'goalScore' => $goalScoreValue,
                     'coreTaskScore' => 0.0,
-                    'overallScore' => (float) $latestGoalScore,
+                    'overallScore' => $goalScoreValue,
                 ];
             }
 
@@ -711,7 +740,11 @@ class UserScoreService
         }
 
         $coreTaskScore = $totalDays > 0 ? ($coreTaskScoreSum / $totalDays) : 0.0;
-        $goalScoreValue = (float) ($latestGoalScore ?? 0);
+        $goalScoreValue = $latestGoalScore === null
+            ? 0.0
+            : ($normalizeLegacyGoalScore && $totalDays > 0
+                ? $this->roundOne(((float) $latestGoalScore) / $totalDays)
+                : (float) $latestGoalScore);
         $overallScore = ($coreTaskScore + $goalScoreValue) / 2;
 
         return [
@@ -733,6 +766,32 @@ class UserScoreService
     private function resolveGoalScoresForUsers(Collection $users, ?Company $knownCompany = null): array
     {
         $scores = $this->resolveGoalScoresFromGoalModel($users);
+        $companiesByUser = $knownCompany !== null
+            ? array_fill_keys(
+                $users
+                    ->pluck('id')
+                    ->map(static fn ($id) => (string) $id)
+                    ->filter()
+                    ->values()
+                    ->all(),
+                $knownCompany,
+            )
+            : $this->resolveCompaniesForUsers($users);
+
+        foreach ($scores as $userId => $score) {
+            $company = $companiesByUser[$userId] ?? null;
+            if (! $this->hasConfiguredPeriod($company)) {
+                continue;
+            }
+
+            $periodDays = $company->leaderboard_period_start->copy()
+                ->startOfDay()
+                ->diffInDays($company->leaderboard_period_end->copy()->startOfDay()) + 1;
+
+            $scores[$userId] = $periodDays > 0
+                ? $this->roundOne(((float) $score) / $periodDays)
+                : 0.0;
+        }
 
         // The Goal/GoalTask models are a newer, structured goals system
         // that most users haven't adopted yet -- the "Goals" screen most
@@ -912,7 +971,9 @@ class UserScoreService
                 continue;
             }
 
-            $scores[$userId] = $this->scoreTodoTasks($userTasks);
+            $scores[$userId] = $periodStart !== null && $periodEnd !== null
+                ? $this->scoreTodoTasksForPeriod($userTasks, $periodStart, $periodEnd)
+                : $this->scoreTodoTasks($userTasks);
         }
 
         return $scores;
@@ -930,6 +991,144 @@ class UserScoreService
         $totalProgress = $tasks->sum(fn (TodoTask $task) => $this->todoTaskProgress($task));
 
         return round($totalProgress / $tasks->count());
+    }
+
+    /**
+     * @param  Collection<int, TodoTask>  $tasks
+     */
+    private function scoreTodoTasksForPeriod(Collection $tasks, Carbon $periodStart, Carbon $periodEnd): float
+    {
+        if ($tasks->isEmpty()) {
+            return 0.0;
+        }
+
+        $periodStart = $periodStart->copy()->startOfDay();
+        $periodEnd = $periodEnd->copy()->startOfDay();
+
+        if ($periodEnd->lt($periodStart)) {
+            return 0.0;
+        }
+
+        $totalPeriodDays = $periodStart->diffInDays($periodEnd) + 1;
+        if ($totalPeriodDays <= 0) {
+            return 0.0;
+        }
+
+        $totalProgress = $tasks->sum(
+            fn (TodoTask $task) => $this->todoTaskPeriodProgress($task, $periodStart, $periodEnd, $totalPeriodDays)
+        );
+
+        return round($totalProgress / $tasks->count(), 2);
+    }
+
+    private function todoTaskPeriodProgress(
+        TodoTask $task,
+        Carbon $periodStart,
+        Carbon $periodEnd,
+        int $totalPeriodDays
+    ): float {
+        if ($totalPeriodDays <= 0) {
+            return 0.0;
+        }
+
+        $today = Carbon::now()->startOfDay();
+        if ($today->lt($periodStart)) {
+            return 0.0;
+        }
+
+        $scoreEnd = $periodEnd->copy()->min($today);
+        $earnedDayCredits = strtoupper((string) $task->goal_type) === 'EVERYDAY'
+            ? $this->todoTaskEverydayEarnedDays($task, $periodStart, $scoreEnd)
+            : $this->todoTaskOneTimeEarnedDays($task, $periodStart, $scoreEnd);
+
+        return ($earnedDayCredits / $totalPeriodDays) * 100;
+    }
+
+    private function todoTaskOneTimeEarnedDays(TodoTask $task, Carbon $periodStart, Carbon $scoreEnd): float
+    {
+        $subTasks = is_array($task->sub_tasks) ? $task->sub_tasks : [];
+
+        if ($subTasks !== []) {
+            $completed = 0;
+            foreach ($subTasks as $subTask) {
+                if (is_array($subTask) && ($subTask['isCompleted'] ?? false) === true) {
+                    $completed++;
+                }
+            }
+
+            return count($subTasks) > 0 ? $completed / count($subTasks) : 0.0;
+        }
+
+        if (! $task->is_completed) {
+            return 0.0;
+        }
+
+        $completedAt = $task->completed_at instanceof Carbon
+            ? $task->completed_at->copy()
+            : ($task->completed_at ? Carbon::parse($task->completed_at) : $this->todoTaskStartDate($task));
+        if ($completedAt === null) {
+            return 0.0;
+        }
+        $completedDate = $completedAt->startOfDay();
+
+        $dueDate = $task->due_date instanceof Carbon
+            ? $task->due_date->copy()
+            : ($task->due_date ? Carbon::parse($task->due_date) : null);
+
+        if ($dueDate !== null && $completedDate->gt($dueDate->startOfDay())) {
+            return 0.0;
+        }
+
+        return $completedDate->betweenIncluded($periodStart, $scoreEnd) ? 1.0 : 0.0;
+    }
+
+    private function todoTaskEverydayEarnedDays(TodoTask $task, Carbon $periodStart, Carbon $scoreEnd): int
+    {
+        $taskStart = $this->todoTaskStartDate($task);
+        $dueDate = $task->due_date instanceof Carbon
+            ? $task->due_date->copy()
+            : ($task->due_date ? Carbon::parse($task->due_date) : null);
+
+        if ($taskStart === null || $dueDate === null) {
+            return 0;
+        }
+
+        $rangeStart = $taskStart->startOfDay()->max($periodStart);
+        $rangeEnd = $dueDate->startOfDay()->min($scoreEnd);
+
+        if ($rangeEnd->lt($rangeStart)) {
+            return 0;
+        }
+
+        $completedDates = collect($task->completion_dates ?? [])
+            ->map(fn ($date) => Carbon::parse($date)->startOfDay())
+            ->filter(fn (Carbon $date) => $date->betweenIncluded($rangeStart, $rangeEnd))
+            ->map(fn (Carbon $date) => $date->toDateString())
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($completedDates === [] && $task->is_completed) {
+            $completedAt = $task->completed_at instanceof Carbon
+                ? $task->completed_at->copy()
+                : ($task->completed_at ? Carbon::parse($task->completed_at) : null);
+
+            if ($completedAt !== null) {
+                $completedDate = $completedAt->startOfDay();
+                if ($completedDate->betweenIncluded($rangeStart, $rangeEnd)) {
+                    $completedDates = [$completedDate->toDateString()];
+                }
+            }
+        }
+
+        return count($completedDates);
+    }
+
+    private function todoTaskStartDate(TodoTask $task): ?Carbon
+    {
+        return $task->start_date instanceof Carbon
+            ? $task->start_date->copy()
+            : ($task->start_date ? Carbon::parse($task->start_date) : null);
     }
 
     private function todoTaskProgress(TodoTask $task): float
