@@ -6,7 +6,6 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -14,7 +13,7 @@ class ProfileMediaUploadTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_authenticated_user_can_upload_profile_media_to_the_cloud_disk(): void
+    public function test_avatar_upload_is_storage_only_until_profile_pic_is_explicitly_updated(): void
     {
         Storage::fake('do');
         config()->set('filesystems.media_upload_disk', 'do');
@@ -42,9 +41,22 @@ class ProfileMediaUploadTest extends TestCase
         $this->assertIsString($path);
         $this->assertIsString($url);
         $this->assertStringStartsWith('uploads/', $path);
+        $this->assertSame($url, $response->json('profile_pic'));
 
         Storage::disk('do')->assertExists($path);
 
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'profile_pic' => null,
+        ]);
+        $response->assertJsonPath('user.profile_pic', null);
+
+        $updateResponse = $this->patchJson('/api/me', [
+            'profile_pic' => $url,
+        ]);
+
+        $updateResponse->assertOk()
+            ->assertJsonPath('user.profile_pic', $url);
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
             'profile_pic' => $url,
@@ -87,6 +99,40 @@ class ProfileMediaUploadTest extends TestCase
         ]);
     }
 
+    public function test_legacy_exercise_avatar_upload_does_not_update_profile_pic(): void
+    {
+        Storage::fake('do');
+        config()->set('filesystems.media_upload_disk', 'do');
+        config()->set('filesystems.media_upload_path', 'uploads');
+
+        $originalProfilePic = 'https://example.com/original-avatar.jpg';
+        $user = User::factory()->create([
+            'profile_pic' => $originalProfilePic,
+        ]);
+        Sanctum::actingAs($user);
+
+        $response = $this->post('/api/media/upload', [
+            'kind' => 'avatar',
+            'file' => UploadedFile::fake()->image('exercise.jpg'),
+        ]);
+
+        $response->assertOk();
+
+        $path = $response->json('path');
+        $this->assertIsString($path);
+        $this->assertStringContainsString(
+            "users/{$user->id}/avatars/",
+            $path,
+        );
+        Storage::disk('do')->assertExists($path);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'profile_pic' => $originalProfilePic,
+        ]);
+        $response->assertJsonPath('user.profile_pic', $originalProfilePic);
+    }
+
     public function test_community_media_prefers_s3_when_cloud_storage_is_available(): void
     {
         Storage::fake('s3');
@@ -127,45 +173,24 @@ class ProfileMediaUploadTest extends TestCase
         ]);
     }
 
-    public function test_authenticated_user_can_upload_profile_media_even_when_profile_pic_column_is_unavailable(): void
+    public function test_authenticated_user_can_explicitly_update_profile_pic(): void
     {
-        Storage::fake('do');
-        config()->set('filesystems.media_upload_disk', 'do');
-        config()->set('filesystems.media_upload_path', 'uploads');
-        Schema::shouldReceive('hasColumn')
-            ->once()
-            ->with('users', 'profile_pic')
-            ->andReturn(false);
-
-        $user = User::factory()->create();
+        $user = User::factory()->create([
+            'profile_pic' => 'https://example.com/original-avatar.jpg',
+        ]);
         Sanctum::actingAs($user);
 
-        $response = $this->post('/api/media/upload', [
-            'kind' => 'avatar',
-            'file' => UploadedFile::fake()->image('avatar.jpg'),
+        $newProfilePic = 'https://example.com/new-avatar.jpg';
+        $response = $this->patchJson('/api/me', [
+            'profile_pic' => $newProfilePic,
         ]);
 
         $response->assertOk()
-            ->assertJsonStructure([
-                'url',
-                'profile_pic',
-                'path',
-                'user',
-            ]);
-
-        $path = $response->json('path');
-        $url = $response->json('url');
-
-        $this->assertIsString($path);
-        $this->assertIsString($url);
-        $this->assertSame($url, $response->json('profile_pic'));
-        $this->assertStringStartsWith('uploads/', $path);
+            ->assertJsonPath('user.profile_pic', $newProfilePic);
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
-            'profile_pic' => null,
+            'profile_pic' => $newProfilePic,
         ]);
-
-        Storage::disk('do')->assertExists($path);
     }
 
     public function test_authenticated_user_can_upload_profile_media_when_the_configured_disk_is_invalid(): void

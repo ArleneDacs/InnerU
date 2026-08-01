@@ -6,18 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class ProfileController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService)
-    {
-    }
+    public function __construct(private readonly UserScoreService $userScoreService) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -76,6 +73,7 @@ class ProfileController extends Controller
             'fasting_streak_last_date' => ['sometimes', 'nullable', 'date'],
             'fasting_streak_rewards' => ['sometimes', 'nullable', 'array'],
             'daily_tracker_items' => ['sometimes', 'nullable', 'array'],
+            'profile_pic' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
         $user->fill($validated);
@@ -114,16 +112,8 @@ class ProfileController extends Controller
 
         $url = Storage::disk($disk)->url($path);
 
-        if ($kind === 'avatar' && Schema::hasColumn($user->getTable(), 'profile_pic')) {
-            try {
-                $user->forceFill([
-                    'profile_pic' => $url,
-                ])->save();
-            } catch (\Throwable $throwable) {
-                report($throwable);
-            }
-        }
-
+        // Uploading media is storage-only. A profile picture changes only
+        // through the explicit profile update endpoint.
         return response()->json([
             'url' => $url,
             'profile_pic' => $url,
