@@ -31,7 +31,14 @@ class OneSignalPushService {
     await OneSignal.initialize(appId);
     NotificationPushRouter.instance.configure(navigatorKey);
     OneSignal.Notifications.addClickListener(_clickListener);
-    await OneSignal.Notifications.requestPermission(false);
+    final permissionGranted =
+        await OneSignal.Notifications.requestPermission(false);
+    if (!permissionGranted) {
+      debugPrint(
+        'OneSignal initialized, but notification permission is not granted. '
+        'Enable notifications for InnerU in the device settings.',
+      );
+    }
 
     _sessionSubscription = AuthService.instance.sessionStream.listen(
       _syncSession,

@@ -42,5 +42,11 @@ android {
 dependencies {
     implementation 'com.google.mlkit:image-labeling:17.0.9'
     implementation 'com.google.mlkit:image-labeling-custom:17.0.3'
-    implementation 'com.google.mlkit:linkfirebase:17.0.0'
+    implementation('com.google.mlkit:linkfirebase:17.0.0') {
+        // linkfirebase is legacy and still pulls firebase-iid 20.1.5, whose
+        // receiver is also bundled by modern firebase-messaging/OneSignal.
+        // InnerU only uses the on-device base labeler, so the obsolete IID
+        // transport is neither needed nor safe on the runtime classpath.
+        exclude group: 'com.google.firebase', module: 'firebase-iid'
+    }
 }

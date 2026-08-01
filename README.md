@@ -37,10 +37,19 @@ keyAlias=upload
 storeFile=../upload-keystore.jks
 ```
 
-3. Build a release artifact:
+3. Copy the OneSignal App ID from OneSignal **Settings > Keys & IDs**, then
+   provide it to every Flutter run/build. The App ID is safe to include in the
+   client; never include the OneSignal REST API key in Flutter.
 
 ```powershell
-flutter build appbundle --release
+flutter run --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
+```
+
+4. Build a release artifact with the same App ID:
+
+```powershell
+flutter build appbundle --release --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
+flutter build ipa --release --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
 ```
 
 If `android/key.properties` is missing, release builds now fail immediately instead
@@ -72,3 +81,15 @@ production environment variables:
 If those are already set on the server, no extra server change is needed.
 If not, add them to the backend `.env` before deploying so push delivery works
 for production notifications.
+
+The Flutter App ID and backend App ID must be identical. After changing backend
+environment values, clear Laravel's cached configuration before testing.
+
+## iOS push capability
+
+The Runner target includes the APNs entitlement and the Remote notifications
+background mode. In Apple Developer, enable **Push Notifications** for
+`com.valenin.inneru`, regenerate both development and App Store provisioning
+profiles, and configure the matching APNs key in OneSignal. A provisioning
+profile created before Push Notifications was enabled cannot register the
+device with APNs.
