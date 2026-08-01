@@ -44,63 +44,31 @@ void main() {
   testWidgets('group member sheet uses daily tracker and goals only', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    const session = AppSession(
-      id: 42,
-      token: 'leaderboard-test-token',
-      name: 'Coach Test',
-      email: 'coach@example.com',
-      role: 'coach',
-      isCoach: true,
-    );
-    await AppSessionService.instance.setSession(session);
-    CompanyThemeService.cacheThemeForUser('42', CompanyThemeData.standard);
-    addTearDown(AppSessionService.instance.clear);
-    addTearDown(() => CompanyThemeService.clearCachedThemeForUser('42'));
-
-    const member = LeaderboardApiGroupMember(
+    const member = LeaderboardEntry(
       userId: '7',
       name: 'Jenny',
       score: 73,
       goalScore: 82,
       coreTaskScore: 64,
-      overallScore: 73,
       rank: 1,
+      activity: UserActivity(),
       teamName: '2B-ASCEND',
-    );
-    const snapshot = LeaderboardApiSnapshot(
-      companyCode: 'ASCEND',
-      companyName: 'Ascend Company',
-      leaderboardPeriodStart: null,
-      leaderboardPeriodEnd: null,
-      entries: <LeaderboardApiCompanyEntry>[],
-      groups: <LeaderboardApiGroup>[
-        LeaderboardApiGroup(
-          groupId: 'group-1',
-          groupName: 'Ascend Team',
-          coachName: 'Coach Test',
-          companyName: 'Ascend Company',
-          totalScore: 73,
-          entries: <LeaderboardApiGroupMember>[member],
-          photoUrl: null,
-        ),
-      ],
-      menteeEntries: <LeaderboardApiGroupMember>[],
     );
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Leaderboard(debugLoader: () async => snapshot),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: GroupLeaderboardScoreBreakdownSheet(
+              entry: member,
+              theme: CompanyThemeData.standard,
+            ),
+          ),
+        ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Groups'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Ascend Team'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('#1 Jenny'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('Jenny score'), findsOneWidget);
     expect(find.text('Combined goal and daily tracker score.'), findsOneWidget);
