@@ -464,10 +464,6 @@ class _StepTrackerState extends State<StepTracker>
     if (_lottieController.isAnimating == false && mounted) {
       _lottieController.repeat();
     }
-
-    if (_lastAppleHealthStepCount == 0) {
-      unawaited(_showAppleHealthAccessDialogIfNeeded());
-    }
   }
 
   DateTime? _parseDateTime(String? value) {
@@ -540,9 +536,6 @@ class _StepTrackerState extends State<StepTracker>
 
     if (!mounted || _isDisposed) return;
 
-    final effectiveSyncStatus =
-        _effectiveAppleHealthSyncStatus(syncStatus, previousSteps);
-
     if (!showFeedback) {
       if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
         await _handleStepGoalCompleted();
@@ -550,7 +543,7 @@ class _StepTrackerState extends State<StepTracker>
       return;
     }
 
-    if (_shouldRequestAppleHealthAccess(effectiveSyncStatus)) {
+    if (_shouldRequestAppleHealthAccess(syncStatus)) {
       setState(() {
         _hasStepPermission = false;
         _stepPermissionMessage =
@@ -560,9 +553,7 @@ class _StepTrackerState extends State<StepTracker>
       if (!mounted || _isDisposed) return;
       final retryStatus = await _loadSteps();
       if (!mounted || _isDisposed) return;
-      if (!_shouldRequestAppleHealthAccess(
-        _effectiveAppleHealthSyncStatus(retryStatus, previousSteps),
-      )) {
+      if (!_shouldRequestAppleHealthAccess(retryStatus)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Apple Health synced.')),
         );
@@ -578,10 +569,10 @@ class _StepTrackerState extends State<StepTracker>
       return;
     }
 
-    final message = switch (effectiveSyncStatus) {
-      AppleHealthStepSyncStatus.success => 'Apple Health synced.',
-      _ => 'Apple Health sync requested.',
-    };
+    final message = _manualAppleHealthSyncMessage(
+      syncStatus: syncStatus,
+      previousSteps: previousSteps,
+    );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -591,26 +582,18 @@ class _StepTrackerState extends State<StepTracker>
     }
   }
 
-  AppleHealthStepSyncStatus? _effectiveAppleHealthSyncStatus(
-    AppleHealthStepSyncStatus? syncStatus,
-    int previousSteps,
-  ) {
-    if (!Platform.isIOS || widget.debugAutoGrantStepPermission) {
-      return syncStatus;
-    }
-    if (syncStatus != AppleHealthStepSyncStatus.success) {
-      return syncStatus;
-    }
-
-    final hadLiveStepsOnScreen = previousSteps > 0;
-    final hasHealthAccessWarning = _stepPermissionMessage != null;
-    final healthReturnedZero = _lastAppleHealthStepCount == 0;
-    if ((hadLiveStepsOnScreen || hasHealthAccessWarning) &&
-        healthReturnedZero) {
-      return AppleHealthStepSyncStatus.accessMayBeDisabled;
+  String _manualAppleHealthSyncMessage({
+    required AppleHealthStepSyncStatus? syncStatus,
+    required int previousSteps,
+  }) {
+    if (syncStatus == AppleHealthStepSyncStatus.success) {
+      if (previousSteps > 0 && _lastAppleHealthStepCount == 0) {
+        return 'No Apple Health steps found. If Health already has steps, check InnerU access.';
+      }
+      return 'Apple Health synced.';
     }
 
-    return syncStatus;
+    return 'Apple Health sync requested.';
   }
 
   bool _shouldRequestAppleHealthAccess(AppleHealthStepSyncStatus? syncStatus) {
@@ -624,7 +607,7 @@ class _StepTrackerState extends State<StepTracker>
     if (!mounted || _isDisposed) return;
     if (_appleHealthAccessDialogVisible) return;
 
-    if (_stepPermissionMessage == null && _steps <= _lastAppleHealthStepCount) {
+    if (_stepPermissionMessage == null) {
       return;
     }
 
@@ -639,7 +622,7 @@ class _StepTrackerState extends State<StepTracker>
 
   void _dismissAppleHealthAccessDialogIfReady() {
     if (!_appleHealthAccessDialogVisible) return;
-    if (_stepPermissionMessage != null || _lastAppleHealthStepCount <= 0) {
+    if (_stepPermissionMessage != null) {
       return;
     }
     Navigator.of(context, rootNavigator: true).pop('synced');
@@ -666,10 +649,7 @@ class _StepTrackerState extends State<StepTracker>
                   if (!dialogContext.mounted || !mounted || _isDisposed) {
                     return;
                   }
-                  if (!_shouldRequestAppleHealthAccess(
-                        _effectiveAppleHealthSyncStatus(retryStatus, _steps),
-                      ) &&
-                      _lastAppleHealthStepCount > 0) {
+                  if (!_shouldRequestAppleHealthAccess(retryStatus)) {
                     Navigator.of(dialogContext).pop('synced');
                   }
                 },

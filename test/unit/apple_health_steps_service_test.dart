@@ -44,6 +44,13 @@ void main() {
       );
     });
 
+    test('keeps zero as a valid Health App count after the day resets', () {
+      expect(
+        resolveAppleHealthStepCount(healthSteps: 0, localSteps: 4100),
+        0,
+      );
+    });
+
     test('uses Health App count when it is ahead of local cache', () {
       expect(
         resolveAppleHealthStepCount(

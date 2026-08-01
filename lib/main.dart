@@ -268,7 +268,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
     if (kIsWeb || !Platform.isIOS) return;
 
     final healthSync = await AppleHealthStepsService.instance.checkTodaySteps();
-    if (healthSync.shouldRequestAccess || (healthSync.steps ?? 0) <= 0) {
+    if (healthSync.shouldRequestAccess) {
       return;
     }
 
@@ -309,8 +309,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
                   final retryHealthSync =
                       await AppleHealthStepsService.instance.checkTodaySteps();
                   if (!context.mounted) return;
-                  if (!retryHealthSync.shouldRequestAccess &&
-                      (retryHealthSync.steps ?? 0) > 0) {
+                  if (!retryHealthSync.shouldRequestAccess) {
                     Navigator.of(context).pop('synced');
                   }
                 },

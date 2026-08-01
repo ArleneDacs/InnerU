@@ -117,19 +117,10 @@ class AppleHealthStepsService {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final savedStepsKey = SessionCleanupService.savedStepsKey(userId);
     final lastSavedDateKey = SessionCleanupService.lastSavedDateKey(userId);
-    final lastReadableHealthStepsKey =
-        SessionCleanupService.appleHealthLastReadableStepsKey(userId);
     final dailyGoal = await _loadDailyGoal(userId, prefs);
     final lastSavedDate = prefs.getString(lastSavedDateKey);
-    final lastReadableHealthSteps =
-        prefs.getInt(lastReadableHealthStepsKey) ?? 0;
     final localSteps =
         lastSavedDate == today ? prefs.getInt(savedStepsKey) ?? 0 : 0;
-    if (healthSteps == 0 && (localSteps > 0 || lastReadableHealthSteps > 0)) {
-      return const AppleHealthStepSyncResult(
-        status: AppleHealthStepSyncStatus.accessMayBeDisabled,
-      );
-    }
     final resolvedSteps = resolveAppleHealthStepCount(
       healthSteps: healthSteps,
       localSteps: localSteps,
@@ -138,9 +129,6 @@ class AppleHealthStepsService {
     await prefs.setInt(savedStepsKey, resolvedSteps);
     await prefs.setString(lastSavedDateKey, today);
     await prefs.setString(SessionCleanupService.stepCacheOwnerKey, userId);
-    if (healthSteps > 0) {
-      await prefs.setInt(lastReadableHealthStepsKey, healthSteps);
-    }
     WatchSyncService.instance.syncSteps(
       resolvedSteps,
       goal: dailyGoal,
