@@ -7,10 +7,16 @@ import 'package:selfcare_projects/src/features/authentication/screen/auth/auth_r
 import 'package:selfcare_projects/src/features/authentication/screen/login/check_email_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class RoleSelectionScreen extends StatefulWidget {
-  const RoleSelectionScreen({super.key});
+  const RoleSelectionScreen({
+    super.key,
+    this.companyCodeValidator,
+  });
+
+  final Future<bool> Function(String companyCode)? companyCodeValidator;
 
   @override
   State<RoleSelectionScreen> createState() => _RoleSelectionScreenState();
@@ -28,20 +34,50 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   String get _companyCode => _companyCodeController.text.trim().toUpperCase();
 
-  bool _validateCompanyChoice() {
-    if (_continueWithoutCompany || _companyCode.isNotEmpty) return true;
+  Future<bool> _validateCompanyChoice() async {
+    if (_continueWithoutCompany) return true;
 
+    final companyCode = _companyCode;
+    if (companyCode.isEmpty) {
+      _showError("Enter a company code or tick no company.");
+      return false;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final validator = widget.companyCodeValidator ??
+          CompanyApiService.instance.isCompanyCodeValid;
+      final isValid = await validator(companyCode);
+      if (!mounted) return false;
+      if (!isValid) {
+        _showError(CompanyApiService.invalidCompanyCodeMessage);
+      }
+      return isValid;
+    } catch (_) {
+      if (mounted) {
+        _showError(
+          "Unable to validate the company code. Please try again.",
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Enter a company code or tick no company."),
+      SnackBar(
+        content: Text(message),
         backgroundColor: Colors.red,
       ),
     );
-    return false;
   }
 
-  void _openEmailSignup() {
-    if (!_validateCompanyChoice()) return;
+  Future<void> _openEmailSignup() async {
+    if (!await _validateCompanyChoice() || !mounted) return;
 
     Navigator.push(
       context,
@@ -50,6 +86,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           selectedRole: _selectedRole,
           initialCompanyCode: _continueWithoutCompany ? '' : _companyCode,
           continueWithoutCompany: _continueWithoutCompany,
+          companyCodeValidator: widget.companyCodeValidator,
         ),
       ),
     );
@@ -65,7 +102,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       );
       return;
     }
-    if (!_validateCompanyChoice()) return;
+    if (!await _validateCompanyChoice() || !mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -96,7 +133,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           MaterialPageRoute(
             builder: (context) => CheckEmailScreen(
               email: pendingEmail,
-              initialSendFailed: !AuthService.instance.lastVerificationEmailSent,
+              initialSendFailed:
+                  !AuthService.instance.lastVerificationEmailSent,
             ),
           ),
         );
@@ -134,7 +172,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       );
       return;
     }
-    if (!_validateCompanyChoice()) return;
+    if (!await _validateCompanyChoice() || !mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -165,7 +203,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           MaterialPageRoute(
             builder: (context) => CheckEmailScreen(
               email: pendingEmail,
-              initialSendFailed: !AuthService.instance.lastVerificationEmailSent,
+              initialSendFailed:
+                  !AuthService.instance.lastVerificationEmailSent,
             ),
           ),
         );
@@ -420,9 +459,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                               borderRadius: BorderRadius.circular(28),
                             ),
                           ),
-                          onPressed: _isLoading
-                              ? null
-                              : _openEmailSignup,
+                          onPressed: _isLoading ? null : _openEmailSignup,
                           child: const Text(
                             "Continue with email",
                             style: TextStyle(

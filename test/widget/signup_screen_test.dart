@@ -7,6 +7,7 @@ Future<void> pumpSignup(
   String role = 'user',
   String initialCompanyCode = '',
   bool continueWithoutCompany = false,
+  Future<bool> Function(String companyCode)? companyCodeValidator,
 }) async {
   tester.view.physicalSize = const Size(1170, 2800);
   tester.view.devicePixelRatio = 2.0;
@@ -18,6 +19,7 @@ Future<void> pumpSignup(
         selectedRole: role,
         initialCompanyCode: initialCompanyCode,
         continueWithoutCompany: continueWithoutCompany,
+        companyCodeValidator: companyCodeValidator ?? (_) async => true,
       ),
     ),
   );
@@ -42,8 +44,7 @@ Future<void> acceptTerms(WidgetTester tester) async {
 
 void main() {
   group('SignupScreen UI', () {
-    testWidgets('renders every signup field for the user role',
-        (tester) async {
+    testWidgets('renders every signup field for the user role', (tester) async {
       await pumpSignup(tester);
 
       expect(field('Company Code'), findsOneWidget);
@@ -91,8 +92,7 @@ void main() {
   });
 
   group('SignupScreen validation', () {
-    testWidgets('blocks registration until terms are accepted',
-        (tester) async {
+    testWidgets('blocks registration until terms are accepted', (tester) async {
       await pumpSignup(tester);
 
       await tapRegister(tester);
@@ -147,11 +147,47 @@ void main() {
       await tester.enterText(field('Company Code'), 'AB');
       await tapRegister(tester);
 
-      expect(find.text('Enter a valid company code'), findsOneWidget);
+      expect(
+        find.text(
+          'Company code is invalid. Please enter a valid company code.',
+        ),
+        findsOneWidget,
+      );
     });
 
-    testWidgets('allows ABUNDANCE 12 short company code alias',
+    testWidgets('rejects a company code that is not in the database',
         (tester) async {
+      String? checkedCode;
+      await pumpSignup(
+        tester,
+        companyCodeValidator: (companyCode) async {
+          checkedCode = companyCode;
+          return false;
+        },
+      );
+      await acceptTerms(tester);
+
+      await tester.enterText(field('Company Code'), 'missing');
+      await tester.enterText(field('Username'), 'karina');
+      await tester.enterText(field('Email'), 'dmkarina62@gmail.com');
+      await tester.enterText(field('Phone Number'), '09171234567');
+      await tester.enterText(field('Password'), 'Str0ngPass1');
+      await tester.enterText(field('Re-type Password'), 'Str0ngPass1');
+
+      await tapRegister(tester);
+      await tester.pump();
+
+      expect(checkedCode, 'MISSING');
+      expect(
+        find.text(
+          'Company code is invalid. Please enter a valid company code.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('allows ABUNDANCE 12 short company code alias', (tester) async {
       await pumpSignup(tester);
       await acceptTerms(tester);
 

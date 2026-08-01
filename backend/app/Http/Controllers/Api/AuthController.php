@@ -18,10 +18,13 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
+    private const INVALID_COMPANY_CODE_MESSAGE = 'Company code is invalid. Please enter a valid company code.';
+
     public function __construct(
         private readonly UserScoreService $userScoreService,
         private readonly FirebaseScryptVerifier $firebaseScryptVerifier,
@@ -38,12 +41,13 @@ class AuthController extends Controller
             'role' => ['required', 'string', 'max:30'],
             'company_code' => ['nullable', 'string', 'max:60'],
             'company_name' => ['nullable', 'string', 'max:120'],
-        ]);
+            'continue_without_company' => ['nullable', 'boolean'],
+        ], $this->companyCodeValidationMessages());
 
         $role = strtolower($validated['role']);
-        $companyCode = $validated['company_code'] ?? null;
-        $company = $companyCode !== null ? Company::where('code', $companyCode)->first() : null;
-        $companyName = $company?->name ?? ($validated['company_name'] ?? null);
+        $company = $this->resolveActiveCompany($validated);
+        $companyCode = $company?->code;
+        $companyName = $company?->name;
 
         $pending = PendingRegistration::updateOrCreate(
             ['email' => $validated['email']],
@@ -84,6 +88,19 @@ class AuthController extends Controller
             'email' => $pending->email,
             'name' => $pending->name,
         ], Response::HTTP_CREATED);
+    }
+
+    public function validateCompanyCode(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'company_code' => ['required', 'string', 'max:60'],
+        ], $this->companyCodeValidationMessages());
+
+        if ($this->activeCompanyByCode((string) $validated['company_code']) === null) {
+            $this->throwInvalidCompanyCode();
+        }
+
+        return response()->json(['valid' => true]);
     }
 
     public function login(Request $request): JsonResponse
@@ -171,7 +188,7 @@ class AuthController extends Controller
             'company_code' => ['nullable', 'string', 'max:60'],
             'company_name' => ['nullable', 'string', 'max:120'],
             'continue_without_company' => ['nullable', 'boolean'],
-        ]);
+        ], $this->companyCodeValidationMessages());
 
         $response = Http::acceptJson()->get('https://oauth2.googleapis.com/tokeninfo', [
             'id_token' => $validated['id_token'],
@@ -217,6 +234,7 @@ class AuthController extends Controller
         $user = User::where('email', $email)->first();
         $pending = PendingRegistration::where('email', $email)->first();
         $createAccount = (bool) ($validated['create_account'] ?? false);
+        $signupCompany = $createAccount ? $this->resolveActiveCompany($validated) : null;
 
         if ($user === null) {
             if ($pending !== null) {
@@ -226,8 +244,7 @@ class AuthController extends Controller
                     ], Response::HTTP_FORBIDDEN);
                 }
 
-                $pendingCompanyCode = $this->resolvedCompanyCode($validated);
-                $pendingCompany = $this->resolvedCompany($validated);
+                $pendingCompanyCode = $signupCompany?->code;
 
                 $pending->fill([
                     'name' => $name !== '' ? $name : Str::before($email, '@'),
@@ -235,12 +252,12 @@ class AuthController extends Controller
                     'role' => strtolower((string) ($validated['role'] ?? 'user')),
                     'is_coach' => strtolower((string) ($validated['role'] ?? 'user')) === 'coach',
                     'company_code' => $pendingCompanyCode,
-                    'company_name' => $pendingCompany?->name ?? $pendingCompanyCode,
+                    'company_name' => $signupCompany?->name,
                     'has_company' => filled($pendingCompanyCode),
-                    'company_id' => $pendingCompany?->id,
-                    'active_company_id' => $pendingCompany?->id,
+                    'company_id' => $signupCompany?->id,
+                    'active_company_id' => $signupCompany?->id,
                     'active_company_code' => $pendingCompanyCode,
-                    'active_company_name' => $pendingCompany?->name ?? $pendingCompanyCode,
+                    'active_company_name' => $signupCompany?->name,
                     'profile_pic' => $picture,
                     'encrypted_password' => Crypt::encryptString(Str::random(64)),
                 ])->save();
@@ -265,9 +282,8 @@ class AuthController extends Controller
             }
 
             $role = strtolower((string) ($validated['role'] ?? 'user'));
-            $companyCode = $this->resolvedCompanyCode($validated);
-            $company = $this->resolvedCompany($validated);
-            $companyName = $company?->name ?? $companyCode;
+            $companyCode = $signupCompany?->code;
+            $companyName = $signupCompany?->name;
             $displayName = $name !== '' ? $name : Str::before($email, '@');
 
             $pending = PendingRegistration::create([
@@ -279,8 +295,8 @@ class AuthController extends Controller
                 'company_code' => $companyCode,
                 'company_name' => $companyName,
                 'has_company' => filled($companyCode),
-                'company_id' => $company?->id,
-                'active_company_id' => $company?->id,
+                'company_id' => $signupCompany?->id,
+                'active_company_id' => $signupCompany?->id,
                 'active_company_code' => $companyCode,
                 'active_company_name' => $companyName,
                 'active_company_score_mode' => null,
@@ -349,7 +365,7 @@ class AuthController extends Controller
             'given_name' => ['nullable', 'string', 'max:120'],
             'family_name' => ['nullable', 'string', 'max:120'],
             'full_name' => ['nullable', 'string', 'max:255'],
-        ]);
+        ], $this->companyCodeValidationMessages());
 
         try {
             $applePayload = $this->verifyAppleIdentityToken(
@@ -373,6 +389,7 @@ class AuthController extends Controller
             : null;
         $name = $this->appleDisplayName($validated);
         $createAccount = (bool) ($validated['create_account'] ?? false);
+        $signupCompany = $createAccount ? $this->resolveActiveCompany($validated) : null;
         $supportsAppleUserIdOnUsers = Schema::hasColumn('users', 'apple_user_id');
         $supportsAppleUserIdOnPendingRegistrations = Schema::hasColumn(
             'pending_registrations',
@@ -449,9 +466,8 @@ class AuthController extends Controller
             }
 
             $role = strtolower((string) ($validated['role'] ?? 'user'));
-            $companyCode = $this->resolvedCompanyCode($validated);
-            $company = $this->resolvedCompany($validated);
-            $companyName = $company?->name ?? $companyCode;
+            $companyCode = $signupCompany?->code;
+            $companyName = $signupCompany?->name;
             $displayName = $name !== '' ? $name : Str::before($email, '@');
 
             $pendingAttributes = [
@@ -464,8 +480,8 @@ class AuthController extends Controller
                 'company_code' => $companyCode,
                 'company_name' => $companyName,
                 'has_company' => filled($companyCode),
-                'company_id' => $company?->id,
-                'active_company_id' => $company?->id,
+                'company_id' => $signupCompany?->id,
+                'active_company_id' => $signupCompany?->id,
                 'active_company_code' => $companyCode,
                 'active_company_name' => $companyName,
                 'active_company_score_mode' => null,
@@ -902,7 +918,7 @@ class AuthController extends Controller
     /**
      * @param array<string, mixed> $validated
      */
-    private function resolvedCompanyCode(array $validated): ?string
+    private function resolveActiveCompany(array $validated): ?Company
     {
         $continueWithoutCompany = (bool) ($validated['continue_without_company'] ?? false);
         $companyCode = trim((string) ($validated['company_code'] ?? ''));
@@ -911,25 +927,41 @@ class AuthController extends Controller
             return null;
         }
 
-        return $companyCode;
+        $company = $this->activeCompanyByCode($companyCode);
+
+        if ($company === null) {
+            $this->throwInvalidCompanyCode();
+        }
+
+        return $company;
+    }
+
+    private function activeCompanyByCode(string $companyCode): ?Company
+    {
+        $normalizedCode = Str::lower(trim($companyCode));
+
+        return Company::query()
+            ->where('is_active', true)
+            ->whereRaw('LOWER(TRIM(code)) = ?', [$normalizedCode])
+            ->first();
     }
 
     /**
-     * Looks up the real Company record for a resolved company code, so
-     * callers can use its actual UUID (company_id) and display name
-     * (company_name) instead of the raw code string. Returns null both when
-     * no code was given and when the code doesn't match a real company -
-     * callers should fall back to the raw code for company_name in that
-     * second case, matching existing behavior for ad-hoc codes.
+     * @return array<string, string>
      */
-    private function resolvedCompany(array $validated): ?Company
+    private function companyCodeValidationMessages(): array
     {
-        $code = $this->resolvedCompanyCode($validated);
-        if ($code === null) {
-            return null;
-        }
-
-        return Company::where('code', $code)->first();
+        return [
+            'company_code.required' => self::INVALID_COMPANY_CODE_MESSAGE,
+            'company_code.string' => self::INVALID_COMPANY_CODE_MESSAGE,
+            'company_code.max' => self::INVALID_COMPANY_CODE_MESSAGE,
+        ];
     }
 
+    private function throwInvalidCompanyCode(): never
+    {
+        throw ValidationException::withMessages([
+            'company_code' => self::INVALID_COMPANY_CODE_MESSAGE,
+        ]);
+    }
 }

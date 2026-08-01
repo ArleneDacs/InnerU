@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/login/check_email_screen.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -10,11 +11,13 @@ class SignupScreen extends StatefulWidget {
     required this.selectedRole,
     this.initialCompanyCode = '',
     this.continueWithoutCompany = false,
+    this.companyCodeValidator,
   });
 
   final String selectedRole;
   final String initialCompanyCode;
   final bool continueWithoutCompany;
+  final Future<bool> Function(String companyCode)? companyCodeValidator;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -33,6 +36,7 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
   bool _acceptedTerms = false;
   late bool _continueWithoutCompany;
+  String? _companyCodeValidationError;
 
   @override
   void initState() {
@@ -87,6 +91,37 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() {
       _isLoading = true;
     });
+
+    if (!_continueWithoutCompany) {
+      final companyCode = _companyCodeController.text.trim().toUpperCase();
+      try {
+        final validator = widget.companyCodeValidator ??
+            CompanyApiService.instance.isCompanyCodeValid;
+        final isValid = await validator(companyCode);
+        if (!mounted) return;
+        if (!isValid) {
+          setState(() {
+            _companyCodeValidationError =
+                CompanyApiService.invalidCompanyCodeMessage;
+            _isLoading = false;
+          });
+          _formKey.currentState?.validate();
+          return;
+        }
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Unable to validate the company code. Please try again.",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
 
     final error = await AuthService().signUpUser(
       username: _usernameController.text.trim(),
@@ -241,6 +276,11 @@ class _SignupScreenState extends State<SignupScreen> {
                               : "Company Code",
                         ),
                         onChanged: (value) {
+                          if (_companyCodeValidationError != null) {
+                            setState(() {
+                              _companyCodeValidationError = null;
+                            });
+                          }
                           final upperValue = value.toUpperCase();
                           if (value != upperValue) {
                             _companyCodeController.value =
@@ -259,9 +299,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           }
                           if (value.trim().length < 4 &&
                               !_isAbundance12Code(value)) {
-                            return "Enter a valid company code";
+                            return CompanyApiService.invalidCompanyCodeMessage;
                           }
-                          return null;
+                          return _companyCodeValidationError;
                         },
                       ),
                       SizedBox(height: context.responsiveValue(10)),
@@ -487,6 +527,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   : (value) {
                       setState(() {
                         _continueWithoutCompany = value ?? false;
+                        _companyCodeValidationError = null;
                         if (_continueWithoutCompany) {
                           _companyCodeController.clear();
                         }

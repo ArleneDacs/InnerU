@@ -21,6 +21,8 @@ class AuthTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const INVALID_COMPANY_CODE_MESSAGE = 'Company code is invalid. Please enter a valid company code.';
+
     #[DataProvider('signupRoleProvider')]
     public function test_register_stores_a_pending_registration_for_each_role(
         string $role,
@@ -29,6 +31,14 @@ class AuthTest extends TestCase
         ?string $companyName
     ): void {
         Notification::fake();
+
+        if ($companyCode !== null) {
+            Company::create([
+                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'name' => (string) $companyName,
+                'code' => $companyCode,
+            ]);
+        }
 
         $response = $this->postJson('/api/auth/register', [
             'name' => $role === 'coach' ? 'Coach Member' : 'User Member',
@@ -115,6 +125,12 @@ class AuthTest extends TestCase
     {
         Notification::fake();
 
+        Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'ACME',
+            'code' => 'ACME',
+        ]);
+
         $response = $this->postJson('/api/auth/register', [
             'name' => 'New Member',
             'email' => 'new.member.inneru@gmail.com',
@@ -168,7 +184,7 @@ class AuthTest extends TestCase
             'password' => 'Password123',
             'number' => '09171234567',
             'role' => 'user',
-            'company_code' => 'GEN0KUS',
+            'company_code' => ' gen0kus ',
             // The client sends the code as company_name too (matching what
             // the real app was observed sending) - the real company name
             // must win over this, not the other way around.
@@ -185,6 +201,52 @@ class AuthTest extends TestCase
         $this->assertSame($company->id, $pending->active_company_id);
         $this->assertSame('Gencys', $pending->company_name);
         $this->assertSame('Gencys', $pending->active_company_name);
+    }
+
+    public function test_register_rejects_an_unknown_company_code(): void
+    {
+        Notification::fake();
+
+        $response = $this->postJson('/api/auth/register', [
+            'name' => 'Unknown Company Member',
+            'email' => 'unknown.company.member.inneru@gmail.com',
+            'password' => 'Password123',
+            'role' => 'user',
+            'company_code' => 'DOES-NOT-EXIST',
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonPath('message', self::INVALID_COMPANY_CODE_MESSAGE)
+            ->assertJsonPath('errors.company_code.0', self::INVALID_COMPANY_CODE_MESSAGE);
+
+        $this->assertDatabaseMissing('pending_registrations', [
+            'email' => 'unknown.company.member.inneru@gmail.com',
+        ]);
+    }
+
+    public function test_register_can_continue_without_a_company_even_if_a_stale_code_is_supplied(): void
+    {
+        Notification::fake();
+
+        $response = $this->postJson('/api/auth/register', [
+            'name' => 'Independent Member',
+            'email' => 'independent.member.inneru@gmail.com',
+            'password' => 'Password123',
+            'role' => 'user',
+            'company_code' => 'STALE-CODE',
+            'company_name' => 'Stale Company',
+            'continue_without_company' => true,
+        ]);
+
+        $response->assertCreated();
+
+        $this->assertDatabaseHas('pending_registrations', [
+            'email' => 'independent.member.inneru@gmail.com',
+            'company_code' => null,
+            'company_name' => null,
+            'company_id' => null,
+            'has_company' => false,
+        ]);
     }
 
     public function test_verifying_a_pending_registration_creates_the_user(): void
@@ -437,6 +499,12 @@ class AuthTest extends TestCase
     {
         Notification::fake();
 
+        Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'ABC123',
+            'code' => 'ABC123',
+        ]);
+
         Http::fake([
             'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
                 'email' => 'google-user.inneru@gmail.com',
@@ -504,7 +572,7 @@ class AuthTest extends TestCase
             'id_token' => 'google-id-token',
             'create_account' => true,
             'role' => 'user',
-            'company_code' => 'GEN0KUS',
+            'company_code' => ' gen0kus ',
         ])->assertCreated();
 
         $pending = PendingRegistration::where('email', 'google-company.inneru@gmail.com')->firstOrFail();
@@ -515,6 +583,34 @@ class AuthTest extends TestCase
         $this->assertSame($company->id, $pending->active_company_id);
         $this->assertSame('Gencys', $pending->company_name);
         $this->assertSame('Gencys', $pending->active_company_name);
+    }
+
+    public function test_google_signup_rejects_an_unknown_company_code(): void
+    {
+        Http::fake([
+            'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
+                'email' => 'google-invalid-company.inneru@gmail.com',
+                'email_verified' => 'true',
+                'name' => 'Google Invalid Company',
+                'aud' => config('services.google.web_client_id'),
+                'iss' => 'accounts.google.com',
+            ], 200),
+        ]);
+
+        $response = $this->postJson('/api/auth/google', [
+            'id_token' => 'google-id-token',
+            'create_account' => true,
+            'role' => 'user',
+            'company_code' => 'DOES-NOT-EXIST',
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonPath('message', self::INVALID_COMPANY_CODE_MESSAGE)
+            ->assertJsonPath('errors.company_code.0', self::INVALID_COMPANY_CODE_MESSAGE);
+
+        $this->assertDatabaseMissing('pending_registrations', [
+            'email' => 'google-invalid-company.inneru@gmail.com',
+        ]);
     }
 
     public function test_google_login_rejects_missing_accounts(): void
@@ -582,6 +678,12 @@ class AuthTest extends TestCase
     {
         Notification::fake();
         Cache::forget('apple.identity.keys');
+
+        Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'ABC123',
+            'code' => 'ABC123',
+        ]);
 
         $rawNonce = bin2hex(random_bytes(16));
         $tokenData = $this->makeAppleIdentityToken([
@@ -662,7 +764,7 @@ class AuthTest extends TestCase
             'raw_nonce' => $rawNonce,
             'create_account' => true,
             'role' => 'user',
-            'company_code' => 'GEN0KUS',
+            'company_code' => ' gen0kus ',
             'email' => 'apple-company.inneru@icloud.com',
             'given_name' => 'Apple',
             'family_name' => 'Company',
@@ -676,6 +778,51 @@ class AuthTest extends TestCase
         $this->assertSame($company->id, $pending->active_company_id);
         $this->assertSame('Gencys', $pending->company_name);
         $this->assertSame('Gencys', $pending->active_company_name);
+    }
+
+    public function test_apple_signup_rejects_an_inactive_company_code(): void
+    {
+        Cache::forget('apple.identity.keys');
+
+        Company::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'name' => 'Inactive Company',
+            'code' => 'INACTIVE',
+            'is_active' => false,
+        ]);
+
+        $rawNonce = bin2hex(random_bytes(16));
+        $tokenData = $this->makeAppleIdentityToken([
+            'sub' => 'apple-subject-inactive-company',
+            'email' => 'apple-inactive-company.inneru@icloud.com',
+            'iss' => 'https://appleid.apple.com',
+            'aud' => config('services.apple.bundle_id'),
+            'exp' => now()->addHour()->timestamp,
+            'iat' => now()->timestamp,
+            'nonce' => hash('sha256', $rawNonce),
+            'email_verified' => 'true',
+        ]);
+
+        Http::fake([
+            'https://appleid.apple.com/auth/keys*' => Http::response($tokenData['keys'], 200),
+        ]);
+
+        $response = $this->postJson('/api/auth/apple', [
+            'identity_token' => $tokenData['token'],
+            'raw_nonce' => $rawNonce,
+            'create_account' => true,
+            'role' => 'user',
+            'company_code' => 'inactive',
+            'email' => 'apple-inactive-company.inneru@icloud.com',
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonPath('message', self::INVALID_COMPANY_CODE_MESSAGE)
+            ->assertJsonPath('errors.company_code.0', self::INVALID_COMPANY_CODE_MESSAGE);
+
+        $this->assertDatabaseMissing('pending_registrations', [
+            'email' => 'apple-inactive-company.inneru@icloud.com',
+        ]);
     }
 
     public function test_apple_login_rejects_missing_accounts(): void

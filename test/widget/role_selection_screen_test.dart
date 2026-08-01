@@ -3,12 +3,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/role_selection_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/signup/signup.dart';
 
-Future<void> pumpRoleSelection(WidgetTester tester) async {
+Future<void> pumpRoleSelection(
+  WidgetTester tester, {
+  Future<bool> Function(String companyCode)? companyCodeValidator,
+}) async {
   tester.view.physicalSize = const Size(1170, 2800);
   tester.view.devicePixelRatio = 2.0;
   addTearDown(tester.view.reset);
 
-  await tester.pumpWidget(const MaterialApp(home: RoleSelectionScreen()));
+  await tester.pumpWidget(
+    MaterialApp(
+      home: RoleSelectionScreen(
+        companyCodeValidator: companyCodeValidator ?? (_) async => true,
+      ),
+    ),
+  );
   await tester.pump();
 }
 
@@ -37,8 +46,7 @@ void main() {
   });
 
   group('RoleSelectionScreen flow', () {
-    testWidgets(
-        'continue with email without company choice shows a warning',
+    testWidgets('continue with email without company choice shows a warning',
         (tester) async {
       await pumpRoleSelection(tester);
 
@@ -53,8 +61,7 @@ void main() {
       expect(find.byType(SignupScreen), findsNothing);
     });
 
-    testWidgets(
-        'continue with email with a company code opens the signup form',
+    testWidgets('continue with email with a company code opens the signup form',
         (tester) async {
       await pumpRoleSelection(tester);
 
@@ -70,6 +77,35 @@ void main() {
       // The entered company code is carried into the signup form.
       expect(find.text('ACME'), findsOneWidget);
       expect(find.text('Register'), findsOneWidget);
+    });
+
+    testWidgets('an unknown company code shows an error and blocks signup',
+        (tester) async {
+      String? checkedCode;
+      await pumpRoleSelection(
+        tester,
+        companyCodeValidator: (companyCode) async {
+          checkedCode = companyCode;
+          return false;
+        },
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Company code'),
+        'missing',
+      );
+      await tester.ensureVisible(find.text('Continue with email'));
+      await tester.tap(find.text('Continue with email'));
+      await tester.pump();
+
+      expect(checkedCode, 'MISSING');
+      expect(
+        find.text(
+          'Company code is invalid. Please enter a valid company code.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(SignupScreen), findsNothing);
     });
   });
 }

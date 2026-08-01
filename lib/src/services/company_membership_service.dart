@@ -47,7 +47,9 @@ class CompanyMembership {
     final name = (data['name'] as String?)?.trim();
     return CompanyMembership(
       id: (data['id'] as String?)?.trim() ?? code ?? '',
-      code: code?.isNotEmpty == true ? code! : (data['id'] as String?)?.trim() ?? '',
+      code: code?.isNotEmpty == true
+          ? code!
+          : (data['id'] as String?)?.trim() ?? '',
       name: name?.isNotEmpty == true ? name! : 'Company',
       scoreMode: scoreMode,
     );
@@ -144,7 +146,8 @@ class CompanyMembershipService {
     ];
 
     final memberships = _membershipsFromUserData(userData);
-    final activeMembership = _activeMembershipFromUserData(userData, memberships);
+    final activeMembership =
+        _activeMembershipFromUserData(userData, memberships);
     if (activeMembership != null) {
       keys.addAll([
         activeMembership.id,
@@ -159,7 +162,8 @@ class CompanyMembershipService {
 
     final companyCodes = userData['companyCodes'];
     if (companyCodes is List) {
-      keys.addAll(companyCodes.whereType<String>().map((value) => value.trim()));
+      keys.addAll(
+          companyCodes.whereType<String>().map((value) => value.trim()));
     }
 
     return keys
@@ -202,7 +206,8 @@ class CompanyMembershipService {
     if (normalizedCode.isEmpty) return null;
 
     try {
-      final company = await CompanyApiService.instance.findByCode(normalizedCode);
+      final company =
+          await CompanyApiService.instance.findByCode(normalizedCode);
       if (company == null || !company.isActive) return null;
       return CompanyMembership.fromCompanyDoc({
         'id': company.id,
@@ -222,7 +227,7 @@ class CompanyMembershipService {
   }) async {
     final company = await findCompanyByCode(companyCode);
     if (company == null) {
-      throw StateError('Invalid company code.');
+      throw StateError(CompanyApiService.invalidCompanyCodeMessage);
     }
 
     final membership = company.copyWith(scoreMode: scoreMode);
@@ -258,8 +263,7 @@ class CompanyMembershipService {
       'active_company_name': membership.name,
       'active_company_score_mode': membership.scoreMode.id,
       'score_mode': membership.scoreMode.id,
-      'company_memberships':
-          memberships.map((item) => item.toMap()).toList(),
+      'company_memberships': memberships.map((item) => item.toMap()).toList(),
       'company_ids': memberships.map((item) => item.id).toList(),
       'company_codes': memberships.map((item) => item.code).toList(),
     });

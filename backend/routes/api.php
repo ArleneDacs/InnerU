@@ -36,6 +36,7 @@ Route::get('/app-version', [AppVersionController::class, 'show']);
 
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/company-code/validate', [AuthController::class, 'validateCompanyCode']);
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/google', [AuthController::class, 'google']);
     Route::post('/apple', [AuthController::class, 'apple']);

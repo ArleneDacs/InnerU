@@ -88,9 +88,29 @@ class CompanyApiService {
   CompanyApiService._();
 
   static final CompanyApiService instance = CompanyApiService._();
+  static const String invalidCompanyCodeMessage =
+      'Company code is invalid. Please enter a valid company code.';
 
   final ApiClient _api = ApiClient.instance;
   String? get _token => AuthService.instance.currentSession?.token;
+
+  Future<bool> isCompanyCodeValid(String code) async {
+    final normalizedCode = code.trim().toUpperCase();
+    if (normalizedCode.isEmpty) return false;
+
+    try {
+      final response = await _api.postJson(
+        '/api/auth/company-code/validate',
+        {'company_code': normalizedCode},
+      );
+      return response['valid'] == true;
+    } on ApiException catch (error) {
+      if (error.statusCode == 422 || error.statusCode == 404) {
+        return false;
+      }
+      rethrow;
+    }
+  }
 
   Future<List<CompanyApiCompany>> fetchCompanies() async {
     final response = await _api.getJson(
@@ -146,7 +166,8 @@ class CompanyApiService {
     );
   }
 
-  Future<List<Map<String, dynamic>>> fetchCompanyMembers(String companyId) async {
+  Future<List<Map<String, dynamic>>> fetchCompanyMembers(
+      String companyId) async {
     final response = await _api.getJson(
       '/api/companies/$companyId/members',
       token: _token,

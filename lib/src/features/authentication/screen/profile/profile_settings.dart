@@ -4,6 +4,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/privacy/pri
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
@@ -230,8 +231,7 @@ class _CompanyMembershipSettingsPanel extends StatefulWidget {
 }
 
 class _CompanyMembershipSettingsPanelState
-    extends State<_CompanyMembershipSettingsPanel>
-    with WidgetsBindingObserver {
+    extends State<_CompanyMembershipSettingsPanel> with WidgetsBindingObserver {
   late Future<CompanyMembershipData> _membershipFuture;
   final TextEditingController _codeController = TextEditingController();
   CompanyScoreMode _selectedScoreMode = CompanyScoreMode.merged;
@@ -290,7 +290,7 @@ class _CompanyMembershipSettingsPanelState
       return;
     }
     if (code.length < 4 && !_isAbundance12Code(code)) {
-      _showMessage('Enter a valid company code.');
+      _showMessage(CompanyApiService.invalidCompanyCodeMessage);
       return;
     }
 
