@@ -37,20 +37,23 @@ keyAlias=upload
 storeFile=../upload-keystore.jks
 ```
 
-3. Copy the OneSignal App ID from OneSignal **Settings > Keys & IDs**, then
-   provide it to every Flutter run/build. The App ID is safe to include in the
-   client; never include the OneSignal REST API key in Flutter.
+3. The public OneSignal App ID is included in the app configuration, so normal
+   Flutter and Xcode builds do not need an extra build argument. Never include
+   the OneSignal REST API key in Flutter.
 
 ```powershell
-flutter run --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
+flutter run
 ```
 
-4. Build a release artifact with the same App ID:
+4. Build release artifacts normally:
 
 ```powershell
-flutter build appbundle --release --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
-flutter build ipa --release --dart-define=ONESIGNAL_APP_ID="your-onesignal-app-id"
+flutter build appbundle --release
+flutter build ipa --release
 ```
+
+To build for a different OneSignal environment, override the default with
+`--dart-define=ONESIGNAL_APP_ID=another-app-id`.
 
 If `android/key.properties` is missing, release builds now fail immediately instead
 of producing an artifact that may be signed incorrectly.
@@ -60,7 +63,6 @@ of producing an artifact that may be signed incorrectly.
 If you want GitHub Actions to build the Android release for you, add these
 repository secrets:
 
-- `ONESIGNAL_APP_ID`
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_STORE_PASSWORD`
 - `ANDROID_KEY_PASSWORD`
@@ -68,7 +70,7 @@ repository secrets:
 
 `ANDROID_KEYSTORE_BASE64` should be the base64-encoded contents of
 `upload-keystore.jks`. The release workflow writes `android/key.properties`
-automatically and passes `ONESIGNAL_APP_ID` into the Flutter build.
+automatically; the public OneSignal App ID comes from the app configuration.
 
 ## Backend OneSignal env
 

@@ -61,20 +61,14 @@ jobs:
           EOF
 
       - name: Build release app bundle
-        env:
-          ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
         run: |
           set -euo pipefail
-          : "${ONESIGNAL_APP_ID:?Missing ONESIGNAL_APP_ID secret}"
-          flutter build appbundle --release --dart-define=ONESIGNAL_APP_ID="$ONESIGNAL_APP_ID"
+          flutter build appbundle --release
 
       - name: Build release APK
-        env:
-          ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
         run: |
           set -euo pipefail
-          : "${ONESIGNAL_APP_ID:?Missing ONESIGNAL_APP_ID secret}"
-          flutter build apk --release --dart-define=ONESIGNAL_APP_ID="$ONESIGNAL_APP_ID"
+          flutter build apk --release
 
       - name: Upload app bundle artifact
         uses: actions/upload-artifact@v4
