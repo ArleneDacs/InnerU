@@ -573,8 +573,22 @@ class _StepTrackerState extends State<StepTracker>
       syncStatus: syncStatus,
       previousSteps: previousSteps,
     );
+    final showAccessHint = _shouldShowAppleHealthAccessHint(
+      syncStatus: syncStatus,
+      previousSteps: previousSteps,
+    );
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        action: showAccessHint
+            ? SnackBarAction(
+                label: 'Check access',
+                onPressed: () {
+                  unawaited(_showAppleHealthAccessHelpDialog());
+                },
+              )
+            : null,
+      ),
     );
 
     if (previousSteps < _dailyGoal && _steps >= _dailyGoal) {
@@ -587,13 +601,58 @@ class _StepTrackerState extends State<StepTracker>
     required int previousSteps,
   }) {
     if (syncStatus == AppleHealthStepSyncStatus.success) {
-      if (previousSteps > 0 && _lastAppleHealthStepCount == 0) {
-        return 'No Apple Health steps found. If Health already has steps, check InnerU access.';
+      if (_lastAppleHealthStepCount == 0) {
+        return 'No Apple Health steps found yet.';
       }
       return 'Apple Health synced.';
     }
 
     return 'Apple Health sync requested.';
+  }
+
+  bool _shouldShowAppleHealthAccessHint({
+    required AppleHealthStepSyncStatus? syncStatus,
+    required int previousSteps,
+  }) {
+    return syncStatus == AppleHealthStepSyncStatus.success &&
+        _lastAppleHealthStepCount == 0;
+  }
+
+  Future<void> _showAppleHealthAccessHelpDialog() async {
+    if (!mounted || _isDisposed) return;
+
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Turn on Apple Health Steps'),
+          content: const Text(
+            'Go to Health > tap your profile picture > Apps > InnerU > Steps, set it to Full Access, then return to InnerU and sync again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Got it'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop('health'),
+              child: const Text('Open Health'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || _isDisposed || action != 'health') return;
+    final openedHealth = await AppleHealthStepsService.instance.openHealthApp();
+    if (!mounted || _isDisposed || openedHealth) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Open Health > tap your profile picture > Apps > InnerU > Steps.',
+        ),
+      ),
+    );
   }
 
   bool _shouldRequestAppleHealthAccess(AppleHealthStepSyncStatus? syncStatus) {
