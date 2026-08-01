@@ -571,11 +571,15 @@ class UserScoreService
         if (is_array($customDailyTasks) && isset($customDailyTasks[$taskId])) {
             $customTask = $customDailyTasks[$taskId];
             if (is_array($customTask)) {
-                return ($customTask['completed'] ?? false) === true;
+                if (($customTask['completed'] ?? false) === true) {
+                    return true;
+                }
             }
 
             if (is_bool($customTask)) {
-                return $customTask;
+                if ($customTask) {
+                    return true;
+                }
             }
         }
 
@@ -584,7 +588,20 @@ class UserScoreService
             default => $taskId,
         };
 
-        return (bool) $tracker->{$column};
+        if ((bool) $tracker->{$column}) {
+            return true;
+        }
+
+        return match ($taskId) {
+            'call' => (int) $tracker->call_count > 0,
+            'steps' => (int) $tracker->step_count > 0,
+            'exercise' => (int) $tracker->exercise_count > 0
+                || (int) $tracker->exercise_minutes > 0,
+            'meditation' => (int) $tracker->meditation_minutes > 0,
+            'learning' => (int) $tracker->learning_count > 0,
+            'addValue' => (int) $tracker->value_count > 0,
+            default => false,
+        };
     }
 
     private function activeCompanyValue(?string $primary, ?string $fallback): string

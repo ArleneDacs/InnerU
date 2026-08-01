@@ -224,6 +224,58 @@ class UserScorePeriodTest extends TestCase
         $this->assertEquals(5.0, $breakdown['coreTaskScore']);
     }
 
+    public function test_period_core_task_score_falls_back_to_activity_counts_when_flags_are_false(): void
+    {
+        Carbon::setTestNow('2030-01-01');
+
+        $company = $this->makeCompanyWithPeriod('2026-08-01', '2026-08-10');
+        $user = $this->makeUserInCompany($company);
+
+        DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => '2026-08-02',
+            'steps' => false,
+            'exercise' => false,
+            'meditation' => false,
+            'learning' => false,
+            'step_count' => 525,
+            'exercise_minutes' => 10,
+            'meditation_minutes' => 30,
+            'custom_daily_tasks' => [
+                '__snapshotTaskIds' => ['steps', 'exercise', 'meditation', 'learning'],
+                'steps' => [
+                    'title' => 'Steps',
+                    'completed' => false,
+                    'isDefault' => true,
+                ],
+                'exercise' => [
+                    'title' => 'Exercise',
+                    'completed' => false,
+                    'isDefault' => true,
+                ],
+                'meditation' => [
+                    'title' => 'Meditation',
+                    'completed' => false,
+                    'isDefault' => true,
+                ],
+                'learning' => [
+                    'title' => 'Learning',
+                    'completed' => false,
+                    'isDefault' => true,
+                ],
+            ],
+        ]);
+
+        $breakdown = app(UserScoreService::class)->resolveBreakdownForUser($user->fresh());
+
+        // Even when the saved flags/snapshot stayed false, positive activity
+        // counts/minutes should still count for the matching default tasks.
+        // 3 completed tasks out of 4 = 75 for that day, spread across the
+        // 10-day period = 7.5.
+        $this->assertEquals(7.5, $breakdown['coreTaskScore']);
+    }
+
     public function test_goal_score_is_the_latest_within_period_record_not_averaged(): void
     {
         Carbon::setTestNow('2030-01-01');
