@@ -69,6 +69,8 @@ class LeaderboardEntry {
     required this.score,
     required this.rank,
     required this.activity,
+    this.goalScore = 0,
+    this.coreTaskScore = 0,
     this.profilePic,
     this.teamName,
   });
@@ -78,6 +80,8 @@ class LeaderboardEntry {
   final num score;
   final int rank;
   final UserActivity activity;
+  final num goalScore;
+  final num coreTaskScore;
   final String? profilePic;
   final String? teamName;
 
@@ -87,6 +91,8 @@ class LeaderboardEntry {
     num? score,
     int? rank,
     UserActivity? activity,
+    num? goalScore,
+    num? coreTaskScore,
     String? profilePic,
     String? teamName,
   }) {
@@ -96,6 +102,8 @@ class LeaderboardEntry {
       score: score ?? this.score,
       rank: rank ?? this.rank,
       activity: activity ?? this.activity,
+      goalScore: goalScore ?? this.goalScore,
+      coreTaskScore: coreTaskScore ?? this.coreTaskScore,
       profilePic: profilePic ?? this.profilePic,
       teamName: teamName ?? this.teamName,
     );
@@ -163,9 +171,14 @@ class GroupLeaderboardSummary {
 }
 
 class Leaderboard extends StatefulWidget {
-  const Leaderboard({super.key, this.isLoading = true});
+  const Leaderboard({
+    super.key,
+    this.isLoading = true,
+    this.debugLoader,
+  });
 
   final bool isLoading;
+  final Future<LeaderboardApiSnapshot> Function()? debugLoader;
 
   @override
   State<Leaderboard> createState() => _LeaderboardState();
@@ -277,7 +290,10 @@ class _LeaderboardState extends State<Leaderboard>
     }
 
     try {
-      final snapshot = await LeaderboardApiService.instance.fetchLeaderboard();
+      final loader = widget.debugLoader;
+      final snapshot = loader != null
+          ? await loader()
+          : await LeaderboardApiService.instance.fetchLeaderboard();
       final companyEntries = snapshot.entries;
       final rankedAll = companyEntries
           .map(
@@ -287,6 +303,8 @@ class _LeaderboardState extends State<Leaderboard>
               score: entry.overallScore,
               rank: entry.rank,
               activity: const UserActivity(),
+              goalScore: entry.goalScore,
+              coreTaskScore: entry.coreTaskScore,
               profilePic: entry.profilePic,
               teamName: entry.teamName,
             ),
@@ -320,6 +338,8 @@ class _LeaderboardState extends State<Leaderboard>
                       score: member.overallScore,
                       rank: member.rank,
                       activity: const UserActivity(),
+                      goalScore: member.goalScore,
+                      coreTaskScore: member.coreTaskScore,
                       profilePic: member.profilePic,
                       teamName: member.teamName,
                     ),
@@ -336,6 +356,8 @@ class _LeaderboardState extends State<Leaderboard>
               score: member.overallScore,
               rank: member.rank,
               activity: const UserActivity(),
+              goalScore: member.goalScore,
+              coreTaskScore: member.coreTaskScore,
               profilePic: member.profilePic,
               teamName: member.teamName,
             ),
@@ -571,163 +593,13 @@ class _LeaderboardState extends State<Leaderboard>
               right: 16,
               top: 16,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.name}\'s Points',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: theme.inkColor,
-                  ),
-                ),
-                if ((entry.teamName ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Team: ${entry.teamName}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: theme.mutedInkColor,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                _buildPointsRow(
-                  'Call',
-                  entry.activity.callIntent,
-                  '10 pt/call',
-                  entry.activity.callIntent,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Steps',
-                  entry.activity.stepsTaken,
-                  '10 pt/200 steps',
-                  (entry.activity.stepsTaken / 200).floor(),
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Exercise',
-                  entry.activity.exerciseCount,
-                  '10 pt/exercise',
-                  entry.activity.exerciseCount * 10,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Meditation',
-                  entry.activity.meditationMinutes,
-                  '5 pt/minute',
-                  entry.activity.meditationMinutes,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Add Value',
-                  entry.activity.valueEntries,
-                  '15 pt/entry',
-                  entry.activity.valueEntries,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Learning',
-                  entry.activity.learningEntries,
-                  '15 pt/entry',
-                  entry.activity.learningEntries,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                _buildPointsRow(
-                  'Goals',
-                  entry.activity.todoListCount,
-                  '1 pt/task',
-                  entry.activity.todoListCount,
-                  theme,
-                ),
-                Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Total Points',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: theme.inkColor,
-                        ),
-                      ),
-                      Text(
-                        _formatLeaderboardScore(entry.score),
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color:
-                              theme.isDark ? theme.primaryColor : Colors.orange,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            child: GroupLeaderboardScoreBreakdownSheet(
+              entry: entry,
+              theme: theme,
             ),
           ),
         );
       },
-    );
-  }
-
-  Widget _buildPointsRow(
-    String title,
-    int value,
-    String rate,
-    int points,
-    CompanyThemeData theme,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Text(
-              title,
-              style: TextStyle(fontSize: 16, color: theme.inkColor),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              '$value',
-              style: TextStyle(fontSize: 16, color: theme.inkColor),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              rate,
-              style: TextStyle(fontSize: 14, color: theme.mutedInkColor),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              '$points pts',
-              style: TextStyle(
-                fontSize: 16,
-                color: theme.isDark ? theme.primaryColor : Colors.orange,
-              ),
-              textAlign: TextAlign.right,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -847,6 +719,30 @@ class _LeaderboardLoadError extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class GroupLeaderboardScoreBreakdownSheet extends StatelessWidget {
+  const GroupLeaderboardScoreBreakdownSheet({
+    super.key,
+    required this.entry,
+    required this.theme,
+  });
+
+  final LeaderboardEntry entry;
+  final CompanyThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return LeaderboardScoreBreakdownSheet(
+      name: entry.name,
+      teamName: entry.teamName,
+      goalScore: entry.goalScore,
+      dailyTrackerScore: entry.coreTaskScore,
+      totalScore: entry.score,
+      accentColor: theme.primaryColor,
+      theme: theme,
     );
   }
 }
@@ -2135,7 +2031,7 @@ class _AllUsersLeaderboardBoardState extends State<_AllUsersLeaderboardBoard> {
   }
 }
 
-class _A12LeaderboardBoard extends StatelessWidget {
+class _A12LeaderboardBoard extends StatefulWidget {
   const _A12LeaderboardBoard({
     super.key,
     required this.entries,
@@ -2155,6 +2051,118 @@ class _A12LeaderboardBoard extends StatelessWidget {
   final String title;
   final ValueChanged<A12LeaderboardEntry> onEntryTap;
 
+  @override
+  State<_A12LeaderboardBoard> createState() => _A12LeaderboardBoardState();
+}
+
+class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
+  static const _summaryCardKey = ValueKey<String>('current-user-score-card');
+  static const _scrollDuration = Duration(milliseconds: 520);
+
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _leaderboardIntroKey = GlobalKey();
+  final GlobalKey _firstRankedRowKey = GlobalKey();
+  final GlobalKey _currentUserRowKey = GlobalKey();
+
+  List<A12LeaderboardEntry> get entries => widget.entries;
+  bool get isLoading => widget.isLoading;
+  CompanyThemeData get theme => widget.theme;
+  String get currentUserId => widget.currentUserId;
+  bool get showRankLabels => widget.showRankLabels;
+  String get title => widget.title;
+  ValueChanged<A12LeaderboardEntry> get onEntryTap => widget.onEntryTap;
+
+  List<A12LeaderboardEntry> get _sortedEntries {
+    final sorted = [...entries];
+    sorted.sort((a, b) {
+      if (a.score.overallScore != b.score.overallScore) {
+        return b.score.overallScore.compareTo(a.score.overallScore);
+      }
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    return sorted;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _scrollToCurrentUser() async {
+    if (!_scrollController.hasClients || currentUserId.isEmpty) return;
+
+    final sorted = _sortedEntries;
+    final placement = sorted.indexWhere(
+      (entry) => entry.userId == currentUserId,
+    );
+    if (placement < 0) return;
+
+    // The first three users are represented by the podium rather than list
+    // rows, so their destination is the top of the leaderboard.
+    if (placement < 3) {
+      await _scrollController.animateTo(
+        _scrollController.position.minScrollExtent,
+        duration: _scrollDuration,
+        curve: Curves.easeInOutCubic,
+      );
+      return;
+    }
+
+    final mountedRow = _currentUserRowKey.currentContext;
+    if (mountedRow != null) {
+      await Scrollable.ensureVisible(
+        mountedRow,
+        duration: _scrollDuration,
+        curve: Curves.easeInOutCubic,
+        alignment: 0.12,
+      );
+      return;
+    }
+
+    final introRenderObject =
+        _leaderboardIntroKey.currentContext?.findRenderObject();
+    final introHeight =
+        introRenderObject is RenderBox && introRenderObject.hasSize
+            ? introRenderObject.size.height
+            : 0.0;
+    final firstRowRenderObject =
+        _firstRankedRowKey.currentContext?.findRenderObject();
+    final precedingRowExtent =
+        firstRowRenderObject is RenderBox && firstRowRenderObject.hasSize
+            ? firstRowRenderObject.size.height
+            : showRankLabels
+                ? 112.0
+                : 86.0;
+    final rowIndex = placement - 3;
+    final rawOffset = introHeight + (rowIndex * precedingRowExtent);
+    final position = _scrollController.position;
+    final targetOffset = rawOffset
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+
+    // Seek by rank first so Flutter mounts a distant lazy list row, then use
+    // its real layout position for the final, exact alignment.
+    await _scrollController.animateTo(
+      targetOffset,
+      duration: _scrollDuration,
+      curve: Curves.easeInOutCubic,
+    );
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+
+    final rowContext = _currentUserRowKey.currentContext;
+    if (rowContext != null && rowContext.mounted) {
+      await Scrollable.ensureVisible(
+        rowContext,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        alignment: 0.12,
+      );
+    }
+  }
+
   LeaderboardEntry _toLegacyEntry(A12LeaderboardEntry entry) {
     return LeaderboardEntry(
       userId: entry.userId,
@@ -2162,6 +2170,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
       score: entry.score.overallScore,
       rank: 0,
       activity: entry.activity,
+      goalScore: entry.score.goalScore,
+      coreTaskScore: entry.score.coreTaskScore,
       profilePic: entry.profilePic,
       teamName: entry.teamName,
     );
@@ -2406,7 +2416,10 @@ class _A12LeaderboardBoard extends StatelessWidget {
                           curve: Curves.easeOutBack,
                         ),
                       ),
-                      child: FadeTransition(opacity: animation, child: child),
+                      child: FadeTransition(
+                        opacity: animation,
+                        child: child,
+                      ),
                     );
                   },
                   child: Container(
@@ -2418,8 +2431,9 @@ class _A12LeaderboardBoard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: scoreColor.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(999),
-                      border:
-                          Border.all(color: scoreColor.withValues(alpha: 0.22)),
+                      border: Border.all(
+                        color: scoreColor.withValues(alpha: 0.22),
+                      ),
                     ),
                     child: Text(
                       'Level ${rank.name}',
@@ -2483,7 +2497,8 @@ class _A12LeaderboardBoard extends StatelessWidget {
     final progress = (entry.score.overallScore / 100).clamp(0.0, 1.0);
     final scoreLabel = _formatLeaderboardScore(entry.score.overallScore);
 
-    return GestureDetector(
+    final item = GestureDetector(
+      key: ValueKey<String>('leaderboard-entry-${entry.userId}'),
       onTap: () => onEntryTap(entry),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2655,6 +2670,10 @@ class _A12LeaderboardBoard extends StatelessWidget {
         ),
       ),
     );
+
+    return isCurrentUser
+        ? KeyedSubtree(key: _currentUserRowKey, child: item)
+        : item;
   }
 
   @override
@@ -2683,12 +2702,7 @@ class _A12LeaderboardBoard extends StatelessWidget {
       );
     }
 
-    final sorted = [...entries]..sort((a, b) {
-        if (a.score.overallScore != b.score.overallScore) {
-          return b.score.overallScore.compareTo(a.score.overallScore);
-        }
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+    final sorted = _sortedEntries;
     final currentUserEntry = _currentUserEntry;
     // Keep the list populated for small company datasets so the company
     // leaderboard still shows the available users instead of a blank section.
@@ -2699,54 +2713,75 @@ class _A12LeaderboardBoard extends StatelessWidget {
         : theme.primaryColor;
 
     return ListView(
+      controller: _scrollController,
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          child: Text(
-            'Company podium',
-            style: TextStyle(
-              color: theme.inkColor,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        _buildCompanyPodium(context, sorted),
-        _buildHeaderCard(currentUserEntry),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: Row(
-            children: [
-              _buildA12MetricChip(
-                label: 'Goal score',
-                value:
-                    '${_formatLeaderboardScore(currentUserEntry?.score.goalScore ?? 0)}%',
-                color: scoreColor,
+        Column(
+          key: _leaderboardIntroKey,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Text(
+                'Company podium',
+                style: TextStyle(
+                  color: theme.inkColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
-              const SizedBox(width: 10),
-              _buildA12MetricChip(
-                label: 'Daily tracker',
-                value:
-                    '${_formatLeaderboardScore(currentUserEntry?.score.coreTaskScore ?? 0)}%',
-                color: theme.primaryColor,
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
             ),
-          ),
+            _buildCompanyPodium(context, sorted),
+            Semantics(
+              button: currentUserEntry != null,
+              label:
+                  currentUserEntry == null ? null : 'Show my leaderboard rank',
+              child: GestureDetector(
+                key: _summaryCardKey,
+                behavior: HitTestBehavior.opaque,
+                onTap: currentUserEntry == null ? null : _scrollToCurrentUser,
+                child: _buildHeaderCard(currentUserEntry),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                children: [
+                  _buildA12MetricChip(
+                    label: 'Goal score',
+                    value:
+                        '${_formatLeaderboardScore(currentUserEntry?.score.goalScore ?? 0)}%',
+                    color: scoreColor,
+                  ),
+                  const SizedBox(width: 10),
+                  _buildA12MetricChip(
+                    label: 'Daily tracker',
+                    value:
+                        '${_formatLeaderboardScore(currentUserEntry?.score.coreTaskScore ?? 0)}%',
+                    color: theme.primaryColor,
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
         ),
         ...remainingEntries.asMap().entries.map((entry) {
           final item = entry.value;
-          return _buildItem(item, entry.key + 4);
+          final row = _buildItem(item, entry.key + 4);
+          return entry.key == 0
+              ? KeyedSubtree(key: _firstRankedRowKey, child: row)
+              : row;
         }),
       ],
     );
