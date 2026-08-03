@@ -414,11 +414,17 @@ class _NotesTypeState extends State<NotesType> {
                         height: 1.25,
                       ),
                       controller: titleController,
-                      minLines: 2,
-                      maxLines: 3,
+                      // A title is a single line by definition (and the
+                      // 40-char cap makes wrapping to a 2nd/3rd line all
+                      // but impossible on a real device width) -- maxLines:
+                      // 1 pins the field's height to exactly one line plus
+                      // contentPadding, with no ambiguity left for a
+                      // "reserved extra lines" gap to reappear in.
+                      maxLines: 1,
                       maxLength: 40,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
+                      textAlignVertical: TextAlignVertical.center,
+                      keyboardType: TextInputType.text,
+                      textInputAction: TextInputAction.done,
                       cursorColor: companyTheme.iconColor,
                       onChanged: (value) => _validateForm(),
                       decoration: InputDecoration(

@@ -10,6 +10,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/profile/pro
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:selfcare_projects/src/services/profile_picture_bus.dart';
 
 class EditProfile extends StatefulWidget {
   const EditProfile({super.key, required this.title});
@@ -231,6 +232,13 @@ class MyEditProfileState extends State<EditProfile> {
           }
           await pointsBatch.commit();
         }
+      }
+
+      if (updatedData["profilePic"] != null) {
+        // Tell every screen showing the avatar right now (e.g. the
+        // Dashboard header) rather than only the Profile page this flow is
+        // about to navigate to.
+        ProfilePictureBus.publish(updatedData["profilePic"] as String?);
       }
 
       if (!mounted) return;

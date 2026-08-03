@@ -35,6 +35,7 @@ import 'package:selfcare_projects/src/services/watch_state_refresher.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notification_api_service.dart';
+import 'package:selfcare_projects/src/services/profile_picture_bus.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -129,6 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadCompanyTheme();
     _loadCachedDashboardScore(currentUserId);
     _fetchProfilePic();
+    ProfilePictureBus.latestUrl.addListener(_onProfilePictureBusUpdate);
     fetchQuote();
     _scheduleNextQuoteRefresh();
     _restoreTodayEmotionFromCache();
@@ -1105,12 +1107,20 @@ class _DashboardScreenState extends State<DashboardScreen>
   void dispose() {
     appRouteObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
+    ProfilePictureBus.latestUrl.removeListener(_onProfilePictureBusUpdate);
     _quoteRefreshTimer?.cancel();
     _moodOverlayTimer?.cancel();
     _todayEmotionSubscription?.cancel();
     _introController.dispose();
     _tileTransitionController.dispose();
     super.dispose();
+  }
+
+  void _onProfilePictureBusUpdate() {
+    if (!mounted) return;
+    setState(() {
+      _profilePic = ProfilePictureBus.latestUrl.value;
+    });
   }
 
   Future<String> _getUsername() async {

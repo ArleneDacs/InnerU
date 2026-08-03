@@ -399,10 +399,26 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
         lookupKeys: CompanyMembershipService.lookupKeysFromUserData(data),
       );
 
+      // The theme choice lookup is a local SharedPreferences read (no
+      // network), so applying it here costs nothing but prevents every
+      // CompanyThemeBuilder from painting the raw company theme first.
+      // Without this, that unpersonalized theme sits in the shared cache --
+      // which screens read synchronously on first build -- until the
+      // slower CompanyThemeService.resolveForUser() network round trip
+      // finishes and overwrites it, which is the multi-second flicker to
+      // the user's actual selected theme (dark mode, a suggested theme,
+      // etc.) reported after each app launch.
+      final themeChoice =
+          await CompanyThemeService.selectedThemeChoiceForUser(widget.uid);
+      final resolvedInitialTheme = CompanyThemeService.applyThemeChoice(
+        loadingConfig.initialTheme,
+        themeChoice,
+      );
+
       if (!mounted) return;
       CompanyThemeService.cacheThemeForUser(
         widget.uid,
-        loadingConfig.initialTheme,
+        resolvedInitialTheme,
       );
       if (loadingConfig.showLoading && role != 'admin') {
         _loadingImageUrl = loadingConfig.imageUrl;

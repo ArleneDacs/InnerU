@@ -185,6 +185,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return CupertinoIcons.flame_fill;
       case 'community_comment':
         return CupertinoIcons.chat_bubble_text_fill;
+      case 'community_heart':
+        return CupertinoIcons.heart_fill;
       case 'mentee_request_received':
         return CupertinoIcons.person_add_solid;
       case 'mentee_progress_logged':

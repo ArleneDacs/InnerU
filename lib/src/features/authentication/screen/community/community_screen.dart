@@ -18,17 +18,30 @@ class CommunityScreen extends StatefulWidget {
 class _CommunityScreenState extends State<CommunityScreen> {
   String selectedCategory = 'Add Value';
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String searchQuery = '';
-  Future<List<Note>>? _postsFuture;
+  List<Note> _posts = <Note>[];
+  bool _isLoading = true;
+  String? _loadError;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _postsFuture = _loadPosts();
+    unawaited(_loadPosts(showSpinner: true));
+    // The feed used to hold a Future<List<Note>> that FutureBuilder awaited
+    // directly, so every periodic refresh swapped it for a new, pending
+    // Future -- which made FutureBuilder briefly render its "waiting"
+    // branch (a centered spinner) in place of the list. That tore down and
+    // recreated the ListView every 20 seconds, and a freshly created
+    // ListView always starts scrolled to the top, which is what read as the
+    // feed "jumping back to the top" while someone was reading it. Loading
+    // into this _posts list instead means the periodic refresh only updates
+    // the data the already-mounted ListView is displaying -- the list
+    // itself, and its scroll position, never gets torn down.
     _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted) return;
-      _refreshPosts();
+      unawaited(_refreshPosts());
     });
   }
 
@@ -36,20 +49,54 @@ class _CommunityScreenState extends State<CommunityScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<List<Note>> _loadPosts() {
-    return CommunityApiService.instance.fetchPosts(
-      category: selectedCategory,
-    );
+  Future<void> _loadPosts({bool showSpinner = false}) async {
+    if (showSpinner && mounted) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
+
+    try {
+      final posts = await CommunityApiService.instance.fetchPosts(
+        category: selectedCategory,
+      );
+      if (!mounted) return;
+      setState(() {
+        _posts = posts;
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = error.toString();
+      });
+    }
   }
 
-  Future<void> _refreshPosts() async {
-    if (!mounted) return;
+  // Silent background refresh: reloads data in place without flashing the
+  // loading spinner or otherwise disturbing whatever the user is doing
+  // (e.g. reading a post further down the feed).
+  Future<void> _refreshPosts() => _loadPosts();
+
+  Future<void> _selectCategory(String category) async {
+    if (category == selectedCategory) return;
     setState(() {
-      _postsFuture = _loadPosts();
+      selectedCategory = category;
     });
+    // Switching categories is a deliberate navigation action, unlike the
+    // periodic background refresh, so resetting to the top of the (new)
+    // list here is expected rather than the bug being fixed above.
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    await _loadPosts(showSpinner: true);
   }
 
   Future<void> _markAsSaved(String noteId) async {
@@ -218,10 +265,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   ),
                 ),
                 Expanded(
-                  child: FutureBuilder<List<Note>>(
-                    future: _postsFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                  child: Builder(
+                    builder: (context) {
+                      // Only the very first load (or a deliberate category
+                      // switch) has no posts to show yet, so only those
+                      // show the spinner in place of the list. The 20s
+                      // background refresh leaves _posts (and therefore the
+                      // mounted ListView and its scroll offset) alone until
+                      // the new data actually arrives.
+                      if (_isLoading && _posts.isEmpty) {
                         return Center(
                           child: CircularProgressIndicator(
                             color: companyTheme.primaryColor,
@@ -229,7 +281,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         );
                       }
 
-                      if (snapshot.hasError) {
+                      if (_loadError != null && _posts.isEmpty) {
                         return Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24),
@@ -245,8 +297,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         );
                       }
 
-                      final posts = (snapshot.data ?? const <Note>[])
-                          .where((note) {
+                      final posts = _posts.where((note) {
                         final username = note.username.toLowerCase();
                         final title = note.title.toLowerCase();
                         return username.contains(searchQuery) ||
@@ -267,6 +318,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                       }
 
                       return ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.all(20),
                         itemCount: posts.length,
                         itemBuilder: (context, index) {
@@ -392,12 +444,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
   ) {
     final isSelected = category == selectedCategory;
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          selectedCategory = category;
-          _postsFuture = _loadPosts();
-        });
-      },
+      onTap: () => unawaited(_selectCategory(category)),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),

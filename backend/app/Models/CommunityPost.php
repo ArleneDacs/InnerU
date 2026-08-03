@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CommunityPost extends Model
 {
@@ -26,5 +27,10 @@ class CommunityPost extends Model
             'note' => 'array',
             'saved' => 'boolean',
         ];
+    }
+
+    public function hearts(): HasMany
+    {
+        return $this->hasMany(CommunityPostHeart::class);
     }
 }

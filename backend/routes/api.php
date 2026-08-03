@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\LeaderboardController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\PostHeartController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\StepSubmissionController;
 use App\Http\Controllers\Api\AccountabilityMeetingController;
@@ -68,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/community/posts/{post}/comments', [CommentController::class, 'store']);
     Route::patch('/community/posts/{post}/comments/{comment}', [CommentController::class, 'update']);
     Route::delete('/community/posts/{post}/comments/{comment}', [CommentController::class, 'destroy']);
+    Route::post('/community/posts/{post}/hearts', [PostHeartController::class, 'store']);
+    Route::delete('/community/posts/{post}/hearts', [PostHeartController::class, 'destroy']);
     Route::get('/chat-rooms', [ChatController::class, 'index']);
     Route::post('/chat-rooms', [ChatController::class, 'storeRoom']);
     Route::get('/chat-rooms/{chatRoom}', [ChatController::class, 'show']);

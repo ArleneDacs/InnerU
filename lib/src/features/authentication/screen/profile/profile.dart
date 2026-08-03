@@ -11,6 +11,7 @@ import 'package:selfcare_projects/src/services/daily_score_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/profile_picture_bus.dart';
 import 'package:selfcare_projects/src/services/user_point_api_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_day_score.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -139,6 +140,11 @@ class _ProfilePageState extends State<ProfilePage> {
   List<_DailyTaskItem> dailyTrackerItems = List.of(_defaultDailyTaskItems);
   Map<String, bool> todayTasks = _emptyTaskState(_defaultDailyTaskItems);
   bool _isEditingDailyTracker = false;
+  // The actual meditation duration already recorded for today, in minutes.
+  // Reconciliation writes (_syncDailyTrackerScore, _syncTodayTask) must reuse
+  // this instead of guessing, or they will clobber a real completed-session
+  // duration (e.g. 30 minutes) with a nominal "done" placeholder of 1 minute.
+  int _todayMeditationMinutes = 0;
   int _todayTodoListScore = 0;
   int _todayTodoListScoreContribution = 0;
   bool _todayTodoListIncludedInTotal = false;
@@ -154,12 +160,26 @@ class _ProfilePageState extends State<ProfilePage> {
       });
     });
     _fetchProfilePic();
+    ProfilePictureBus.latestUrl.addListener(_onProfilePictureBusUpdate);
     _loadDailyTrackerItems().then((_) {
       if (!mounted) return;
       _restoreCachedDailyTrackerState().then((_) {
         if (!mounted) return;
         fetchDailyTrackerData();
       });
+    });
+  }
+
+  @override
+  void dispose() {
+    ProfilePictureBus.latestUrl.removeListener(_onProfilePictureBusUpdate);
+    super.dispose();
+  }
+
+  void _onProfilePictureBusUpdate() {
+    if (!mounted) return;
+    setState(() {
+      _profilePicUrl = ProfilePictureBus.latestUrl.value;
     });
   }
 
@@ -382,7 +402,14 @@ class _ProfilePageState extends State<ProfilePage> {
       todoListIncludedInTotal: _todayTodoListIncludedInTotal,
       userTotalScore: _combinedDailyAndTodoScore.round(),
       customDailyTasks: _dailyTrackerSnapshotTasks(),
-      meditationMinutes: todayTasks['meditation'] == true ? 1 : 0,
+      // Reconciliation must never invent a duration. This runs whenever the
+      // tracker snapshot needs repairing (e.g. right after fetch), which can
+      // happen after a real meditation session already recorded its actual
+      // minutes -- sending a hardcoded "1" here would silently overwrite
+      // that correct value the next time the app opens.
+      meditationMinutes: todayTasks['meditation'] == true
+          ? (_todayMeditationMinutes > 0 ? _todayMeditationMinutes : 1)
+          : 0,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
       companyName: membershipData.activeMembership?.name,
@@ -423,6 +450,9 @@ class _ProfilePageState extends State<ProfilePage> {
             tracker['todoListIncludedInTotal'] == true ||
                 _todayTodoListScore > 0 ||
                 _todayTodoListScoreContribution > 0;
+        final rawMeditationMinutes = tracker['meditationMinutes'];
+        _todayMeditationMinutes =
+            rawMeditationMinutes is num ? rawMeditationMinutes.round() : 0;
         todayTasks = {
           for (final item in dailyTrackerItems)
             item.id: _readTaskCompletion(tracker, item),
@@ -447,6 +477,7 @@ class _ProfilePageState extends State<ProfilePage> {
     // Reset task values
     setState(() {
       todayTasks = _emptyTaskState(dailyTrackerItems);
+      _todayMeditationMinutes = 0;
       _todayTodoListScore = 0;
       _todayTodoListScoreContribution = 0;
       _todayTodoListIncludedInTotal = false;
@@ -515,6 +546,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
     setState(() {
       todayTasks[item.id] = value;
+      if (item.id == 'meditation' && value == false) {
+        _todayMeditationMinutes = 0;
+      }
     });
 
     // Keep rapid manual changes ordered. Each request patches only the task
@@ -569,7 +603,16 @@ class _ProfilePageState extends State<ProfilePage> {
       learningCount: item.id == 'learning' ? manualCount : null,
       valueCount: item.id == 'addValue' ? manualCount : null,
       customDailyTasks: _dailyTrackerSnapshotTasks(),
-      meditationMinutes: item.id == 'meditation' ? manualCount : null,
+      // Checking the box on doesn't mean "1 minute" -- if a real session
+      // already recorded a duration today, keep it instead of stomping it
+      // with the manual-toggle placeholder.
+      meditationMinutes: item.id == 'meditation'
+          ? (value
+              ? (_todayMeditationMinutes > 0
+                  ? _todayMeditationMinutes
+                  : manualCount)
+              : 0)
+          : null,
       companyId: membershipData.activeMembership?.id,
       companyCode: membershipData.activeMembership?.code,
       companyName: membershipData.activeMembership?.name,

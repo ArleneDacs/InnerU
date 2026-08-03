@@ -16,6 +16,8 @@ class Note {
   String companyId;
   String companyCode;
   String companyName;
+  int heartsCount;
+  bool heartedByMe;
 
   Note({
     required this.id,
@@ -30,6 +32,8 @@ class Note {
     this.companyId = '',
     this.companyCode = '',
     this.companyName = '',
+    this.heartsCount = 0,
+    this.heartedByMe = false,
   });
 
   factory Note.fromMap(Map<String, dynamic> data) {
@@ -81,6 +85,10 @@ class Note {
           (data['companyName'] as String?)?.trim() ??
           (data['activeCompanyName'] as String?)?.trim() ??
           '',
+      heartsCount: data['heartsCount'] is num
+          ? (data['heartsCount'] as num).toInt()
+          : int.tryParse(data['heartsCount']?.toString() ?? '') ?? 0,
+      heartedByMe: data['heartedByMe'] == true,
     );
   }
 

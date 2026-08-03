@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
@@ -73,6 +74,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   bool _isLoadingLogs = true;
   bool _hasAnnouncedGoalReached = false;
   Timer? _sessionTimer;
+  Timer? _completionAlarmTimer;
   List<Map<String, dynamic>> _todayLogs = [];
 
   String get _todayDate => DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -80,6 +82,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   @override
   void dispose() {
     _sessionTimer?.cancel();
+    _completionAlarmTimer?.cancel();
     _customTypeController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -223,10 +226,31 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       final remaining = _remainingSessionTime();
       if (remaining == Duration.zero && !_hasAnnouncedGoalReached) {
         _hasAnnouncedGoalReached = true;
+        _playCompletionAlarm();
         _showMessage('Exercise goal reached. Great work!');
       }
       setState(() {});
     });
+  }
+
+  // Rings a repeating system alert + haptic burst once the goal duration is
+  // hit, and keeps ringing indefinitely -- like an actual alarm -- until
+  // the workout is explicitly stopped and saved (or a new session starts).
+  // _stopExerciseSession, _startExerciseSession, and dispose() all cancel
+  // _completionAlarmTimer, which is the only thing that ends this loop.
+  void _playCompletionAlarm() {
+    _completionAlarmTimer?.cancel();
+
+    void ring() {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.heavyImpact();
+    }
+
+    ring();
+    _completionAlarmTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => ring(),
+    );
   }
 
   Future<bool> _syncExerciseNotification() async {
@@ -306,6 +330,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         debugPrint('Start photo capture failed: $error');
       }
 
+      _completionAlarmTimer?.cancel();
       final now = DateTime.now();
       setState(() {
         _selectedType = type;
@@ -381,6 +406,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       final unlockedRewards = await _recordExerciseStreak(session.id.toString());
       await _clearExerciseNotification();
       await _clearActiveSessionCache();
+      _completionAlarmTimer?.cancel();
 
       if (!mounted) return;
       setState(() {

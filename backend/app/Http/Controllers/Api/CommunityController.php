@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
+use App\Models\CommunityPostHeart;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
@@ -42,22 +43,33 @@ class CommunityController extends Controller
             }
         }
 
-        $posts = $query->orderByDesc('created_at')->get()->map(function (CommunityPost $post) {
-            return [
-                'id' => (string) $post->id,
-                'userId' => (string) $post->user_id,
-                'username' => $post->username,
-                'title' => $post->title,
-                'note' => $post->note,
-                'color' => $post->color,
-                'createdAt' => $this->serializeAppDate($post->created_at),
-                'category' => $post->category,
-                'saved' => $post->saved,
-                'companyId' => $post->company_id,
-                'companyCode' => $post->company_code,
-                'companyName' => $post->company_name,
-            ];
-        });
+        // One query for every heart this viewer has left, rather than an
+        // exists() check per post below -- keeps this an O(1) query list
+        // page regardless of how many posts are being returned.
+        $heartedPostIds = CommunityPostHeart::query()
+            ->where('user_id', $user->id)
+            ->pluck('community_post_id')
+            ->all();
+
+        $posts = $query->withCount('hearts')->orderByDesc('created_at')->get()
+            ->map(function (CommunityPost $post) use ($heartedPostIds) {
+                return [
+                    'id' => (string) $post->id,
+                    'userId' => (string) $post->user_id,
+                    'username' => $post->username,
+                    'title' => $post->title,
+                    'note' => $post->note,
+                    'color' => $post->color,
+                    'createdAt' => $this->serializeAppDate($post->created_at),
+                    'category' => $post->category,
+                    'saved' => $post->saved,
+                    'companyId' => $post->company_id,
+                    'companyCode' => $post->company_code,
+                    'companyName' => $post->company_name,
+                    'heartsCount' => (int) $post->hearts_count,
+                    'heartedByMe' => in_array($post->id, $heartedPostIds, true),
+                ];
+            });
 
         return response()->json(['posts' => $posts]);
     }
@@ -91,7 +103,7 @@ class CommunityController extends Controller
         ]);
 
         return response()->json([
-            'post' => $this->mapPost($post),
+            'post' => $this->mapPost($post, (int) $user->id),
         ], Response::HTTP_CREATED);
     }
 
@@ -109,7 +121,9 @@ class CommunityController extends Controller
         $post->fill($validated);
         $post->save();
 
-        return response()->json(['post' => $this->mapPost($post->refresh())]);
+        return response()->json([
+            'post' => $this->mapPost($post->refresh(), (int) $user->id),
+        ]);
     }
 
     public function destroy(Request $request, CommunityPost $post): JsonResponse
@@ -123,8 +137,10 @@ class CommunityController extends Controller
         return response()->json(['message' => 'Deleted.']);
     }
 
-    private function mapPost(CommunityPost $post): array
+    private function mapPost(CommunityPost $post, ?int $viewerId = null): array
     {
+        $viewerId ??= (int) $post->user_id;
+
         return [
             'id' => (string) $post->id,
             'userId' => (string) $post->user_id,
@@ -138,6 +154,13 @@ class CommunityController extends Controller
             'companyId' => $post->company_id,
             'companyCode' => $post->company_code,
             'companyName' => $post->company_name,
+            'heartsCount' => CommunityPostHeart::query()
+                ->where('community_post_id', $post->id)
+                ->count(),
+            'heartedByMe' => CommunityPostHeart::query()
+                ->where('community_post_id', $post->id)
+                ->where('user_id', $viewerId)
+                ->exists(),
         ];
     }
 

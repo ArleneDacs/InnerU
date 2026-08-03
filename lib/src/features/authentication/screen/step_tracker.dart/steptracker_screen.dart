@@ -20,6 +20,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/step_tracke
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/tracking.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
@@ -87,6 +88,9 @@ class _StepTrackerState extends State<StepTracker>
   bool _iosLiveStepCounterStarted = false;
   bool _didRequestAppleHealthAccessThisSession = false;
   bool _appleHealthAccessDialogVisible = false;
+  // Submit Steps posts a step-count photo for a coach to review, so it has
+  // nothing to do if the mentee doesn't have a coach assigned yet.
+  bool _hasCoach = false;
   String? _stepPermissionMessage;
   DateTime? _appleHealthLastSyncedAt;
   int? _lastPedometerRawSteps;
@@ -121,6 +125,20 @@ class _StepTrackerState extends State<StepTracker>
     });
     _initializeApp();
     _startAppleHealthRefreshTimer();
+    unawaited(_loadCoachAssignment());
+  }
+
+  Future<void> _loadCoachAssignment() async {
+    if (_currentUserId == null) return;
+    try {
+      final coaches = await CoachApiService.instance.fetchMyCoaches();
+      if (!mounted || _isDisposed) return;
+      setState(() {
+        _hasCoach = coaches.isNotEmpty;
+      });
+    } catch (error) {
+      debugPrint('Failed to load coach assignment: $error');
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -1996,21 +2014,22 @@ class _StepTrackerState extends State<StepTracker>
                                     icon: const Icon(Icons.map_outlined),
                                     label: const Text('Track on Map'),
                                   ),
-                                  OutlinedButton.icon(
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const StepSubmissionScreen(),
-                                        ),
-                                      );
-                                    },
-                                    icon: const Icon(
-                                      Icons.add_photo_alternate_outlined,
+                                  if (_hasCoach)
+                                    OutlinedButton.icon(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const StepSubmissionScreen(),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.add_photo_alternate_outlined,
+                                      ),
+                                      label: const Text('Submit Steps'),
                                     ),
-                                    label: const Text('Submit Steps'),
-                                  ),
                                 ],
                               ),
                               TextButton(

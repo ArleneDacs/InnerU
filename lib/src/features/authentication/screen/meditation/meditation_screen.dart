@@ -1005,38 +1005,66 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                                         height: animationHeight,
                                       ),
                                       SizedBox(height: isShort ? 4 : 10),
-                                      GestureDetector(
-                                        onTap: () => _showTimePicker(
-                                            context, timeProvider),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              _formatTime(
-                                                  timeProvider.remainingTime),
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: timerFontSize,
-                                                color: isDark
-                                                    ? const Color(0xFFF3EFE9)
-                                                    : const Color(0xFF2E2A27),
-                                              ),
+                                      Builder(builder: (context) {
+                                        // A session is in progress once time
+                                        // has been spent from the picked
+                                        // duration, whether currently
+                                        // counting down or paused -- only a
+                                        // full Stop (which resets remaining
+                                        // back to initial) or a natural
+                                        // finish (which calls stopTimer())
+                                        // should re-enable the picker.
+                                        final sessionInProgress =
+                                            timeProvider.isRunning ||
+                                                timeProvider.remainingTime <
+                                                    timeProvider.initialTime;
+                                        return GestureDetector(
+                                          onTap: sessionInProgress
+                                              ? null
+                                              : () => _showTimePicker(
+                                                  context, timeProvider),
+                                          child: Opacity(
+                                            opacity:
+                                                sessionInProgress ? 0.6 : 1,
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  _formatTime(timeProvider
+                                                      .remainingTime),
+                                                  style: TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.bold,
+                                                    fontSize: timerFontSize,
+                                                    color: isDark
+                                                        ? const Color(
+                                                            0xFFF3EFE9)
+                                                        : const Color(
+                                                            0xFF2E2A27),
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  sessionInProgress
+                                                      ? 'Stop meditation to change minutes'
+                                                      : 'Tap to set meditation minutes',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: isDark
+                                                        ? const Color(
+                                                            0xFFB9B1A7)
+                                                        : const Color(
+                                                            0xFF8B8179),
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              'Tap to set meditation minutes',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(
-                                                color: isDark
-                                                    ? const Color(0xFFB9B1A7)
-                                                    : const Color(0xFF8B8179),
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
+                                          ),
+                                        );
+                                      }),
                                       SizedBox(height: isShort ? 4 : 8),
                                       Row(
                                         mainAxisAlignment:

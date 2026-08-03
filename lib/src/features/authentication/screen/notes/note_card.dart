@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/comments_api_service.dart';
+import 'package:selfcare_projects/src/services/community_api_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 
 class NoteCard extends StatefulWidget {
@@ -24,6 +25,64 @@ class NoteCard extends StatefulWidget {
 class NoteCardState extends State<NoteCard> {
   int currentPage = 0;
   bool isExpanded = false; // Track expansion state
+  late int _heartsCount = widget.note.heartsCount;
+  late bool _heartedByMe = widget.note.heartedByMe;
+  bool _isTogglingHeart = false;
+
+  @override
+  void didUpdateWidget(covariant NoteCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The parent feed silently refetches posts every 20s (see
+    // CommunityScreen), which hands this card a brand-new Note instance
+    // with the server's current heart state. Adopt it, unless a toggle is
+    // in flight right now -- otherwise a refresh landing mid-tap could
+    // overwrite the optimistic UI update with the pre-tap snapshot.
+    if (!_isTogglingHeart && widget.note.id == oldWidget.note.id) {
+      _heartsCount = widget.note.heartsCount;
+      _heartedByMe = widget.note.heartedByMe;
+    }
+  }
+
+  Future<void> _toggleHeart() async {
+    if (_isTogglingHeart) return;
+    final wasHearted = _heartedByMe;
+
+    setState(() {
+      _isTogglingHeart = true;
+      _heartedByMe = !wasHearted;
+      _heartsCount = _heartsCount + (wasHearted ? -1 : 1);
+    });
+
+    try {
+      final state = wasHearted
+          ? await CommunityApiService.instance.unheartPost(widget.note.id)
+          : await CommunityApiService.instance.heartPost(widget.note.id);
+      if (!mounted) return;
+      setState(() {
+        _heartsCount = state.heartsCount;
+        _heartedByMe = state.heartedByMe;
+      });
+      widget.onChanged?.call();
+    } catch (error) {
+      debugPrint('Failed to toggle heart reaction: $error');
+      if (!mounted) return;
+      setState(() {
+        // Undo exactly the optimistic delta applied above, rather than
+        // trusting any other cached count, which may itself be stale.
+        _heartedByMe = wasHearted;
+        _heartsCount = _heartsCount + (wasHearted ? 1 : -1);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update your reaction.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isTogglingHeart = false;
+        });
+      }
+    }
+  }
 
   void openCommentSection(BuildContext context) {
     showModalBottomSheet(
@@ -296,6 +355,20 @@ class NoteCardState extends State<NoteCard> {
                     ),
                   ),
                   const Spacer(), // Pushes the next content to the right
+                  IconButton(
+                    onPressed: _isTogglingHeart ? null : _toggleHeart,
+                    tooltip: _heartedByMe ? 'Unlike' : 'Like',
+                    icon: Badge(
+                      label: Text('$_heartsCount'),
+                      isLabelVisible: _heartsCount > 0,
+                      child: Icon(
+                        _heartedByMe
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                      ),
+                    ),
+                    color: _heartedByMe ? Colors.redAccent : Colors.black54,
+                  ),
                   FutureBuilder<List<CommunityComment>>(
                     future: CommentsApiService.instance
                         .fetchComments(widget.note.id),

@@ -2,6 +2,26 @@ import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 
+class PostHeartState {
+  const PostHeartState({
+    required this.heartsCount,
+    required this.heartedByMe,
+  });
+
+  final int heartsCount;
+  final bool heartedByMe;
+
+  factory PostHeartState.fromJson(Map<String, dynamic> json) {
+    final rawCount = json['heartsCount'];
+    return PostHeartState(
+      heartsCount: rawCount is num
+          ? rawCount.toInt()
+          : int.tryParse(rawCount?.toString() ?? '') ?? 0,
+      heartedByMe: json['heartedByMe'] == true,
+    );
+  }
+}
+
 class CommunityApiService {
   CommunityApiService._();
 
@@ -70,5 +90,26 @@ class CommunityApiService {
       '/api/community/posts/$postId',
       token: _token,
     );
+  }
+
+  // Liking a post you already liked (e.g. a double tap) is a harmless
+  // no-op server-side -- the backend's unique (post, user) constraint on
+  // the hearts table means it always returns the current, authoritative
+  // count instead of inflating it.
+  Future<PostHeartState> heartPost(String postId) async {
+    final response = await _api.postJson(
+      '/api/community/posts/$postId/hearts',
+      const {},
+      token: _token,
+    );
+    return PostHeartState.fromJson(response);
+  }
+
+  Future<PostHeartState> unheartPost(String postId) async {
+    final response = await _api.deleteJson(
+      '/api/community/posts/$postId/hearts',
+      token: _token,
+    );
+    return PostHeartState.fromJson(response);
   }
 }

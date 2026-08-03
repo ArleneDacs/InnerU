@@ -55,6 +55,7 @@ class NotificationPushRouter {
         );
         return;
       case 'community_comment':
+      case 'community_heart':
         navigator.push(
           MaterialPageRoute(
             builder: (context) => const CommunityScreen(),
