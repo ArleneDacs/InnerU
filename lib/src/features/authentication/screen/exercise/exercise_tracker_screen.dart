@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -75,6 +76,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   bool _hasAnnouncedGoalReached = false;
   Timer? _sessionTimer;
   Timer? _completionAlarmTimer;
+  final AudioPlayer _alarmPlayer = AudioPlayer()
+    ..setPlayerMode(PlayerMode.mediaPlayer);
+  bool _alarmAudioContextConfigured = false;
   List<Map<String, dynamic>> _todayLogs = [];
 
   String get _todayDate => DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -83,6 +87,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   void dispose() {
     _sessionTimer?.cancel();
     _completionAlarmTimer?.cancel();
+    // dispose() stops playback itself; no need to await the separate
+    // stop() call _stopCompletionAlarm() would otherwise race against.
+    _alarmPlayer.dispose();
     _customTypeController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -233,24 +240,71 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     });
   }
 
-  // Rings a repeating system alert + haptic burst once the goal duration is
-  // hit, and keeps ringing indefinitely -- like an actual alarm -- until
-  // the workout is explicitly stopped and saved (or a new session starts).
-  // _stopExerciseSession, _startExerciseSession, and dispose() all cancel
-  // _completionAlarmTimer, which is the only thing that ends this loop.
-  void _playCompletionAlarm() {
-    _completionAlarmTimer?.cancel();
+  Future<void> _ensureAlarmAudioContext() async {
+    if (_alarmAudioContextConfigured) return;
+    try {
+      await _alarmPlayer.setAudioContext(
+        AudioContext(
+          // .playback (rather than .ambient) is what makes iOS keep
+          // playing -- and audibly ring -- even when the ring/silent
+          // switch is flipped to silent, the same way a real alarm clock
+          // does.
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: {AVAudioSessionOptions.mixWithOthers},
+          ),
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: true,
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransient,
+          ),
+        ),
+      );
+      _alarmAudioContextConfigured = true;
+    } catch (error) {
+      debugPrint('Failed to configure exercise alarm audio context: $error');
+    }
+  }
 
-    void ring() {
-      SystemSound.play(SystemSoundType.alert);
-      HapticFeedback.heavyImpact();
+  // Loops an actual alarm sound file until the workout is stopped and
+  // saved. This used to call SystemSound.play(SystemSoundType.alert) on a
+  // repeating timer, but that API is a short one-shot UI click meant for
+  // things like picker feedback -- both iOS and Android throttle/ignore
+  // repeated calls to it in quick succession, so only the very first tick
+  // was ever actually audible and everything after it was silently
+  // dropped, which is why it sounded like "a single tone" instead of a
+  // continuing alarm. Looping a real audio asset (the same sleep_alarm
+  // sound already used for the sleep tracker's alarm) has no such
+  // throttling and keeps ringing for as long as the timer below is alive.
+  Future<void> _playCompletionAlarm() async {
+    _completionAlarmTimer?.cancel();
+    HapticFeedback.heavyImpact();
+
+    try {
+      await _ensureAlarmAudioContext();
+      await _alarmPlayer.stop();
+      await _alarmPlayer.setReleaseMode(ReleaseMode.loop);
+      await _alarmPlayer.play(AssetSource('audio/sleep_alarm.wav'));
+    } catch (error) {
+      debugPrint('Failed to play exercise completion alarm: $error');
     }
 
-    ring();
     _completionAlarmTimer = Timer.periodic(
       const Duration(seconds: 1),
-      (_) => ring(),
+      (_) => HapticFeedback.heavyImpact(),
     );
+  }
+
+  Future<void> _stopCompletionAlarm() async {
+    _completionAlarmTimer?.cancel();
+    _completionAlarmTimer = null;
+    try {
+      await _alarmPlayer.stop();
+    } catch (error) {
+      debugPrint('Failed to stop exercise completion alarm: $error');
+    }
   }
 
   Future<bool> _syncExerciseNotification() async {
@@ -330,7 +384,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         debugPrint('Start photo capture failed: $error');
       }
 
-      _completionAlarmTimer?.cancel();
+      unawaited(_stopCompletionAlarm());
       final now = DateTime.now();
       setState(() {
         _selectedType = type;
@@ -375,6 +429,15 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       return;
     }
 
+    // Silence the alarm the instant Stop & save is tapped, not after
+    // everything else below finishes. _captureExercisePhoto() alone can
+    // wait on the user through the entire native camera UI, so leaving the
+    // alarm stop until after it (and the network calls that follow) meant
+    // the alarm kept blaring through all of that -- it looked like Stop
+    // did nothing until something else (like leaving the screen) tore the
+    // player down instead.
+    unawaited(_stopCompletionAlarm());
+
     setState(() {
       _isUploadingEndPhoto = true;
       _isSaving = true;
@@ -406,7 +469,6 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       final unlockedRewards = await _recordExerciseStreak(session.id.toString());
       await _clearExerciseNotification();
       await _clearActiveSessionCache();
-      _completionAlarmTimer?.cancel();
 
       if (!mounted) return;
       setState(() {
@@ -1000,17 +1062,23 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         _controlLabel(theme, 'Intensity'),
         const SizedBox(height: 8),
         SegmentedButton<int>(
+          // No per-segment icon and no built-in selected checkmark: with
+          // three equal-width segments, "Moderate" was the one long
+          // enough that adding icon + checkmark width on top of its text
+          // left too little room, so it wrapped mid-word ("Moderat" /
+          // "e") instead of fitting on one line. The highlighted
+          // background/foreground color already shows which one is
+          // selected, so the icons were decorative, not load-bearing.
+          showSelectedIcon: false,
           segments: [
             for (var i = 0; i < labels.length; i++)
               ButtonSegment<int>(
                 value: i + 1,
-                label: Text(labels[i]),
-                icon: Icon(
-                  i == 0
-                      ? CupertinoIcons.wind
-                      : i == 1
-                          ? CupertinoIcons.flame
-                          : CupertinoIcons.bolt_fill,
+                label: Text(
+                  labels[i],
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
           ],
