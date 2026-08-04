@@ -78,6 +78,18 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _hasObservedEmotionStream = false;
   ModalRoute<dynamic>? _route;
 
+  // Fetched once and cached here rather than inline in build() via
+  // FutureBuilder(future: UserService.getUserData(), ...). This screen
+  // rebuilds constantly for unrelated reasons (profile picture updates,
+  // the quote refresh timer, chat-read overrides, watch sync, app resume),
+  // and a FutureBuilder given a brand-new Future instance on every one of
+  // those rebuilds throws away its previously loaded snapshot and resets
+  // to ConnectionState.waiting with data: null -- which is what made the
+  // "Current Days" streak medal appear to reset to 0 on its own even
+  // though nothing about the actual streak had changed. Only explicit
+  // refresh points (below) should ever replace this Future.
+  Future<Map<String, dynamic>>? _streakUserDataFuture;
+
   String get _todayDate => EmotionService.todayKey();
 
   IconData _getIconForEmotion(String emotion) {
@@ -130,6 +142,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadCompanyTheme();
     _loadCachedDashboardScore(currentUserId);
     _fetchProfilePic();
+    _streakUserDataFuture = UserService.getUserData();
     ProfilePictureBus.latestUrl.addListener(_onProfilePictureBusUpdate);
     fetchQuote();
     _scheduleNextQuoteRefresh();
@@ -170,6 +183,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (state == AppLifecycleState.resumed) {
       unawaited(_refreshQuoteIfNeeded());
       unawaited(_fetchProfilePic());
+      _refreshStreakMedals();
     }
   }
 
@@ -177,6 +191,18 @@ class _DashboardScreenState extends State<DashboardScreen>
   void didPopNext() {
     unawaited(_refreshQuoteIfNeeded());
     unawaited(_fetchProfilePic());
+    // Coming back from an activity screen (exercise, meditation, steps,
+    // fasting) is exactly when a streak/medal just changed server-side, so
+    // this is a real refresh point -- unlike the setState calls elsewhere
+    // on this screen that shouldn't touch _streakUserDataFuture at all.
+    _refreshStreakMedals();
+  }
+
+  void _refreshStreakMedals() {
+    if (!mounted) return;
+    setState(() {
+      _streakUserDataFuture = UserService.getUserData();
+    });
   }
 
   @override
@@ -2046,8 +2072,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (session == null) return const SizedBox.shrink();
 
     return FutureBuilder<Map<String, dynamic>>(
-      future: UserService.getUserData(),
+      future: _streakUserDataFuture ??= UserService.getUserData(),
       builder: (context, snapshot) {
+        // snapshot.data is only null before the very first fetch resolves
+        // (or if that first fetch failed with no cache to fall back on).
+        // Every rebuild after that reuses the same Future instance above,
+        // so a rebuild while a refresh is in flight keeps showing the
+        // last-known values here instead of dropping back to {}.
         final data = snapshot.data ?? <String, dynamic>{};
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -7,6 +8,17 @@ class ApiClient {
   ApiClient._();
 
   static final ApiClient instance = ApiClient._();
+
+  // Every request in the app funnels through this client, and the
+  // underlying `http` package has no default timeout -- a stalled or very
+  // slow connection (weak signal, captive portal, dead Wi-Fi) leaves the
+  // await hanging forever. That's most damaging at launch: main() awaits
+  // AuthService.initialize(), which calls getJson('/api/me') before
+  // runApp() ever fires, so a hung request here blocks the entire app from
+  // rendering so much as the splash screen. Bounding every call here means
+  // a slow network fails fast into the ApiException callers already catch,
+  // instead of hanging indefinitely.
+  static const Duration _defaultTimeout = Duration(seconds: 15);
 
   Uri _uri(String path) {
     final normalizedPath = path.startsWith('/') ? path : '/$path';
@@ -24,8 +36,11 @@ class ApiClient {
   Future<Map<String, dynamic>> getJson(
     String path, {
     String? token,
+    Duration timeout = _defaultTimeout,
   }) async {
-    final response = await http.get(_uri(path), headers: _headers(token: token));
+    final response = await http
+        .get(_uri(path), headers: _headers(token: token))
+        .timeout(timeout, onTimeout: _onTimeout);
     return _decodeResponse(response);
   }
 
@@ -33,12 +48,15 @@ class ApiClient {
     String path,
     Map<String, dynamic> body, {
     String? token,
+    Duration timeout = _defaultTimeout,
   }) async {
-    final response = await http.post(
-      _uri(path),
-      headers: _headers(token: token),
-      body: jsonEncode(body),
-    );
+    final response = await http
+        .post(
+          _uri(path),
+          headers: _headers(token: token),
+          body: jsonEncode(body),
+        )
+        .timeout(timeout, onTimeout: _onTimeout);
     return _decodeResponse(response);
   }
 
@@ -47,13 +65,17 @@ class ApiClient {
     String? token,
     Map<String, String>? fields,
     List<http.MultipartFile> files = const [],
+    Duration timeout = const Duration(seconds: 60),
   }) async {
     final request = http.MultipartRequest('POST', _uri(path))
       ..headers.addAll(_headers(token: token))
       ..fields.addAll(fields ?? {});
     request.files.addAll(files);
 
-    final streamedResponse = await request.send();
+    // Uploads (photos/videos) legitimately take longer than a plain JSON
+    // call, so this gets a longer bound rather than the default.
+    final streamedResponse =
+        await request.send().timeout(timeout, onTimeout: _onTimeout);
     final response = await http.Response.fromStream(streamedResponse);
     return _decodeResponse(response);
   }
@@ -62,22 +84,31 @@ class ApiClient {
     String path,
     Map<String, dynamic> body, {
     String? token,
+    Duration timeout = _defaultTimeout,
   }) async {
-    final response = await http.patch(
-      _uri(path),
-      headers: _headers(token: token),
-      body: jsonEncode(body),
-    );
+    final response = await http
+        .patch(
+          _uri(path),
+          headers: _headers(token: token),
+          body: jsonEncode(body),
+        )
+        .timeout(timeout, onTimeout: _onTimeout);
     return _decodeResponse(response);
   }
 
   Future<Map<String, dynamic>> deleteJson(
     String path, {
     String? token,
+    Duration timeout = _defaultTimeout,
   }) async {
-    final response =
-        await http.delete(_uri(path), headers: _headers(token: token));
+    final response = await http
+        .delete(_uri(path), headers: _headers(token: token))
+        .timeout(timeout, onTimeout: _onTimeout);
     return _decodeResponse(response);
+  }
+
+  Never _onTimeout() {
+    throw const ApiTimeoutException();
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
@@ -112,4 +143,20 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException($statusCode): $message';
+}
+
+/// Thrown when a request exceeds [ApiClient]'s bound instead of hanging
+/// forever. Callers that already `catch (e)` broadly (nearly everywhere in
+/// this app) handle this the same as any other network failure; code that
+/// wants to react specifically to "request took too long" (e.g. to show a
+/// slow-connection hint) can catch this type directly.
+class ApiTimeoutException implements Exception {
+  const ApiTimeoutException([
+    this.message = 'The request took too long. Please check your connection and try again.',
+  ]);
+
+  final String message;
+
+  @override
+  String toString() => 'ApiTimeoutException: $message';
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,7 +43,19 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   bool _completionAlertHandled = false;
   bool _completionFlowHandled = false;
   bool _completionDialogVisible = false;
+  // Set by the manual Stop button so the alarm doesn't start after the
+  // fact if the user stops the session during the brief window between
+  // the completion voice line and the alarm that's meant to follow it.
+  bool _completionAudioCancelled = false;
   Timer? _completionAlarmTimer;
+  // Dedicated player for the post-completion alarm, separate from
+  // AudioHelper's background meditation-music player. Rings for as long as
+  // the "Meditation complete" modal is open -- _stopCompletionAlarm() is
+  // the only thing that silences it (Done, Take photo & share, or leaving
+  // the screen), by design.
+  final AudioPlayer _completionAlarmPlayer = AudioPlayer()
+    ..setPlayerMode(PlayerMode.mediaPlayer);
+  bool _alarmAudioContextConfigured = false;
   final ImagePicker _memoryPicker = ImagePicker();
   final MeditationStreakService _meditationStreakService =
       MeditationStreakService();
@@ -70,6 +83,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _completionAlarmTimer?.cancel();
+    _completionAlarmPlayer.dispose();
     super.dispose();
   }
 
@@ -200,6 +214,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
 
     _completionAlertHandled = false;
     _completionFlowHandled = false;
+    _completionAudioCancelled = false;
     await FastingNotificationService.instance.ensurePermissions();
     await FastingNotificationService.instance
         .scheduleMeditationCompleteNotification(
@@ -229,27 +244,80 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
     return _completionAffirmations[index];
   }
 
-  void _playCompletionAlarm() {
-    _completionAlarmTimer?.cancel();
+  Future<void> _ensureAlarmAudioContext() async {
+    if (_alarmAudioContextConfigured) return;
+    try {
+      await _completionAlarmPlayer.setAudioContext(
+        AudioContext(
+          // .playback (not .ambient) so this keeps ringing even if the
+          // ring/silent switch is flipped to silent -- the same way a real
+          // alarm clock does, and the same setup the exercise tracker's
+          // completion alarm already uses.
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: {AVAudioSessionOptions.mixWithOthers},
+          ),
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: true,
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransient,
+          ),
+        ),
+      );
+      _alarmAudioContextConfigured = true;
+    } catch (error) {
+      debugPrint('Failed to configure meditation alarm audio context: $error');
+    }
+  }
 
-    var rings = 0;
-    void ring() {
-      SystemSound.play(SystemSoundType.alert);
-      HapticFeedback.mediumImpact();
+  // Rings a real alarm tone on loop -- intentionally, by product design --
+  // for as long as the "Meditation complete" modal is open. It only stops
+  // via _stopCompletionAlarm(), which fires when the user taps Done or
+  // Take photo & share.
+  Future<void> _playCompletionAlarm() async {
+    _completionAlarmTimer?.cancel();
+    HapticFeedback.heavyImpact();
+
+    try {
+      await _ensureAlarmAudioContext();
+      await _completionAlarmPlayer.stop();
+      await _completionAlarmPlayer.setReleaseMode(ReleaseMode.loop);
+      await _completionAlarmPlayer.play(AssetSource('audio/sleep_alarm.wav'));
+    } catch (error) {
+      debugPrint('Failed to play meditation completion alarm: $error');
     }
 
-    ring();
-    _completionAlarmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      rings += 1;
-      if (rings >= 3) {
-        timer.cancel();
-        if (_completionAlarmTimer == timer) {
-          _completionAlarmTimer = null;
-        }
-        return;
-      }
-      ring();
-    });
+    _completionAlarmTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => HapticFeedback.heavyImpact(),
+    );
+  }
+
+  Future<void> _stopCompletionAlarm() async {
+    _completionAlarmTimer?.cancel();
+    _completionAlarmTimer = null;
+    try {
+      await _completionAlarmPlayer.stop();
+    } catch (error) {
+      debugPrint('Failed to stop meditation completion alarm: $error');
+    }
+  }
+
+  // The "speak" platform channel call returns as soon as the native side
+  // *starts* speaking, not once the voice line finishes -- neither the iOS
+  // nor Android handler waits on a completion delegate before replying. So
+  // rather than the alarm racing the voice, this waits out a duration long
+  // enough for "Meditation done, great job." to finish at the app's
+  // slightly-slower-than-normal speaking rate before the alarm takes over.
+  static const Duration _completionPraiseDuration = Duration(milliseconds: 2500);
+
+  Future<void> _runCompletionAudioSequence() async {
+    await _speakCompletionPraise();
+    await Future<void>.delayed(_completionPraiseDuration);
+    if (!mounted || _completionAudioCancelled) return;
+    await _playCompletionAlarm();
   }
 
   Future<void> _speakCompletionPraise() async {
@@ -400,6 +468,18 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
         );
       },
     );
+
+    // By design, the completion alarm rings on loop until this point --
+    // this runs the instant the dialog closes, no matter how: Done,
+    // tapping outside the barrier, or Take photo & share (which pops the
+    // same dialog before opening the picker). Flagging it cancelled first
+    // also covers the case where the dialog gets dismissed during the
+    // brief voice-then-alarm delay in _runCompletionAudioSequence(), so
+    // the alarm can't start ringing after the user has already moved on.
+    _completionAudioCancelled = true;
+    unawaited(_stopCompletionAlarm());
+    unawaited(_stopCompletionSpeech());
+    unawaited(FastingNotificationService.instance.cancelMeditationCompleteNotification());
 
     _completionDialogVisible = false;
   }
@@ -661,8 +741,7 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
     timeProvider.stopTimer();
     await AudioHelper.stopAudio();
     await _stopSpotifyPlayer();
-    _playCompletionAlarm();
-    unawaited(_speakCompletionPraise());
+    unawaited(_runCompletionAudioSequence());
     final completionFuture =
         _onMeditationComplete(completedSeconds: completedSeconds);
     await _handleMeditationCompleteAlert();
@@ -1085,7 +1164,8 @@ class _MeditationState extends State<Meditation> with WidgetsBindingObserver {
                                           ),
                                           IconButton(
                                             onPressed: () {
-                                              _completionAlarmTimer?.cancel();
+                                              _completionAudioCancelled = true;
+                                              unawaited(_stopCompletionAlarm());
                                               _completionFlowHandled = true;
                                               timeProvider.stopTimer();
                                               AudioHelper.stopAudio();

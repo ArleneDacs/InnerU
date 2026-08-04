@@ -62,27 +62,42 @@ class FastingNotificationService {
   static const String _meditationChannelName = 'Meditation reminders';
   static const String _meditationChannelDescription =
       'Reminds you to meditate and alerts you when meditation is complete.';
+  // A fresh channel id on purpose (was
+  // 'meditation_complete_alarm_channel'): Android treats a notification
+  // channel's importance/category as fixed forever once it's first
+  // created on-device, so bumping the category below on the *old* channel
+  // id would silently do nothing for anyone who already has the app
+  // installed -- their channel was already created with the old settings.
   static const String _meditationCompleteChannelId =
-      'meditation_complete_alarm_channel';
+      'meditation_complete_channel';
   static const String _meditationCompleteChannelName =
       'Meditation completion alerts';
+  // This finishes a session while the user is already looking at the app,
+  // not a "wake up now" alert -- AndroidNotificationCategory.alarm paired
+  // with Importance.max is exactly the combination Android (and OEM
+  // skins like Samsung/Xiaomi) reserve for actual ringing alarms, which on
+  // many devices keep sounding/vibrating in an insistent loop until the
+  // notification is manually cleared, independent of anything the app
+  // does. Importance.high + category.reminder still gets a heads-up
+  // banner with sound, but as a normal one-shot notification rather than
+  // an alarm-style one that can loop on its own.
   static const NotificationDetails _meditationCompleteNotificationDetails =
       NotificationDetails(
     android: AndroidNotificationDetails(
       _meditationCompleteChannelId,
       _meditationCompleteChannelName,
       channelDescription: _meditationChannelDescription,
-      importance: Importance.max,
+      importance: Importance.high,
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
-      category: AndroidNotificationCategory.alarm,
+      category: AndroidNotificationCategory.reminder,
     ),
     iOS: DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: false,
       presentSound: true,
-      interruptionLevel: InterruptionLevel.timeSensitive,
+      interruptionLevel: InterruptionLevel.active,
     ),
   );
   static const String _exerciseCompleteChannelId =

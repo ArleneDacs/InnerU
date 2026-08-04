@@ -25,6 +25,21 @@ class _MeditationStreakRewardsScreenState
   final PageController _pageController = PageController(viewportFraction: 0.78);
   int _page = 0;
 
+  // Cached instead of created inline in the FutureBuilder below. Swiping
+  // between milestone pages calls setState() to update _page, which
+  // rebuilds this whole screen; handing FutureBuilder a fresh
+  // UserService.getUserData() Future on every one of those rebuilds reset
+  // its snapshot to data: null each time, which is what made the streak
+  // count and unlocked-medal count flash back to 0/locked while swiping
+  // instead of reflecting the real, already-earned progress.
+  late Future<Map<String, dynamic>> _userDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _userDataFuture = UserService.getUserData();
+  }
+
   @override
   void dispose() {
     _pageController.dispose();
@@ -58,7 +73,7 @@ class _MeditationStreakRewardsScreenState
     List<ActivityStreakMilestone> milestones,
   ) {
     return FutureBuilder<Map<String, dynamic>>(
-        future: UserService.getUserData(),
+        future: _userDataFuture,
         builder: (context, snapshot) {
           final data = snapshot.data ?? <String, dynamic>{};
           final currentField = ActivityStreakService.currentFieldFor(

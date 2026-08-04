@@ -68,33 +68,18 @@ void main() {
       };
     }
 
-    try {
-      await AuthService.instance.initialize();
-    } catch (error, stack) {
-      await _recordError(error, stack);
-    }
-    try {
-      await FastingNotificationService.instance.initialize();
-    } catch (error, stack) {
-      await _recordError(error, stack);
-    }
-    try {
-      await OneSignalPushService.instance.initialize(appNavigatorKey);
-    } catch (error, stack) {
-      await _recordError(error, stack);
-    }
-    try {
-      await StepBackgroundService.instance.configure();
-      await AppleHealthStepsService.instance.syncTodaySteps();
-      await StepBackgroundService.instance.startTrackingIfAvailable();
-    } catch (error, stack) {
-      await _recordError(error, stack);
-    }
-    try {
-      WatchStepsReceiver.instance.start();
-    } catch (error, stack) {
-      await _recordError(error, stack);
-    }
+    // runApp() used to wait behind this whole block, including
+    // AuthService.initialize() and OneSignalPushService.initialize(), both
+    // of which make network calls. On a slow or dead connection that left
+    // the user staring at a blank screen indefinitely -- not even the
+    // branding splash screen could render, since nothing had reached
+    // runApp() yet. None of these steps are needed to paint the first
+    // frame (SplashScreen doesn't read the session, and AuthRoleHome only
+    // appears once AuthService's session stream emits), so they now run in
+    // the background after the UI is already on screen. Each step keeps
+    // its own try/catch exactly as before, so a slow/failing step still
+    // can't take down the ones after it.
+    unawaited(_initializeBackgroundServices());
 
     runApp(const App());
   }, (error, stack) {
@@ -106,6 +91,36 @@ void main() {
       debugPrint('Uncaught app error: $error');
     }
   });
+}
+
+Future<void> _initializeBackgroundServices() async {
+  try {
+    await AuthService.instance.initialize();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+  try {
+    await FastingNotificationService.instance.initialize();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+  try {
+    await OneSignalPushService.instance.initialize(appNavigatorKey);
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+  try {
+    await StepBackgroundService.instance.configure();
+    await AppleHealthStepsService.instance.syncTodaySteps();
+    await StepBackgroundService.instance.startTrackingIfAvailable();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+  try {
+    WatchStepsReceiver.instance.start();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
 }
 
 Future<void> _recordError(
