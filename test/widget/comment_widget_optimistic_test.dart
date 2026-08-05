@@ -39,6 +39,8 @@ void main() {
         createdAt: '2026-08-04T00:00:00Z',
         updatedAt: null,
         profilePic: null,
+        reactionsCount: 0,
+        reactedByMe: false,
       ));
       await tester.pumpAndSettle();
 

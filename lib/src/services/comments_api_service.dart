@@ -11,6 +11,8 @@ class CommunityComment {
     required this.createdAt,
     required this.updatedAt,
     required this.profilePic,
+    required this.reactionsCount,
+    required this.reactedByMe,
   });
 
   final String id;
@@ -21,8 +23,11 @@ class CommunityComment {
   final String? createdAt;
   final String? updatedAt;
   final String? profilePic;
+  final int reactionsCount;
+  final bool reactedByMe;
 
   factory CommunityComment.fromJson(Map<String, dynamic> json) {
+    final rawReactionsCount = json['reactionsCount'];
     return CommunityComment(
       id: json['id']?.toString() ?? '',
       postId: json['postId']?.toString() ?? '',
@@ -32,8 +37,35 @@ class CommunityComment {
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
       profilePic: json['profilePic'] as String?,
+      reactionsCount: rawReactionsCount is num
+          ? rawReactionsCount.toInt()
+          : int.tryParse(rawReactionsCount?.toString() ?? '') ?? 0,
+      reactedByMe: json['reactedByMe'] == true,
     );
   }
+}
+
+class CommentReactionState {
+  const CommentReactionState({
+    required this.commentId,
+    required this.reactionsCount,
+    required this.reactedByMe,
+  });
+
+  factory CommentReactionState.fromJson(Map<String, dynamic> json) {
+    final rawReactionsCount = json['reactionsCount'];
+    return CommentReactionState(
+      commentId: json['commentId']?.toString() ?? '',
+      reactionsCount: rawReactionsCount is num
+          ? rawReactionsCount.toInt()
+          : int.tryParse(rawReactionsCount?.toString() ?? '') ?? 0,
+      reactedByMe: json['reactedByMe'] == true,
+    );
+  }
+
+  final String commentId;
+  final int reactionsCount;
+  final bool reactedByMe;
 }
 
 class CommentsApiService {
@@ -101,5 +133,28 @@ class CommentsApiService {
       '/api/community/posts/$postId/comments/$commentId',
       token: _token,
     );
+  }
+
+  Future<CommentReactionState> reactComment({
+    required String postId,
+    required String commentId,
+  }) async {
+    final response = await _api.postJson(
+      '/api/community/posts/$postId/comments/$commentId/reactions',
+      const {},
+      token: _token,
+    );
+    return CommentReactionState.fromJson(response);
+  }
+
+  Future<CommentReactionState> unreactComment({
+    required String postId,
+    required String commentId,
+  }) async {
+    final response = await _api.deleteJson(
+      '/api/community/posts/$postId/comments/$commentId/reactions',
+      token: _token,
+    );
+    return CommentReactionState.fromJson(response);
   }
 }

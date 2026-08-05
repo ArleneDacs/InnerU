@@ -33,6 +33,7 @@ class _CommentWidgetState extends State<CommentWidget> {
   Timer? _relativeTimeTicker;
   Future<List<CommunityComment>>? _commentsFuture;
   List<CommunityComment>? _comments;
+  final Set<String> _togglingReactionCommentIds = <String>{};
 
   @override
   void initState() {
@@ -113,6 +114,10 @@ class _CommentWidgetState extends State<CommentWidget> {
       createdAt: DateTime.now().toIso8601String(),
       updatedAt: null,
       profilePic: session?.profilePic,
+      // A freshly optimistic-inserted comment doesn't exist server-side
+      // yet, so it can't have any reactions on it.
+      reactionsCount: 0,
+      reactedByMe: false,
     );
 
     setState(() {
@@ -175,6 +180,88 @@ class _CommentWidgetState extends State<CommentWidget> {
           content: Text('Could not post your comment. Please try again.'),
         ),
       );
+    }
+  }
+
+  Future<void> _toggleReaction(CommunityComment comment) async {
+    if (_togglingReactionCommentIds.contains(comment.id)) return;
+    final wasReacted = comment.reactedByMe;
+    final optimistic = CommunityComment(
+      id: comment.id,
+      postId: comment.postId,
+      userId: comment.userId,
+      username: comment.username,
+      profilePic: comment.profilePic,
+      comment: comment.comment,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      reactionsCount: comment.reactionsCount + (wasReacted ? -1 : 1),
+      reactedByMe: !wasReacted,
+    );
+
+    final beforeToggle = _comments;
+    if (beforeToggle == null) return;
+    setState(() {
+      _togglingReactionCommentIds.add(comment.id);
+      _comments = [
+        for (final c in beforeToggle)
+          if (c.id == comment.id) optimistic else c,
+      ];
+    });
+
+    try {
+      final state = wasReacted
+          ? await _api.unreactComment(
+              postId: widget.postId, commentId: comment.id)
+          : await _api.reactComment(
+              postId: widget.postId, commentId: comment.id);
+      if (!mounted) return;
+      // Same concurrent-reload guard as addComment: only reconcile if our
+      // optimistic entry could still be in the current list.
+      final currentComments = _comments;
+      if (currentComments != null) {
+        setState(() {
+          _comments = [
+            for (final c in currentComments)
+              if (c.id == comment.id)
+                CommunityComment(
+                  id: c.id,
+                  postId: c.postId,
+                  userId: c.userId,
+                  username: c.username,
+                  profilePic: c.profilePic,
+                  comment: c.comment,
+                  createdAt: c.createdAt,
+                  updatedAt: c.updatedAt,
+                  reactionsCount: state.reactionsCount,
+                  reactedByMe: state.reactedByMe,
+                )
+              else
+                c,
+          ];
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to toggle comment reaction: $e');
+      if (!mounted) return;
+      final currentComments = _comments;
+      if (currentComments != null) {
+        setState(() {
+          _comments = [
+            for (final c in currentComments)
+              // Roll back to the pre-tap value.
+              if (c.id == comment.id) comment else c,
+          ];
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _togglingReactionCommentIds.remove(comment.id);
+        });
+      } else {
+        _togglingReactionCommentIds.remove(comment.id);
+      }
     }
   }
 
@@ -408,6 +495,41 @@ class _CommentWidgetState extends State<CommentWidget> {
                                                 ),
                                               ],
                                             ),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          InkWell(
+                                            onTap: _togglingReactionCommentIds
+                                                    .contains(comment.id)
+                                                ? null
+                                                : () =>
+                                                    _toggleReaction(comment),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  comment.reactedByMe
+                                                      ? Icons.favorite_rounded
+                                                      : Icons
+                                                          .favorite_border_rounded,
+                                                  size: 16,
+                                                  color: comment.reactedByMe
+                                                      ? Colors.redAccent
+                                                      : companyTheme
+                                                          .mutedInkColor,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${comment.reactionsCount}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: companyTheme
+                                                        .mutedInkColor,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ],
