@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
 use App\Models\CommunityPostHeart;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
@@ -72,6 +73,45 @@ class CommunityController extends Controller
             });
 
         return response()->json(['posts' => $posts]);
+    }
+
+    public function mentionableUsers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $query = trim((string) $request->query('q', ''));
+
+        if ($query === '') {
+            return response()->json([]);
+        }
+
+        $matches = User::query()
+            ->where(function ($q) use ($user): void {
+                if ($user->company_code !== null && $user->company_code !== '') {
+                    $q->where('company_code', $user->company_code);
+                }
+
+                if ($user->company_name !== null && $user->company_name !== '') {
+                    $method = $user->company_code !== null && $user->company_code !== ''
+                        ? 'orWhere'
+                        : 'where';
+                    $q->{$method}('company_name', $user->company_name);
+                }
+            })
+            ->where('id', '!=', $user->id)
+            ->where('name', 'ILIKE', "%{$query}%")
+            ->orderBy('name')
+            ->limit(10)
+            ->get(['id', 'name', 'profile_pic']);
+
+        return response()->json($matches->map(fn (User $u) => [
+            'id' => (string) $u->id,
+            'name' => $u->name,
+            'profilePic' => $u->profile_pic,
+        ])->values());
     }
 
     public function store(Request $request): JsonResponse

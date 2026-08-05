@@ -63,6 +63,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/companies/{company}/members', [CompanyController::class, 'members']);
     Route::delete('/companies/{company}', [CompanyController::class, 'destroy']);
     Route::get('/community/posts', [CommunityController::class, 'index']);
+    Route::get('/community/mentionable-users', [CommunityController::class, 'mentionableUsers']);
     Route::post('/community/posts', [CommunityController::class, 'store']);
     Route::patch('/community/posts/{post}', [CommunityController::class, 'update']);
     Route::delete('/community/posts/{post}', [CommunityController::class, 'destroy']);
