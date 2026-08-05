@@ -421,13 +421,13 @@ class _NotesTypeState extends State<NotesType> {
                       ),
                       controller: titleController,
                       // A title is a single line by definition (and the
-                      // 40-char cap makes wrapping to a 2nd/3rd line all
+                      // 50-char cap makes wrapping to a 2nd/3rd line all
                       // but impossible on a real device width) -- maxLines:
                       // 1 pins the field's height to exactly one line plus
                       // contentPadding, with no ambiguity left for a
                       // "reserved extra lines" gap to reappear in.
                       maxLines: 1,
-                      maxLength: 40,
+                      maxLength: 50,
                       textAlignVertical: TextAlignVertical.center,
                       keyboardType: TextInputType.text,
                       textInputAction: TextInputAction.done,
