@@ -6,6 +6,7 @@ import 'package:selfcare_projects/src/services/comments_api_service.dart';
 import 'package:selfcare_projects/src/services/community_api_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
 import 'package:selfcare_projects/src/widgets/linkified_text.dart';
+import 'package:selfcare_projects/src/widgets/member_profile_sheet.dart';
 
 class NoteCard extends StatefulWidget {
   final Note note;
@@ -191,6 +192,27 @@ class NoteCardState extends State<NoteCard> {
                           color: Color.fromARGB(221, 19, 19, 19),
                           height: 1.5,
                         ),
+                        mentions: widget.note.mentions
+                            .map((m) => MentionSpanTarget(
+                                  userId: m['userId'] ?? '',
+                                  name: m['name'] ?? '',
+                                ))
+                            .toList(),
+                        mentionStyle: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple,
+                        ),
+                        onMentionTap: (userId) {
+                          final mention = widget.note.mentions.firstWhere(
+                            (m) => m['userId'] == userId,
+                            orElse: () => const <String, String>{},
+                          );
+                          showMemberProfileSheet(
+                            context,
+                            userId: userId,
+                            name: mention['name'] ?? 'Member',
+                          );
+                        },
                       ),
                       if (isLongText)
                         GestureDetector(

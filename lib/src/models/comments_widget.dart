@@ -6,6 +6,8 @@ import 'package:selfcare_projects/src/services/comments_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
 import 'package:selfcare_projects/src/widgets/linkified_text.dart';
+import 'package:selfcare_projects/src/widgets/member_profile_sheet.dart';
+import 'package:selfcare_projects/src/widgets/mention_text_field.dart';
 
 class CommentWidget extends StatefulWidget {
   final String postId;
@@ -37,6 +39,13 @@ class _CommentWidgetState extends State<CommentWidget> {
   List<CommunityComment>? _comments;
   final Set<String> _togglingReactionCommentIds = <String>{};
   CommunityComment? _replyingTo;
+  // The same MentionTextField instance is reused for every comment/reply
+  // sent during this sheet's lifetime (it isn't recreated per-submission),
+  // so its selected-mentions list is read at submit time via this key, then
+  // explicitly cleared (see addComment) -- otherwise a later, unrelated
+  // comment would keep re-including mentions selected for an earlier one.
+  final GlobalKey<MentionTextFieldState> _mentionFieldKey =
+      GlobalKey<MentionTextFieldState>();
 
   // Per-comment GlobalKeys (top-level comments and replies share this same
   // key space, since both are rendered by _buildCommentRow) so a
@@ -263,6 +272,15 @@ class _CommentWidgetState extends State<CommentWidget> {
     // network call still know the parent even though the "Replying to"
     // chip has already been dismissed from the UI.
     final replyingTo = _replyingTo;
+    // Snapshot the mentions selected while composing this comment before
+    // the field gets cleared below -- clearMentions() resets the
+    // MentionTextField's internal list right after, so a later comment
+    // typed into the same reused field doesn't inherit this one's mentions.
+    final selectedMentions =
+        _mentionFieldKey.currentState?.selectedMentions ?? const [];
+    final mentionsPayload = selectedMentions
+        .map((m) => {'userId': m.id, 'name': m.name})
+        .toList();
     final tempId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
     final optimistic = CommunityComment(
       id: tempId,
@@ -278,6 +296,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       reactionsCount: 0,
       reactedByMe: false,
       parentId: replyingTo?.id,
+      mentions: mentionsPayload,
     );
 
     setState(() {
@@ -285,6 +304,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       _replyingTo = null;
     });
     _commentController.clear();
+    _mentionFieldKey.currentState?.clearMentions();
 
     try {
       final saved = widget.addCommentOverride != null
@@ -293,6 +313,7 @@ class _CommentWidgetState extends State<CommentWidget> {
               postId: widget.postId,
               comment: trimmed,
               parentId: replyingTo?.id,
+              mentions: mentionsPayload,
             );
       if (!mounted) return;
       // A concurrent _reloadComments() (edit/delete flow) may have nulled
@@ -363,6 +384,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       reactionsCount: comment.reactionsCount + (wasReacted ? -1 : 1),
       reactedByMe: !wasReacted,
       parentId: comment.parentId,
+      mentions: comment.mentions,
     );
 
     final beforeToggle = _comments;
@@ -402,6 +424,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                   reactionsCount: state.reactionsCount,
                   reactedByMe: state.reactedByMe,
                   parentId: c.parentId,
+                  mentions: c.mentions,
                 )
               else
                 c,
@@ -585,6 +608,27 @@ class _CommentWidgetState extends State<CommentWidget> {
                             fontSize: 16,
                             color: companyTheme.inkColor,
                           ),
+                          mentions: comment.mentions
+                              .map((m) => MentionSpanTarget(
+                                    userId: m['userId'] ?? '',
+                                    name: m['name'] ?? '',
+                                  ))
+                              .toList(),
+                          mentionStyle: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepPurple,
+                          ),
+                          onMentionTap: (userId) {
+                            final mention = comment.mentions.firstWhere(
+                              (m) => m['userId'] == userId,
+                              orElse: () => const <String, String>{},
+                            );
+                            showMemberProfileSheet(
+                              context,
+                              userId: userId,
+                              name: mention['name'] ?? 'Member',
+                            );
+                          },
                         ),
                       ),
                       if (currentUsername == comment.username)
@@ -820,7 +864,8 @@ class _CommentWidgetState extends State<CommentWidget> {
                             minHeight: 48,
                             maxHeight: 116,
                           ),
-                          child: TextField(
+                          child: MentionTextField(
+                            key: _mentionFieldKey,
                             controller: _commentController,
                             minLines: 1,
                             maxLines: 4,

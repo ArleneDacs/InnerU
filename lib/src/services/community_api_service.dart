@@ -53,6 +53,7 @@ class CommunityApiService {
     required List<Map<String, String>> note,
     required int color,
     bool saved = false,
+    List<Map<String, String>> mentions = const [],
   }) async {
     final response = await _api.postJson(
       '/api/community/posts',
@@ -62,6 +63,7 @@ class CommunityApiService {
         'note': note,
         'color': color,
         'saved': saved,
+        if (mentions.isNotEmpty) 'mentions': mentions,
       },
       token: _token,
     );

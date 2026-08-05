@@ -58,6 +58,22 @@ void main() {
       final invalid = baseData()..['color'] = 'not-a-number';
       expect(Note.fromMap(invalid).color, 0xFFFFFFFF);
     });
+
+    test('defaults mentions to an empty list when missing', () {
+      final note = Note.fromMap(baseData());
+      expect(note.mentions, isEmpty);
+    });
+
+    test('parses mentions into userId/name pairs', () {
+      final data = baseData()
+        ..['mentions'] = [
+          {'userId': 'u1', 'name': 'Jordan Rivera'},
+        ];
+      final note = Note.fromMap(data);
+      expect(note.mentions, [
+        {'userId': 'u1', 'name': 'Jordan Rivera'},
+      ]);
+    });
   });
 
   group('Note.toJson', () {

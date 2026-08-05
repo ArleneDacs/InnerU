@@ -14,6 +14,7 @@ class CommunityComment {
     required this.reactionsCount,
     required this.reactedByMe,
     required this.parentId,
+    this.mentions = const [],
   });
 
   final String id;
@@ -27,6 +28,11 @@ class CommunityComment {
   final int reactionsCount;
   final bool reactedByMe;
   final String? parentId;
+  // Users mentioned in this comment's body via `@Name`, as
+  // `{userId, name}` pairs -- see CommentController::mapComment on the
+  // backend. Used by comments_widget.dart to render highlighted, tappable
+  // mentions with LinkifiedText.
+  final List<Map<String, String>> mentions;
 
   factory CommunityComment.fromJson(Map<String, dynamic> json) {
     final rawReactionsCount = json['reactionsCount'];
@@ -44,6 +50,13 @@ class CommunityComment {
           : int.tryParse(rawReactionsCount?.toString() ?? '') ?? 0,
       reactedByMe: json['reactedByMe'] == true,
       parentId: json['parentId'] as String?,
+      mentions: json['mentions'] is List
+          ? List<Map<String, String>>.from(
+              (json['mentions'] as List).map(
+                (item) => Map<String, String>.from(item),
+              ),
+            )
+          : const [],
     );
   }
 }
@@ -99,12 +112,14 @@ class CommentsApiService {
     required String postId,
     required String comment,
     String? parentId,
+    List<Map<String, String>> mentions = const [],
   }) async {
     final response = await _api.postJson(
       '/api/community/posts/$postId/comments',
       {
         'comment': comment,
         if (parentId != null) 'parentId': parentId,
+        if (mentions.isNotEmpty) 'mentions': mentions,
       },
       token: _token,
     );

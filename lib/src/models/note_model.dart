@@ -18,6 +18,11 @@ class Note {
   String companyName;
   int heartsCount;
   bool heartedByMe;
+  // Users mentioned in this post's body via `@Name`, as
+  // `{userId, name}` pairs -- see CommunityController::mapPost on the
+  // backend. Used by note_card.dart to render highlighted, tappable
+  // mentions with LinkifiedText.
+  List<Map<String, String>> mentions;
 
   Note({
     required this.id,
@@ -34,6 +39,7 @@ class Note {
     this.companyName = '',
     this.heartsCount = 0,
     this.heartedByMe = false,
+    this.mentions = const [],
   });
 
   factory Note.fromMap(Map<String, dynamic> data) {
@@ -89,6 +95,13 @@ class Note {
           ? (data['heartsCount'] as num).toInt()
           : int.tryParse(data['heartsCount']?.toString() ?? '') ?? 0,
       heartedByMe: data['heartedByMe'] == true,
+      mentions: data['mentions'] is List
+          ? List<Map<String, String>>.from(
+              (data['mentions'] as List).map(
+                (item) => Map<String, String>.from(item),
+              ),
+            )
+          : const [],
     );
   }
 

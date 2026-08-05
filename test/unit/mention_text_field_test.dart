@@ -63,6 +63,61 @@ void main() {
   });
 
   testWidgets(
+      'clearMentions empties the selection without touching the controller text',
+      (tester) async {
+    final controller = TextEditingController();
+    final key = GlobalKey<MentionTextFieldState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MentionTextField(
+            key: key,
+            controller: controller,
+            searchOverride: (query) async =>
+                [const MentionCandidate(id: '1', name: 'Jordan Rivera')],
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'hey @Jor');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Jordan Rivera'));
+    await tester.pumpAndSettle();
+    expect(key.currentState!.selectedMentions.length, 1);
+
+    key.currentState!.clearMentions();
+    await tester.pump();
+
+    expect(key.currentState!.selectedMentions, isEmpty);
+    // Clearing mentions is independent of the controller's text -- a
+    // caller that also wants the field emptied (e.g. after submitting a
+    // comment) clears the controller itself, separately.
+    expect(controller.text, 'hey @Jordan Rivera ');
+  });
+
+  testWidgets('onChanged is forwarded on every keystroke', (tester) async {
+    final controller = TextEditingController();
+    final seen = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MentionTextField(
+            controller: controller,
+            onChanged: seen.add,
+            searchOverride: (query) async => const [],
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'hello');
+
+    expect(seen, ['hello']);
+  });
+
+  testWidgets(
       'debounces incremental typing into a single search with the final query',
       (tester) async {
     final controller = TextEditingController();

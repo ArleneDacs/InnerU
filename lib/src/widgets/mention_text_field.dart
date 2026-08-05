@@ -8,13 +8,29 @@ class MentionTextField extends StatefulWidget {
     super.key,
     required this.controller,
     this.decoration,
+    this.style,
+    this.cursorColor,
+    this.minLines,
     this.maxLines = 5,
+    this.keyboardType,
+    this.textInputAction,
+    this.onChanged,
     this.searchOverride,
   });
 
   final TextEditingController controller;
   final InputDecoration? decoration;
+  final TextStyle? style;
+  final Color? cursorColor;
+  final int? minLines;
   final int? maxLines;
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  // Forwarded alongside this widget's own internal mention-scanning
+  // onChanged handler, so callers that need to react to every keystroke
+  // (e.g. notes_type.dart re-validating the post form) don't lose that
+  // ability just by switching from a plain TextField to this one.
+  final void Function(String text)? onChanged;
   final Future<List<MentionCandidate>> Function(String query)? searchOverride;
 
   @override
@@ -32,12 +48,27 @@ class MentionTextFieldState extends State<MentionTextField> {
   List<MentionCandidate> get selectedMentions =>
       List.unmodifiable(_selectedMentions);
 
+  /// Clears the accumulated selection, without touching [widget.controller]
+  /// or its text. Callers that reuse the same MentionTextField across
+  /// multiple submissions (e.g. a comment composer left open after posting)
+  /// must call this once a submission's mentions have been read and sent,
+  /// otherwise every later submission would keep re-including mentions
+  /// selected for earlier, already-sent text.
+  void clearMentions() {
+    if (_selectedMentions.isEmpty) return;
+    setState(() {
+      _selectedMentions.clear();
+    });
+  }
+
   Future<List<MentionCandidate>> _search(String query) {
     return widget.searchOverride?.call(query) ??
         MentionApiService.instance.search(query);
   }
 
   void _onChanged(String text) {
+    widget.onChanged?.call(text);
+
     final cursor = widget.controller.selection.baseOffset;
     if (cursor < 0) return;
 
@@ -109,7 +140,12 @@ class MentionTextFieldState extends State<MentionTextField> {
         TextField(
           controller: widget.controller,
           decoration: widget.decoration,
+          style: widget.style,
+          cursorColor: widget.cursorColor,
+          minLines: widget.minLines,
           maxLines: widget.maxLines,
+          keyboardType: widget.keyboardType,
+          textInputAction: widget.textInputAction,
           onChanged: _onChanged,
         ),
         if (_suggestions.isNotEmpty)

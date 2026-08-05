@@ -12,6 +12,7 @@ import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:selfcare_projects/src/widgets/mention_text_field.dart';
 
 class NotesType extends StatefulWidget {
   final Note note;
@@ -51,6 +52,28 @@ class _NotesTypeState extends State<NotesType> {
 
   late TextEditingController titleController;
   late TextEditingController contentController = TextEditingController();
+
+  // In practice every real caller (main.dart, sleep_tracker.dart,
+  // meditation_screen.dart, steptracker_screen.dart) constructs the
+  // incoming Note with exactly one "text" entry in `note.note`, so there's
+  // effectively a single free-text body field here, not several -- but
+  // contentWidgets *can* hold more than one TextField (addText() appends
+  // another), so mentions are tracked per-controller and unioned at submit
+  // time rather than assuming there's only ever one field. Keyed by the
+  // TextField's own controller (stable across build() reruns, since
+  // build() always rewraps the same controller instances stored in
+  // contentWidgets) so each field's MentionTextFieldState -- and the
+  // mention selections held inside it -- survives rebuilds.
+  final Map<TextEditingController, GlobalKey<MentionTextFieldState>>
+      _mentionKeys = {};
+
+  GlobalKey<MentionTextFieldState> _mentionKeyFor(
+      TextEditingController controller) {
+    return _mentionKeys.putIfAbsent(
+      controller,
+      () => GlobalKey<MentionTextFieldState>(),
+    );
+  }
 
   get todayTasks => null;
 
@@ -463,8 +486,10 @@ class _NotesTypeState extends State<NotesType> {
                         children: [
                           ...contentWidgets.map((widget) {
                             if (widget is TextField) {
-                              return TextField(
-                                controller: widget.controller,
+                              final bodyController = widget.controller!;
+                              return MentionTextField(
+                                key: _mentionKeyFor(bodyController),
+                                controller: bodyController,
                                 onChanged: (value) => _validateForm(),
                                 minLines: 6,
                                 maxLines: null,
@@ -590,6 +615,21 @@ class _NotesTypeState extends State<NotesType> {
       }
     }
 
+    // Union the mentions selected across every body field (in the common
+    // case there's exactly one), deduped by userId in case the same person
+    // was mentioned from more than one field.
+    final mentionsByUserId = <String, Map<String, String>>{};
+    for (final key in _mentionKeys.values) {
+      final selected = key.currentState?.selectedMentions ?? const [];
+      for (final mention in selected) {
+        mentionsByUserId[mention.id] = {
+          'userId': mention.id,
+          'name': mention.name,
+        };
+      }
+    }
+    final mentions = mentionsByUserId.values.toList();
+
     try {
       await CommunityApiService.instance.createPost(
         title: titleController.text.trim(),
@@ -597,6 +637,7 @@ class _NotesTypeState extends State<NotesType> {
         note: contentList,
         color: color,
         saved: isSaved,
+        mentions: mentions,
       );
     } catch (e) {
       print("Error saving note: $e");
