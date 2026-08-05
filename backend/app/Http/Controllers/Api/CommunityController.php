@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CommunityPost;
 use App\Models\CommunityPostHeart;
+use App\Models\Notification;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -129,13 +130,19 @@ class CommunityController extends Controller
             'note' => ['required', 'array'],
             'color' => ['nullable', 'integer'],
             'saved' => ['nullable', 'boolean'],
+            'mentions' => ['sometimes', 'nullable', 'array'],
+            'mentions.*.userId' => ['required_with:mentions', 'string'],
+            'mentions.*.name' => ['required_with:mentions', 'string'],
         ]);
+
+        $mentions = $this->validateAndFilterMentions($validated['mentions'] ?? null, $user);
 
         $post = CommunityPost::create([
             'user_id' => $user->id,
             'username' => $user->name,
             'title' => $validated['title'],
             'note' => $validated['note'],
+            'mentions' => $mentions,
             'color' => $validated['color'] ?? 0xFFFFFFFF,
             'category' => $validated['category'],
             'saved' => (bool) ($validated['saved'] ?? false),
@@ -143,6 +150,19 @@ class CommunityController extends Controller
             'company_code' => $user->company_code,
             'company_name' => $user->company_name,
         ]);
+
+        foreach ($mentions as $mention) {
+            if ((string) $mention['userId'] === (string) $user->id) {
+                continue;
+            }
+            Notification::createFor(
+                (string) $mention['userId'],
+                'community_mention',
+                sprintf('%s mentioned you in a post', $user->name),
+                null,
+                ['postId' => (string) $post->id, 'mentionedByUserId' => (string) $user->id],
+            );
+        }
 
         return response()->json([
             'post' => $this->mapPost($post, (int) $user->id),
@@ -189,6 +209,7 @@ class CommunityController extends Controller
             'username' => $post->username,
             'title' => $post->title,
             'note' => $post->note,
+            'mentions' => $post->mentions ?? [],
             'color' => $post->color,
             'createdAt' => $this->serializeAppDate($post->created_at),
             'category' => $post->category,
@@ -204,6 +225,54 @@ class CommunityController extends Controller
                 ->where('user_id', $viewerId)
                 ->exists(),
         ];
+    }
+
+    /**
+     * Validate that every mentioned userId is a real user in the same
+     * company as the author, then return the (unchanged) mentions array.
+     * Aborts with 422 if any mentioned user can't be found in-company --
+     * this is what prevents a client from using this to spam-notify or
+     * fingerprint arbitrary users.
+     *
+     * @param  array<int, array<string, mixed>>|null  $mentions
+     * @return array<int, array<string, mixed>>
+     */
+    private function validateAndFilterMentions(?array $mentions, User $author): array
+    {
+        if (empty($mentions)) {
+            return [];
+        }
+
+        $companyCode = trim((string) ($author->active_company_code ?? $author->company_code ?? ''));
+        $companyName = trim((string) ($author->active_company_name ?? $author->company_name ?? ''));
+
+        $validIds = \App\Models\User::query()
+            ->whereIn('id', collect($mentions)->pluck('userId'))
+            ->where(function ($q) use ($companyCode, $companyName) {
+                if ($companyCode !== '') {
+                    $q->where('company_code', $companyCode)
+                        ->orWhere('active_company_code', $companyCode);
+                }
+
+                if ($companyName !== '') {
+                    $q->orWhere('company_name', $companyName)
+                        ->orWhere('active_company_name', $companyName);
+                }
+            })
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        $filtered = collect($mentions)
+            ->filter(fn ($m) => in_array((string) ($m['userId'] ?? ''), $validIds, true))
+            ->values()
+            ->all();
+
+        if (count($filtered) !== count($mentions)) {
+            abort(422, 'One or more mentioned users could not be found in your company.');
+        }
+
+        return $filtered;
     }
 
     private function serializeAppDate(?CarbonInterface $value): ?string

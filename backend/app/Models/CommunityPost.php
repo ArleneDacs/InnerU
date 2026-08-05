@@ -13,6 +13,7 @@ class CommunityPost extends Model
         'username',
         'title',
         'note',
+        'mentions',
         'color',
         'category',
         'saved',
@@ -25,6 +26,7 @@ class CommunityPost extends Model
     {
         return [
             'note' => 'array',
+            'mentions' => 'array',
             'saved' => 'boolean',
         ];
     }

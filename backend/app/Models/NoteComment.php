@@ -13,7 +13,13 @@ class NoteComment extends Model
         'parent_id',
         'username',
         'comment',
+        'mentions',
     ];
+
+    protected function casts(): array
+    {
+        return ['mentions' => 'array'];
+    }
 
     public function user(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
