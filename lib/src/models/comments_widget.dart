@@ -125,22 +125,32 @@ class _CommentWidgetState extends State<CommentWidget> {
       if (!mounted) return;
       // A concurrent _reloadComments() (edit/delete flow) may have nulled
       // _comments while this POST was in flight, and a fresh GET may have
-      // already reseeded it from the server by the time we get here. That
-      // reseeded list won't contain our tempId placeholder (the server
-      // fetch predates this POST completing), so replacing-in-place would
-      // silently drop `saved` on the floor even though it did save
-      // successfully. If the placeholder is still present, replace it in
-      // place; otherwise append `saved` so it isn't lost.
+      // already reseeded it from the server by the time we get here. Two
+      // races are possible depending on when that GET landed relative to
+      // the server actually committing this POST:
+      //  - GET landed BEFORE the commit: the reseeded list has neither the
+      //    tempId placeholder nor the real comment. Replacing-in-place
+      //    would silently drop `saved` on the floor even though it did
+      //    save successfully, so we append it instead.
+      //  - GET landed AFTER the commit: the reseeded list already contains
+      //    the real comment (by its real id, not tempId). Appending here
+      //    would create a visible duplicate, so we do nothing.
+      // If the placeholder is still present (no concurrent reload raced
+      // us), replace it in place as normal.
       final currentComments = _comments;
       if (currentComments != null) {
         final hasTemp = currentComments.any((c) => c.id == tempId);
+        final hasSaved = currentComments.any((c) => c.id == saved.id);
         setState(() {
-          _comments = hasTemp
-              ? [
-                  for (final c in currentComments)
-                    if (c.id == tempId) saved else c,
-                ]
-              : [...currentComments, saved];
+          if (hasTemp) {
+            _comments = [
+              for (final c in currentComments)
+                if (c.id == tempId) saved else c,
+            ];
+          } else if (!hasSaved) {
+            _comments = [...currentComments, saved];
+          }
+          // else: reseed already includes the committed comment — nothing to do.
         });
       }
       widget.onChanged?.call();
