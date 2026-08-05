@@ -598,30 +598,37 @@ class _NotesTypeState extends State<NotesType> {
         color: color,
         saved: isSaved,
       );
+    } catch (e) {
+      print("Error saving note: $e");
+      _isSaving = false;
+      return false;
+    }
 
-      // Add data to dailytracker if the category is 'Learning' or 'Add Value'
+    // The post itself is now saved server-side. A failure recording the
+    // secondary daily-tracker activity must never be reported as if the
+    // post failed -- that previously stranded the user on the compose form
+    // with no error and no navigation, even though their post existed, and
+    // risked creating a duplicate post if they retried.
+    try {
       if (category == "Learning") {
         await _saveDailyActivity(learning: true);
       } else if (category == "Add Value") {
         await _saveDailyActivity(addValue: true);
       }
-
-      // Show a confirmation message
-      if (mounted) {
-        CustomSnackBar.showCustomSnackBar(
-          context,
-          isSaved ? "Note saved successfully." : "Note posted successfully.",
-          Colors.white,
-        );
-      }
-      _isSaving = false;
-      return true;
     } catch (e) {
-      print("Error saving note: $e");
+      print("Error recording daily activity for post: $e");
     }
 
+    // Show a confirmation message
+    if (mounted) {
+      CustomSnackBar.showCustomSnackBar(
+        context,
+        isSaved ? "Note saved successfully." : "Note posted successfully.",
+        Colors.white,
+      );
+    }
     _isSaving = false;
-    return false;
+    return true;
   }
 
   Future<void> _addPickedImage(XFile image) async {
