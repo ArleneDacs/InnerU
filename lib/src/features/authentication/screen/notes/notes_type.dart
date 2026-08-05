@@ -342,13 +342,11 @@ class _NotesTypeState extends State<NotesType> {
                                       // the pop's transition and the next push's transition can overlap and
                                       // paint a black frame before either settles. Same fix here.
                                       await Future<void>.delayed(const Duration(milliseconds: 180));
-                                      if (!mounted) return;
+                                      if (!mounted || !context.mounted) return;
 
                                       if (widget.openCommunityAfterPost) {
-                                        // ignore: use_build_context_synchronously
                                         Navigator.pushReplacementNamed(context, '/communityScreen');
                                       } else {
-                                        // ignore: use_build_context_synchronously
                                         Navigator.pop(context);
                                       }
                                     },
