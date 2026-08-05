@@ -335,12 +335,20 @@ class _NotesTypeState extends State<NotesType> {
                                       Navigator.pop(dialogContext);
                                       if (!success) return;
 
+                                      // Popping this confirmation dialog and immediately pushing/replacing
+                                      // the next route in the same synchronous continuation is the same
+                                      // Navigator race already found and fixed in the meditation
+                                      // complete-dialog flow (meditation_screen.dart _shareWithMemories):
+                                      // the pop's transition and the next push's transition can overlap and
+                                      // paint a black frame before either settles. Same fix here.
+                                      await Future<void>.delayed(const Duration(milliseconds: 180));
+                                      if (!mounted) return;
+
                                       if (widget.openCommunityAfterPost) {
-                                        Navigator.pushReplacementNamed(
-                                          context,
-                                          '/communityScreen',
-                                        );
+                                        // ignore: use_build_context_synchronously
+                                        Navigator.pushReplacementNamed(context, '/communityScreen');
                                       } else {
+                                        // ignore: use_build_context_synchronously
                                         Navigator.pop(context);
                                       }
                                     },
