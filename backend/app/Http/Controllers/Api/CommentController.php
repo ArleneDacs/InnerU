@@ -117,6 +117,8 @@ class CommentController extends Controller
             'username' => $comment->username,
             'profilePic' => $comment->user?->profile_pic,
             'comment' => $comment->comment,
+            'reactionsCount' => $comment->reactions()->count(),
+            'reactedByMe' => $comment->reactions()->where('user_id', auth()->id())->exists(),
             'createdAt' => $this->serializeAppDate($comment->created_at),
             'updatedAt' => $this->serializeAppDate($comment->updated_at),
         ];

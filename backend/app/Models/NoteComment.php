@@ -18,4 +18,9 @@ class NoteComment extends Model
     {
         return $this->belongsTo(\App\Models\User::class);
     }
+
+    public function reactions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\CommentReaction::class);
+    }
 }

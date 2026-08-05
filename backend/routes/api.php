@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\CoachManagementController;
 use App\Http\Controllers\Api\GoalController;
 use App\Http\Controllers\Api\TodoTaskController;
 use App\Http\Controllers\Api\CommentController;
+use App\Http\Controllers\Api\CommentReactionController;
 use App\Http\Controllers\Api\CalorieController;
 use App\Http\Controllers\Api\FastingController;
 use App\Http\Controllers\Api\DailyTrackerController;
@@ -69,6 +70,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/community/posts/{post}/comments', [CommentController::class, 'store']);
     Route::patch('/community/posts/{post}/comments/{comment}', [CommentController::class, 'update']);
     Route::delete('/community/posts/{post}/comments/{comment}', [CommentController::class, 'destroy']);
+    Route::post('/community/posts/{post}/comments/{comment}/reactions', [CommentReactionController::class, 'store']);
+    Route::delete('/community/posts/{post}/comments/{comment}/reactions', [CommentReactionController::class, 'destroy']);
     Route::post('/community/posts/{post}/hearts', [PostHeartController::class, 'store']);
     Route::delete('/community/posts/{post}/hearts', [PostHeartController::class, 'destroy']);
     Route::get('/chat-rooms', [ChatController::class, 'index']);
