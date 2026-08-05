@@ -10,6 +10,7 @@ import 'package:selfcare_projects/src/widgets/linkified_text.dart';
 class CommentWidget extends StatefulWidget {
   final String postId;
   final VoidCallback? onChanged;
+  final String? highlightCommentId;
   final Future<List<CommunityComment>> Function()? fetchCommentsOverride;
   final Future<CommunityComment> Function(String postId, String comment)?
       addCommentOverride;
@@ -18,6 +19,7 @@ class CommentWidget extends StatefulWidget {
     super.key,
     required this.postId,
     this.onChanged,
+    this.highlightCommentId,
     this.fetchCommentsOverride,
     this.addCommentOverride,
   });
@@ -35,6 +37,19 @@ class _CommentWidgetState extends State<CommentWidget> {
   List<CommunityComment>? _comments;
   final Set<String> _togglingReactionCommentIds = <String>{};
   CommunityComment? _replyingTo;
+
+  // Per-comment GlobalKeys (top-level comments and replies share this same
+  // key space, since both are rendered by _buildCommentRow) so a
+  // notification-deep-linked comment can be located in the tree and
+  // scrolled into view once _comments loads. Populated lazily as rows are
+  // built -- see _keyFor.
+  final Map<String, GlobalKey> _commentKeys = {};
+  // The id of the comment currently showing its brief post-scroll pulse
+  // highlight, or null when nothing is pulsing.
+  String? _pulsingCommentId;
+
+  GlobalKey _keyFor(String commentId) =>
+      _commentKeys.putIfAbsent(commentId, () => GlobalKey());
 
   @override
   void initState() {
@@ -67,6 +82,36 @@ class _CommentWidgetState extends State<CommentWidget> {
     if (!mounted) return;
     setState(() {
       currentUsername = username;
+    });
+  }
+
+  // Scrolls to and briefly pulse-highlights widget.highlightCommentId, if
+  // one was requested and it's actually present in the just-loaded
+  // _comments. Callers must only invoke this once per successful load (see
+  // the `_comments == null` guard at the FutureBuilder seeding site) --
+  // this method itself does no re-entrancy guarding, since it doesn't need
+  // to: it only ever runs off that single seeding assignment.
+  void _scrollToHighlightTargetIfNeeded() {
+    final targetId = widget.highlightCommentId;
+    if (targetId == null || _comments == null) return;
+    final matches = _comments!.any((c) => c.id == targetId);
+    if (!matches) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final key = _commentKeys[targetId];
+      if (key?.currentContext != null) {
+        await Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.2,
+        );
+      }
+      if (!mounted) return;
+      setState(() => _pulsingCommentId = targetId);
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      if (!mounted) return;
+      setState(() => _pulsingCommentId = null);
     });
   }
 
@@ -370,138 +415,145 @@ class _CommentWidgetState extends State<CommentWidget> {
       _commentCreatedAt(comment.createdAt),
     );
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: companyTheme.iconColor.withValues(alpha: 0.15),
-            backgroundImage: (comment.profilePic?.isNotEmpty ?? false)
-                ? NetworkImage(comment.profilePic!)
-                : null,
-            child: (comment.profilePic?.isNotEmpty ?? false)
-                ? null
-                : Icon(
-                    Icons.account_circle_rounded,
-                    size: 40,
-                    color: companyTheme.iconColor,
-                  ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        comment.username,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: companyTheme.inkColor,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+    return KeyedSubtree(
+      key: _keyFor(comment.id),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        color: comment.id == _pulsingCommentId
+            ? companyTheme.primaryColor.withValues(alpha: 0.18)
+            : Colors.transparent,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: companyTheme.iconColor.withValues(alpha: 0.15),
+              backgroundImage: (comment.profilePic?.isNotEmpty ?? false)
+                  ? NetworkImage(comment.profilePic!)
+                  : null,
+              child: (comment.profilePic?.isNotEmpty ?? false)
+                  ? null
+                  : Icon(
+                      Icons.account_circle_rounded,
+                      size: 40,
+                      color: companyTheme.iconColor,
                     ),
-                    Text(
-                      formattedTime,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: companyTheme.mutedInkColor,
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: LinkifiedText(
-                        comment.comment,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: companyTheme.inkColor,
-                        ),
-                      ),
-                    ),
-                    if (currentUsername == comment.username)
-                      PopupMenuButton<String>(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(
-                          Icons.more_vert,
-                          size: 18,
-                          color: companyTheme.iconColor,
-                        ),
-                        onSelected: (value) {
-                          if (value == 'edit') {
-                            _showEditDialog(
-                              context,
-                              comment,
-                            );
-                          } else if (value == 'delete') {
-                            _deleteComment(comment.id);
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: Text('Edit'),
-                          ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Text('Delete'),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    InkWell(
-                      onTap: _togglingReactionCommentIds.contains(comment.id)
-                          ? null
-                          : () => _toggleReaction(comment),
-                      child: Row(
-                        children: [
-                          Icon(
-                            comment.reactedByMe
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            size: 16,
-                            color: comment.reactedByMe
-                                ? Colors.redAccent
-                                : companyTheme.mutedInkColor,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${comment.reactionsCount}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: companyTheme.mutedInkColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (!isReply)
-                      TextButton(
-                        onPressed: () =>
-                            setState(() => _replyingTo = comment),
-                        child: const Text(
-                          'Reply',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          comment.username,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: companyTheme.inkColor,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        formattedTime,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: companyTheme.mutedInkColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: LinkifiedText(
+                          comment.comment,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: companyTheme.inkColor,
+                          ),
+                        ),
+                      ),
+                      if (currentUsername == comment.username)
+                        PopupMenuButton<String>(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.more_vert,
+                            size: 18,
+                            color: companyTheme.iconColor,
+                          ),
+                          onSelected: (value) {
+                            if (value == 'edit') {
+                              _showEditDialog(
+                                context,
+                                comment,
+                              );
+                            } else if (value == 'delete') {
+                              _deleteComment(comment.id);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'edit',
+                              child: Text('Edit'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Text('Delete'),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      InkWell(
+                        onTap: _togglingReactionCommentIds.contains(comment.id)
+                            ? null
+                            : () => _toggleReaction(comment),
+                        child: Row(
+                          children: [
+                            Icon(
+                              comment.reactedByMe
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 16,
+                              color: comment.reactedByMe
+                                  ? Colors.redAccent
+                                  : companyTheme.mutedInkColor,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${comment.reactionsCount}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: companyTheme.mutedInkColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!isReply)
+                        TextButton(
+                          onPressed: () =>
+                              setState(() => _replyingTo = comment),
+                          child: const Text(
+                            'Reply',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -532,13 +584,13 @@ class _CommentWidgetState extends State<CommentWidget> {
                     color: companyTheme.inkColor,
                   ),
                 ),
-                Divider(color: companyTheme.mutedInkColor.withValues(alpha: 0.2)),
+                Divider(
+                    color: companyTheme.mutedInkColor.withValues(alpha: 0.2)),
                 Expanded(
                   child: FutureBuilder<List<CommunityComment>>(
                     future: _commentsFuture,
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState ==
-                              ConnectionState.waiting &&
+                      if (snapshot.connectionState == ConnectionState.waiting &&
                           _comments == null) {
                         return Center(
                           child: CircularProgressIndicator(
@@ -548,8 +600,13 @@ class _CommentWidgetState extends State<CommentWidget> {
                       }
 
                       if (snapshot.hasData && _comments == null) {
-                        _comments =
-                            List<CommunityComment>.from(snapshot.data!);
+                        _comments = List<CommunityComment>.from(snapshot.data!);
+                        // Fires exactly once per successful load: guarded by
+                        // the same `_comments == null` check as the seeding
+                        // assignment above, so a later rebuild (reactions,
+                        // replies, the relative-time ticker, etc.) with
+                        // _comments already populated never re-triggers it.
+                        _scrollToHighlightTargetIfNeeded();
                       }
 
                       final comments = _comments ?? const <CommunityComment>[];
@@ -568,7 +625,8 @@ class _CommentWidgetState extends State<CommentWidget> {
                       // render indented beneath the comment they reply to.
                       final topLevelComments =
                           comments.where((c) => c.parentId == null).toList();
-                      final repliesByParent = <String, List<CommunityComment>>{};
+                      final repliesByParent =
+                          <String, List<CommunityComment>>{};
                       for (final c in comments) {
                         final parentId = c.parentId;
                         if (parentId != null) {

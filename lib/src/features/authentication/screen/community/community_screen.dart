@@ -18,10 +18,8 @@ class CommunityScreen extends StatefulWidget {
   /// push notifications -- see [NotificationPushRouter]).
   final String? targetPostId;
 
-  /// Optional comment to highlight inside the opened comment sheet. Not
-  /// wired up to [CommentWidget] yet -- that lands in a follow-up task --
-  /// but is threaded through [_openCommentsFor] now so that hookup is a
-  /// one-line change later.
+  /// Optional comment to highlight inside the opened comment sheet, wired
+  /// through [_openCommentsFor] into [CommentWidget.highlightCommentId].
   final String? targetCommentId;
 
   @override
@@ -113,10 +111,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
   // (widget.note, widget.onChanged), so it isn't reasonably extractable
   // into a shared free function -- duplicating the showModalBottomSheet
   // call here is the pragmatic choice.
-  //
-  // highlightCommentId isn't wired into CommentWidget yet -- a follow-up
-  // task adds that constructor parameter -- but is accepted here so this
-  // call site is already in place for it.
   void _openCommentsFor(Note post, {String? highlightCommentId}) {
     showModalBottomSheet(
       context: context,
@@ -124,6 +118,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
       builder: (context) => CommentWidget(
         postId: post.id,
         onChanged: _refreshPosts,
+        highlightCommentId: highlightCommentId,
       ),
     );
   }
