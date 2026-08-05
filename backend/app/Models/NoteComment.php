@@ -10,6 +10,7 @@ class NoteComment extends Model
         'firestore_id',
         'community_post_id',
         'user_id',
+        'parent_id',
         'username',
         'comment',
     ];
@@ -22,5 +23,15 @@ class NoteComment extends Model
     public function reactions(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(\App\Models\CommentReaction::class);
+    }
+
+    public function parent(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(NoteComment::class, 'parent_id');
+    }
+
+    public function replies(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(NoteComment::class, 'parent_id');
     }
 }

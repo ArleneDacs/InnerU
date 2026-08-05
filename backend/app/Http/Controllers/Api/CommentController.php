@@ -11,6 +11,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class CommentController extends Controller
@@ -41,18 +42,37 @@ class CommentController extends Controller
 
         $validated = $request->validate([
             'comment' => ['required', 'string', 'max:5000'],
+            'parentId' => ['sometimes', 'nullable', 'integer', Rule::exists('note_comments', 'id')->where('community_post_id', $post->id)],
         ]);
 
         $comment = NoteComment::create([
             'community_post_id' => $post->id,
             'user_id' => $user->id,
+            'parent_id' => $validated['parentId'] ?? null,
             'username' => $user->name,
             'comment' => $validated['comment'],
         ]);
         $comment->load('user');
 
-        // No self-notification when commenting on your own post.
-        if ((string) $post->user_id !== (string) $user->id) {
+        if (!empty($validated['parentId'])) {
+            // Replying to a comment notifies that comment's author (not the post owner).
+            $parent = NoteComment::find($validated['parentId']);
+            if ($parent && (string) $parent->user_id !== (string) $user->id) {
+                Notification::createFor(
+                    (string) $parent->user_id,
+                    'comment_reply',
+                    sprintf('%s replied to your comment', $user->name),
+                    Str::limit(trim((string) $validated['comment']), 80),
+                    [
+                        'postId' => (string) $post->id,
+                        'commentId' => (string) $comment->id,
+                        'parentCommentId' => (string) $parent->id,
+                        'replierId' => (string) $user->id,
+                    ],
+                );
+            }
+        } elseif ((string) $post->user_id !== (string) $user->id) {
+            // No self-notification when commenting on your own post.
             Notification::createFor(
                 (string) $post->user_id,
                 'community_comment',
@@ -114,6 +134,7 @@ class CommentController extends Controller
             'id' => (string) $comment->id,
             'postId' => (string) $comment->community_post_id,
             'userId' => (string) $comment->user_id,
+            'parentId' => $comment->parent_id !== null ? (string) $comment->parent_id : null,
             'username' => $comment->username,
             'profilePic' => $comment->user?->profile_pic,
             'comment' => $comment->comment,
