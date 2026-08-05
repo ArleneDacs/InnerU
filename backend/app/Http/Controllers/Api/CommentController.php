@@ -23,6 +23,7 @@ class CommentController extends Controller
         }
 
         $comments = NoteComment::query()
+            ->with('user')
             ->where('community_post_id', $post->id)
             ->orderByDesc('created_at')
             ->get()
@@ -48,6 +49,7 @@ class CommentController extends Controller
             'username' => $user->name,
             'comment' => $validated['comment'],
         ]);
+        $comment->load('user');
 
         // No self-notification when commenting on your own post.
         if ((string) $post->user_id !== (string) $user->id) {
@@ -85,8 +87,9 @@ class CommentController extends Controller
         ]);
 
         $comment->update(['comment' => $validated['comment']]);
+        $comment->refresh()->load('user');
 
-        return response()->json(['comment' => $this->mapComment($comment->refresh())]);
+        return response()->json(['comment' => $this->mapComment($comment)]);
     }
 
     public function destroy(Request $request, CommunityPost $post, NoteComment $comment): JsonResponse
@@ -112,6 +115,7 @@ class CommentController extends Controller
             'postId' => (string) $comment->community_post_id,
             'userId' => (string) $comment->user_id,
             'username' => $comment->username,
+            'profilePic' => $comment->user?->profile_pic,
             'comment' => $comment->comment,
             'createdAt' => $this->serializeAppDate($comment->created_at),
             'updatedAt' => $this->serializeAppDate($comment->updated_at),
