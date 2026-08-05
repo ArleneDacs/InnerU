@@ -88,17 +88,19 @@ class CommunityController extends Controller
             return response()->json([]);
         }
 
+        $companyCode = trim((string) ($user->active_company_code ?? $user->company_code ?? ''));
+        $companyName = trim((string) ($user->active_company_name ?? $user->company_name ?? ''));
+
         $matches = User::query()
-            ->where(function ($q) use ($user): void {
-                if ($user->company_code !== null && $user->company_code !== '') {
-                    $q->where('company_code', $user->company_code);
+            ->where(function ($q) use ($companyCode, $companyName): void {
+                if ($companyCode !== '') {
+                    $q->where('company_code', $companyCode)
+                        ->orWhere('active_company_code', $companyCode);
                 }
 
-                if ($user->company_name !== null && $user->company_name !== '') {
-                    $method = $user->company_code !== null && $user->company_code !== ''
-                        ? 'orWhere'
-                        : 'where';
-                    $q->{$method}('company_name', $user->company_name);
+                if ($companyName !== '') {
+                    $q->orWhere('company_name', $companyName)
+                        ->orWhere('active_company_name', $companyName);
                 }
             })
             ->where('id', '!=', $user->id)
