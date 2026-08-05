@@ -112,6 +112,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       comment: trimmed,
       createdAt: DateTime.now().toIso8601String(),
       updatedAt: null,
+      profilePic: session?.profilePic,
     );
 
     setState(() {
@@ -319,10 +320,22 @@ class _CommentWidgetState extends State<CommentWidget> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  Icons.account_circle_rounded,
-                                  size: 40,
-                                  color: companyTheme.iconColor,
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: companyTheme.iconColor
+                                      .withValues(alpha: 0.15),
+                                  backgroundImage:
+                                      (comment.profilePic?.isNotEmpty ?? false)
+                                          ? NetworkImage(comment.profilePic!)
+                                          : null,
+                                  child:
+                                      (comment.profilePic?.isNotEmpty ?? false)
+                                          ? null
+                                          : Icon(
+                                              Icons.account_circle_rounded,
+                                              size: 40,
+                                              color: companyTheme.iconColor,
+                                            ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(

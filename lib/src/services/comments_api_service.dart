@@ -10,6 +10,7 @@ class CommunityComment {
     required this.comment,
     required this.createdAt,
     required this.updatedAt,
+    this.profilePic,
   });
 
   final String id;
@@ -19,6 +20,7 @@ class CommunityComment {
   final String comment;
   final String? createdAt;
   final String? updatedAt;
+  final String? profilePic;
 
   factory CommunityComment.fromJson(Map<String, dynamic> json) {
     return CommunityComment(
@@ -29,6 +31,7 @@ class CommunityComment {
       comment: json['comment']?.toString() ?? '',
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
+      profilePic: json['profilePic'] as String?,
     );
   }
 }
