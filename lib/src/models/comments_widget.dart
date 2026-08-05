@@ -47,6 +47,19 @@ class _CommentWidgetState extends State<CommentWidget> {
   // The id of the comment currently showing its brief post-scroll pulse
   // highlight, or null when nothing is pulsing.
   String? _pulsingCommentId;
+  // Attached to the comments ListView so _scrollToAndPulse can coarse-jump
+  // toward a highlight target that ListView.builder hasn't built yet (see
+  // that method for why a plain Scrollable.ensureVisible isn't enough).
+  final ScrollController _commentsScrollController = ScrollController();
+  // One-shot guard, independent of _comments's null-ness: _reloadComments()
+  // (delete/edit flows) nulls _comments and reseeds it, which would
+  // otherwise re-enter the seeding branch below and re-fire the scroll+
+  // pulse for a highlight target that was already handled, even though the
+  // reload had nothing to do with that target. Set only once the scroll+
+  // pulse actually begins (see _scrollToHighlightTargetIfNeeded), so a
+  // load that doesn't yet contain the target can still legitimately retry
+  // on a later reseed.
+  bool _hasScrolledToHighlight = false;
 
   GlobalKey _keyFor(String commentId) =>
       _commentKeys.putIfAbsent(commentId, () => GlobalKey());
@@ -65,6 +78,7 @@ class _CommentWidgetState extends State<CommentWidget> {
   void dispose() {
     _relativeTimeTicker?.cancel();
     _commentController.dispose();
+    _commentsScrollController.dispose();
     super.dispose();
   }
 
@@ -87,32 +101,126 @@ class _CommentWidgetState extends State<CommentWidget> {
 
   // Scrolls to and briefly pulse-highlights widget.highlightCommentId, if
   // one was requested and it's actually present in the just-loaded
-  // _comments. Callers must only invoke this once per successful load (see
-  // the `_comments == null` guard at the FutureBuilder seeding site) --
-  // this method itself does no re-entrancy guarding, since it doesn't need
-  // to: it only ever runs off that single seeding assignment.
+  // _comments. _comments gets reseeded (nulled, then reloaded) by
+  // _reloadComments() after totally unrelated edits/deletes, which would
+  // otherwise re-enter this method's `_comments == null` seeding-site call
+  // and re-fire the scroll+pulse -- so _hasScrolledToHighlight guards that,
+  // independent of _comments's null-ness, ensuring this only ever "fires"
+  // (schedules the scroll+pulse) once per widget lifetime.
   void _scrollToHighlightTargetIfNeeded() {
+    if (_hasScrolledToHighlight) return;
     final targetId = widget.highlightCommentId;
     if (targetId == null || _comments == null) return;
     final matches = _comments!.any((c) => c.id == targetId);
     if (!matches) return;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final key = _commentKeys[targetId];
-      if (key?.currentContext != null) {
-        await Scrollable.ensureVisible(
-          key!.currentContext!,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          alignment: 0.2,
-        );
-      }
-      if (!mounted) return;
-      setState(() => _pulsingCommentId = targetId);
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-      if (!mounted) return;
-      setState(() => _pulsingCommentId = null);
+    _hasScrolledToHighlight = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_scrollToAndPulse(targetId));
     });
+  }
+
+  // Top-level comments the target could be anchored under, in the same
+  // order _buildCommentRow's ListView.builder renders them in (i.e. the
+  // order _comments came back from the backend in, filtered to
+  // parentId == null). Used only to estimate the target's position for the
+  // coarse scroll below.
+  List<CommunityComment> _topLevelComments() =>
+      (_comments ?? const <CommunityComment>[])
+          .where((c) => c.parentId == null)
+          .toList();
+
+  // A reply is rendered nested inside its parent's ListView.builder item
+  // (see build()'s itemBuilder), not as its own item, so the item that has
+  // to be scrolled/built into view for either a top-level comment or a
+  // reply is always the *top-level* one -- itself, or its parent.
+  int? _topLevelIndexForHighlightTarget(String targetId) {
+    final comments = _comments;
+    if (comments == null) return null;
+    CommunityComment? target;
+    for (final c in comments) {
+      if (c.id == targetId) {
+        target = c;
+        break;
+      }
+    }
+    if (target == null) return null;
+    final anchorId = target.parentId ?? target.id;
+    final topLevel = _topLevelComments();
+    for (var i = 0; i < topLevel.length; i++) {
+      if (topLevel[i].id == anchorId) return i;
+    }
+    return null;
+  }
+
+  // ListView.builder only builds items inside the viewport plus a small
+  // (~250px) cache extent, so on first frame a comment (or a reply nested
+  // under one) far down a long thread has never had _buildCommentRow run
+  // for it -- meaning _commentKeys has no entry for it yet, and a plain
+  // Scrollable.ensureVisible has nothing to scroll to. Since the backend
+  // orders comments newest-first (CommentController.php), this is a very
+  // ordinary case: replying to any comment beyond the first screenful.
+  //
+  // Generalizes leaderboard_screen.dart's _scrollToCurrentUser: coarse-jump
+  // toward an estimated position first (so the builder constructs that
+  // region), then fall back to the exact Scrollable.ensureVisible once the
+  // target's real GlobalKey context exists. Unlike the leaderboard's
+  // fairly uniform row heights, comment rows vary a lot (reply counts,
+  // text length), so instead of guessing a fixed per-row pixel height,
+  // each attempt jumps to a position proportional to the target's index
+  // within the flattened list, scaled by the ScrollController's own
+  // running maxScrollExtent estimate -- which gets more accurate as more
+  // items get built, so a few retries converge even when the first jump's
+  // estimate is off.
+  Future<void> _scrollToAndPulse(String targetId) async {
+    GlobalKey? key = _commentKeys[targetId];
+
+    if (key?.currentContext == null && _commentsScrollController.hasClients) {
+      final targetIndex = _topLevelIndexForHighlightTarget(targetId);
+      final topLevelCount = _topLevelComments().length;
+      if (targetIndex != null && topLevelCount > 0) {
+        const maxAttempts = 6;
+        for (var attempt = 0; attempt < maxAttempts; attempt++) {
+          if (!mounted || !_commentsScrollController.hasClients) break;
+          final position = _commentsScrollController.position;
+          final fraction =
+              topLevelCount <= 1 ? 0.0 : targetIndex / (topLevelCount - 1);
+          final estimated = position.minScrollExtent +
+              fraction * (position.maxScrollExtent - position.minScrollExtent);
+          final clamped = estimated.clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+          await _commentsScrollController.animateTo(
+            clamped,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          );
+          if (!mounted) return;
+          // Give ListView.builder a frame to build the rows around the
+          // spot we just jumped to before re-checking for the key.
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted) return;
+          key = _commentKeys[targetId];
+          if (key?.currentContext != null) break;
+        }
+      }
+    }
+
+    if (!mounted) return;
+    if (key?.currentContext != null) {
+      await Scrollable.ensureVisible(
+        key!.currentContext!,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.2,
+      );
+    }
+    if (!mounted) return;
+    setState(() => _pulsingCommentId = targetId);
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    if (!mounted) return;
+    setState(() => _pulsingCommentId = null);
   }
 
   DateTime _commentCreatedAt(String? value) {
@@ -636,6 +744,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                       }
 
                       return ListView.builder(
+                        controller: _commentsScrollController,
                         itemCount: topLevelComments.length,
                         itemBuilder: (context, index) {
                           final comment = topLevelComments[index];
