@@ -34,6 +34,7 @@ class _CommentWidgetState extends State<CommentWidget> {
   Future<List<CommunityComment>>? _commentsFuture;
   List<CommunityComment>? _comments;
   final Set<String> _togglingReactionCommentIds = <String>{};
+  CommunityComment? _replyingTo;
 
   @override
   void initState() {
@@ -104,6 +105,11 @@ class _CommentWidgetState extends State<CommentWidget> {
     if (trimmed.isEmpty) return;
 
     final session = AuthService.instance.currentSession;
+    // Snapshot which comment (if any) this reply targets before we clear
+    // _replyingTo below, so both the optimistic insert and the real
+    // network call still know the parent even though the "Replying to"
+    // chip has already been dismissed from the UI.
+    final replyingTo = _replyingTo;
     final tempId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
     final optimistic = CommunityComment(
       id: tempId,
@@ -118,17 +124,23 @@ class _CommentWidgetState extends State<CommentWidget> {
       // yet, so it can't have any reactions on it.
       reactionsCount: 0,
       reactedByMe: false,
+      parentId: replyingTo?.id,
     );
 
     setState(() {
       _comments = [...(_comments ?? const <CommunityComment>[]), optimistic];
+      _replyingTo = null;
     });
     _commentController.clear();
 
     try {
       final saved = widget.addCommentOverride != null
           ? await widget.addCommentOverride!(widget.postId, trimmed)
-          : await _api.addComment(postId: widget.postId, comment: trimmed);
+          : await _api.addComment(
+              postId: widget.postId,
+              comment: trimmed,
+              parentId: replyingTo?.id,
+            );
       if (!mounted) return;
       // A concurrent _reloadComments() (edit/delete flow) may have nulled
       // _comments while this POST was in flight, and a fresh GET may have
@@ -197,6 +209,7 @@ class _CommentWidgetState extends State<CommentWidget> {
       updatedAt: comment.updatedAt,
       reactionsCount: comment.reactionsCount + (wasReacted ? -1 : 1),
       reactedByMe: !wasReacted,
+      parentId: comment.parentId,
     );
 
     final beforeToggle = _comments;
@@ -235,6 +248,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                   updatedAt: c.updatedAt,
                   reactionsCount: state.reactionsCount,
                   reactedByMe: state.reactedByMe,
+                  parentId: c.parentId,
                 )
               else
                 c,
@@ -337,6 +351,161 @@ class _CommentWidgetState extends State<CommentWidget> {
     ).then((_) => editController.dispose());
   }
 
+  /// Builds a single comment's row: avatar, username, timestamp, body text,
+  /// the edit/delete menu (own comments only), and the reaction/reply
+  /// action row beneath it. Shared by [build] for both top-level comments
+  /// and their indented replies so Tasks 4/8/10's per-row logic (optimistic
+  /// state, avatars, reactions) isn't duplicated between the two.
+  ///
+  /// [isReply] suppresses the Reply button: replies are one level deep only
+  /// (matching the backend's flat `parentId` model from Task 11), so a
+  /// reply row has no parent slot for its own replies to attach to.
+  Widget _buildCommentRow(
+    BuildContext context,
+    CompanyThemeData companyTheme,
+    CommunityComment comment, {
+    bool isReply = false,
+  }) {
+    final formattedTime = _formatRelativeTime(
+      _commentCreatedAt(comment.createdAt),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: companyTheme.iconColor.withValues(alpha: 0.15),
+            backgroundImage: (comment.profilePic?.isNotEmpty ?? false)
+                ? NetworkImage(comment.profilePic!)
+                : null,
+            child: (comment.profilePic?.isNotEmpty ?? false)
+                ? null
+                : Icon(
+                    Icons.account_circle_rounded,
+                    size: 40,
+                    color: companyTheme.iconColor,
+                  ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        comment.username,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: companyTheme.inkColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      formattedTime,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: companyTheme.mutedInkColor,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: LinkifiedText(
+                        comment.comment,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: companyTheme.inkColor,
+                        ),
+                      ),
+                    ),
+                    if (currentUsername == comment.username)
+                      PopupMenuButton<String>(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.more_vert,
+                          size: 18,
+                          color: companyTheme.iconColor,
+                        ),
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _showEditDialog(
+                              context,
+                              comment,
+                            );
+                          } else if (value == 'delete') {
+                            _deleteComment(comment.id);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete'),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    InkWell(
+                      onTap: _togglingReactionCommentIds.contains(comment.id)
+                          ? null
+                          : () => _toggleReaction(comment),
+                      child: Row(
+                        children: [
+                          Icon(
+                            comment.reactedByMe
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 16,
+                            color: comment.reactedByMe
+                                ? Colors.redAccent
+                                : companyTheme.mutedInkColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${comment.reactionsCount}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: companyTheme.mutedInkColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!isReply)
+                      TextButton(
+                        onPressed: () =>
+                            setState(() => _replyingTo = comment),
+                        child: const Text(
+                          'Reply',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return CompanyThemeBuilder(
@@ -394,155 +563,83 @@ class _CommentWidgetState extends State<CommentWidget> {
                         );
                       }
 
-                      return ListView.builder(
-                        itemCount: comments.length,
-                        itemBuilder: (context, index) {
-                          final comment = comments[index];
-                          final formattedTime = _formatRelativeTime(
-                            _commentCreatedAt(comment.createdAt),
-                          );
+                      // Group into top-level comments plus their replies
+                      // (one level deep, keyed by parentId) so replies can
+                      // render indented beneath the comment they reply to.
+                      final topLevelComments =
+                          comments.where((c) => c.parentId == null).toList();
+                      final repliesByParent = <String, List<CommunityComment>>{};
+                      for (final c in comments) {
+                        final parentId = c.parentId;
+                        if (parentId != null) {
+                          (repliesByParent[parentId] ??= <CommunityComment>[])
+                              .add(c);
+                        }
+                      }
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CircleAvatar(
-                                  radius: 20,
-                                  backgroundColor: companyTheme.iconColor
-                                      .withValues(alpha: 0.15),
-                                  backgroundImage:
-                                      (comment.profilePic?.isNotEmpty ?? false)
-                                          ? NetworkImage(comment.profilePic!)
-                                          : null,
-                                  child:
-                                      (comment.profilePic?.isNotEmpty ?? false)
-                                          ? null
-                                          : Icon(
-                                              Icons.account_circle_rounded,
-                                              size: 40,
-                                              color: companyTheme.iconColor,
-                                            ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
+                      return ListView.builder(
+                        itemCount: topLevelComments.length,
+                        itemBuilder: (context, index) {
+                          final comment = topLevelComments[index];
+                          final replies = repliesByParent[comment.id] ??
+                              const <CommunityComment>[];
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildCommentRow(context, companyTheme, comment),
+                              if (replies.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 40),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              comment.username,
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: companyTheme.inkColor,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          Text(
-                                            formattedTime,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: companyTheme.mutedInkColor,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: LinkifiedText(
-                                              comment.comment,
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                color: companyTheme.inkColor,
-                                              ),
-                                            ),
-                                          ),
-                                          if (currentUsername == comment.username)
-                                            PopupMenuButton<String>(
-                                              padding: EdgeInsets.zero,
-                                              icon: Icon(
-                                                Icons.more_vert,
-                                                size: 18,
-                                                color: companyTheme.iconColor,
-                                              ),
-                                              onSelected: (value) {
-                                                if (value == 'edit') {
-                                                  _showEditDialog(
-                                                    context,
-                                                    comment,
-                                                  );
-                                                } else if (value == 'delete') {
-                                                  _deleteComment(comment.id);
-                                                }
-                                              },
-                                              itemBuilder: (context) => [
-                                                const PopupMenuItem(
-                                                  value: 'edit',
-                                                  child: Text('Edit'),
-                                                ),
-                                                const PopupMenuItem(
-                                                  value: 'delete',
-                                                  child: Text('Delete'),
-                                                ),
-                                              ],
-                                            ),
-                                        ],
-                                      ),
-                                      Row(
-                                        children: [
-                                          InkWell(
-                                            onTap: _togglingReactionCommentIds
-                                                    .contains(comment.id)
-                                                ? null
-                                                : () =>
-                                                    _toggleReaction(comment),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  comment.reactedByMe
-                                                      ? Icons.favorite_rounded
-                                                      : Icons
-                                                          .favorite_border_rounded,
-                                                  size: 16,
-                                                  color: comment.reactedByMe
-                                                      ? Colors.redAccent
-                                                      : companyTheme
-                                                          .mutedInkColor,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  '${comment.reactionsCount}',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: companyTheme
-                                                        .mutedInkColor,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                      for (final reply in replies)
+                                        _buildCommentRow(
+                                          context,
+                                          companyTheme,
+                                          reply,
+                                          isReply: true,
+                                        ),
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
+                            ],
                           );
                         },
                       );
                     },
                   ),
                 ),
+                if (_replyingTo != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Replying to ${_replyingTo!.username}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: companyTheme.mutedInkColor,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: companyTheme.iconColor,
+                          ),
+                          onPressed: () => setState(() => _replyingTo = null),
+                        ),
+                      ],
+                    ),
+                  ),
                 Padding(
                   padding: EdgeInsets.only(
                     bottom: MediaQuery.of(context).viewInsets.bottom,

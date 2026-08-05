@@ -13,6 +13,7 @@ class CommunityComment {
     required this.profilePic,
     required this.reactionsCount,
     required this.reactedByMe,
+    required this.parentId,
   });
 
   final String id;
@@ -25,6 +26,7 @@ class CommunityComment {
   final String? profilePic;
   final int reactionsCount;
   final bool reactedByMe;
+  final String? parentId;
 
   factory CommunityComment.fromJson(Map<String, dynamic> json) {
     final rawReactionsCount = json['reactionsCount'];
@@ -41,6 +43,7 @@ class CommunityComment {
           ? rawReactionsCount.toInt()
           : int.tryParse(rawReactionsCount?.toString() ?? '') ?? 0,
       reactedByMe: json['reactedByMe'] == true,
+      parentId: json['parentId'] as String?,
     );
   }
 }
@@ -95,10 +98,14 @@ class CommentsApiService {
   Future<CommunityComment> addComment({
     required String postId,
     required String comment,
+    String? parentId,
   }) async {
     final response = await _api.postJson(
       '/api/community/posts/$postId/comments',
-      {'comment': comment},
+      {
+        'comment': comment,
+        if (parentId != null) 'parentId': parentId,
+      },
       token: _token,
     );
     final raw = response['comment'];

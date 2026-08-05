@@ -41,6 +41,7 @@ void main() {
         profilePic: null,
         reactionsCount: 0,
         reactedByMe: false,
+        parentId: null,
       ));
       await tester.pumpAndSettle();
 
