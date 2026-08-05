@@ -123,22 +123,33 @@ class _CommentWidgetState extends State<CommentWidget> {
           ? await widget.addCommentOverride!(widget.postId, trimmed)
           : await _api.addComment(postId: widget.postId, comment: trimmed);
       if (!mounted) return;
-      setState(() {
-        _comments = [
-          for (final c in _comments!)
-            if (c.id == tempId) saved else c,
-        ];
-      });
+      // A concurrent _reloadComments() (edit/delete flow) may have nulled
+      // _comments while this POST was in flight. If so, that fresh fetch has
+      // already superseded our local list, so there's nothing to reconcile.
+      final currentComments = _comments;
+      if (currentComments != null) {
+        setState(() {
+          _comments = [
+            for (final c in currentComments)
+              if (c.id == tempId) saved else c,
+          ];
+        });
+      }
       widget.onChanged?.call();
     } catch (e) {
       debugPrint('Failed to send comment: $e');
       if (!mounted) return;
-      setState(() {
-        _comments = [
-          for (final c in _comments!)
-            if (c.id != tempId) c,
-        ];
-      });
+      // Same concurrent-reload guard as above: only roll back if our
+      // optimistic entry could still be in the current list.
+      final currentComments = _comments;
+      if (currentComments != null) {
+        setState(() {
+          _comments = [
+            for (final c in currentComments)
+              if (c.id != tempId) c,
+          ];
+        });
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Could not post your comment. Please try again.'),
