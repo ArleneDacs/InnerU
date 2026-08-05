@@ -119,10 +119,15 @@ class UserScoreService
         }
 
         if ($goalScore !== null) {
+            // The leaderboard ranking score comes only from daily tracker
+            // activity. With no DailyTracker/UserPoint rows at all there is
+            // no tracker activity to score, so the ranking is legitimately
+            // 0 even though a goalScore exists -- goalScore is still
+            // returned for informational display.
             return [
                 'goalScore' => $goalScore,
                 'coreTaskScore' => 0.0,
-                'overallScore' => $goalScore,
+                'overallScore' => 0.0,
             ];
         }
 
@@ -292,10 +297,13 @@ class UserScoreService
             }
 
             if ($goalScore !== null) {
+                // See the matching fallback in resolveBreakdownForUser(): no
+                // tracker activity at all means the ranking score is 0,
+                // even though goalScore is still available for display.
                 $scores[$userId] = [
                     'goalScore' => $goalScore,
                     'coreTaskScore' => 0.0,
-                    'overallScore' => $goalScore,
+                    'overallScore' => 0.0,
                 ];
                 continue;
             }
@@ -392,7 +400,11 @@ class UserScoreService
 
         $goalScore = $goalScoreTotal / $count;
         $coreTaskScore = $coreTaskScoreTotal / $count;
-        $overallScore = ($goalScore + $coreTaskScore) / 2;
+
+        // Leaderboard ranking comes only from daily tracker activity.
+        // goalScore is still averaged and returned above for informational
+        // display, but it no longer feeds the ranking score.
+        $overallScore = $coreTaskScore;
 
         return [
             'goalScore' => $goalScore,
@@ -421,19 +433,12 @@ class UserScoreService
     {
         $dailyTrackerScore = $this->scoreDailyTrackerTasks($user, $tracker);
 
+        // goalScore is still resolved and returned below for informational
+        // display, but the leaderboard ranking score (overallScore) is a
+        // pure function of daily tracker activity only.
         $resolvedGoalScore = $goalScore ?? $this->legacyGoalScoreFromTracker($tracker);
-        $effectiveGoalScore = $resolvedGoalScore > 0
-            ? $resolvedGoalScore
-            : (float) $tracker->todo_list_score_daily_contribution;
-        $includeTodoListScore = $goalScore !== null
-            || (bool) $tracker->todo_list_included_in_total
-            || $resolvedGoalScore > 0
-            || $tracker->todo_list_score_daily_contribution > 0;
 
-        $resolved = $includeTodoListScore
-            ? (($dailyTrackerScore + $effectiveGoalScore) / 2)
-            : $dailyTrackerScore;
-
+        $resolved = $dailyTrackerScore;
         if ($resolved <= 0) {
             $resolved = (float) ($tracker->user_total_score ?? 0);
         }
@@ -454,25 +459,10 @@ class UserScoreService
     ): array
     {
         $dailyTrackerScore = (float) $point->daily_tracker_score;
+        // goalScore is still resolved and returned below for informational
+        // display, but the leaderboard ranking score (overallScore) is a
+        // pure function of daily tracker activity only.
         $resolvedGoalScore = $goalScore ?? $this->legacyGoalScoreFromPoint($point);
-        $effectiveGoalScore = $resolvedGoalScore > 0
-            ? $resolvedGoalScore
-            : (float) $point->todo_list_score_daily_contribution;
-
-        if ($goalScore !== null
-            || (bool) $point->todo_list_included_in_total
-            || $resolvedGoalScore > 0
-            || $point->todo_list_score_daily_contribution > 0
-        ) {
-            $resolved = (($dailyTrackerScore + $effectiveGoalScore) / 2);
-            if ($resolved > 0) {
-                return [
-                    'goalScore' => $resolvedGoalScore,
-                    'coreTaskScore' => $dailyTrackerScore,
-                    'overallScore' => $resolved,
-                ];
-            }
-        }
 
         if ($dailyTrackerScore > 0) {
             return [
@@ -746,10 +736,14 @@ class UserScoreService
                     ? $this->roundOne(((float) $latestGoalScore) / $totalDays)
                     : (float) $latestGoalScore;
 
+                // No daily tracker rows in the period at all -- the
+                // leaderboard ranking score is 0 even though a goalScore
+                // exists (goalScore is still returned for informational
+                // display; it no longer feeds the ranking).
                 return [
                     'goalScore' => $goalScoreValue,
                     'coreTaskScore' => 0.0,
-                    'overallScore' => $goalScoreValue,
+                    'overallScore' => 0.0,
                 ];
             }
 
@@ -766,7 +760,11 @@ class UserScoreService
             : ($normalizeLegacyGoalScore && $totalDays > 0
                 ? $this->roundOne(((float) $latestGoalScore) / $totalDays)
                 : (float) $latestGoalScore);
-        $overallScore = ($coreTaskScore + $goalScoreValue) / 2;
+
+        // Leaderboard ranking comes only from daily tracker activity.
+        // goalScoreValue is still computed and returned above for
+        // informational display, but it no longer feeds the ranking score.
+        $overallScore = $coreTaskScore;
 
         return [
             'goalScore' => $goalScoreValue,

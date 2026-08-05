@@ -647,6 +647,131 @@ class CoachManagementTest extends TestCase
         ]);
     }
 
+    public function test_coach_can_add_a_mentee_to_multiple_of_their_own_groups_simultaneously(): void
+    {
+        $coach = User::factory()->create([
+            'is_coach' => true,
+            'role' => 'coach',
+        ]);
+        $mentee = User::factory()->create([
+            'name' => 'Multi Group Mentee',
+            'email' => 'multigroup@example.com',
+        ]);
+
+        $groupA = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Group A',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+        $groupB = CoachGroup::create([
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id],
+            'name' => 'Group B',
+            'member_ids' => [],
+            'member_count' => 0,
+        ]);
+
+        Sanctum::actingAs($coach);
+
+        // Assign the same mentee to Group A, then Group B -- previously
+        // this second call would have silently MOVED the mentee out of
+        // Group A instead of also adding them to Group B.
+        $assignA = $this->postJson('/api/coach/mentees/assign', [
+            'mentee_id' => (string) $mentee->id,
+            'mentee_name' => $mentee->name,
+            'mentee_email' => $mentee->email,
+            'team_name' => 'Team',
+            'group_id' => $groupA->id,
+            'group_name' => 'Group A',
+        ]);
+        $assignA->assertOk()->assertJsonPath('mentee.groupId', $groupA->id);
+
+        $assignB = $this->postJson('/api/coach/mentees/assign', [
+            'mentee_id' => (string) $mentee->id,
+            'mentee_name' => $mentee->name,
+            'mentee_email' => $mentee->email,
+            'team_name' => 'Team',
+            'group_id' => $groupB->id,
+            'group_name' => 'Group B',
+        ]);
+        $assignB->assertOk()->assertJsonPath('mentee.groupId', $groupB->id);
+
+        // Both memberships persist as independent rows.
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => $groupA->id,
+        ]);
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => $groupB->id,
+        ]);
+        $this->assertSame(2, CoachMentee::query()
+            ->where('coach_id', (string) $coach->id)
+            ->where('mentee_id', (string) $mentee->id)
+            ->count());
+
+        // member_count is accurate on both groups.
+        $groups = $this->getJson('/api/coach/groups');
+        $groups->assertOk();
+        $groupPayloads = collect($groups->json('groups'))->keyBy('id');
+        $this->assertSame(1, $groupPayloads[$groupA->id]['memberCount']);
+        $this->assertSame(1, $groupPayloads[$groupB->id]['memberCount']);
+        $this->assertContains((string) $mentee->id, $groupPayloads[$groupA->id]['memberIds']);
+        $this->assertContains((string) $mentee->id, $groupPayloads[$groupB->id]['memberIds']);
+
+        $this->assertDatabaseHas('coach_groups', ['id' => $groupA->id, 'member_count' => 1]);
+        $this->assertDatabaseHas('coach_groups', ['id' => $groupB->id, 'member_count' => 1]);
+
+        // The mentee roster shows the mentee once, listing both groups.
+        $mentees = $this->getJson('/api/coach/mentees');
+        $mentees->assertOk();
+        $menteeEntries = collect($mentees->json('mentees'))
+            ->where('menteeId', (string) $mentee->id);
+        $this->assertCount(1, $menteeEntries);
+        $groupIds = $menteeEntries->first()['groupIds'];
+        $this->assertContains($groupA->id, $groupIds);
+        $this->assertContains($groupB->id, $groupIds);
+
+        // Removing from Group A does not remove the mentee from Group B.
+        $removeFromA = $this->postJson('/api/coach/groups/'.$groupA->id.'/remove-mentee', [
+            'mentee_id' => (string) $mentee->id,
+        ]);
+        $removeFromA->assertOk();
+
+        $this->assertDatabaseMissing('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => $groupA->id,
+        ]);
+        $this->assertDatabaseHas('coach_mentees', [
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $mentee->id,
+            'group_id' => $groupB->id,
+        ]);
+
+        $groupsAfter = $this->getJson('/api/coach/groups');
+        $groupsAfter->assertOk();
+        $groupPayloadsAfter = collect($groupsAfter->json('groups'))->keyBy('id');
+        $this->assertSame(0, $groupPayloadsAfter[$groupA->id]['memberCount']);
+        $this->assertSame(1, $groupPayloadsAfter[$groupB->id]['memberCount']);
+        $this->assertDatabaseHas('coach_groups', ['id' => $groupA->id, 'member_count' => 0]);
+        $this->assertDatabaseHas('coach_groups', ['id' => $groupB->id, 'member_count' => 1]);
+
+        // The mentee is still my mentee overall (via the Group B row).
+        $menteesAfter = $this->getJson('/api/coach/mentees');
+        $menteesAfter->assertOk();
+        $menteeEntryAfter = collect($menteesAfter->json('mentees'))
+            ->firstWhere('menteeId', (string) $mentee->id);
+        $this->assertNotNull($menteeEntryAfter);
+        $this->assertSame([$groupB->id], $menteeEntryAfter['groupIds']);
+    }
+
     public function test_update_group_coaches_removes_omitted_co_coach_but_keeps_owner(): void
     {
         $owner = User::factory()->create([

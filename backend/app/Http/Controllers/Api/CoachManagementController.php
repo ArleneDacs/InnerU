@@ -106,10 +106,25 @@ class CoachManagementController extends Controller
                     ->values()
                     ->all();
 
-                $relation = CoachMentee::query()
+                // A candidate can have more than one coach_mentees row with
+                // this coach now (one per group they're in), so this pulls
+                // every row rather than just the first. groupId/groupName
+                // below reflect a single ("primary") membership for
+                // backward-compatible display; groupIds lists all of them so
+                // the add-mentee UI can pre-check every group the mentee
+                // already belongs to.
+                $relations = CoachMentee::query()
                     ->where('coach_id', (string) $user->id)
                     ->where('mentee_id', (string) $candidate->id)
-                    ->first();
+                    ->get();
+                $relation = $relations->first();
+                $groupIds = $relations
+                    ->pluck('group_id')
+                    ->filter()
+                    ->map(static fn ($id) => (string) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
 
                 return [
                     'id' => (string) $candidate->id,
@@ -123,9 +138,10 @@ class CoachManagementController extends Controller
                     'companyCode' => $candidate->company_code,
                     'profilePic' => $candidate->profile_pic,
                     'coachIds' => $coachIds,
-                    'assignedToMe' => $relation !== null,
+                    'assignedToMe' => $relations->isNotEmpty(),
                     'groupId' => $relation?->group_id,
                     'groupName' => $relation?->group_name,
+                    'groupIds' => $groupIds,
                     'teamName' => $relation?->team_name,
                     'score' => (int) $candidate->score,
                     'createdAt' => $candidate->created_at?->toIso8601String(),
@@ -275,14 +291,14 @@ class CoachManagementController extends Controller
         DB::transaction(function () use ($group): void {
             $coachIds = $this->groupCoachIds($group);
 
-            CoachMentee::query()
+            $relations = CoachMentee::query()
                 ->whereIn('coach_id', $coachIds)
                 ->where('group_id', $group->id)
-                ->update([
-                    'group_id' => null,
-                    'group_name' => null,
-                    'updated_at' => now(),
-                ]);
+                ->get();
+
+            foreach ($relations as $relation) {
+                $this->detachRelationFromGroup($relation);
+            }
 
             $group->delete();
         });
@@ -314,11 +330,8 @@ class CoachManagementController extends Controller
         }
 
         DB::transaction(function () use ($relation, $group): void {
-            $relation->group_id = null;
-            $relation->group_name = null;
-            $relation->save();
-
-            $this->syncGroupCounters($group->id, '');
+            $this->detachRelationFromGroup($relation);
+            $this->decrementGroupCounter($group->id);
         });
 
         return response()->json(['message' => 'Removed from group.']);
@@ -342,11 +355,23 @@ class CoachManagementController extends Controller
             ->keyBy(fn (User $menteeUser) => (string) $menteeUser->id);
         $scores = $this->userScoreService->resolveForUsers($menteeUsers);
 
-        $mentees = $relations->map(function (CoachMentee $relation) use ($scores) {
-            $payload = $this->menteePayload($relation);
-            $payload['score'] = (int) round($scores[(string) $relation->mentee_id] ?? 0);
-            return $payload;
-        });
+        // A mentee can now have several rows here (one per group they're in
+        // with this coach), but this endpoint is "my roster of mentees", not
+        // "my roster of group memberships" -- group by mentee_id so each
+        // mentee is listed once. $relations is already ordered by
+        // updated_at desc, so the first row in each group is the mentee's
+        // most recently touched membership; its team_name/group fields are
+        // used for the singular display fields, while groupIds/groupNames
+        // list every group the mentee is in with this coach.
+        $mentees = $relations
+            ->groupBy(fn (CoachMentee $relation) => (string) $relation->mentee_id)
+            ->map(function ($menteeRelations) use ($scores) {
+                $primary = $menteeRelations->first();
+                $payload = $this->menteePayload($primary, $menteeRelations);
+                $payload['score'] = (int) round($scores[(string) $primary->mentee_id] ?? 0);
+                return $payload;
+            })
+            ->values();
 
         return response()->json(['mentees' => $mentees]);
     }
@@ -497,34 +522,42 @@ class CoachManagementController extends Controller
             }
         }
 
-        $previousGroupId = '';
-        $relation = DB::transaction(function () use ($user, $validated, $groupId, $groupName, &$previousGroupId): CoachMentee {
+        // A mentee can belong to several of this coach's groups at once, so
+        // the (coach, mentee, group) triple is the identity of a single
+        // membership row rather than (coach, mentee) alone -- see the
+        // 2026_08_06_000001 migration. firstOrNew here either finds the
+        // existing row for THIS specific group (or the group_id=null "main
+        // coach team" row when no group was chosen) or starts a brand new
+        // one; it never touches any of the mentee's other group rows.
+        $isNewMembership = false;
+        $relation = DB::transaction(function () use ($user, $validated, $groupId, $groupName, &$isNewMembership): CoachMentee {
             $relation = CoachMentee::query()->firstOrNew([
                 'coach_id' => (string) $user->id,
                 'mentee_id' => trim((string) $validated['mentee_id']),
+                'group_id' => $groupId !== '' ? $groupId : null,
             ]);
 
-            $previousGroupId = (string) ($relation->group_id ?? '');
-            $nextGroupId = $groupId;
+            $isNewMembership = ! $relation->exists;
 
             $relation->mentee_name = trim((string) ($validated['mentee_name'] ?? '')) ?: $relation->mentee_name;
             $relation->mentee_email = trim((string) ($validated['mentee_email'] ?? '')) ?: $relation->mentee_email;
             $relation->team_name = trim((string) $validated['team_name']);
-            $relation->group_id = $nextGroupId !== '' ? $nextGroupId : null;
             $relation->group_name = $groupName !== '' ? $groupName : null;
             $relation->save();
 
-            $this->syncGroupCounters($previousGroupId, $nextGroupId);
+            if ($isNewMembership && $groupId !== '') {
+                $this->incrementGroupCounter($groupId);
+            }
 
             return $relation->fresh();
         });
 
-        // Only a real, changing group assignment counts as "added to a
-        // group" — assignMentee is reused for the plain "assign new
-        // mentee" call (no group_id at all) and this same endpoint is also
-        // hit again harmlessly when a mentee is re-saved into the group
-        // they're already in.
-        if ($groupId !== '' && $groupId !== $previousGroupId) {
+        // Only a brand-new group membership counts as "added to a group" --
+        // assignMentee is reused for the plain "assign new mentee" call (no
+        // group_id at all) and this same endpoint is also hit again
+        // harmlessly when a mentee is re-saved into a group they're already
+        // in (a no-op second call against the same existing row).
+        if ($groupId !== '' && $isNewMembership) {
             Notification::createFor(
                 (string) $relation->mentee_id,
                 'added_to_group',
@@ -550,20 +583,26 @@ class CoachManagementController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        $relation = CoachMentee::query()
+        // A mentee may now have several rows for this coach (one per
+        // group, plus possibly an ungrouped "main team" row) --
+        // removeMentee means "unassign this mentee from me entirely", so
+        // every row for this (coach, mentee) pair is removed, not just one
+        // group membership.
+        $relations = CoachMentee::query()
             ->where('coach_id', (string) $user->id)
             ->where('mentee_id', $menteeId)
-            ->first();
+            ->get();
 
-        if ($relation === null) {
+        if ($relations->isEmpty()) {
             return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        $previousGroupId = (string) ($relation->group_id ?? '');
-
-        DB::transaction(function () use ($relation, $user, $previousGroupId): void {
-            $relation->delete();
-            $this->syncGroupCounters((string) $user->id, $previousGroupId, '');
+        DB::transaction(function () use ($relations): void {
+            foreach ($relations as $relation) {
+                $groupId = (string) ($relation->group_id ?? '');
+                $relation->delete();
+                $this->decrementGroupCounter($groupId);
+            }
         });
 
         $requestId = $this->requestId($menteeId, (string) $user->id);
@@ -772,19 +811,20 @@ class CoachManagementController extends Controller
             $relation = CoachMentee::query()->firstOrNew([
                 'coach_id' => (string) $user->id,
                 'mentee_id' => (string) $coachRequest->mentee_id,
+                'group_id' => $groupId !== '' ? $groupId : null,
             ]);
 
-            $previousGroupId = (string) ($relation->group_id ?? '');
-            $nextGroupId = $groupId;
+            $isNewMembership = ! $relation->exists;
 
             $relation->mentee_name = $coachRequest->mentee_name;
             $relation->mentee_email = $coachRequest->mentee_email;
             $relation->team_name = trim((string) $validated['team_name']);
-            $relation->group_id = $nextGroupId !== '' ? $nextGroupId : null;
             $relation->group_name = $groupName !== '' ? $groupName : null;
             $relation->save();
 
-            $this->syncGroupCounters($previousGroupId, $nextGroupId);
+            if ($isNewMembership && $groupId !== '') {
+                $this->incrementGroupCounter($groupId);
+            }
 
             $coachRequest->status = 'accepted';
             $coachRequest->group_id = $groupId !== '' ? $groupId : null;
@@ -831,19 +871,57 @@ class CoachManagementController extends Controller
         ]);
     }
 
-    private function syncGroupCounters(string $previousGroupId, string $nextGroupId): void
+    private function incrementGroupCounter(string $groupId): void
     {
-        if ($previousGroupId !== '' && $previousGroupId !== $nextGroupId) {
-            CoachGroup::query()
-                ->where('id', $previousGroupId)
-                ->decrement('member_count');
+        if ($groupId === '') {
+            return;
         }
 
-        if ($nextGroupId !== '' && $previousGroupId !== $nextGroupId) {
-            CoachGroup::query()
-                ->where('id', $nextGroupId)
-                ->increment('member_count');
+        CoachGroup::query()->where('id', $groupId)->increment('member_count');
+    }
+
+    private function decrementGroupCounter(string $groupId): void
+    {
+        if ($groupId === '') {
+            return;
         }
+
+        CoachGroup::query()->where('id', $groupId)->decrement('member_count');
+    }
+
+    /**
+     * Detach a single coach_mentees row from its group without necessarily
+     * deleting the coach<->mentee relationship: if the mentee has other
+     * rows for this same coach (another group, or an existing ungrouped
+     * row), this row is simply removed since the relationship survives via
+     * the other row(s). Otherwise -- this was the mentee's only row for
+     * this coach -- it's converted into the ungrouped "main coach team"
+     * row instead of being deleted outright, preserving the long-standing
+     * behavior that leaving your only group doesn't remove you as the
+     * coach's mentee.
+     *
+     * Never nulls group_id on a row when another null-group row already
+     * exists for the same (coach, mentee) pair -- that would violate the
+     * partial unique index added in the 2026_08_06_000001 migration, so
+     * that case always deletes instead of merging.
+     */
+    private function detachRelationFromGroup(CoachMentee $relation): void
+    {
+        $otherRelations = CoachMentee::query()
+            ->where('coach_id', $relation->coach_id)
+            ->where('mentee_id', $relation->mentee_id)
+            ->where('id', '!=', $relation->id)
+            ->get();
+
+        if ($otherRelations->isEmpty()) {
+            $relation->group_id = null;
+            $relation->group_name = null;
+            $relation->save();
+
+            return;
+        }
+
+        $relation->delete();
     }
 
     private function groupPayload(CoachGroup $group): array
@@ -882,8 +960,32 @@ class CoachManagementController extends Controller
         ];
     }
 
-    private function menteePayload(CoachMentee $relation): array
+    /**
+     * @param \Illuminate\Support\Collection<int, CoachMentee>|null $groupRelations
+     *        Every coach_mentees row for this same (coach, mentee) pair, used
+     *        to list all of the mentee's groups. Defaults to just $relation
+     *        itself for callers (like assignMentee's response) that only
+     *        care about the single membership just touched.
+     */
+    private function menteePayload(CoachMentee $relation, ?\Illuminate\Support\Collection $groupRelations = null): array
     {
+        $groupRelations ??= collect([$relation]);
+
+        $groupIds = $groupRelations
+            ->pluck('group_id')
+            ->filter()
+            ->map(static fn ($id) => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $groupNames = $groupRelations
+            ->pluck('group_name')
+            ->filter()
+            ->map(static fn ($name) => (string) $name)
+            ->unique()
+            ->values()
+            ->all();
+
         return [
             'coachId' => (string) $relation->coach_id,
             'menteeId' => (string) $relation->mentee_id,
@@ -892,6 +994,8 @@ class CoachManagementController extends Controller
             'teamName' => $relation->team_name,
             'groupId' => $relation->group_id,
             'groupName' => $relation->group_name,
+            'groupIds' => $groupIds,
+            'groupNames' => $groupNames,
             'createdAt' => $relation->created_at?->toIso8601String(),
             'updatedAt' => $relation->updated_at?->toIso8601String(),
         ];

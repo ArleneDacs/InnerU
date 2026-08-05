@@ -70,6 +70,25 @@ class CommunityMentionTest extends TestCase
             'user_id' => (string) $mentioned->id,
             'type' => 'community_mention',
         ]);
+
+        $this->getJson('/api/community/posts?category=General')
+            ->assertOk()
+            ->assertJsonPath('posts.0.mentions.0.userId', (string) $mentioned->id);
+    }
+
+    public function test_post_titles_cannot_exceed_fifty_characters(): void
+    {
+        $author = User::factory()->create(['company_code' => 'ACME']);
+
+        Sanctum::actingAs($author);
+        $response = $this->postJson('/api/community/posts', [
+            'title' => str_repeat('x', 51),
+            'category' => 'General',
+            'note' => [['type' => 'text', 'value' => 'A post body']],
+            'color' => 0xFFFFFFFF,
+        ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('title');
     }
 
     public function test_mentioning_a_user_outside_the_company_is_rejected(): void

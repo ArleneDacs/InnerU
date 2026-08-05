@@ -151,7 +151,10 @@ class UserScoreTodoTaskGoalsTest extends TestCase
             // Aug 1-Dec 31 inclusive is 153 days. A one-time goal earns
             // one day-credit, so it must not become 100% on day one.
             $this->assertEqualsWithDelta(0.65, $breakdown['goalScore'], 0.01);
-            $this->assertEqualsWithDelta(0.65, $breakdown['overallScore'], 0.01);
+            // No DailyTracker rows exist for this period, so the
+            // leaderboard ranking score (daily-tracker-only) is 0 even
+            // though a goalScore is available for informational display.
+            $this->assertEquals(0.0, $breakdown['overallScore']);
         } finally {
             Carbon::setTestNow();
         }

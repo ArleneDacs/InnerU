@@ -125,10 +125,38 @@ class CoachRelationshipImporter
                     continue;
                 }
 
-                CoachMentee::query()
+                // synthesizeBaseRelationships() already created one
+                // group_id=null row per (coach, mentee) pair above. Reuse
+                // that row for the first group this mentee is stamped
+                // into; if the mentee also belongs to another of this
+                // coach's groups in the Firestore snapshot, that null row
+                // is already taken, so a second row is created for the
+                // additional group membership instead of overwriting it
+                // (which is exactly the multi-group case the coach_mentees
+                // schema was relaxed for -- see the 2026_08_06_000001
+                // migration).
+                $relation = CoachMentee::query()
                     ->where('coach_id', (string) $coachId)
                     ->where('mentee_id', (string) $menteeId)
-                    ->update(['group_id' => $group->id, 'group_name' => $group->name]);
+                    ->whereNull('group_id')
+                    ->first();
+
+                if ($relation !== null) {
+                    $relation->group_id = $group->id;
+                    $relation->group_name = $group->name;
+                    $relation->save();
+
+                    continue;
+                }
+
+                CoachMentee::query()->firstOrCreate(
+                    [
+                        'coach_id' => (string) $coachId,
+                        'mentee_id' => (string) $menteeId,
+                        'group_id' => $group->id,
+                    ],
+                    ['group_name' => $group->name],
+                );
             }
         }
     }

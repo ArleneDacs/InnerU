@@ -26,10 +26,14 @@ class CommentController extends Controller
 
         $comments = NoteComment::query()
             ->with('user')
+            ->withCount('reactions')
+            ->withExists([
+                'reactions as reacted_by_me' => fn ($query) => $query->where('user_id', $user->id),
+            ])
             ->where('community_post_id', $post->id)
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn (NoteComment $comment) => $this->mapComment($comment));
+            ->map(fn (NoteComment $comment) => $this->mapComment($comment, (int) $user->id));
 
         return response()->json(['comments' => $comments]);
     }
@@ -107,7 +111,7 @@ class CommentController extends Controller
         }
 
         return response()->json([
-            'comment' => $this->mapComment($comment),
+            'comment' => $this->mapComment($comment, (int) $user->id),
         ], Response::HTTP_CREATED);
     }
 
@@ -129,7 +133,7 @@ class CommentController extends Controller
         $comment->update(['comment' => $validated['comment']]);
         $comment->refresh()->load('user');
 
-        return response()->json(['comment' => $this->mapComment($comment)]);
+        return response()->json(['comment' => $this->mapComment($comment, (int) $user->id)]);
     }
 
     public function destroy(Request $request, CommunityPost $post, NoteComment $comment): JsonResponse
@@ -148,8 +152,18 @@ class CommentController extends Controller
         return response()->json(['message' => 'Deleted.']);
     }
 
-    private function mapComment(NoteComment $comment): array
+    private function mapComment(NoteComment $comment, ?int $viewerId = null): array
     {
+        $attributes = $comment->getAttributes();
+        $reactionsCount = array_key_exists('reactions_count', $attributes)
+            ? (int) $comment->getAttribute('reactions_count')
+            : $comment->reactions()->count();
+        $reactedByMe = array_key_exists('reacted_by_me', $attributes)
+            ? (bool) $comment->getAttribute('reacted_by_me')
+            : ($viewerId !== null && $comment->reactions()
+                ->where('user_id', $viewerId)
+                ->exists());
+
         return [
             'id' => (string) $comment->id,
             'postId' => (string) $comment->community_post_id,
@@ -159,8 +173,8 @@ class CommentController extends Controller
             'profilePic' => $comment->user?->profile_pic,
             'comment' => $comment->comment,
             'mentions' => $comment->mentions ?? [],
-            'reactionsCount' => $comment->reactions()->count(),
-            'reactedByMe' => $comment->reactions()->where('user_id', auth()->id())->exists(),
+            'reactionsCount' => $reactionsCount,
+            'reactedByMe' => $reactedByMe,
             'createdAt' => $this->serializeAppDate($comment->created_at),
             'updatedAt' => $this->serializeAppDate($comment->updated_at),
         ];

@@ -34,7 +34,7 @@ void main() {
     expect(find.text('Arlene score'), findsOneWidget);
     expect(find.text('Goal score'), findsOneWidget);
     expect(find.text('Daily tracker'), findsOneWidget);
-    expect(find.text('Total score'), findsOneWidget);
+    expect(find.text('Overall score (ranking)'), findsOneWidget);
     expect(find.text('A12'), findsNothing);
     expect(find.text('Consistency'), findsNothing);
     expect(find.text('Streak'), findsNothing);
@@ -71,11 +71,17 @@ void main() {
     await tester.pump();
 
     expect(find.text('Jenny score'), findsOneWidget);
-    expect(find.text('Combined goal and daily tracker score.'), findsOneWidget);
+    expect(
+      find.text(
+        'Leaderboard rank is based on the Daily tracker score only. '
+        'Goal score is shown separately and does not affect rank.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Team: 2B-ASCEND'), findsOneWidget);
     expect(find.text('Goal score'), findsOneWidget);
     expect(find.text('Daily tracker'), findsOneWidget);
-    expect(find.text('Total score'), findsOneWidget);
+    expect(find.text('Overall score (ranking)'), findsOneWidget);
     expect(find.text('82'), findsOneWidget);
     expect(find.text('82 pts'), findsOneWidget);
     expect(find.text('64'), findsOneWidget);

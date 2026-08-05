@@ -70,6 +70,31 @@ class CoachApiService {
     );
   }
 
+  // A coach can add the same mentee to several of their own groups at
+  // once (the backend treats each coach/mentee/group combination as an
+  // independent membership row, so assigning to group B no longer moves
+  // the mentee out of group A). This just issues one assignMentee call
+  // per selected group -- pass a null groupId for "no group" (the
+  // coach's main team) if that's one of the selections.
+  Future<void> assignMenteeToGroups({
+    required String menteeId,
+    required String teamName,
+    String? menteeName,
+    String? menteeEmail,
+    required List<({String? groupId, String groupName})> groups,
+  }) async {
+    for (final group in groups) {
+      await assignMentee(
+        menteeId: menteeId,
+        teamName: teamName,
+        menteeName: menteeName,
+        menteeEmail: menteeEmail,
+        groupId: group.groupId,
+        groupName: group.groupName,
+      );
+    }
+  }
+
   Future<void> removeMentee(String menteeId) async {
     await _api.deleteJson(
       '/api/coach/mentees/$menteeId',

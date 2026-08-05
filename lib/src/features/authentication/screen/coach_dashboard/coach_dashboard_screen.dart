@@ -5513,44 +5513,25 @@ class CoachManageMenteesPage extends StatelessWidget {
     );
   }
 
+  // Multi-select "Add Mentees" flow: a coach can add the same mentee to
+  // several of their own groups in one go (checkboxes below, instead of
+  // the old tap-one-group-and-close pattern), since the backend now keeps
+  // one independent membership row per (coach, mentee, group) rather than
+  // silently moving the mentee between groups. See
+  // _showMoveMenteeToGroupDialog for the separate single-target "move out
+  // of this specific group into exactly one other" flow used from a
+  // group-scoped mentee card.
   Future<void> _showAddMenteeSheet(BuildContext context) async {
     final searchController = TextEditingController();
     Map<String, dynamic>? selectedUser;
     String selectedUserName = '';
+    Set<String> selectedGroupKeys = <String>{};
     bool isAssigning = false;
 
-    Future<void> assignSelectedMentee(
-      BuildContext activeContext,
-      StateSetter setSheetState,
-      _CoachGroupChoice groupChoice,
-    ) async {
-      final userData = selectedUser;
-      if (userData == null || isAssigning) return;
-      final userId = (userData['id'] as String?)?.trim() ?? '';
-      if (userId.isEmpty) return;
-
-      setSheetState(() => isAssigning = true);
-      await onAssignMentee(
-        menteeId: userId,
-        teamName: teamName,
-        groupId: groupChoice.groupId,
-        groupName: groupChoice.groupName,
-      );
-      if (!activeContext.mounted) return;
-      setSheetState(() {
-        selectedUser = null;
-        selectedUserName = '';
-        isAssigning = false;
-      });
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${selectedUserName.isNotEmpty ? selectedUserName : 'Mentee'} added to ${groupChoice.groupName}',
-          ),
-        ),
-      );
-    }
+    // The checkbox representing "no specific group" (the coach's main
+    // team) doesn't have a real group id, so it's tracked with this
+    // sentinel key in selectedGroupKeys.
+    const mainTeamKey = '__main_team__';
 
     Future<List<List<Map<String, dynamic>>>> loadSheetData() async {
       final results = await Future.wait<List<Map<String, dynamic>>>([
@@ -5558,6 +5539,59 @@ class CoachManageMenteesPage extends StatelessWidget {
         CoachApiService.instance.fetchGroups(),
       ]);
       return results;
+    }
+
+    // Fetched once per sheet open rather than inside the builder, so
+    // toggling a checkbox (which calls setSheetState) doesn't re-trigger a
+    // network round trip and flash the loading spinner on every tap.
+    final sheetDataFuture = loadSheetData();
+
+    Future<void> assignSelectedMentee(
+      BuildContext activeContext,
+      StateSetter setSheetState,
+      List<Map<String, dynamic>> groups,
+    ) async {
+      final userData = selectedUser;
+      if (userData == null || isAssigning || selectedGroupKeys.isEmpty) {
+        return;
+      }
+      final userId = (userData['id'] as String?)?.trim() ?? '';
+      if (userId.isEmpty) return;
+
+      final groupsById = <String, Map<String, dynamic>>{
+        for (final group in groups) group['id']?.toString() ?? '': group,
+      };
+
+      final chosenGroups = selectedGroupKeys.map((key) {
+        if (key == mainTeamKey) {
+          return (groupId: null, groupName: teamName);
+        }
+        final name = (groupsById[key]?['name'] as String?)?.trim() ?? 'Group';
+        return (groupId: key, groupName: name);
+      }).toList();
+
+      setSheetState(() => isAssigning = true);
+      await CoachApiService.instance.assignMenteeToGroups(
+        menteeId: userId,
+        teamName: teamName,
+        groups: chosenGroups,
+      );
+      if (!activeContext.mounted) return;
+      setSheetState(() {
+        selectedUser = null;
+        selectedUserName = '';
+        selectedGroupKeys = <String>{};
+        isAssigning = false;
+      });
+      if (!context.mounted) return;
+      final summary = chosenGroups.map((group) => group.groupName).join(', ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${selectedUserName.isNotEmpty ? selectedUserName : 'Mentee'} added to $summary',
+          ),
+        ),
+      );
     }
 
     try {
@@ -5585,7 +5619,7 @@ class CoachManageMenteesPage extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              'Choose group for $selectedUserName',
+                              'Choose groups for $selectedUserName',
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
@@ -5599,17 +5633,32 @@ class CoachManageMenteesPage extends StatelessWidget {
                                     setSheetState(() {
                                       selectedUser = null;
                                       selectedUserName = '';
+                                      selectedGroupKeys = <String>{};
                                     });
                                   },
                             child: const Text('Cancel'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Select one or more groups to add this mentee to.',
+                          style: TextStyle(
+                            color: Theme.of(sheetContext)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.65),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       SizedBox(
                         height: 360,
                         child: FutureBuilder<List<List<Map<String, dynamic>>>>(
-                          future: loadSheetData(),
+                          future: sheetDataFuture,
                           builder: (context, snapshot) {
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting) {
@@ -5620,36 +5669,9 @@ class CoachManageMenteesPage extends StatelessWidget {
 
                             final data = snapshot.data ??
                                 const <List<Map<String, dynamic>>>[];
-                            final users = data.isNotEmpty
-                                ? data.first
-                                : <Map<String, dynamic>>[];
                             final groups = data.length > 1
                                 ? data[1]
                                 : <Map<String, dynamic>>[];
-
-                            final query =
-                                searchController.text.trim().toLowerCase();
-                            final filteredUsers = users.where((user) {
-                              final userId =
-                                  (user['id'] as String?)?.trim() ?? '';
-                              final username =
-                                  (user['name'] as String?)?.toLowerCase() ??
-                                      '';
-                              final email =
-                                  (user['email'] as String?)?.toLowerCase() ??
-                                      '';
-                              final isCoach = user['isCoach'] == true ||
-                                  ((user['role'] as String?)?.toLowerCase() ==
-                                      'coach');
-                              final isMyAcceptedMentee =
-                                  user['assignedToMe'] == true;
-                              return userId != currentUserId &&
-                                  !isCoach &&
-                                  isMyAcceptedMentee &&
-                                  (query.isEmpty ||
-                                      username.contains(query) ||
-                                      email.contains(query));
-                            }).toList();
 
                             final sortedGroups =
                                 List<Map<String, dynamic>>.from(
@@ -5666,26 +5688,30 @@ class CoachManageMenteesPage extends StatelessWidget {
 
                             return ListView(
                               children: [
-                                ListTile(
+                                CheckboxListTile(
                                   contentPadding: EdgeInsets.zero,
-                                  leading: const CircleAvatar(
+                                  secondary: const CircleAvatar(
                                     backgroundColor: Color(0xFFE9EEE4),
                                     child: Icon(CupertinoIcons.person_2_fill),
                                   ),
                                   title: Text(teamName),
                                   subtitle: const Text('Main coach team'),
-                                  enabled: !isAssigning,
-                                  onTap: isAssigning
+                                  value: selectedGroupKeys.contains(mainTeamKey),
+                                  onChanged: isAssigning
                                       ? null
-                                      : () => assignSelectedMentee(
-                                            sheetContext,
-                                            setSheetState,
-                                            _CoachGroupChoice(
-                                              groupName: teamName,
-                                            ),
-                                          ),
+                                      : (checked) {
+                                          setSheetState(() {
+                                            if (checked == true) {
+                                              selectedGroupKeys.add(mainTeamKey);
+                                            } else {
+                                              selectedGroupKeys
+                                                  .remove(mainTeamKey);
+                                            }
+                                          });
+                                        },
                                 ),
                                 ...sortedGroups.map((group) {
+                                  final groupId = group['id']?.toString() ?? '';
                                   final name =
                                       (group['name'] as String?)?.trim() ??
                                           'Group';
@@ -5694,109 +5720,65 @@ class CoachManageMenteesPage extends StatelessWidget {
                                           ((group['memberIds'] as List?)
                                                   ?.length ??
                                               0);
-                                  return ListTile(
+                                  return CheckboxListTile(
                                     contentPadding: EdgeInsets.zero,
-                                    leading: const CircleAvatar(
+                                    secondary: const CircleAvatar(
                                       backgroundColor: Color(0xFFDDE7D5),
                                       child: Icon(
                                         CupertinoIcons.rectangle_grid_2x2_fill,
                                       ),
                                     ),
                                     title: Text(name),
-                                    subtitle: Text(
-                                      '$memberCount mentees',
-                                    ),
-                                    enabled: !isAssigning,
-                                    onTap: isAssigning
+                                    subtitle: Text('$memberCount mentees'),
+                                    value:
+                                        selectedGroupKeys.contains(groupId),
+                                    onChanged: (isAssigning || groupId.isEmpty)
                                         ? null
-                                        : () => assignSelectedMentee(
-                                              sheetContext,
-                                              setSheetState,
-                                              _CoachGroupChoice(
-                                                groupId:
-                                                    group['id']?.toString(),
-                                                groupName: name,
-                                              ),
-                                            ),
-                                  );
-                                }),
-                                if (filteredUsers.isEmpty)
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 16),
-                                    child: Center(
-                                      child: Text('No users found.'),
-                                    ),
-                                  ),
-                                ...filteredUsers.map((user) {
-                                  final userName = (user['name'] as String?)
-                                              ?.trim()
-                                              .isNotEmpty ==
-                                          true
-                                      ? (user['name'] as String).trim()
-                                      : ((user['email'] as String?)
-                                                  ?.trim()
-                                                  .isNotEmpty ==
-                                              true
-                                          ? (user['email'] as String)
-                                              .trim()
-                                              .split('@')
-                                              .first
-                                          : 'Unknown User');
-                                  final isCoach = user['isCoach'] == true ||
-                                      ((user['role'] as String?)
-                                              ?.toLowerCase() ==
-                                          'coach');
-                                  final assignedToMe =
-                                      user['assignedToMe'] == true;
-                                  return ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: CircleAvatar(
-                                      backgroundImage:
-                                          (user['profilePic'] as String?)
-                                                      ?.trim()
-                                                      .isNotEmpty ==
-                                                  true
-                                              ? NetworkImage(
-                                                  user['profilePic'] as String,
-                                                )
-                                              : null,
-                                      child: ((user['profilePic'] as String?)
-                                                  ?.trim()
-                                                  .isEmpty ??
-                                              true)
-                                          ? Text(
-                                              userName.isNotEmpty
-                                                  ? userName[0].toUpperCase()
-                                                  : '?',
-                                            )
-                                          : null,
-                                    ),
-                                    title: Text(userName),
-                                    subtitle: Text(
-                                      [
-                                        (user['email'] as String?) ?? '',
-                                        if (isCoach) 'Coach account',
-                                      ].where((value) {
-                                        return value
-                                            .toString()
-                                            .trim()
-                                            .isNotEmpty;
-                                      }).join(' · '),
-                                    ),
-                                    trailing: ElevatedButton(
-                                      onPressed: () {
-                                        setSheetState(() {
-                                          selectedUser = user;
-                                          selectedUserName = userName;
-                                        });
-                                      },
-                                      child: Text(
-                                        assignedToMe ? 'Move' : 'Add',
-                                      ),
-                                    ),
+                                        : (checked) {
+                                            setSheetState(() {
+                                              if (checked == true) {
+                                                selectedGroupKeys.add(groupId);
+                                              } else {
+                                                selectedGroupKeys
+                                                    .remove(groupId);
+                                              }
+                                            });
+                                          },
                                   );
                                 }),
                               ],
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FutureBuilder<List<List<Map<String, dynamic>>>>(
+                          future: sheetDataFuture,
+                          builder: (context, snapshot) {
+                            final data = snapshot.data ??
+                                const <List<Map<String, dynamic>>>[];
+                            final groups = data.length > 1
+                                ? data[1]
+                                : <Map<String, dynamic>>[];
+
+                            return ElevatedButton(
+                              onPressed: (isAssigning ||
+                                      selectedGroupKeys.isEmpty)
+                                  ? null
+                                  : () => assignSelectedMentee(
+                                        sheetContext,
+                                        setSheetState,
+                                        groups,
+                                      ),
+                              child: Text(
+                                isAssigning
+                                    ? 'Adding...'
+                                    : selectedGroupKeys.length > 1
+                                        ? 'Add to ${selectedGroupKeys.length} groups'
+                                        : 'Add mentee',
+                              ),
                             );
                           },
                         ),
@@ -5834,7 +5816,7 @@ class CoachManageMenteesPage extends StatelessWidget {
                     SizedBox(
                       height: 360,
                       child: FutureBuilder<List<List<Map<String, dynamic>>>>(
-                        future: loadSheetData(),
+                        future: sheetDataFuture,
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
@@ -5934,9 +5916,21 @@ class CoachManageMenteesPage extends StatelessWidget {
                                 ),
                                 trailing: ElevatedButton(
                                   onPressed: () {
+                                    final existingGroupIds =
+                                        (user['groupIds'] as List?)
+                                                ?.map((id) => id.toString())
+                                                .toSet() ??
+                                            <String>{};
                                     setSheetState(() {
                                       selectedUser = user;
                                       selectedUserName = userName;
+                                      // Pre-check whichever of this coach's
+                                      // groups the mentee already belongs
+                                      // to, so re-opening this sheet for an
+                                      // existing mentee shows their current
+                                      // memberships rather than starting
+                                      // from a blank slate.
+                                      selectedGroupKeys = existingGroupIds;
                                     });
                                   },
                                   child: Text(
@@ -6069,6 +6063,29 @@ class CoachManageMenteesPage extends StatelessWidget {
       return;
     }
 
+    // A mentee can now be in several of this coach's groups at once, so a
+    // real "move" has to know every group they're currently in (not just
+    // the single teamName string shown on the roster card) in order to
+    // vacate all of them once the new group is chosen below.
+    List<String> currentGroupIds = <String>[];
+    try {
+      final users = await CoachApiService.instance.fetchUsers();
+      final match = users.firstWhere(
+        (user) => (user['id']?.toString() ?? '') == menteeId,
+        orElse: () => const <String, dynamic>{},
+      );
+      currentGroupIds = (match['groupIds'] as List?)
+              ?.map((id) => id.toString())
+              .toList() ??
+          <String>[];
+    } catch (_) {
+      // Best-effort -- if this lookup fails the mentee still gets added to
+      // the newly selected group below, they just may not be removed from
+      // whichever group(s) they were already in.
+    }
+
+    if (!context.mounted) return;
+
     final selectedGroup = await showModalBottomSheet<Map<String, dynamic>?>(
       context: context,
       isScrollControlled: true,
@@ -6164,6 +6181,23 @@ class CoachManageMenteesPage extends StatelessWidget {
       groupId: groupId,
       groupName: groupName,
     );
+
+    // Assigning to the new group only ADDS a membership now (it no longer
+    // implicitly moves the mentee), so a real "move" has to explicitly
+    // vacate every other group they were in with this coach.
+    for (final oldGroupId in currentGroupIds) {
+      if (oldGroupId.isEmpty || oldGroupId == groupId) continue;
+      try {
+        await CoachApiService.instance.removeMenteeFromGroup(
+          groupId: oldGroupId,
+          menteeId: menteeId,
+        );
+      } catch (_) {
+        // Best-effort cleanup -- the new membership above already
+        // succeeded, so surface that success rather than failing the
+        // whole move over a stale/already-removed old membership.
+      }
+    }
 
     if (!context.mounted) return;
     refresh();
@@ -6965,16 +6999,6 @@ class _CoachPendingApplicationsSectionState
       ],
     );
   }
-}
-
-class _CoachGroupChoice {
-  const _CoachGroupChoice({
-    this.groupId,
-    required this.groupName,
-  });
-
-  final String? groupId;
-  final String groupName;
 }
 
 class _CoachGroupMenteeScore {

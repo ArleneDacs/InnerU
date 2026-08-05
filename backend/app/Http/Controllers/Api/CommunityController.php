@@ -61,6 +61,7 @@ class CommunityController extends Controller
                     'username' => $post->username,
                     'title' => $post->title,
                     'note' => $post->note,
+                    'mentions' => $post->mentions ?? [],
                     'color' => $post->color,
                     'createdAt' => $this->serializeAppDate($post->created_at),
                     'category' => $post->category,
@@ -125,7 +126,7 @@ class CommunityController extends Controller
         }
 
         $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:50'],
             'category' => ['required', 'string', 'max:80'],
             'note' => ['required', 'array'],
             'color' => ['nullable', 'integer'],

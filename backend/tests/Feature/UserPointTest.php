@@ -71,13 +71,16 @@ class UserPointTest extends TestCase
 
     public function test_fractional_scores_are_rounded_before_being_stored(): void
     {
-        // daily_tracker_score=50 and todo_list_score=25 with
-        // todo_list_included_in_total=true resolves to (50+25)/2 = 37.5 —
-        // deliberately fractional. user_points.user_total_score is an
-        // INTEGER column; writing the raw float here previously crashed
+        // The leaderboard ranking score comes only from daily tracker
+        // activity, so daily_tracker_score=50 resolves to overallScore=50
+        // regardless of todo_list_score -- goalScore (25) is still computed
+        // and returned separately for informational display, but it no
+        // longer factors into the ranking. user_points.user_total_score is
+        // an INTEGER column; writing a raw float here previously crashed
         // against Postgres (SQLite silently tolerated it) because the
         // controller wrote resolveForUser()'s raw float directly instead of
-        // the already-rounded value syncForUser() produces for users.score.
+        // the already-rounded value syncForUser() produces for users.score
+        // -- this still exercises that write path end to end.
         $user = User::factory()->create([
             'name' => 'Fractional Point User',
             'email' => 'fractional-point@example.com',
@@ -113,7 +116,7 @@ class UserPointTest extends TestCase
             ->where('date', '2026-07-21')
             ->value('user_total_score');
 
-        $this->assertEquals(38, $storedScore);
+        $this->assertEquals(50, $storedScore);
     }
 
     protected function tearDown(): void

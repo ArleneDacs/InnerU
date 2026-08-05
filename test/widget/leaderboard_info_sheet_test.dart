@@ -41,7 +41,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('80% Daily Tracker and 60% Goals\n(80 + 60) ÷ 2 = 70% Overall Score'),
+      find.text(
+        'Completed 4 of 6 Daily Tracker activities\n'
+        '4 ÷ 6 × 100 = 66.7% Overall Score',
+      ),
       findsOneWidget,
     );
     expect(

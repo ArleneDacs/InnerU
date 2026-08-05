@@ -190,13 +190,13 @@ class DailyTrackerTest extends TestCase
     {
         // This exact fixture (a single tracker with only "steps" completed
         // out of the 6 default daily-tracker tasks) is known to resolve to a
-        // repeating-decimal score (8.3333333333333) — real production data
-        // hits this routinely, not just this contrived case. daily_trackers
-        // .user_total_score is an unsigned INTEGER column; writing the raw
-        // float here previously crashed against Postgres (SQLite silently
-        // tolerated it) because the controller wrote resolveForUser()'s raw
-        // float directly instead of the already-rounded value syncForUser()
-        // produces for users.score.
+        // repeating-decimal score (16.6666666666667, i.e. 1/6 * 100) — real
+        // production data hits this routinely, not just this contrived
+        // case. daily_trackers.user_total_score is an unsigned INTEGER
+        // column; writing the raw float here previously crashed against
+        // Postgres (SQLite silently tolerated it) because the controller
+        // wrote resolveForUser()'s raw float directly instead of the
+        // already-rounded value syncForUser() produces for users.score.
         $user = User::factory()->create([
             'name' => 'Fractional Score User',
             'email' => 'fractional-score@example.com',
@@ -225,7 +225,7 @@ class DailyTrackerTest extends TestCase
             ->where('date', '2026-07-21')
             ->value('user_total_score');
 
-        $this->assertEquals(8, $storedScore);
+        $this->assertEquals(17, $storedScore);
     }
 
     public function test_score_averages_daily_tracker_completion_across_all_recorded_days(): void

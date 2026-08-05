@@ -143,6 +143,9 @@ class UserScoreGoalsTest extends TestCase
 
         $this->assertEquals(65.0, $breakdown['goalScore']);
         $this->assertEquals(75.0, $breakdown['coreTaskScore']);
-        $this->assertEquals(70.0, $breakdown['overallScore']);
+        // The leaderboard ranking score comes only from daily tracker
+        // activity now, so overallScore equals coreTaskScore -- goalScore
+        // is still computed and returned above for informational display.
+        $this->assertEquals(75.0, $breakdown['overallScore']);
     }
 }

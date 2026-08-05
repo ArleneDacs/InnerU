@@ -141,7 +141,9 @@ class UserScorePeriodTest extends TestCase
         // Legacy tracker goal score is spread across the full 5-day period:
         // 50 / 5 = 10.
         $this->assertEquals(10.0, $breakdown['goalScore']);
-        $this->assertEquals(15.0, $breakdown['overallScore']);
+        // The leaderboard ranking score comes only from daily tracker
+        // activity, so overallScore equals coreTaskScore.
+        $this->assertEquals(20.0, $breakdown['overallScore']);
     }
 
     public function test_the_divisor_is_the_full_period_length_not_the_recorded_day_count(): void
@@ -382,7 +384,10 @@ class UserScorePeriodTest extends TestCase
         // earns one day-credit across the 153-day period, averaged with
         // the incomplete in-period task: (0.65 + 0) / 2 = 0.33.
         $this->assertEqualsWithDelta(0.33, $breakdown['goalScore'], 0.01);
-        $this->assertEqualsWithDelta(0.33, $breakdown['overallScore'], 0.01);
+        // No DailyTracker rows exist at all for this period, so the
+        // leaderboard ranking score (daily-tracker-only) is 0 even though
+        // a goalScore is available for informational display.
+        $this->assertEquals(0.0, $breakdown['overallScore']);
     }
 
     public function test_a_period_starts_at_the_companys_local_midnight_even_when_utc_is_still_the_previous_day(): void
@@ -508,7 +513,10 @@ class UserScorePeriodTest extends TestCase
         //   Period Days        = End - Start + 1
         //   Daily Tracker Avg   = Total Daily Tracker Score / Period Days
         //   Goals Avg           = (Personal + Professional + Contribution) / 3
-        //   Final Score         = (Daily Tracker Avg + Goals Avg) / 2
+        //   Final Score (ranking) = Daily Tracker Avg
+        // Goals Avg is still computed and returned as goalScore for
+        // informational display, but it no longer factors into the
+        // leaderboard ranking score.
         Carbon::setTestNow('2030-01-01');
 
         $company = $this->makeCompanyWithPeriod('2026-01-01', '2026-01-10');
@@ -620,6 +628,6 @@ class UserScorePeriodTest extends TestCase
 
         $this->assertEquals(6.5, $breakdown['goalScore']);
         $this->assertEquals(15.0, $breakdown['coreTaskScore']);
-        $this->assertEqualsWithDelta(10.75, $breakdown['overallScore'], 0.01);
+        $this->assertEqualsWithDelta(15.0, $breakdown['overallScore'], 0.01);
     }
 }

@@ -207,6 +207,14 @@ class LeaderboardController extends Controller
             ->where('coach_id', (string) $user->id)
             ->orderByDesc('updated_at')
             ->get()
+            // A mentee can now have several coach_mentees rows with this
+            // coach (one per group), but this flat list is "my accepted
+            // mentees", not "my group memberships" -- the grouped view is
+            // groupLeaderboards above. Rows are already ordered by
+            // updated_at desc, so keeping the first occurrence per
+            // mentee_id keeps the mentee's most recently touched
+            // membership (and thus its teamName) as the one shown here.
+            ->unique(fn (CoachMentee $relation) => (string) $relation->mentee_id)
             ->map(function (CoachMentee $relation) use ($usersById, $companyScores): ?array {
                 $mentee = $usersById->get((string) $relation->mentee_id);
                 if ($mentee === null) {
