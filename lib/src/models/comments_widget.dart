@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/comments_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
@@ -8,11 +9,16 @@ import 'package:selfcare_projects/src/services/user_preferences.dart';
 class CommentWidget extends StatefulWidget {
   final String postId;
   final VoidCallback? onChanged;
+  final Future<List<CommunityComment>> Function()? fetchCommentsOverride;
+  final Future<CommunityComment> Function(String postId, String comment)?
+      addCommentOverride;
 
   const CommentWidget({
     super.key,
     required this.postId,
     this.onChanged,
+    this.fetchCommentsOverride,
+    this.addCommentOverride,
   });
 
   @override
@@ -22,10 +28,10 @@ class CommentWidget extends StatefulWidget {
 class _CommentWidgetState extends State<CommentWidget> {
   final TextEditingController _commentController = TextEditingController();
   final CommentsApiService _api = CommentsApiService.instance;
-  bool _isSending = false;
   String? currentUsername;
   Timer? _relativeTimeTicker;
   Future<List<CommunityComment>>? _commentsFuture;
+  List<CommunityComment>? _comments;
 
   @override
   void initState() {
@@ -46,7 +52,10 @@ class _CommentWidgetState extends State<CommentWidget> {
 
   void _reloadComments() {
     setState(() {
-      _commentsFuture = _api.fetchComments(widget.postId);
+      _comments = null;
+      _commentsFuture = widget.fetchCommentsOverride != null
+          ? widget.fetchCommentsOverride!()
+          : _api.fetchComments(widget.postId);
     });
   }
 
@@ -89,25 +98,52 @@ class _CommentWidgetState extends State<CommentWidget> {
   }
 
   Future<void> addComment(String comment) async {
-    if (comment.trim().isEmpty || _isSending) return;
+    final trimmed = comment.trim();
+    if (trimmed.isEmpty) return;
+
+    final session = AuthService.instance.currentSession;
+    final tempId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
+    final optimistic = CommunityComment(
+      id: tempId,
+      postId: widget.postId,
+      userId: session?.id.toString() ?? '',
+      username: session?.name ?? 'You',
+      comment: trimmed,
+      createdAt: DateTime.now().toIso8601String(),
+      updatedAt: null,
+    );
 
     setState(() {
-      _isSending = true;
+      _comments = [...(_comments ?? const <CommunityComment>[]), optimistic];
     });
+    _commentController.clear();
 
     try {
-      await _api.addComment(postId: widget.postId, comment: comment.trim());
-      _commentController.clear();
-      _reloadComments();
+      final saved = widget.addCommentOverride != null
+          ? await widget.addCommentOverride!(widget.postId, trimmed)
+          : await _api.addComment(postId: widget.postId, comment: trimmed);
+      if (!mounted) return;
+      setState(() {
+        _comments = [
+          for (final c in _comments!)
+            if (c.id == tempId) saved else c,
+        ];
+      });
       widget.onChanged?.call();
     } catch (e) {
       debugPrint('Failed to send comment: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSending = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _comments = [
+          for (final c in _comments!)
+            if (c.id != tempId) c,
+        ];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not post your comment. Please try again.'),
+        ),
+      );
     }
   }
 
@@ -214,15 +250,22 @@ class _CommentWidgetState extends State<CommentWidget> {
                   child: FutureBuilder<List<CommunityComment>>(
                     future: _commentsFuture,
                     builder: (context, snapshot) {
-                      final comments = snapshot.data ?? const <CommunityComment>[];
-                      if (snapshot.connectionState == ConnectionState.waiting &&
-                          comments.isEmpty) {
+                      if (snapshot.connectionState ==
+                              ConnectionState.waiting &&
+                          _comments == null) {
                         return Center(
                           child: CircularProgressIndicator(
                             color: companyTheme.iconColor,
                           ),
                         );
                       }
+
+                      if (snapshot.hasData && _comments == null) {
+                        _comments =
+                            List<CommunityComment>.from(snapshot.data!);
+                      }
+
+                      final comments = _comments ?? const <CommunityComment>[];
 
                       if (comments.isEmpty) {
                         return Center(
@@ -399,25 +442,16 @@ class _CommentWidgetState extends State<CommentWidget> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      _isSending
-                          ? SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: companyTheme.iconColor,
-                              ),
-                            )
-                          : IconButton(
-                              icon: Icon(
-                                Icons.send_rounded,
-                                color: companyTheme.iconColor,
-                              ),
-                              onPressed: () {
-                                addComment(_commentController.text);
-                                FocusScope.of(context).unfocus();
-                              },
-                            ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.send_rounded,
+                          color: companyTheme.iconColor,
+                        ),
+                        onPressed: () {
+                          addComment(_commentController.text);
+                          FocusScope.of(context).unfocus();
+                        },
+                      ),
                     ],
                   ),
                 ),
