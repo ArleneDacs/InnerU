@@ -5,6 +5,7 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/comments_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/user_preferences.dart';
+import 'package:selfcare_projects/src/widgets/linkified_text.dart';
 
 class CommentWidget extends StatefulWidget {
   final String postId;
@@ -357,7 +358,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                                             CrossAxisAlignment.start,
                                         children: [
                                           Expanded(
-                                            child: Text(
+                                            child: LinkifiedText(
                                               comment.comment,
                                               style: TextStyle(
                                                 fontSize: 16,

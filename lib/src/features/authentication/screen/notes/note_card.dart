@@ -5,6 +5,7 @@ import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/comments_api_service.dart';
 import 'package:selfcare_projects/src/services/community_api_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
+import 'package:selfcare_projects/src/widgets/linkified_text.dart';
 
 class NoteCard extends StatefulWidget {
   final Note note;
@@ -180,7 +181,7 @@ class NoteCardState extends State<NoteCard> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      LinkifiedText(
                         isExpanded
                             ? textContent
                             : textContent.substring(
