@@ -42,7 +42,7 @@ class CommentController extends Controller
 
         $validated = $request->validate([
             'comment' => ['required', 'string', 'max:5000'],
-            'parentId' => ['sometimes', 'nullable', 'integer', Rule::exists('note_comments', 'id')->where('community_post_id', $post->id)],
+            'parentId' => ['sometimes', 'nullable', 'integer', Rule::exists('note_comments', 'id')->where('community_post_id', $post->id)->whereNull('parent_id')],
         ]);
 
         $comment = NoteComment::create([

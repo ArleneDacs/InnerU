@@ -112,4 +112,30 @@ class CommentReplyTest extends TestCase
 
         $response->assertStatus(422);
     }
+
+    public function test_a_parentid_pointing_to_a_reply_instead_of_a_top_level_comment_is_rejected(): void
+    {
+        $owner = User::factory()->create();
+        $commenter = User::factory()->create();
+        $replier = User::factory()->create();
+        $secondReplier = User::factory()->create();
+        $post = $this->makePost($owner);
+
+        Sanctum::actingAs($commenter);
+        $parent = $this->postJson("/api/community/posts/{$post->id}/comments", ['comment' => 'top level'])->json();
+
+        Sanctum::actingAs($replier);
+        $reply = $this->postJson("/api/community/posts/{$post->id}/comments", [
+            'comment' => 'a reply',
+            'parentId' => $parent['comment']['id'],
+        ])->json();
+
+        Sanctum::actingAs($secondReplier);
+        $response = $this->postJson("/api/community/posts/{$post->id}/comments", [
+            'comment' => 'a reply to a reply',
+            'parentId' => $reply['comment']['id'],
+        ]);
+
+        $response->assertStatus(422);
+    }
 }
