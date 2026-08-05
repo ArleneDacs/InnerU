@@ -10,7 +10,7 @@ class CommunityComment {
     required this.comment,
     required this.createdAt,
     required this.updatedAt,
-    this.profilePic,
+    required this.profilePic,
   });
 
   final String id;

@@ -38,6 +38,7 @@ void main() {
         comment: 'Great post!',
         createdAt: '2026-08-04T00:00:00Z',
         updatedAt: null,
+        profilePic: null,
       ));
       await tester.pumpAndSettle();
 
