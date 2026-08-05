@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/notes/note_card.dart';
+import 'package:selfcare_projects/src/models/comments_widget.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/community_api_service.dart';
@@ -9,7 +11,18 @@ import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class CommunityScreen extends StatefulWidget {
-  const CommunityScreen({super.key});
+  const CommunityScreen({super.key, this.targetPostId, this.targetCommentId});
+
+  /// When set, the comment sheet for this post is opened automatically
+  /// once the feed finishes its initial load (used by deep links from
+  /// push notifications -- see [NotificationPushRouter]).
+  final String? targetPostId;
+
+  /// Optional comment to highlight inside the opened comment sheet. Not
+  /// wired up to [CommentWidget] yet -- that lands in a follow-up task --
+  /// but is threaded through [_openCommentsFor] now so that hookup is a
+  /// one-line change later.
+  final String? targetCommentId;
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -28,7 +41,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadPosts(showSpinner: true));
+    unawaited(_loadInitialPosts());
     // The feed used to hold a Future<List<Note>> that FutureBuilder awaited
     // directly, so every periodic refresh swapped it for a new, pending
     // Future -- which made FutureBuilder briefly render its "waiting"
@@ -51,6 +64,44 @@ class _CommunityScreenState extends State<CommunityScreen> {
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // Kicks off the initial load and, once it lands, opens the deep-linked
+  // post's comment sheet (if one was requested via widget.targetPostId).
+  Future<void> _loadInitialPosts() async {
+    await _loadPosts(showSpinner: true);
+    _openTargetIfNeeded();
+  }
+
+  void _openTargetIfNeeded() {
+    if (widget.targetPostId == null) return;
+    final target =
+        _posts.firstWhereOrNull((post) => post.id == widget.targetPostId);
+    if (target == null || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openCommentsFor(target, highlightCommentId: widget.targetCommentId);
+    });
+  }
+
+  // Mirrors NoteCardState.openCommentSection (see note_card.dart). That
+  // method is an instance method tightly coupled to NoteCard's own state
+  // (widget.note, widget.onChanged), so it isn't reasonably extractable
+  // into a shared free function -- duplicating the showModalBottomSheet
+  // call here is the pragmatic choice.
+  //
+  // highlightCommentId isn't wired into CommentWidget yet -- a follow-up
+  // task adds that constructor parameter -- but is accepted here so this
+  // call site is already in place for it.
+  void _openCommentsFor(Note post, {String? highlightCommentId}) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => CommentWidget(
+        postId: post.id,
+        onChanged: _refreshPosts,
+      ),
+    );
   }
 
   Future<void> _loadPosts({bool showSpinner = false}) async {

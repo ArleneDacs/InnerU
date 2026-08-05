@@ -56,9 +56,16 @@ class NotificationPushRouter {
         return;
       case 'community_comment':
       case 'community_heart':
+      case 'comment_reply':
+      case 'comment_reaction':
+        final postId = data is Map ? data['postId'] as String? : null;
+        final commentId = data is Map ? data['commentId'] as String? : null;
         navigator.push(
           MaterialPageRoute(
-            builder: (context) => const CommunityScreen(),
+            builder: (context) => CommunityScreen(
+              targetPostId: postId,
+              targetCommentId: commentId,
+            ),
           ),
         );
         return;

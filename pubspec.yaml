@@ -83,6 +83,7 @@ dependencies:
   watch_connectivity: ^0.2.8
   share_plus: ^13.2.1
   package_info_plus: ^10.2.1
+  collection: ^1.18.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
