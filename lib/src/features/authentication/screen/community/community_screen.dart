@@ -70,17 +70,41 @@ class _CommunityScreenState extends State<CommunityScreen> {
   // post's comment sheet (if one was requested via widget.targetPostId).
   Future<void> _loadInitialPosts() async {
     await _loadPosts(showSpinner: true);
-    _openTargetIfNeeded();
+    await _openTargetIfNeeded();
   }
 
-  void _openTargetIfNeeded() {
+  // Comment/heart/reply/reaction notifications aren't scoped to any one
+  // category, but the initial load above is scoped to selectedCategory
+  // (the default "Add Value" tab), so a deep link into e.g. a "Learning"
+  // post won't be found in _posts yet. There's no single-post "show"
+  // endpoint on the backend to fall back on (only index/store/update/
+  // destroy), so instead fall back to one unscoped fetchPosts() call --
+  // its sole purpose is locating this one post; it is never stored into
+  // _posts, so the visible, still category-scoped feed is untouched.
+  Future<void> _openTargetIfNeeded() async {
     if (widget.targetPostId == null) return;
-    final target =
+
+    var target =
         _posts.firstWhereOrNull((post) => post.id == widget.targetPostId);
+
+    if (target == null) {
+      try {
+        final allPosts = await CommunityApiService.instance.fetchPosts();
+        target = allPosts
+            .firstWhereOrNull((post) => post.id == widget.targetPostId);
+      } catch (error) {
+        // Best-effort: if this fallback lookup fails, don't open the
+        // sheet -- same outcome as if the post genuinely doesn't exist.
+        debugPrint('Could not resolve deep-linked community post: $error');
+        return;
+      }
+    }
+
     if (target == null || !mounted) return;
+    final resolvedTarget = target;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _openCommentsFor(target, highlightCommentId: widget.targetCommentId);
+      _openCommentsFor(resolvedTarget, highlightCommentId: widget.targetCommentId);
     });
   }
 
