@@ -778,31 +778,14 @@ class LeaderboardInfoSheet extends StatelessWidget {
           '4 ÷ 6 × 100 = 66.7% for that day',
     ),
     _LeaderboardInfoSection(
-      icon: Icons.flag_rounded,
-      title: 'Goals & To-Do completion',
-      body:
-          'Goals are scored separately from the Daily Tracker. An Everyday '
-          'Goal counts how many unique days you complete it out of the '
-          'goal\'s total days. A Long-Term Goal only adds to your Goals '
-          'score once it\'s fully completed on or before its due date -- '
-          'the progress bar on the goal card can show partial progress, '
-          'but that progress only counts toward your score at 100%. Your '
-          'Goals score is shown here for your own tracking, but it does '
-          'not affect your leaderboard rank.',
-      example: 'Completed 7 of 10 days on a 10-day Everyday Goal\n'
-          '7 ÷ 10 × 100 = 70% for that goal',
-    ),
-    _LeaderboardInfoSection(
       icon: Icons.leaderboard_rounded,
       title: 'Leaderboard ranking',
       body:
           'Your Overall Score -- the number that determines your rank -- '
           'comes entirely from how consistently you complete your Daily '
-          'Tracker. Goals and To-Do activity are tracked and shown '
-          'separately but don\'t factor into your rank. Everyone in your '
-          'company is ranked by this Overall Score, highest first. If your '
-          'company runs a set leaderboard period, only what happens inside '
-          'that date range counts.',
+          'Tracker. Everyone in your company is ranked by this Overall '
+          'Score, highest first. If your company runs a set leaderboard '
+          'period, only what happens inside that date range counts.',
       example: 'Completed 4 of 6 Daily Tracker activities\n'
           '4 ÷ 6 × 100 = 66.7% Overall Score',
     ),
@@ -1057,8 +1040,7 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Leaderboard rank is based on the Daily tracker score only. '
-          'Goal score is shown separately and does not affect rank.',
+          'Leaderboard rank is based on the Daily tracker score only.',
           style: TextStyle(
             fontSize: 14,
             color: theme.mutedInkColor,
@@ -1075,14 +1057,6 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        _buildScoreBreakdownRow(
-          'Goal score',
-          goalScore,
-          'Goal completion',
-          goalScore,
-          theme,
-        ),
-        Divider(color: theme.mutedInkColor.withValues(alpha: 0.18)),
         _buildScoreBreakdownRow(
           'Daily tracker',
           dailyTrackerScore,

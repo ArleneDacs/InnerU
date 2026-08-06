@@ -45,6 +45,24 @@ class MentionTextFieldState extends State<MentionTextField> {
   Timer? _debounce;
   int? _mentionStartIndex;
 
+  // The suggestion dropdown is rendered via OverlayPortal/CompositedTransform
+  // rather than inline in this widget's own Column. An inline dropdown
+  // participates in the surrounding layout's height budget -- inside a
+  // fixed-height composer row (e.g. this widget wrapped in Expanded inside a
+  // Row, itself near the bottom of a modal sheet with the keyboard open),
+  // that reliably overflows ("BOTTOM OVERFLOWED BY n PIXELS") the moment
+  // suggestions appear, since there's no room left to grow into. An overlay
+  // paints into the app's Overlay (above everything, unconstrained by local
+  // box constraints), so it can never cause a layout overflow here.
+  final LayerLink _layerLink = LayerLink();
+  final OverlayPortalController _overlayController = OverlayPortalController();
+  // Captured from LayoutBuilder's constraints (a layout INPUT, always
+  // available during build) rather than a GlobalKey's renderObject.size (a
+  // layout OUTPUT, not yet computed while this same build is still running)
+  // -- reading .size here throws "size has not yet been determined because
+  // the framework is still in the layout phase".
+  double? _fieldWidth;
+
   List<MentionCandidate> get selectedMentions =>
       List.unmodifiable(_selectedMentions);
 
@@ -66,6 +84,19 @@ class MentionTextFieldState extends State<MentionTextField> {
         MentionApiService.instance.search(query);
   }
 
+  void _hideSuggestions() {
+    _debounce?.cancel();
+    if (_overlayController.isShowing) {
+      _overlayController.hide();
+    }
+    if (_suggestions.isNotEmpty || _mentionStartIndex != null) {
+      setState(() {
+        _mentionStartIndex = null;
+        _suggestions = [];
+      });
+    }
+  }
+
   void _onChanged(String text) {
     widget.onChanged?.call(text);
 
@@ -78,21 +109,13 @@ class MentionTextFieldState extends State<MentionTextField> {
         (atIndex > 0 &&
             !RegExp(r'\s').hasMatch(upToCursor[atIndex - 1]) &&
             atIndex != 0)) {
-      _debounce?.cancel();
-      setState(() {
-        _mentionStartIndex = null;
-        _suggestions = [];
-      });
+      _hideSuggestions();
       return;
     }
 
     final query = upToCursor.substring(atIndex + 1);
     if (query.contains(' ') || query.isEmpty) {
-      _debounce?.cancel();
-      setState(() {
-        _mentionStartIndex = null;
-        _suggestions = [];
-      });
+      _hideSuggestions();
       return;
     }
 
@@ -102,6 +125,11 @@ class MentionTextFieldState extends State<MentionTextField> {
       final results = await _search(query);
       if (!mounted) return;
       setState(() => _suggestions = results);
+      if (results.isEmpty) {
+        if (_overlayController.isShowing) _overlayController.hide();
+      } else if (!_overlayController.isShowing) {
+        _overlayController.show();
+      }
     });
   }
 
@@ -119,6 +147,7 @@ class MentionTextFieldState extends State<MentionTextField> {
           offset: before.length + candidate.name.length + 2),
     );
     _debounce?.cancel();
+    if (_overlayController.isShowing) _overlayController.hide();
     setState(() {
       _selectedMentions.add(candidate);
       _suggestions = [];
@@ -132,24 +161,20 @@ class MentionTextFieldState extends State<MentionTextField> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: widget.controller,
-          decoration: widget.decoration,
-          style: widget.style,
-          cursorColor: widget.cursorColor,
-          minLines: widget.minLines,
-          maxLines: widget.maxLines,
-          keyboardType: widget.keyboardType,
-          textInputAction: widget.textInputAction,
-          onChanged: _onChanged,
-        ),
-        if (_suggestions.isNotEmpty)
-          Container(
+  Widget _buildSuggestionsOverlay(BuildContext context) {
+    final fieldWidth = _fieldWidth;
+    return CompositedTransformFollower(
+      link: _layerLink,
+      showWhenUnlinked: false,
+      targetAnchor: Alignment.bottomLeft,
+      followerAnchor: Alignment.topLeft,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: fieldWidth,
             constraints: const BoxConstraints(maxHeight: 180),
             decoration: BoxDecoration(
               border: Border.all(color: Theme.of(context).dividerColor),
@@ -177,7 +202,35 @@ class MentionTextFieldState extends State<MentionTextField> {
               },
             ),
           ),
-      ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _fieldWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : null;
+        return CompositedTransformTarget(
+          link: _layerLink,
+          child: OverlayPortal(
+            controller: _overlayController,
+            overlayChildBuilder: _buildSuggestionsOverlay,
+            child: TextField(
+              controller: widget.controller,
+              decoration: widget.decoration,
+              style: widget.style,
+              cursorColor: widget.cursorColor,
+              minLines: widget.minLines,
+              maxLines: widget.maxLines,
+              keyboardType: widget.keyboardType,
+              textInputAction: widget.textInputAction,
+              onChanged: _onChanged,
+            ),
+          ),
+        );
+      },
     );
   }
 }

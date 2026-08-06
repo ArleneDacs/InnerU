@@ -23,21 +23,14 @@ void main() {
 
     expect(find.text('How scoring works'), findsOneWidget);
     expect(find.text('Daily Tracker score'), findsOneWidget);
-    expect(find.text('Goals & To-Do completion'), findsOneWidget);
+    expect(find.text('Goals & To-Do completion'), findsNothing);
     expect(find.text('Leaderboard ranking'), findsOneWidget);
     expect(find.text('Medals & streaks'), findsOneWidget);
 
     // Each section carries a worked numeric example, not just prose.
-    expect(find.text('EXAMPLE'), findsNWidgets(4));
+    expect(find.text('EXAMPLE'), findsNWidgets(3));
     expect(
       find.text('Completed 4 of 6 activities\n4 ÷ 6 × 100 = 66.7% for that day'),
-      findsOneWidget,
-    );
-    expect(
-      find.text(
-        'Completed 7 of 10 days on a 10-day Everyday Goal\n'
-        '7 ÷ 10 × 100 = 70% for that goal',
-      ),
       findsOneWidget,
     );
     expect(
