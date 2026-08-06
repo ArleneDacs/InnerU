@@ -56,12 +56,34 @@ class MentionTextFieldState extends State<MentionTextField> {
   // box constraints), so it can never cause a layout overflow here.
   final LayerLink _layerLink = LayerLink();
   final OverlayPortalController _overlayController = OverlayPortalController();
+  final GlobalKey _fieldKey = GlobalKey();
   // Captured from LayoutBuilder's constraints (a layout INPUT, always
   // available during build) rather than a GlobalKey's renderObject.size (a
   // layout OUTPUT, not yet computed while this same build is still running)
   // -- reading .size here throws "size has not yet been determined because
   // the framework is still in the layout phase".
   double? _fieldWidth;
+
+  // Whether the dropdown should grow upward from the field instead of
+  // downward. Recomputed (synchronously, from an event handler -- never
+  // from build/layout, where the field's renderObject.size/position aren't
+  // safely readable yet) right before the dropdown opens, since by then the
+  // field has already been laid out on a prior frame.
+  bool _showAbove = false;
+
+  static const double _dropdownMaxHeight = 180;
+
+  void _updatePreferredDirection() {
+    final renderBox = _fieldKey.currentContext?.findRenderObject();
+    if (renderBox is! RenderBox || !renderBox.hasSize) return;
+    final fieldTop = renderBox.localToGlobal(Offset.zero).dy;
+    final fieldBottom = fieldTop + renderBox.size.height;
+    final mediaQuery = MediaQuery.of(context);
+    final visibleBottom = mediaQuery.size.height - mediaQuery.viewInsets.bottom;
+    final spaceBelow = visibleBottom - fieldBottom;
+    final spaceAbove = fieldTop - mediaQuery.padding.top;
+    _showAbove = spaceBelow < _dropdownMaxHeight && spaceAbove > spaceBelow;
+  }
 
   List<MentionCandidate> get selectedMentions =>
       List.unmodifiable(_selectedMentions);
@@ -128,6 +150,7 @@ class MentionTextFieldState extends State<MentionTextField> {
       if (results.isEmpty) {
         if (_overlayController.isShowing) _overlayController.hide();
       } else if (!_overlayController.isShowing) {
+        _updatePreferredDirection();
         _overlayController.show();
       }
     });
@@ -163,19 +186,27 @@ class MentionTextFieldState extends State<MentionTextField> {
 
   Widget _buildSuggestionsOverlay(BuildContext context) {
     final fieldWidth = _fieldWidth;
+    // The field is often docked near the bottom of the screen, right above
+    // the keyboard (comment/reply composers) -- anchoring below would put
+    // the dropdown off-screen there. _updatePreferredDirection (called just
+    // before this overlay opens) picks whichever side actually has room.
+    final targetAnchor = _showAbove ? Alignment.topLeft : Alignment.bottomLeft;
+    final followerAnchor = _showAbove ? Alignment.bottomLeft : Alignment.topLeft;
+    final offset = Offset(0, _showAbove ? -4 : 4);
     return CompositedTransformFollower(
       link: _layerLink,
       showWhenUnlinked: false,
-      targetAnchor: Alignment.bottomLeft,
-      followerAnchor: Alignment.topLeft,
+      targetAnchor: targetAnchor,
+      followerAnchor: followerAnchor,
+      offset: offset,
       child: Align(
-        alignment: Alignment.topLeft,
+        alignment: _showAbove ? Alignment.bottomLeft : Alignment.topLeft,
         child: Material(
           elevation: 4,
           borderRadius: BorderRadius.circular(8),
           child: Container(
             width: fieldWidth,
-            constraints: const BoxConstraints(maxHeight: 180),
+            constraints: const BoxConstraints(maxHeight: _dropdownMaxHeight),
             decoration: BoxDecoration(
               border: Border.all(color: Theme.of(context).dividerColor),
               borderRadius: BorderRadius.circular(8),
@@ -218,6 +249,7 @@ class MentionTextFieldState extends State<MentionTextField> {
             controller: _overlayController,
             overlayChildBuilder: _buildSuggestionsOverlay,
             child: TextField(
+              key: _fieldKey,
               controller: widget.controller,
               decoration: widget.decoration,
               style: widget.style,
