@@ -782,9 +782,10 @@ class LeaderboardInfoSheet extends StatelessWidget {
       title: 'Leaderboard ranking',
       body:
           'Your rank is simply the average of your Daily Tracker score. '
-          'Everyone in your company is ranked by that average, highest '
-          'first. If your company runs a set leaderboard period, the '
-          'average is taken across that whole period.',
+          'We add up your score for every day, then divide by 152 -- the '
+          'number of days in your company\'s tracking period -- to get '
+          'that average. Everyone in your company is ranked by it, '
+          'highest first.',
       example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
           '(70 + 90 + 50) ÷ 3 = 70% average',
     ),
