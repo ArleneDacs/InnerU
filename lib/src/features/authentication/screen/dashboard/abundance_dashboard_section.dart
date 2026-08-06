@@ -110,7 +110,7 @@ class _AbundanceDashboardSectionState extends State<AbundanceDashboardSection> {
     final councilRank = await _loadCouncilRank(
       userData: userData,
       currentUserId: userId,
-      currentScore: score.goalScore,
+      currentScore: score.coreTaskScore,
     );
 
     return _AbundanceDashboardData(
@@ -690,7 +690,12 @@ class _AbundanceDashboardData {
   final String councilRankLabel;
   final List<_AbundanceAchievement> achievements;
 
-  double get goalTotalScore => score.goalScore;
+  // Named goalTotalScore for historical reasons (this dashboard used to
+  // headline a pure goal-completion score); the ring now shows
+  // coreTaskScore -- daily tracker completion only, matching the
+  // leaderboard's daily-tracker-only ranking. Goal completion is still
+  // tracked and shown separately via categoryStats/goalsCompleted below.
+  double get goalTotalScore => score.coreTaskScore;
 }
 
 class _AbundanceCoachProfile {
@@ -1013,7 +1018,7 @@ class _AbundanceScorePanel extends StatelessWidget {
                   _AbundanceScoreRing(score: clamped, accent: scoreColor),
                   const SizedBox(height: 10),
                   Text(
-                    'Goal score',
+                    'Daily tracker score',
                     style: TextStyle(
                       color: theme.mutedInkColor,
                       fontWeight: FontWeight.w700,

@@ -339,7 +339,12 @@ class _AbundanceMenteeDashboardScreenState
           ),
           asOf: DateTime.now(),
         );
-        final goalTotalScore = score.goalScore;
+        // Named goalTotalScore for historical reasons (this dashboard used
+        // to headline a pure goal-completion score); it now reflects
+        // coreTaskScore -- daily tracker completion only, matching the
+        // leaderboard's daily-tracker-only ranking. Goal completion is
+        // still tracked and shown separately via categoryStats below.
+        final goalTotalScore = score.coreTaskScore;
         final rank = rankForPercent(goalTotalScore);
         final categoryStats = _buildCategoryStats(goals, score);
         final upcomingDeadlines = goals
@@ -1096,7 +1101,7 @@ class _ScoreRing extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Goal score',
+                  'Daily tracker score',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: Colors.white.withValues(alpha: 0.9),
                         fontWeight: FontWeight.w700,
