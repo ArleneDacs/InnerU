@@ -781,13 +781,12 @@ class LeaderboardInfoSheet extends StatelessWidget {
       icon: Icons.leaderboard_rounded,
       title: 'Leaderboard ranking',
       body:
-          'Your Overall Score -- the number that determines your rank -- '
-          'comes entirely from how consistently you complete your Daily '
-          'Tracker. Everyone in your company is ranked by this Overall '
-          'Score, highest first. If your company runs a set leaderboard '
-          'period, only what happens inside that date range counts.',
-      example: 'Completed 4 of 6 Daily Tracker activities\n'
-          '4 ÷ 6 × 100 = 66.7% Overall Score',
+          'Your rank is simply the average of your Daily Tracker score. '
+          'Everyone in your company is ranked by that average, highest '
+          'first. If your company runs a set leaderboard period, the '
+          'average is taken across that whole period.',
+      example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
+          '(70 + 90 + 50) ÷ 3 = 70% average',
     ),
     _LeaderboardInfoSection(
       icon: Icons.workspace_premium_rounded,
@@ -2701,44 +2700,6 @@ class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
     );
   }
 
-  Widget _buildA12MetricChip({
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: theme.isDark ? 0.16 : 0.1),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: theme.mutedInkColor,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(
-                color: color,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildItem(A12LeaderboardEntry entry, int position) {
     final isCurrentUser = entry.userId == currentUserId;
     final rankColor =
@@ -2957,9 +2918,6 @@ class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
     // leaderboard still shows the available users instead of a blank section.
     final remainingEntries =
         sorted.length >= 3 ? sorted.skip(3).toList() : sorted;
-    final scoreColor = showRankLabels
-        ? _rankColor(currentUserEntry?.rank ?? rankForPercent(0))
-        : theme.primaryColor;
 
     return ListView(
       controller: _scrollController,
@@ -2991,26 +2949,6 @@ class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
                 behavior: HitTestBehavior.opaque,
                 onTap: currentUserEntry == null ? null : _scrollToCurrentUser,
                 child: _buildHeaderCard(currentUserEntry),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Row(
-                children: [
-                  _buildA12MetricChip(
-                    label: 'Goal score',
-                    value:
-                        '${_formatLeaderboardScore(currentUserEntry?.score.goalScore ?? 0)}%',
-                    color: scoreColor,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildA12MetricChip(
-                    label: 'Daily tracker',
-                    value:
-                        '${_formatLeaderboardScore(currentUserEntry?.score.coreTaskScore ?? 0)}%',
-                    color: theme.primaryColor,
-                  ),
-                ],
               ),
             ),
             Padding(
