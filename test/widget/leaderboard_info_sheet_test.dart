@@ -36,7 +36,7 @@ void main() {
     expect(
       find.text(
         'Daily Tracker scores of 70%, 90%, and 50%\n'
-        '(70 + 90 + 50) ÷ 152 = 1.4% average',
+        '(70 + 90 + 50) ÷ period days = leaderboard average',
       ),
       findsOneWidget,
     );
@@ -51,6 +51,33 @@ void main() {
     await tester.scrollUntilVisible(find.text('Got it'), 200);
     await tester.tap(find.text('Got it'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('LeaderboardInfoSheet uses inclusive leaderboard period days', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: LeaderboardInfoSheet(
+              theme: CompanyThemeData.standard,
+              periodStart: DateTime(2026, 8, 1),
+              periodEnd: DateTime(2026, 12, 31),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.text(
+        'Daily Tracker scores of 70%, 90%, and 50%\n'
+        '(70 + 90 + 50) ÷ 153 = 1.4% average',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tapping the leaderboard help icon opens the info sheet', (
