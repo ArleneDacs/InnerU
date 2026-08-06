@@ -319,6 +319,78 @@ class UserScoreService
         return $scores;
     }
 
+    /**
+     * @param  Collection<int, User>  $users
+     * @return array<string, string>
+     */
+    public function firstCompletedDailyTrackerAtForUsers(Collection $users, ?Company $knownCompany = null): array
+    {
+        $users = $users->values();
+        if ($users->isEmpty()) {
+            return [];
+        }
+
+        $userIds = $users
+            ->pluck('id')
+            ->map(static fn ($id) => (string) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($userIds === []) {
+            return [];
+        }
+
+        $today = Carbon::now()->startOfDay();
+
+        if ($this->hasConfiguredPeriod($knownCompany)) {
+            $start = $knownCompany->leaderboard_period_start->copy()->startOfDay();
+            if ($today->lt($start)) {
+                return [];
+            }
+
+            $end = $knownCompany->leaderboard_period_end->copy()->startOfDay();
+            if ($today->gt($end)) {
+                return [];
+            }
+        }
+
+        $query = DailyTracker::query()
+            ->whereIn('user_id', $userIds)
+            ->whereDate('date', $today->toDateString())
+            ->orderBy('updated_at')
+            ->orderBy('created_at');
+
+        $trackersByUser = $query->get()->groupBy(fn (DailyTracker $tracker) => (string) $tracker->user_id);
+        $usersById = $users->keyBy(fn (User $user) => (string) $user->id);
+        $firstCompletedAt = [];
+
+        foreach ($trackersByUser as $userId => $trackers) {
+            $user = $usersById->get((string) $userId);
+            if ($user === null) {
+                continue;
+            }
+
+            foreach ($trackers as $tracker) {
+                $taskIds = $this->dailyTrackerIdsForTracker($user, $tracker);
+                if ($taskIds === []) {
+                    continue;
+                }
+
+                $isComplete = collect($taskIds)
+                    ->every(fn (string $taskId): bool => $this->dailyTrackerTaskCompleted($tracker, $taskId));
+                if (! $isComplete) {
+                    continue;
+                }
+
+                $firstCompletedAt[(string) $userId] = optional($tracker->updated_at ?? $tracker->created_at)?->toIso8601String();
+                break;
+            }
+        }
+
+        return array_filter($firstCompletedAt);
+    }
+
     public function syncForUser(User $user, ?float $score = null): int
     {
         $resolvedScore = $this->normalizeScore($score ?? $this->resolveForUser($user));

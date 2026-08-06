@@ -43,8 +43,9 @@ class LeaderboardController extends Controller
         $companyUsers = $this->companyUsersForScope($company, $user);
 
         $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers, $company);
+        $companyCompletionTimes = $this->userScoreService->firstCompletedDailyTrackerAtForUsers($companyUsers, $company);
         $companyLeaderboard = $companyUsers
-            ->map(function (User $candidate) use ($companyScores): array {
+            ->map(function (User $candidate) use ($companyScores, $companyCompletionTimes): array {
                 $breakdown = $this->leaderboardBreakdownForUser($candidate, $companyScores);
 
                 return [
@@ -56,15 +57,14 @@ class LeaderboardController extends Controller
                     'overallScore' => $breakdown['overallScore'],
                     'profilePic' => $candidate->profile_pic,
                     'teamName' => $candidate->company_name,
+                    'firstCompletedTrackerAt' => $companyCompletionTimes[(string) $candidate->id] ?? null,
                 ];
             })
-            ->sort(function (array $left, array $right): int {
-                if ($left['score'] !== $right['score']) {
-                    return $right['score'] <=> $left['score'];
-                }
-
-                return strcmp($left['name'], $right['name']);
-            })
+            ->sort(fn (array $left, array $right): int => $this->compareLeaderboardEntries(
+                $left,
+                $right,
+                $companyCompletionTimes,
+            ))
             ->values()
             ->map(function (array $entry, int $index): array {
                 $entry['rank'] = $index + 1;
@@ -141,6 +141,10 @@ class LeaderboardController extends Controller
                     ->whereIn('id', array_unique(array_merge($coachIds, $memberIds)))
                     ->get()
                     ->keyBy(fn (User $candidate) => (string) $candidate->id);
+                $groupCompletionTimes = $this->userScoreService->firstCompletedDailyTrackerAtForUsers(
+                    $groupUsersById->values(),
+                    $company,
+                );
 
                 $coachNames = collect($coachIds)
                     ->map(fn (string $coachId) => $groupUsersById->get($coachId)?->name)
@@ -150,7 +154,7 @@ class LeaderboardController extends Controller
                 $coachName = $coachNames === [] ? 'Coach' : implode(', ', $coachNames);
 
                 $entries = collect($memberIds)
-                    ->map(function (string $memberId) use ($groupUsersById, $group, $companyScores): ?array {
+                    ->map(function (string $memberId) use ($groupUsersById, $group, $companyScores, $groupCompletionTimes): ?array {
                         $member = $groupUsersById->get($memberId);
                         if ($member === null) {
                             return null;
@@ -167,16 +171,15 @@ class LeaderboardController extends Controller
                             'overallScore' => $breakdown['overallScore'],
                             'profilePic' => $member->profile_pic,
                             'teamName' => $group->name,
+                            'firstCompletedTrackerAt' => $groupCompletionTimes[(string) $member->id] ?? null,
                         ];
                     })
                     ->filter()
-                    ->sort(function (array $left, array $right): int {
-                        if ($left['score'] !== $right['score']) {
-                            return $right['score'] <=> $left['score'];
-                        }
-
-                        return strcmp($left['name'], $right['name']);
-                    })
+                    ->sort(fn (array $left, array $right): int => $this->compareLeaderboardEntries(
+                        $left,
+                        $right,
+                        $groupCompletionTimes,
+                    ))
                     ->values()
                     ->map(function (array $entry, int $index): array {
                         $entry['rank'] = $index + 1;
@@ -215,7 +218,7 @@ class LeaderboardController extends Controller
             // mentee_id keeps the mentee's most recently touched
             // membership (and thus its teamName) as the one shown here.
             ->unique(fn (CoachMentee $relation) => (string) $relation->mentee_id)
-            ->map(function (CoachMentee $relation) use ($usersById, $companyScores): ?array {
+            ->map(function (CoachMentee $relation) use ($usersById, $companyScores, $companyCompletionTimes): ?array {
                 $mentee = $usersById->get((string) $relation->mentee_id);
                 if ($mentee === null) {
                     return null;
@@ -233,16 +236,15 @@ class LeaderboardController extends Controller
                     'rank' => 0,
                     'profilePic' => $mentee->profile_pic,
                     'teamName' => $relation->group_name ?: $relation->team_name,
+                    'firstCompletedTrackerAt' => $companyCompletionTimes[(string) $mentee->id] ?? null,
                 ];
             })
             ->filter()
-            ->sort(function (array $left, array $right): int {
-                if ($left['score'] !== $right['score']) {
-                    return $right['score'] <=> $left['score'];
-                }
-
-                return strcmp($left['name'], $right['name']);
-            })
+            ->sort(fn (array $left, array $right): int => $this->compareLeaderboardEntries(
+                $left,
+                $right,
+                $companyCompletionTimes,
+            ))
             ->values()
             ->map(function (array $entry, int $index): array {
                 $entry['rank'] = $index + 1;
@@ -386,6 +388,37 @@ class LeaderboardController extends Controller
                 'fallback' => true,
             ],
         ]);
+    }
+
+    /**
+     * @param  array{userId:string,name:string,score:float|int}  $left
+     * @param  array{userId:string,name:string,score:float|int}  $right
+     * @param  array<string, string>  $completedTrackerAtByUserId
+     */
+    private function compareLeaderboardEntries(
+        array $left,
+        array $right,
+        array $completedTrackerAtByUserId = []
+    ): int {
+        if ($left['score'] !== $right['score']) {
+            return $right['score'] <=> $left['score'];
+        }
+
+        $leftCompletedAt = $completedTrackerAtByUserId[(string) $left['userId']] ?? null;
+        $rightCompletedAt = $completedTrackerAtByUserId[(string) $right['userId']] ?? null;
+
+        if ($leftCompletedAt !== $rightCompletedAt) {
+            if ($leftCompletedAt === null) {
+                return 1;
+            }
+            if ($rightCompletedAt === null) {
+                return -1;
+            }
+
+            return strcmp($leftCompletedAt, $rightCompletedAt);
+        }
+
+        return strcmp($left['name'], $right['name']);
     }
 
     /**

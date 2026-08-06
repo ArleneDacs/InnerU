@@ -799,6 +799,106 @@ class LeaderboardCompanyScopeTest extends TestCase
         }
     }
 
+    public function test_score_ties_are_ranked_by_todays_first_completed_daily_tracker_time(): void
+    {
+        Carbon::setTestNow('2026-08-06 12:00:00');
+
+        $company = $this->makeCompany('Tie Break Company', 'TIE001');
+        $company->update([
+            'leaderboard_period_start' => '2026-08-01',
+            'leaderboard_period_end' => '2026-12-31',
+        ]);
+
+        $laterAlphabeticallyFirst = User::factory()->create([
+            'name' => 'A Later',
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+        $earlierAlphabeticallyLast = User::factory()->create([
+            'name' => 'Z Earlier',
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $oldPeriodTracker = DailyTracker::create([
+            'user_id' => (string) $laterAlphabeticallyFirst->id,
+            'username' => $laterAlphabeticallyFirst->name,
+            'date' => '2026-08-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+        $oldPeriodTracker->forceFill([
+            'created_at' => '2026-08-01 08:00:00',
+            'updated_at' => '2026-08-01 08:00:00',
+        ])->save();
+
+        $oldPeriodTrackerForEarlierUser = DailyTracker::create([
+            'user_id' => (string) $earlierAlphabeticallyLast->id,
+            'username' => $earlierAlphabeticallyLast->name,
+            'date' => '2026-08-01',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+        $oldPeriodTrackerForEarlierUser->forceFill([
+            'created_at' => '2026-08-01 11:00:00',
+            'updated_at' => '2026-08-01 11:00:00',
+        ])->save();
+
+        $laterTracker = DailyTracker::create([
+            'user_id' => (string) $laterAlphabeticallyFirst->id,
+            'username' => $laterAlphabeticallyFirst->name,
+            'date' => '2026-08-06',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+        $laterTracker->forceFill([
+            'created_at' => '2026-08-06 10:00:00',
+            'updated_at' => '2026-08-06 10:00:00',
+        ])->save();
+
+        $earlierTracker = DailyTracker::create([
+            'user_id' => (string) $earlierAlphabeticallyLast->id,
+            'username' => $earlierAlphabeticallyLast->name,
+            'date' => '2026-08-06',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+        $earlierTracker->forceFill([
+            'created_at' => '2026-08-06 09:00:00',
+            'updated_at' => '2026-08-06 09:00:00',
+        ])->save();
+
+        Sanctum::actingAs($laterAlphabeticallyFirst);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertSame(
+            ['Z Earlier', 'A Later'],
+            collect($response->json('companyLeaderboard'))->take(2)->pluck('name')->all(),
+        );
+        $this->assertNotNull($response->json('companyLeaderboard.0.firstCompletedTrackerAt'));
+        $this->assertNotNull($response->json('companyLeaderboard.1.firstCompletedTrackerAt'));
+    }
+
     public function test_a_users_score_still_respects_the_period_even_when_their_active_company_id_has_drifted_elsewhere(): void
     {
         // Regression test: LeaderboardController's own company-membership

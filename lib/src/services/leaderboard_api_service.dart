@@ -12,6 +12,7 @@ class LeaderboardApiCompanyEntry {
     required this.rank,
     this.profilePic,
     this.teamName,
+    this.firstCompletedTrackerAt,
   });
 
   final String userId;
@@ -23,6 +24,7 @@ class LeaderboardApiCompanyEntry {
   final int rank;
   final String? profilePic;
   final String? teamName;
+  final String? firstCompletedTrackerAt;
 
   factory LeaderboardApiCompanyEntry.fromJson(Map<String, dynamic> json) {
     final score = _parseApiNumber(json['score']);
@@ -45,6 +47,7 @@ class LeaderboardApiCompanyEntry {
           : int.tryParse(json['rank']?.toString() ?? '') ?? 0,
       profilePic: json['profilePic']?.toString(),
       teamName: json['teamName']?.toString(),
+      firstCompletedTrackerAt: json['firstCompletedTrackerAt']?.toString(),
     );
   }
 }
@@ -60,6 +63,7 @@ class LeaderboardApiGroupMember {
     required this.rank,
     this.profilePic,
     this.teamName,
+    this.firstCompletedTrackerAt,
   });
 
   final String userId;
@@ -71,6 +75,7 @@ class LeaderboardApiGroupMember {
   final int rank;
   final String? profilePic;
   final String? teamName;
+  final String? firstCompletedTrackerAt;
 
   factory LeaderboardApiGroupMember.fromJson(Map<String, dynamic> json) {
     final score = _parseApiNumber(json['score']);
@@ -93,6 +98,7 @@ class LeaderboardApiGroupMember {
           : int.tryParse(json['rank']?.toString() ?? '') ?? 0,
       profilePic: json['profilePic']?.toString(),
       teamName: json['teamName']?.toString(),
+      firstCompletedTrackerAt: json['firstCompletedTrackerAt']?.toString(),
     );
   }
 }
@@ -212,6 +218,7 @@ class LeaderboardApiService {
     final response = await _api.getJson(
       '/api/leaderboard',
       token: _token,
+      timeout: const Duration(seconds: 60),
     );
     return LeaderboardApiSnapshot.fromJson(response);
   }

@@ -56,6 +56,20 @@ String _formatLeaderboardDate(DateTime date) {
   return DateFormat('MMM d, yyyy').format(date.toLocal());
 }
 
+int _compareCompletedTrackerAt(String? left, String? right) {
+  if (left == right) return 0;
+  if (left == null || left.isEmpty) return 1;
+  if (right == null || right.isEmpty) return -1;
+
+  final leftTime = DateTime.tryParse(left);
+  final rightTime = DateTime.tryParse(right);
+  if (leftTime != null && rightTime != null) {
+    return leftTime.compareTo(rightTime);
+  }
+
+  return left.compareTo(right);
+}
+
 bool _isBeforeDate(DateTime left, DateTime right) {
   final normalizedLeft = DateTime(left.year, left.month, left.day);
   final normalizedRight = DateTime(right.year, right.month, right.day);
@@ -73,6 +87,7 @@ class LeaderboardEntry {
     this.coreTaskScore = 0,
     this.profilePic,
     this.teamName,
+    this.firstCompletedTrackerAt,
   });
 
   final String userId;
@@ -84,6 +99,7 @@ class LeaderboardEntry {
   final num coreTaskScore;
   final String? profilePic;
   final String? teamName;
+  final String? firstCompletedTrackerAt;
 
   LeaderboardEntry copyWith({
     String? userId,
@@ -95,6 +111,7 @@ class LeaderboardEntry {
     num? coreTaskScore,
     String? profilePic,
     String? teamName,
+    String? firstCompletedTrackerAt,
   }) {
     return LeaderboardEntry(
       userId: userId ?? this.userId,
@@ -106,6 +123,8 @@ class LeaderboardEntry {
       coreTaskScore: coreTaskScore ?? this.coreTaskScore,
       profilePic: profilePic ?? this.profilePic,
       teamName: teamName ?? this.teamName,
+      firstCompletedTrackerAt:
+          firstCompletedTrackerAt ?? this.firstCompletedTrackerAt,
     );
   }
 }
@@ -116,36 +135,45 @@ class A12LeaderboardEntry {
     required this.name,
     required this.score,
     required this.rank,
+    required this.leaderboardRank,
     required this.activity,
     this.profilePic,
     this.teamName,
+    this.firstCompletedTrackerAt,
   });
 
   final String userId;
   final String name;
   final UserScore score;
   final GoalRank rank;
+  final int leaderboardRank;
   final UserActivity activity;
   final String? profilePic;
   final String? teamName;
+  final String? firstCompletedTrackerAt;
 
   A12LeaderboardEntry copyWith({
     String? userId,
     String? name,
     UserScore? score,
     GoalRank? rank,
+    int? leaderboardRank,
     UserActivity? activity,
     String? profilePic,
     String? teamName,
+    String? firstCompletedTrackerAt,
   }) {
     return A12LeaderboardEntry(
       userId: userId ?? this.userId,
       name: name ?? this.name,
       score: score ?? this.score,
       rank: rank ?? this.rank,
+      leaderboardRank: leaderboardRank ?? this.leaderboardRank,
       activity: activity ?? this.activity,
       profilePic: profilePic ?? this.profilePic,
       teamName: teamName ?? this.teamName,
+      firstCompletedTrackerAt:
+          firstCompletedTrackerAt ?? this.firstCompletedTrackerAt,
     );
   }
 }
@@ -262,9 +290,11 @@ class _LeaderboardState extends State<Leaderboard>
         checkInRate: 0,
       ),
       rank: rankForPercent(score),
+      leaderboardRank: entry.rank,
       activity: const UserActivity(),
       profilePic: entry.profilePic,
       teamName: entry.teamName,
+      firstCompletedTrackerAt: entry.firstCompletedTrackerAt,
     );
   }
 
@@ -307,12 +337,23 @@ class _LeaderboardState extends State<Leaderboard>
               coreTaskScore: entry.coreTaskScore,
               profilePic: entry.profilePic,
               teamName: entry.teamName,
+              firstCompletedTrackerAt: entry.firstCompletedTrackerAt,
             ),
           )
           .toList()
         ..sort((a, b) {
           if (a.score != b.score) {
             return b.score.compareTo(a.score);
+          }
+          final completedComparison = _compareCompletedTrackerAt(
+            a.firstCompletedTrackerAt,
+            b.firstCompletedTrackerAt,
+          );
+          if (completedComparison != 0) {
+            return completedComparison;
+          }
+          if (a.rank != b.rank) {
+            return a.rank.compareTo(b.rank);
           }
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
@@ -342,6 +383,7 @@ class _LeaderboardState extends State<Leaderboard>
                       coreTaskScore: member.coreTaskScore,
                       profilePic: member.profilePic,
                       teamName: member.teamName,
+                      firstCompletedTrackerAt: member.firstCompletedTrackerAt,
                     ),
                   )
                   .toList(),
@@ -360,6 +402,7 @@ class _LeaderboardState extends State<Leaderboard>
               coreTaskScore: member.coreTaskScore,
               profilePic: member.profilePic,
               teamName: member.teamName,
+              firstCompletedTrackerAt: member.firstCompletedTrackerAt,
             ),
           )
           .toList();
@@ -487,7 +530,8 @@ class _LeaderboardState extends State<Leaderboard>
                     key: const ValueKey('leaderboard-info-button'),
                     icon: const Icon(Icons.help_outline_rounded),
                     tooltip: 'How scoring works',
-                    onPressed: () => _showLeaderboardInfo(context, companyTheme),
+                    onPressed: () =>
+                        _showLeaderboardInfo(context, companyTheme),
                   ),
                   IconButton(
                     icon: const Icon(Icons.refresh),
@@ -601,7 +645,11 @@ class _LeaderboardState extends State<Leaderboard>
                 right: 20,
                 top: 12,
               ),
-              child: LeaderboardInfoSheet(theme: theme),
+              child: LeaderboardInfoSheet(
+                theme: theme,
+                periodStart: _leaderboardPeriodStart,
+                periodEnd: _leaderboardPeriodEnd,
+              ),
             );
           },
         );
@@ -761,48 +809,79 @@ class _LeaderboardLoadError extends StatelessWidget {
 }
 
 class LeaderboardInfoSheet extends StatelessWidget {
-  const LeaderboardInfoSheet({super.key, required this.theme});
+  const LeaderboardInfoSheet({
+    super.key,
+    required this.theme,
+    this.periodStart,
+    this.periodEnd,
+  });
 
   final CompanyThemeData theme;
+  final DateTime? periodStart;
+  final DateTime? periodEnd;
 
-  static const _sections = [
-    _LeaderboardInfoSection(
-      icon: Icons.checklist_rounded,
-      title: 'Daily Tracker score',
-      body:
-          'Every day you have a set of core activities -- things like Call, '
-          'Steps, Exercise, Meditation, Learning, and Add Value. Each one is '
-          'worth an equal share of the day. There\'s no partial credit for '
-          'an activity -- it\'s either done or it isn\'t.',
-      example: 'Completed 4 of 6 activities\n'
-          '4 ÷ 6 × 100 = 66.7% for that day',
-    ),
-    _LeaderboardInfoSection(
-      icon: Icons.leaderboard_rounded,
-      title: 'Leaderboard ranking',
-      body:
-          'Your rank is simply the average of your Daily Tracker score. '
-          'We add up your score for every day, then divide by 152 -- the '
-          'number of days in your company\'s tracking period -- to get '
-          'that average. Everyone in your company is ranked by it, '
-          'highest first.',
-      example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
-          '(70 + 90 + 50) ÷ 152 = 1.4% average',
-    ),
-    _LeaderboardInfoSection(
-      icon: Icons.workspace_premium_rounded,
-      title: 'Medals & streaks',
-      body:
-          'Medals are earned by building daily streaks on Meditation, '
-          'Steps, Exercise, and Fasting -- each has its own streak. '
-          'Completing an activity today or yesterday keeps its streak '
-          'alive; going a full day without it resets that streak back to '
-          'zero. Once a medal is unlocked, it\'s yours to keep even if the '
-          'streak later resets.',
-      example: 'Streak milestones (days): 3, 7, 14, 30, 60, 100\n'
-          'A 14-day streak unlocks the 3, 7, and 14-day medals at once',
-    ),
-  ];
+  int? get _periodDayCount {
+    final start = periodStart;
+    final end = periodEnd;
+    if (start == null || end == null) {
+      return null;
+    }
+
+    final startDate = DateTime(start.year, start.month, start.day);
+    final endDate = DateTime(end.year, end.month, end.day);
+    if (endDate.isBefore(startDate)) {
+      return null;
+    }
+
+    return endDate.difference(startDate).inDays + 1;
+  }
+
+  List<_LeaderboardInfoSection> get _sections {
+    final dayCount = _periodDayCount;
+    final divisorLabel = dayCount?.toString() ?? 'the number of days';
+    final averageExample = dayCount == null
+        ? '(70 + 90 + 50) ÷ period days = leaderboard average'
+        : '(70 + 90 + 50) ÷ $dayCount = '
+            '${((70 + 90 + 50) / dayCount).toStringAsFixed(1)}% average';
+
+    return [
+      const _LeaderboardInfoSection(
+        icon: Icons.checklist_rounded,
+        title: 'Daily Tracker score',
+        body:
+            'Every day you have a set of core activities -- things like Call, '
+            'Steps, Exercise, Meditation, Learning, and Add Value. Each one is '
+            'worth an equal share of the day. There\'s no partial credit for '
+            'an activity -- it\'s either done or it isn\'t.',
+        example: 'Completed 4 of 6 activities\n'
+            '4 ÷ 6 × 100 = 66.7% for that day',
+      ),
+      _LeaderboardInfoSection(
+        icon: Icons.leaderboard_rounded,
+        title: 'Leaderboard ranking',
+        body: 'Your rank is simply the average of your Daily Tracker score. '
+            'We add up your score for every day, then divide by $divisorLabel '
+            'in your company\'s tracking period to get '
+            'that average. Everyone in your company is ranked by it, '
+            'highest first. When scores are tied, the person who completes '
+            'today\'s Daily Tracker first is ranked higher.',
+        example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
+            '$averageExample',
+      ),
+      const _LeaderboardInfoSection(
+        icon: Icons.workspace_premium_rounded,
+        title: 'Medals & streaks',
+        body: 'Medals are earned by building daily streaks on Meditation, '
+            'Steps, Exercise, and Fasting -- each has its own streak. '
+            'Completing an activity today or yesterday keeps its streak '
+            'alive; going a full day without it resets that streak back to '
+            'zero. Once a medal is unlocked, it\'s yours to keep even if the '
+            'streak later resets.',
+        example: 'Streak milestones (days): 3, 7, 14, 30, 60, 100\n'
+            'A 14-day streak unlocks the 3, 7, and 14-day medals at once',
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -833,7 +912,8 @@ class LeaderboardInfoSheet extends StatelessWidget {
         Text(
           'A quick guide to how your Daily Tracker, Goals, medals, and '
           'Leaderboard rank are calculated.',
-          style: TextStyle(fontSize: 14, color: theme.mutedInkColor, height: 1.35),
+          style:
+              TextStyle(fontSize: 14, color: theme.mutedInkColor, height: 1.35),
         ),
         const SizedBox(height: 18),
         for (final section in _sections) ...[
@@ -892,7 +972,8 @@ class _LeaderboardInfoCard extends StatelessWidget {
         color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.1 : 0.06),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: theme.primaryColor.withValues(alpha: theme.isDark ? 0.22 : 0.14),
+          color:
+              theme.primaryColor.withValues(alpha: theme.isDark ? 0.22 : 0.14),
         ),
       ),
       child: Row(
@@ -2326,6 +2407,16 @@ class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
     sorted.sort((a, b) {
       if (a.score.overallScore != b.score.overallScore) {
         return b.score.overallScore.compareTo(a.score.overallScore);
+      }
+      final completedComparison = _compareCompletedTrackerAt(
+        a.firstCompletedTrackerAt,
+        b.firstCompletedTrackerAt,
+      );
+      if (completedComparison != 0) {
+        return completedComparison;
+      }
+      if (a.leaderboardRank != b.leaderboardRank) {
+        return a.leaderboardRank.compareTo(b.leaderboardRank);
       }
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
