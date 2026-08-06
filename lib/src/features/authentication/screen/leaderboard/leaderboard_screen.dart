@@ -787,7 +787,7 @@ class LeaderboardInfoSheet extends StatelessWidget {
           'that average. Everyone in your company is ranked by it, '
           'highest first.',
       example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
-          '(70 + 90 + 50) ÷ 3 = 70% average',
+          '(70 + 90 + 50) ÷ 152 = 1.4% average',
     ),
     _LeaderboardInfoSection(
       icon: Icons.workspace_premium_rounded,
