@@ -106,7 +106,7 @@ class CommunityController extends Controller
                 }
             })
             ->where('id', '!=', $user->id)
-            ->where('name', 'ILIKE', "%{$query}%")
+            ->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%'])
             ->orderBy('name')
             ->limit(10)
             ->get(['id', 'name', 'profile_pic']);
