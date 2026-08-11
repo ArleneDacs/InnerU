@@ -82,6 +82,49 @@ class StepGoalAchievementTest extends TestCase
             ->count());
     }
 
+    public function test_profile_load_backfills_existing_step_goal_days_once(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Historical Step User',
+            'steps_streak_current' => 1,
+            'steps_streak_longest' => 1,
+            'steps_streak_last_date' => '2026-08-10',
+        ]);
+
+        // These tracker rows existed before the server-owned medal service
+        // was deployed, so no qualifying upsert has evaluated them yet.
+        foreach (range(6, 10) as $day) {
+            DailyTracker::create([
+                'user_id' => (string) $user->id,
+                'username' => $user->name,
+                'date' => sprintf('2026-08-%02d', $day),
+                'step_count' => 10_000,
+                'step_goal' => 10_000,
+            ]);
+        }
+
+        Sanctum::actingAs($user);
+
+        $firstProfileLoad = $this->getJson('/api/me');
+        $firstProfileLoad->assertOk()
+            ->assertJsonPath('user.stepsStreakCurrent', 5)
+            ->assertJsonPath('user.stepsStreakLongest', 5)
+            ->assertJsonPath('user.stepsStreakLastDate', '2026-08-10')
+            ->assertJsonPath('user.stepsStreakRewards.first_stride', '2026-08-08');
+
+        $this->assertSame(1, Notification::query()
+            ->where('user_id', (string) $user->id)
+            ->where('type', 'streak_milestone')
+            ->count());
+
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.stepsStreakRewards.first_stride', '2026-08-08');
+        $this->assertSame(1, Notification::query()
+            ->where('user_id', (string) $user->id)
+            ->where('type', 'streak_milestone')
+            ->count());
+    }
+
     public function test_one_hundred_day_milestone_is_evaluated_from_bounded_history(): void
     {
         $user = User::factory()->create(['name' => 'Long Step User']);

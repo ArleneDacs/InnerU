@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\StepGoalAchievementService;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,12 +15,36 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ProfileController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService) {}
+    public function __construct(
+        private readonly UserScoreService $userScoreService,
+        private readonly StepGoalAchievementService $stepGoalAchievementService,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json([
+                'message' => 'No authenticated user found.',
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        // A user can have tracker rows saved before the server-owned Step
+        // achievement service was introduced. Reconcile them here because the
+        // rewards UI is driven by this profile payload, not by raw trackers.
+        // This is idempotent: already-unlocked medals and notifications are
+        // never duplicated on later profile loads.
+        try {
+            $this->stepGoalAchievementService->reconcileForUser($user);
+            $user->refresh();
+        } catch (\Throwable $throwable) {
+            // Do not turn a temporary reconciliation issue into a forced
+            // logout or blank profile. The next profile load retries it.
+            report($throwable);
+        }
+
         return response()->json([
-            'user' => $this->userPayload($request->user()),
+            'user' => $this->userPayload($user),
         ]);
     }
 

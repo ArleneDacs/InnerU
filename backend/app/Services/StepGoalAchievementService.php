@@ -107,6 +107,11 @@ class StepGoalAchievementService
     }
 
     /**
+     * Reconciles recently-recorded step-goal days that existed before this
+     * server-side system was deployed. This is deliberately independent of a
+     * new tracker write: a user can open the app on a rest day and still have
+     * their prior qualifying streak reflected immediately.
+     *
      * @return array{
      *   goalMet: bool,
      *   currentStreak: int,
@@ -116,7 +121,29 @@ class StepGoalAchievementService
      *   newRewards: list<array{id:string,title:string,tier:string,days:int,description:string,unlockedAt:string}>
      * }
      */
-    private function syncLocked(User $user, DailyTracker $tracker): array
+    public function reconcileForUser(User $user): array
+    {
+        return DB::transaction(function () use ($user): array {
+            /** @var User $lockedUser */
+            $lockedUser = User::query()
+                ->lockForUpdate()
+                ->findOrFail($user->getKey());
+
+            return $this->syncLocked($lockedUser);
+        });
+    }
+
+    /**
+     * @return array{
+     *   goalMet: bool,
+     *   currentStreak: int,
+     *   longestStreak: int,
+     *   lastCompletedDate: string|null,
+     *   unlockedRewardIds: list<string>,
+     *   newRewards: list<array{id:string,title:string,tier:string,days:int,description:string,unlockedAt:string}>
+     * }
+     */
+    private function syncLocked(User $user, ?DailyTracker $tracker = null): array
     {
         $storedRewards = is_array($user->steps_streak_rewards)
             ? $user->steps_streak_rewards
@@ -124,10 +151,12 @@ class StepGoalAchievementService
         $rewards = $storedRewards;
         $newRewards = [];
 
-        $goal = (int) ($tracker->step_goal ?? 0);
-        $stepCount = (int) ($tracker->step_count ?? 0);
-        $goalMet = $goal > 0 && $stepCount >= $goal;
-        $trackerDate = Carbon::parse($tracker->date)->startOfDay();
+        $goal = (int) ($tracker?->step_goal ?? 0);
+        $stepCount = (int) ($tracker?->step_count ?? 0);
+        $goalMet = $tracker !== null && $goal > 0 && $stepCount >= $goal;
+        $trackerDate = $tracker === null
+            ? null
+            : Carbon::parse($tracker->date)->startOfDay();
 
         /** @var DailyTracker|null $latestCompletedTracker */
         $latestCompletedTracker = DailyTracker::query()
@@ -170,8 +199,25 @@ class StepGoalAchievementService
             $observedCurrentStreak,
         );
 
+        // Reconcile every recent qualifying run, not just the tracker that
+        // happened to trigger this request. This backfills users whose step
+        // data arrived before the achievement service, including a profile
+        // fetch on a later rest day.
+        $windowLongestStreak = 0;
+        foreach ($this->runsInWindow($currentWindow) as $run) {
+            $windowLongestStreak = max($windowLongestStreak, $run['length']);
+            $newRewards = [
+                ...$newRewards,
+                ...$this->unlockRewardsForRun(
+                    $run['start'],
+                    $run['length'],
+                    $rewards,
+                ),
+            ];
+        }
+
         $affectedRunLength = 0;
-        if ($goalMet) {
+        if ($goalMet && $trackerDate !== null) {
             $affectedWindow = $this->completedDateKeys(
                 $user,
                 $trackerDate->copy()->subDays(self::MAX_MILESTONE_DAYS - 1),
@@ -179,23 +225,14 @@ class StepGoalAchievementService
             );
             $affectedRun = $this->runContaining($trackerDate, $affectedWindow);
             $affectedRunLength = $affectedRun['length'];
-
-            foreach (self::MILESTONES as $milestone) {
-                if ($affectedRun['length'] < $milestone['days']
-                    || array_key_exists($milestone['id'], $rewards)) {
-                    continue;
-                }
-
-                $unlockedAt = $affectedRun['start']
-                    ->copy()
-                    ->addDays($milestone['days'] - 1)
-                    ->toDateString();
-                $rewards[$milestone['id']] = $unlockedAt;
-                $newRewards[] = [
-                    ...$milestone,
-                    'unlockedAt' => $unlockedAt,
-                ];
-            }
+            $newRewards = [
+                ...$newRewards,
+                ...$this->unlockRewardsForRun(
+                    $affectedRun['start'],
+                    $affectedRun['length'],
+                    $rewards,
+                ),
+            ];
         }
 
         // Preserve an already-recorded best streak during the migration from
@@ -205,6 +242,7 @@ class StepGoalAchievementService
         // unlock a new, larger medal today.
         $longestStreak = max(
             $currentStreak,
+            $windowLongestStreak,
             $affectedRunLength,
             max(0, (int) ($user->steps_streak_longest ?? 0)),
         );
@@ -214,7 +252,13 @@ class StepGoalAchievementService
             'steps_streak_longest' => $longestStreak,
             'steps_streak_last_date' => $latestCompletedDate->toDateString(),
             'steps_streak_rewards' => $rewards,
-        ])->save();
+        ]);
+        // Profile loads invoke reconciliation for historical backfill. Avoid
+        // an unnecessary users-table write on every subsequent /api/me once
+        // the stored streak state already matches the tracker history.
+        if ($user->isDirty()) {
+            $user->save();
+        }
 
         foreach ($newRewards as $reward) {
             Notification::createFor(
@@ -302,6 +346,73 @@ class StepGoalAchievementService
             'start' => $date->copy()->subDays($before),
             'length' => $before + $after,
         ];
+    }
+
+    /**
+     * @param  array<string, true>  $completedDateKeys
+     * @return list<array{start: Carbon, length: int}>
+     */
+    private function runsInWindow(array $completedDateKeys): array
+    {
+        $dateKeys = array_keys($completedDateKeys);
+        sort($dateKeys, SORT_STRING);
+
+        $runs = [];
+        $start = null;
+        $previous = null;
+        $length = 0;
+
+        foreach ($dateKeys as $dateKey) {
+            $date = Carbon::parse($dateKey)->startOfDay();
+            if ($previous !== null && ! $previous->copy()->addDay()->isSameDay($date)) {
+                $runs[] = ['start' => $start, 'length' => $length];
+                $start = null;
+                $length = 0;
+            }
+
+            if ($start === null) {
+                $start = $date;
+            }
+            $length++;
+            $previous = $date;
+        }
+
+        if ($start !== null) {
+            $runs[] = ['start' => $start, 'length' => $length];
+        }
+
+        return $runs;
+    }
+
+    /**
+     * @param  array<string, mixed>  $rewards
+     * @return list<array{id:string,title:string,tier:string,days:int,description:string,unlockedAt:string}>
+     */
+    private function unlockRewardsForRun(
+        Carbon $start,
+        int $length,
+        array &$rewards,
+    ): array {
+        $newRewards = [];
+
+        foreach (self::MILESTONES as $milestone) {
+            if ($length < $milestone['days']
+                || array_key_exists($milestone['id'], $rewards)) {
+                continue;
+            }
+
+            $unlockedAt = $start
+                ->copy()
+                ->addDays($milestone['days'] - 1)
+                ->toDateString();
+            $rewards[$milestone['id']] = $unlockedAt;
+            $newRewards[] = [
+                ...$milestone,
+                'unlockedAt' => $unlockedAt,
+            ];
+        }
+
+        return $newRewards;
     }
 
     private function resolveCurrentStreak(
