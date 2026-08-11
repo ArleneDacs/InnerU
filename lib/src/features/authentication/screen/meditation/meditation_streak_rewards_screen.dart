@@ -73,99 +73,99 @@ class _MeditationStreakRewardsScreenState
     List<ActivityStreakMilestone> milestones,
   ) {
     return FutureBuilder<Map<String, dynamic>>(
-        future: _userDataFuture,
-        builder: (context, snapshot) {
-          final data = snapshot.data ?? <String, dynamic>{};
-          final currentField = ActivityStreakService.currentFieldFor(
-            widget.activityType,
-          );
-          final longestField = ActivityStreakService.longestFieldFor(
-            widget.activityType,
-          );
-          final lastDateField = ActivityStreakService.lastDateFieldFor(
-            widget.activityType,
-          );
-          final rewardsField = ActivityStreakService.rewardsFieldFor(
-            widget.activityType,
-          );
-          final storedCurrentStreak = ActivityStreakService.readInt(
-            data[currentField] ?? data[_snakeToCamel(currentField)],
-          );
-          final currentStreak = ActivityStreakService.activeCurrentStreak(
-            lastDate: data[lastDateField] ?? data[_snakeToCamel(lastDateField)],
-            currentStreak: storedCurrentStreak,
-          );
-          final longestStreak = ActivityStreakService.readInt(
-            data[longestField] ?? data[_snakeToCamel(longestField)],
-          );
-          final rewards = ActivityStreakService.readRewards(
-            data[rewardsField] ?? data[_snakeToCamel(rewardsField)],
-          );
-          final unlockedCount = milestones
-              .where((milestone) => rewards.containsKey(milestone.id))
-              .length;
-          final nextMilestone = _nextMilestone(
-            rewards.keys.toSet(),
-            milestones,
-          );
-          final progressTarget = nextMilestone?.days ?? milestones.last.days;
-          final progress = progressTarget == 0
-              ? 0.0
-              : (currentStreak / progressTarget).clamp(0.0, 1.0);
+      future: _userDataFuture,
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? <String, dynamic>{};
+        final currentField = ActivityStreakService.currentFieldFor(
+          widget.activityType,
+        );
+        final longestField = ActivityStreakService.longestFieldFor(
+          widget.activityType,
+        );
+        final lastDateField = ActivityStreakService.lastDateFieldFor(
+          widget.activityType,
+        );
+        final rewardsField = ActivityStreakService.rewardsFieldFor(
+          widget.activityType,
+        );
+        final storedCurrentStreak = ActivityStreakService.readInt(
+          data[currentField] ?? data[_snakeToCamel(currentField)],
+        );
+        final currentStreak = ActivityStreakService.activeCurrentStreak(
+          lastDate: data[lastDateField] ?? data[_snakeToCamel(lastDateField)],
+          currentStreak: storedCurrentStreak,
+        );
+        final longestStreak = ActivityStreakService.readInt(
+          data[longestField] ?? data[_snakeToCamel(longestField)],
+        );
+        final rewards = ActivityStreakService.readRewards(
+          data[rewardsField] ?? data[_snakeToCamel(rewardsField)],
+        );
+        final unlockedCount = milestones
+            .where((milestone) => rewards.containsKey(milestone.id))
+            .length;
+        final nextMilestone = _nextMilestone(
+          rewards.keys.toSet(),
+          milestones,
+        );
+        final progressTarget = nextMilestone?.days ?? milestones.last.days;
+        final progress = progressTarget == 0
+            ? 0.0
+            : (currentStreak / progressTarget).clamp(0.0, 1.0);
 
-          return SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-                  child: _ProgressHeader(
-                    unlockedCount: unlockedCount,
-                    totalCount: milestones.length,
-                    currentStreak: currentStreak,
-                    longestStreak: longestStreak,
-                    progress: progress,
-                    nextMilestone: nextMilestone,
-                  ),
+        return SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+                child: _ProgressHeader(
+                  unlockedCount: unlockedCount,
+                  totalCount: milestones.length,
+                  currentStreak: currentStreak,
+                  longestStreak: longestStreak,
+                  progress: progress,
+                  nextMilestone: nextMilestone,
                 ),
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    onPageChanged: (index) {
-                      setState(() {
-                        _page = index;
-                      });
-                    },
-                    itemCount: milestones.length,
-                    itemBuilder: (context, index) {
-                      final milestone = milestones[index];
-                      final unlockedAt = rewards[milestone.id];
-                      final unlocked = unlockedAt != null;
-
-                      return AnimatedScale(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeOutBack,
-                        scale: unlocked ? 1.0 : 0.88,
-                        child: _RewardPage(
-                          milestone: milestone,
-                          unlocked: unlocked,
-                          unlockedLabel: _formatUnlockedAt(unlockedAt),
-                          selected: _page == index,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _PageDots(
-                  currentIndex: _page,
+              ),
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  onPageChanged: (index) {
+                    setState(() {
+                      _page = index;
+                    });
+                  },
                   itemCount: milestones.length,
+                  itemBuilder: (context, index) {
+                    final milestone = milestones[index];
+                    final unlockedAt = rewards[milestone.id];
+                    final unlocked = unlockedAt != null;
+
+                    return AnimatedScale(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutBack,
+                      scale: unlocked ? 1.0 : 0.88,
+                      child: _RewardPage(
+                        milestone: milestone,
+                        unlocked: unlocked,
+                        unlockedLabel: _formatUnlockedAt(unlockedAt),
+                        selected: _page == index,
+                      ),
+                    );
+                  },
                 ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          );
-        },
-      );
+              ),
+              const SizedBox(height: 12),
+              _PageDots(
+                currentIndex: _page,
+                itemCount: milestones.length,
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   ActivityStreakMilestone? _nextMilestone(
@@ -374,70 +374,96 @@ class _RewardPage extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              milestone.tier.toUpperCase(),
-              style: TextStyle(
-                color: unlocked ? color : const Color(0xFF6D7282),
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0,
-              ),
+      // A PageView supplies a finite, but sometimes very short, height after
+      // the progress header and page dots take their space. The large medal
+      // plus fixed title/status content can be taller than that on an iPhone.
+      // Let the regular card still fill its page (so the two Spacers retain
+      // the existing visual balance), while allowing the card body to scroll
+      // vertically when it cannot fit instead of overflowing or clipping.
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final content = IntrinsicHeight(
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    milestone.tier.toUpperCase(),
+                    style: TextStyle(
+                      color: unlocked ? color : const Color(0xFF6D7282),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                _Medal(
+                  color: color,
+                  unlocked: unlocked,
+                  days: milestone.days,
+                ),
+                const SizedBox(height: 30),
+                Text(
+                  milestone.title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: unlocked ? Colors.white : const Color(0xFF777D8D),
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  milestone.description,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: unlocked
+                        ? const Color(0xFFCCD3EA)
+                        : const Color(0xFF646A78),
+                    fontSize: 15,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                  decoration: BoxDecoration(
+                    color: unlocked
+                        ? color.withValues(alpha: 0.12)
+                        : const Color(0xFF0A0D16),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    unlocked
+                        ? 'Unlocked ${unlockedLabel ?? ''}'.trim()
+                        : 'Keep a ${milestone.days}-day streak',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: unlocked ? color : const Color(0xFF777D8D),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const Spacer(),
-          _Medal(
-            color: color,
-            unlocked: unlocked,
-            days: milestone.days,
-          ),
-          const SizedBox(height: 30),
-          Text(
-            milestone.title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: unlocked ? Colors.white : const Color(0xFF777D8D),
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            milestone.description,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color:
-                  unlocked ? const Color(0xFFCCD3EA) : const Color(0xFF646A78),
-              fontSize: 15,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const Spacer(),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-            decoration: BoxDecoration(
-              color: unlocked
-                  ? color.withValues(alpha: 0.12)
-                  : const Color(0xFF0A0D16),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Text(
-              unlocked
-                  ? 'Unlocked ${unlockedLabel ?? ''}'.trim()
-                  : 'Keep a ${milestone.days}-day streak',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: unlocked ? color : const Color(0xFF777D8D),
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
+          );
+
+          return SingleChildScrollView(
+            primary: false,
+            physics: const ClampingScrollPhysics(),
+            child: constraints.hasBoundedHeight
+                ? ConstrainedBox(
+                    constraints:
+                        BoxConstraints(minHeight: constraints.maxHeight),
+                    child: content,
+                  )
+                : content,
+          );
+        },
       ),
     );
   }
