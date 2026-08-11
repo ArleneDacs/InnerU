@@ -9,6 +9,7 @@ import 'package:watch_connectivity/watch_connectivity.dart';
 
 import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/emotion_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
@@ -97,12 +98,13 @@ class WatchStepsReceiver {
     final phoneSteps =
         prefs.getInt(SessionCleanupService.savedStepsKey(userId)) ?? 0;
     final combined = steps > phoneSteps ? steps : phoneSteps;
+    final dailyGoal = await _dailyGoalForSession(userId, prefs);
 
     final membershipData = await CompanyMembershipService.loadForUser(userId);
     await DailyTrackerApiService.instance.upsert(
       date: date,
       stepCount: combined,
-      stepGoal: _dailyGoalForSession(),
+      stepGoal: dailyGoal,
       steps: true,
       username: session.name,
       companyId: membershipData.activeMembership?.id,
@@ -111,7 +113,7 @@ class WatchStepsReceiver {
     );
 
     // Reflect the merged count back to the watch/widget snapshot.
-    WatchSyncService.instance.syncSteps(combined);
+    WatchSyncService.instance.syncSteps(combined, goal: dailyGoal);
 
     debugPrint('Recorded $steps watch steps ($combined combined) for $date');
   }
@@ -311,7 +313,29 @@ class WatchStepsReceiver {
     );
   }
 
-  int _dailyGoalForSession() {
+  Future<int> _dailyGoalForSession(
+    String userId,
+    SharedPreferences prefs,
+  ) async {
+    final cachedGoal = prefs.getInt('daily_step_goal_$userId');
+    if (cachedGoal != null && cachedGoal > 0) {
+      return cachedGoal;
+    }
+
+    try {
+      final userData = await UserService.getUserData();
+      final rawGoal = userData['daily_step_goal'] ?? userData['dailyStepGoal'];
+      final goal = rawGoal is num
+          ? rawGoal.toInt()
+          : int.tryParse(rawGoal?.toString() ?? '');
+      if (goal != null && goal > 0) {
+        await prefs.setInt('daily_step_goal_$userId', goal);
+        return goal;
+      }
+    } catch (error) {
+      debugPrint('Watch step goal load failed: $error');
+    }
+
     return 5000;
   }
 }

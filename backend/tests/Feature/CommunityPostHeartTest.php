@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CommunityPost;
+use App\Models\CommunityPostHeart;
 use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -43,6 +44,11 @@ class CommunityPostHeartTest extends TestCase
             'user_id' => (string) $owner->id,
             'type' => 'community_heart',
         ]);
+        $notification = Notification::query()
+            ->where('user_id', (string) $owner->id)
+            ->where('type', 'community_heart')
+            ->firstOrFail();
+        $this->assertSame((string) $post->id, $notification->data['postId'] ?? null);
 
         // Self-heart: no notification.
         Notification::query()->delete();
@@ -134,5 +140,70 @@ class CommunityPostHeartTest extends TestCase
         $bystanderPost = collect($bystanderView->json('posts'))->firstWhere('id', (string) $post->id);
         $this->assertSame(1, $bystanderPost['heartsCount']);
         $this->assertFalse($bystanderPost['heartedByMe']);
+    }
+
+    public function test_liker_identities_are_paged_and_bounded_for_a_visible_post(): void
+    {
+        $owner = User::factory()->create(['name' => 'Post Owner']);
+        $post = $this->makePost($owner);
+        $fans = User::factory()->count(3)->sequence(
+            ['name' => 'First Fan'],
+            ['name' => 'Second Fan'],
+            ['name' => 'Third Fan'],
+        )->create();
+
+        foreach ($fans as $fan) {
+            CommunityPostHeart::create([
+                'community_post_id' => $post->id,
+                'user_id' => $fan->id,
+            ]);
+        }
+
+        Sanctum::actingAs($owner);
+        $firstPage = $this->getJson('/api/community/posts/'.$post->id.'/hearts?perPage=2');
+
+        $firstPage->assertOk()
+            ->assertJsonPath('heartsCount', 3)
+            ->assertJsonPath('page', 1)
+            ->assertJsonPath('perPage', 2)
+            ->assertJsonPath('hasMore', true)
+            ->assertJsonCount(2, 'likers');
+        $this->assertContains(
+            $firstPage->json('likers.0.name'),
+            ['First Fan', 'Second Fan', 'Third Fan'],
+        );
+
+        $secondPage = $this->getJson('/api/community/posts/'.$post->id.'/hearts?perPage=2&page=2');
+        $secondPage->assertOk()
+            ->assertJsonPath('hasMore', false)
+            ->assertJsonCount(1, 'likers');
+
+        // The API enforces its maximum even if a client asks for an
+        // unreasonably large page, keeping a hover/popover response small.
+        $bounded = $this->getJson('/api/community/posts/'.$post->id.'/hearts?perPage=999');
+        $bounded->assertOk()->assertJsonPath('perPage', 25);
+    }
+
+    public function test_liker_identities_do_not_expose_a_private_saved_post(): void
+    {
+        $owner = User::factory()->create(['company_code' => 'ACME']);
+        $otherMember = User::factory()->create(['company_code' => 'ACME']);
+        $post = $this->makePost($owner);
+        $post->update(['saved' => true]);
+
+        Sanctum::actingAs($otherMember);
+        $this->getJson('/api/community/posts/'.$post->id.'/hearts')->assertNotFound();
+    }
+
+    public function test_targeted_post_endpoint_returns_the_exact_notification_destination(): void
+    {
+        $owner = User::factory()->create(['name' => 'Post Owner']);
+        $post = $this->makePost($owner);
+
+        Sanctum::actingAs($owner);
+        $this->getJson('/api/community/posts/'.$post->id)
+            ->assertOk()
+            ->assertJsonPath('post.id', (string) $post->id)
+            ->assertJsonPath('post.title', 'A post');
     }
 }

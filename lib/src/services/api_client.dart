@@ -12,13 +12,22 @@ class ApiClient {
   // Every request in the app funnels through this client, and the
   // underlying `http` package has no default timeout -- a stalled or very
   // slow connection (weak signal, captive portal, dead Wi-Fi) leaves the
-  // await hanging forever. That's most damaging at launch: main() awaits
-  // AuthService.initialize(), which calls getJson('/api/me') before
-  // runApp() ever fires, so a hung request here blocks the entire app from
-  // rendering so much as the splash screen. Bounding every call here means
-  // a slow network fails fast into the ApiException callers already catch,
-  // instead of hanging indefinitely.
+  // await hanging forever. That's especially damaging around session
+  // validation and first-load data: although the shell now paints before
+  // background startup work completes, a stalled request still prevents a
+  // useful refresh or invalid-session decision. Bounding every call means a
+  // slow network fails fast into the ApiException callers already catch.
   static const Duration _defaultTimeout = Duration(seconds: 15);
+
+  void Function(String failedToken)? _onUnauthorized;
+
+  /// AuthService registers a session invalidator here. Keeping the callback
+  /// in the transport layer avoids a circular dependency while still making
+  /// an expired bearer token log the user out no matter which API first sees
+  /// the 401 response.
+  void setUnauthorizedHandler(void Function(String failedToken)? handler) {
+    _onUnauthorized = handler;
+  }
 
   Uri _uri(String path) {
     final normalizedPath = path.startsWith('/') ? path : '/$path';
@@ -41,7 +50,10 @@ class ApiClient {
     final response = await http
         .get(_uri(path), headers: _headers(token: token))
         .timeout(timeout, onTimeout: _onTimeout);
-    return _decodeResponse(response);
+    return _decodeResponse(
+      response,
+      requestToken: token,
+    );
   }
 
   Future<Map<String, dynamic>> postJson(
@@ -57,7 +69,10 @@ class ApiClient {
           body: jsonEncode(body),
         )
         .timeout(timeout, onTimeout: _onTimeout);
-    return _decodeResponse(response);
+    return _decodeResponse(
+      response,
+      requestToken: token,
+    );
   }
 
   Future<Map<String, dynamic>> postMultipart(
@@ -77,7 +92,10 @@ class ApiClient {
     final streamedResponse =
         await request.send().timeout(timeout, onTimeout: _onTimeout);
     final response = await http.Response.fromStream(streamedResponse);
-    return _decodeResponse(response);
+    return _decodeResponse(
+      response,
+      requestToken: token,
+    );
   }
 
   Future<Map<String, dynamic>> patchJson(
@@ -93,7 +111,10 @@ class ApiClient {
           body: jsonEncode(body),
         )
         .timeout(timeout, onTimeout: _onTimeout);
-    return _decodeResponse(response);
+    return _decodeResponse(
+      response,
+      requestToken: token,
+    );
   }
 
   Future<Map<String, dynamic>> deleteJson(
@@ -104,20 +125,32 @@ class ApiClient {
     final response = await http
         .delete(_uri(path), headers: _headers(token: token))
         .timeout(timeout, onTimeout: _onTimeout);
-    return _decodeResponse(response);
+    return _decodeResponse(
+      response,
+      requestToken: token,
+    );
   }
 
   Never _onTimeout() {
     throw const ApiTimeoutException();
   }
 
-  Map<String, dynamic> _decodeResponse(http.Response response) {
+  Map<String, dynamic> _decodeResponse(
+    http.Response response, {
+    required String? requestToken,
+  }) {
     final raw = response.body.trim();
     final data = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return data is Map<String, dynamic>
           ? data
           : <String, dynamic>{'data': data};
+    }
+
+    if (response.statusCode == 401 &&
+        requestToken != null &&
+        requestToken.isNotEmpty) {
+      _onUnauthorized?.call(requestToken);
     }
 
     if (data is Map<String, dynamic>) {
@@ -152,7 +185,8 @@ class ApiException implements Exception {
 /// slow-connection hint) can catch this type directly.
 class ApiTimeoutException implements Exception {
   const ApiTimeoutException([
-    this.message = 'The request took too long. Please check your connection and try again.',
+    this.message =
+        'The request took too long. Please check your connection and try again.',
   ]);
 
   final String message;

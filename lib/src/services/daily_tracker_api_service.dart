@@ -1,6 +1,24 @@
 import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 
+class StepGoalReward {
+  const StepGoalReward({
+    required this.id,
+    required this.title,
+    required this.tier,
+    required this.days,
+    required this.description,
+    required this.unlockedAt,
+  });
+
+  final String id;
+  final String title;
+  final String tier;
+  final int days;
+  final String description;
+  final String unlockedAt;
+}
+
 class DailyTrackerApiService {
   DailyTrackerApiService._();
 
@@ -155,6 +173,41 @@ class DailyTrackerApiService {
       if (learning) 'learning': true,
       if (addValue) 'addValue': true,
     };
+  }
+
+  /// Reads the newly-unlocked, server-authoritative Step rewards from a
+  /// daily-tracker response. Other callers (background sync, watch, and the
+  /// offline queue) can safely ignore this; the visible tracker uses it for
+  /// immediate feedback without calculating or persisting medals on-device.
+  static List<StepGoalReward> newStepGoalRewardsFromResponse(
+    Map<String, dynamic> response,
+  ) {
+    final rawAchievement = response['stepGoalAchievement'];
+    if (rawAchievement is! Map) return const <StepGoalReward>[];
+
+    final rawRewards = rawAchievement['newRewards'];
+    if (rawRewards is! List) return const <StepGoalReward>[];
+
+    final rewards = <StepGoalReward>[];
+    for (final rawReward in rawRewards) {
+      if (rawReward is! Map) continue;
+      final reward = Map<String, dynamic>.from(rawReward);
+      final id = reward['id']?.toString().trim() ?? '';
+      final title = reward['title']?.toString().trim() ?? '';
+      if (id.isEmpty || title.isEmpty) continue;
+
+      rewards.add(
+        StepGoalReward(
+          id: id,
+          title: title,
+          tier: reward['tier']?.toString().trim() ?? '',
+          days: _asInt(reward['days']),
+          description: reward['description']?.toString().trim() ?? '',
+          unlockedAt: reward['unlockedAt']?.toString().trim() ?? '',
+        ),
+      );
+    }
+    return rewards;
   }
 
   /// Records automatic activity completions without sending `false` for

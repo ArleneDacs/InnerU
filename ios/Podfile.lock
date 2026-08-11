@@ -1259,6 +1259,9 @@ PODS:
     - SDWebImageWebPCoder
   - flutter_local_notifications (0.0.1):
     - Flutter
+  - flutter_secure_storage_darwin (10.0.0):
+    - Flutter
+    - FlutterMacOS
   - flutter_timezone (0.0.1):
     - Flutter
   - geolocator_apple (1.2.0):
@@ -1517,6 +1520,7 @@ DEPENDENCIES:
   - flutter_background_service_ios (from `.symlinks/plugins/flutter_background_service_ios/ios`)
   - flutter_image_compress_common (from `.symlinks/plugins/flutter_image_compress_common/ios`)
   - flutter_local_notifications (from `.symlinks/plugins/flutter_local_notifications/ios`)
+  - flutter_secure_storage_darwin (from `.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
   - flutter_timezone (from `.symlinks/plugins/flutter_timezone/ios`)
   - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
   - google_mlkit_commons (from `.symlinks/plugins/google_mlkit_commons/ios`)
@@ -1595,6 +1599,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_image_compress_common/ios"
   flutter_local_notifications:
     :path: ".symlinks/plugins/flutter_local_notifications/ios"
+  flutter_secure_storage_darwin:
+    :path: ".symlinks/plugins/flutter_secure_storage_darwin/darwin"
   flutter_timezone:
     :path: ".symlinks/plugins/flutter_timezone/ios"
   geolocator_apple:
@@ -1666,6 +1672,7 @@ SPEC CHECKSUMS:
   flutter_background_service_ios: 00d31bdff7b4bfe06d32375df358abe0329cf87e
   flutter_image_compress_common: 11d5dcfb36f4ded92320bfa896261813a073240e
   flutter_local_notifications: 643a3eda1ce1c0599413ca31672536d423dee214
+  flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
   flutter_timezone: 7c838e17ffd4645d261e87037e5bebf6d38fe544
   geolocator_apple: ab36aa0e8b7d7a2d7639b3b4e48308394e8cef5e
   google_mlkit_commons: 3a69fd9631f2fda04916c83e6b9ea964f62ac2cf

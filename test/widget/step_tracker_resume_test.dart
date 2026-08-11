@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
 import 'package:pedometer/pedometer.dart';
@@ -46,6 +47,7 @@ void main() {
       SharedPreferences.setMockInitialValues(<String, Object>{
         'inneru.app.session': '',
       });
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
 
       final session = AppSession(
         id: 42,
@@ -100,6 +102,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.text('1500'), findsWidgets);
+
+      // Dispose the tracker before closing its debug streams in tearDown.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     });
   });
 }

@@ -65,8 +65,10 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/community/posts', [CommunityController::class, 'index']);
     Route::get('/community/mentionable-users', [CommunityController::class, 'mentionableUsers']);
     Route::post('/community/posts', [CommunityController::class, 'store']);
+    Route::get('/community/posts/{post}', [CommunityController::class, 'show']);
     Route::patch('/community/posts/{post}', [CommunityController::class, 'update']);
     Route::delete('/community/posts/{post}', [CommunityController::class, 'destroy']);
+    Route::get('/community/posts/{post}/hearts', [CommunityController::class, 'hearts']);
     Route::get('/community/posts/{post}/comments', [CommentController::class, 'index']);
     Route::post('/community/posts/{post}/comments', [CommentController::class, 'store']);
     Route::patch('/community/posts/{post}/comments/{comment}', [CommentController::class, 'update']);

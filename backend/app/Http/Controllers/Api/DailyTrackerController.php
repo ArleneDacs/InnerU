@@ -8,6 +8,7 @@ use App\Models\CoachMentee;
 use App\Models\DailyTracker;
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\StepGoalAchievementService;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,9 +18,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DailyTrackerController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService)
-    {
-    }
+    public function __construct(
+        private readonly UserScoreService $userScoreService,
+        private readonly StepGoalAchievementService $stepGoalAchievementService,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -332,6 +334,14 @@ class DailyTrackerController extends Controller
             report($throwable);
         }
 
+        // Every step source—foreground tracker, Apple Health, Android
+        // background service, watch, and the offline queue—arrives through
+        // this upsert. The achievement service locks and evaluates the
+        // authoritative DailyTracker history, so retries cannot duplicate a
+        // medal or its notification.
+        $stepGoalAchievement = $this->stepGoalAchievementService
+            ->syncForDailyTracker($user, $tracker->refresh());
+
         // Throttled: only notify on the first tracker row for this
         // user+date, not on every subsequent field edit within the same
         // day (upsert is called repeatedly as the mentee checks off
@@ -354,6 +364,7 @@ class DailyTrackerController extends Controller
 
         return response()->json([
             'tracker' => $this->mapTracker($tracker->refresh()),
+            'stepGoalAchievement' => $stepGoalAchievement,
         ]);
     }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -27,7 +28,9 @@ class ActionCodeSettings {
 }
 
 class AuthService {
-  AuthService._();
+  AuthService._() {
+    _apiClient.setUnauthorizedHandler(_invalidateCurrentSession);
+  }
 
   factory AuthService() => instance;
 
@@ -52,8 +55,7 @@ class AuthService {
     androidMinimumVersion: '21',
   );
 
-  static const ActionCodeSettings passwordResetSettings =
-      ActionCodeSettings(
+  static const ActionCodeSettings passwordResetSettings = ActionCodeSettings(
     url: EmailLinkAuthService.passwordResetContinueUrl,
     handleCodeInApp: true,
     androidPackageName: 'com.valenin.inneru',
@@ -127,7 +129,7 @@ class AuthService {
       );
     } on ApiException catch (e) {
       if (e.statusCode == 401) {
-        await _sessionService.clear();
+        await _sessionService.clearIfCurrentTokenMatches(session.token);
       }
     } catch (e) {
       // Network/connectivity failure (e.g. no internet at launch) -- keep
@@ -135,6 +137,14 @@ class AuthService {
       // confirmed 401 from the server means the token is actually invalid.
       debugPrint('Failed to refresh session on launch: $e');
     }
+  }
+
+  void _invalidateCurrentSession(String failedToken) {
+    // ApiClient calls this only for a 401 response to an authenticated
+    // request. It is intentionally fire-and-forget so every service gets a
+    // consistent invalid-session redirect without delaying its own error
+    // handling path.
+    unawaited(_sessionService.clearIfCurrentTokenMatches(failedToken));
   }
 
   Future<String?> signInWithEmailAndPassword({
@@ -377,8 +387,10 @@ class AuthService {
 
       final verificationRequired = response['verification_required'] == true;
       if (verificationRequired) {
-        _pendingVerificationEmail = response['email']?.toString() ?? googleUser.email;
-        _lastVerificationEmailSent = response['verification_email_sent'] != false;
+        _pendingVerificationEmail =
+            response['email']?.toString() ?? googleUser.email;
+        _lastVerificationEmailSent =
+            response['verification_email_sent'] != false;
         return null;
       }
 
@@ -407,7 +419,8 @@ class AuthService {
 
       final rawNonce = apple_sign_in.generateNonce();
       final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
-      final credential = await apple_sign_in.SignInWithApple.getAppleIDCredential(
+      final credential =
+          await apple_sign_in.SignInWithApple.getAppleIDCredential(
         scopes: const [
           apple_sign_in.AppleIDAuthorizationScopes.email,
           apple_sign_in.AppleIDAuthorizationScopes.fullName,
@@ -448,7 +461,8 @@ class AuthService {
       if (verificationRequired) {
         _pendingVerificationEmail =
             response['email']?.toString() ?? credential.email;
-        _lastVerificationEmailSent = response['verification_email_sent'] != false;
+        _lastVerificationEmailSent =
+            response['verification_email_sent'] != false;
         return null;
       }
 

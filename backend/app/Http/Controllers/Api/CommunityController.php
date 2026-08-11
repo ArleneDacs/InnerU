@@ -77,6 +77,72 @@ class CommunityController extends Controller
         return response()->json(['posts' => $posts]);
     }
 
+    /**
+     * Resolve one post for a notification deep link without making the app
+     * download every category just to find it.  Private saved posts remain
+     * visible only to their owner.
+     */
+    public function show(Request $request, CommunityPost $post): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if (!$this->canViewPost($post, $user)) {
+            // Returning Not Found avoids turning this endpoint into a way to
+            // enumerate posts that belong to another company.
+            return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json([
+            'post' => $this->mapPost($post, (int) $user->id),
+        ]);
+    }
+
+    /**
+     * A paged, on-demand list for the heart-count popover.  It deliberately
+     * is not embedded in the feed payload: a busy feed should not eagerly
+     * transfer every name for every post when the vast majority are never
+     * inspected.
+     */
+    public function hearts(Request $request, CommunityPost $post): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        if (!$this->canViewPost($post, $user)) {
+            return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
+        }
+
+        // Keep every response small even if a popular post has thousands of
+        // hearts.  The client can request the next page from its detail sheet.
+        $requestedPerPage = (int) $request->query('perPage', 12);
+        $perPage = min(25, max(1, $requestedPerPage));
+
+        $hearts = CommunityPostHeart::query()
+            ->where('community_post_id', $post->id)
+            ->with('user:id,name')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($perPage);
+
+        return response()->json([
+            'likers' => $hearts->getCollection()
+                ->map(fn (CommunityPostHeart $heart) => [
+                    'id' => (string) $heart->user_id,
+                    'name' => $heart->user?->name ?? 'Member',
+                ])
+                ->values(),
+            'heartsCount' => (int) $hearts->total(),
+            'page' => (int) $hearts->currentPage(),
+            'perPage' => (int) $hearts->perPage(),
+            'hasMore' => $hearts->hasMorePages(),
+        ]);
+    }
+
     public function mentionableUsers(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -178,10 +244,38 @@ class CommunityController extends Controller
         }
 
         $validated = $request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:50'],
+            'category' => ['sometimes', 'required', 'string', 'max:80'],
+            'note' => ['sometimes', 'required', 'array'],
+            'color' => ['sometimes', 'integer'],
             'saved' => ['sometimes', 'boolean'],
+            'mentions' => ['sometimes', 'nullable', 'array'],
+            'mentions.*.userId' => ['required_with:mentions', 'string'],
+            'mentions.*.name' => ['required_with:mentions', 'string'],
         ]);
 
-        $post->fill($validated);
+        // Only author-editable presentation fields are accepted here.  The
+        // post id, owner, timestamps, hearts, and comments are deliberately
+        // absent so an edit cannot disturb related data.
+        $updates = array_intersect_key($validated, array_flip([
+            'title',
+            'category',
+            'note',
+            'color',
+            'saved',
+        ]));
+
+        // Omitted mentions must stay intact (the simple edit dialog does not
+        // alter them); an explicit mentions payload is still checked using
+        // the same in-company validation as post creation.
+        if (array_key_exists('mentions', $validated)) {
+            $updates['mentions'] = $this->validateAndFilterMentions(
+                $validated['mentions'],
+                $user,
+            );
+        }
+
+        $post->fill($updates);
         $post->save();
 
         return response()->json([
@@ -226,6 +320,34 @@ class CommunityController extends Controller
                 ->where('user_id', $viewerId)
                 ->exists(),
         ];
+    }
+
+    /**
+     * Match the feed's company visibility rules for the two targeted
+     * endpoints above.  A post owner can always recover their own post from a
+     * notification, while a saved post is never exposed to another member.
+     */
+    private function canViewPost(CommunityPost $post, User $viewer): bool
+    {
+        if ((int) $post->user_id === (int) $viewer->id) {
+            return true;
+        }
+
+        if ($post->saved) {
+            return false;
+        }
+
+        $companyCode = trim((string) $viewer->company_code);
+        $companyName = trim((string) $viewer->company_name);
+
+        // A user without company metadata currently sees the unfiltered feed
+        // too, so preserve that established behaviour for a direct link.
+        if ($companyCode === '' && $companyName === '') {
+            return true;
+        }
+
+        return ($companyCode !== '' && (string) $post->company_code === $companyCode)
+            || ($companyName !== '' && (string) $post->company_name === $companyName);
     }
 
     /**

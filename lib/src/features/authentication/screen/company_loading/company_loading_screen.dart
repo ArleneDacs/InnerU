@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
+import 'package:selfcare_projects/src/services/app_session_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
@@ -364,6 +365,19 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
 
   Future<void> _prepareLoadingScreen() async {
     try {
+      // A valid session restored from secure storage is not a new login. The
+      // old code treated every cold process start as one because its
+      // `_playedLoginSessions` set is in-memory, then blocked the dashboard
+      // behind profile/company lookups, video initialization, and a 4.4s
+      // branded sequence. Render the cached/standard shell immediately on a
+      // morning reopen; Setuppage and DashboardScreen already refresh theme,
+      // profile, and dashboard data asynchronously once they mount.
+      if (AppSessionService.instance.restoredSessionOnLaunch) {
+        if (!mounted) return;
+        setState(() => _isChecking = false);
+        return;
+      }
+
       final loginSessionKey = _currentLoginSessionKey();
       if (_playedLoginSessions.contains(loginSessionKey)) {
         if (!mounted) return;

@@ -11,16 +11,26 @@ import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class CommunityScreen extends StatefulWidget {
-  const CommunityScreen({super.key, this.targetPostId, this.targetCommentId});
+  const CommunityScreen({
+    super.key,
+    this.targetPostId,
+    this.targetCommentId,
+    this.showStandaloneAppBar = true,
+  });
 
-  /// When set, the comment sheet for this post is opened automatically
-  /// once the feed finishes its initial load (used by deep links from
-  /// push notifications -- see [NotificationPushRouter]).
+  /// When set, this post is brought into view and highlighted once the feed
+  /// finishes its initial load (used by deep links from push notifications).
   final String? targetPostId;
 
   /// Optional comment to highlight inside the opened comment sheet, wired
   /// through [_openCommentsFor] into [CommentWidget.highlightCommentId].
   final String? targetCommentId;
+
+  /// The bottom-navigation shell already owns the Community app bar. A
+  /// notification opens this screen as its own route, where it needs its own
+  /// app bar to keep the content below the system/header area and provide a
+  /// way back.
+  final bool showStandaloneAppBar;
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -35,6 +45,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   bool _isLoading = true;
   String? _loadError;
   Timer? _refreshTimer;
+  String? _highlightedPostId;
+  Note? _focusedPost;
 
   @override
   void initState() {
@@ -64,46 +76,124 @@ class _CommunityScreenState extends State<CommunityScreen> {
     super.dispose();
   }
 
-  // Kicks off the initial load and, once it lands, opens the deep-linked
-  // post's comment sheet (if one was requested via widget.targetPostId).
+  // Kicks off the initial load and, once it lands, focuses any post supplied
+  // by a notification deep link.
   Future<void> _loadInitialPosts() async {
     await _loadPosts(showSpinner: true);
     await _openTargetIfNeeded();
   }
 
-  // Comment/heart/reply/reaction notifications aren't scoped to any one
-  // category, but the initial load above is scoped to selectedCategory
-  // (the default "Add Value" tab), so a deep link into e.g. a "Learning"
-  // post won't be found in _posts yet. There's no single-post "show"
-  // endpoint on the backend to fall back on (only index/store/update/
-  // destroy), so instead fall back to one unscoped fetchPosts() call --
-  // its sole purpose is locating this one post; it is never stored into
-  // _posts, so the visible, still category-scoped feed is untouched.
+  // Community notifications are not scoped to the default "Add Value" tab.
+  // Resolve the one post directly, put it visibly at the top of the feed,
+  // and visually mark it.  A comment sheet is only opened for notifications
+  // that actually target a comment; a heart should focus the post itself.
   Future<void> _openTargetIfNeeded() async {
-    if (widget.targetPostId == null) return;
+    final targetPostId = widget.targetPostId?.trim();
+    if (targetPostId == null || targetPostId.isEmpty) return;
 
-    var target =
-        _posts.firstWhereOrNull((post) => post.id == widget.targetPostId);
+    var target = _posts.firstWhereOrNull((post) => post.id == targetPostId);
 
     if (target == null) {
       try {
-        final allPosts = await CommunityApiService.instance.fetchPosts();
-        target = allPosts
-            .firstWhereOrNull((post) => post.id == widget.targetPostId);
+        target = await CommunityApiService.instance.fetchPost(targetPostId);
       } catch (error) {
-        // Best-effort: if this fallback lookup fails, don't open the
-        // sheet -- same outcome as if the post genuinely doesn't exist.
-        debugPrint('Could not resolve deep-linked community post: $error');
-        return;
+        // An older deployment may not have the targeted-show endpoint yet.
+        // Keep a bounded best-effort fallback for that transition rather than
+        // turning a notification tap into a dead end.
+        try {
+          final allPosts = await CommunityApiService.instance.fetchPosts();
+          target = allPosts.firstWhereOrNull((post) => post.id == targetPostId);
+        } catch (fallbackError) {
+          debugPrint(
+            'Could not resolve deep-linked community post: $error / $fallbackError',
+          );
+          return;
+        }
       }
     }
 
     if (target == null || !mounted) return;
     final resolvedTarget = target;
+    _focusPost(resolvedTarget);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _openCommentsFor(resolvedTarget, highlightCommentId: widget.targetCommentId);
+      if (widget.targetCommentId != null &&
+          widget.targetCommentId!.isNotEmpty) {
+        _openCommentsFor(
+          resolvedTarget,
+          highlightCommentId: widget.targetCommentId,
+        );
+      }
     });
+  }
+
+  String? _targetCategoryFor(Note post) {
+    if (post.saved) return 'Saved';
+    if (post.category == 'Add Value' || post.category == 'Learning') {
+      return post.category;
+    }
+    return null;
+  }
+
+  List<Note> _prioritizeFocusedPost(List<Note> posts) {
+    final focused = _focusedPost;
+    if (focused == null || _highlightedPostId != focused.id) return posts;
+
+    final fresh =
+        posts.firstWhereOrNull((post) => post.id == focused.id) ?? focused;
+    return [fresh, ...posts.where((post) => post.id != fresh.id)];
+  }
+
+  void _focusPost(Note post) {
+    final targetCategory = _targetCategoryFor(post);
+    final categoryChanged =
+        targetCategory != null && targetCategory != selectedCategory;
+
+    setState(() {
+      if (targetCategory != null) {
+        selectedCategory = targetCategory;
+      }
+      _focusedPost = post;
+      _highlightedPostId = post.id;
+      _posts = _prioritizeFocusedPost(_posts);
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+      );
+    });
+
+    if (categoryChanged) {
+      unawaited(_reloadFocusedCategory(post, targetCategory));
+    }
+  }
+
+  Future<void> _reloadFocusedCategory(Note target, String category) async {
+    try {
+      final posts =
+          await CommunityApiService.instance.fetchPosts(category: category);
+      if (!mounted || selectedCategory != category) return;
+      final freshTarget =
+          posts.firstWhereOrNull((post) => post.id == target.id) ?? target;
+      setState(() {
+        _focusedPost = freshTarget;
+        _posts = _prioritizeFocusedPost(posts);
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted || selectedCategory != category) return;
+      setState(() {
+        // The directly fetched target is still usable, so do not replace it
+        // with a full-screen error if its category refresh happens to fail.
+        _isLoading = false;
+      });
+      debugPrint('Could not refresh the notification post category: $error');
+    }
   }
 
   // Mirrors NoteCardState.openCommentSection (see note_card.dart). That
@@ -124,6 +214,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
   }
 
   Future<void> _loadPosts({bool showSpinner = false}) async {
+    // Keep a late response for a previous tab from replacing the focused post
+    // (or the current tab) while a notification target is being resolved.
+    final requestedCategory = selectedCategory;
     if (showSpinner && mounted) {
       setState(() {
         _isLoading = true;
@@ -133,16 +226,16 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
     try {
       final posts = await CommunityApiService.instance.fetchPosts(
-        category: selectedCategory,
+        category: requestedCategory,
       );
-      if (!mounted) return;
+      if (!mounted || selectedCategory != requestedCategory) return;
       setState(() {
-        _posts = posts;
+        _posts = _prioritizeFocusedPost(posts);
         _isLoading = false;
         _loadError = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || selectedCategory != requestedCategory) return;
       setState(() {
         _isLoading = false;
         _loadError = error.toString();
@@ -159,6 +252,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
     if (category == selectedCategory) return;
     setState(() {
       selectedCategory = category;
+      _highlightedPostId = null;
+      _focusedPost = null;
     });
     // Switching categories is a deliberate navigation action, unlike the
     // periodic background refresh, so resetting to the top of the (new)
@@ -263,6 +358,235 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
+  List<Map<String, String>> _editedNoteContent(
+    Note post,
+    List<TextEditingController> textControllers,
+  ) {
+    var textIndex = 0;
+    final updated = <Map<String, String>>[];
+    for (final item in post.note) {
+      final copy = Map<String, String>.from(item);
+      if (copy['type'] == 'text' && textIndex < textControllers.length) {
+        copy['value'] = textControllers[textIndex].text.trim();
+        textIndex += 1;
+      }
+      updated.add(copy);
+    }
+
+    // Older/imported image-only posts have no editable text segment.  Add one
+    // without touching the existing media so the author can still add a body.
+    if (textIndex == 0 && textControllers.isNotEmpty) {
+      updated.insert(0, {
+        'type': 'text',
+        'value': textControllers.first.text.trim(),
+      });
+    }
+    return updated;
+  }
+
+  bool _matchesSelectedCategory(Note post, String currentUserId) {
+    switch (selectedCategory) {
+      case 'Saved':
+        return post.saved && post.userId == currentUserId;
+      case 'My Post':
+        return !post.saved && post.userId == currentUserId;
+      default:
+        return !post.saved && post.category == selectedCategory;
+    }
+  }
+
+  void _applyEditedPost(Note updated) {
+    final currentUserId = AuthService.instance.currentSession?.id.toString();
+    if (currentUserId == null) return;
+
+    setState(() {
+      final existingIndex = _posts.indexWhere((post) => post.id == updated.id);
+      if (_matchesSelectedCategory(updated, currentUserId)) {
+        if (existingIndex == -1) {
+          _posts = [updated, ..._posts];
+        } else {
+          final nextPosts = List<Note>.from(_posts);
+          nextPosts[existingIndex] = updated;
+          _posts = nextPosts;
+        }
+      } else if (existingIndex != -1) {
+        final nextPosts = List<Note>.from(_posts);
+        nextPosts.removeAt(existingIndex);
+        _posts = nextPosts;
+      }
+
+      if (_focusedPost?.id == updated.id) {
+        _focusedPost = updated;
+      }
+    });
+  }
+
+  Future<void> _editPost(Note post) async {
+    final titleController = TextEditingController(text: post.title);
+    final textControllers = post.note
+        .where((item) => item['type'] == 'text')
+        .map((item) => TextEditingController(text: item['value'] ?? ''))
+        .toList();
+    if (textControllers.isEmpty) {
+      textControllers.add(TextEditingController());
+    }
+
+    final categories = <String>['Add Value', 'Learning'];
+    var selectedEditCategory = post.category;
+    if (!categories.contains(selectedEditCategory)) {
+      categories.insert(0, selectedEditCategory);
+    }
+
+    Note? updated;
+    try {
+      updated = await showDialog<Note>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          var isSaving = false;
+          String? saveError;
+
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              final hasBody = textControllers.any(
+                (controller) => controller.text.trim().isNotEmpty,
+              );
+              final isValid = titleController.text.trim().isNotEmpty &&
+                  selectedEditCategory.trim().isNotEmpty &&
+                  hasBody;
+
+              Future<void> saveEdit() async {
+                if (!isValid || isSaving) return;
+                setDialogState(() {
+                  isSaving = true;
+                  saveError = null;
+                });
+
+                try {
+                  final saved = await CommunityApiService.instance.updatePost(
+                    postId: post.id,
+                    title: titleController.text.trim(),
+                    category: selectedEditCategory,
+                    note: _editedNoteContent(post, textControllers),
+                  );
+                  if (!dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop(saved);
+                } catch (error) {
+                  if (!dialogContext.mounted) return;
+                  setDialogState(() {
+                    isSaving = false;
+                    saveError = 'Could not update this post: $error';
+                  });
+                }
+              }
+
+              return AlertDialog(
+                title: const Text('Edit post'),
+                content: SizedBox(
+                  width: 520,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextField(
+                          controller: titleController,
+                          enabled: !isSaving,
+                          maxLength: 50,
+                          onChanged: (_) => setDialogState(() {}),
+                          decoration: const InputDecoration(labelText: 'Title'),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          initialValue: selectedEditCategory,
+                          decoration:
+                              const InputDecoration(labelText: 'Category'),
+                          items: categories
+                              .map(
+                                (category) => DropdownMenuItem(
+                                  value: category,
+                                  child: Text(category),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: isSaving
+                              ? null
+                              : (category) {
+                                  if (category == null) return;
+                                  setDialogState(
+                                    () => selectedEditCategory = category,
+                                  );
+                                },
+                        ),
+                        const SizedBox(height: 12),
+                        for (var index = 0;
+                            index < textControllers.length;
+                            index++) ...[
+                          TextField(
+                            controller: textControllers[index],
+                            enabled: !isSaving,
+                            minLines: 4,
+                            maxLines: null,
+                            keyboardType: TextInputType.multiline,
+                            onChanged: (_) => setDialogState(() {}),
+                            decoration: InputDecoration(
+                              labelText: textControllers.length == 1
+                                  ? 'Post content'
+                                  : 'Post content ${index + 1}',
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                          if (index + 1 < textControllers.length)
+                            const SizedBox(height: 12),
+                        ],
+                        if (saveError != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            saveError!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSaving
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: isValid && !isSaving ? saveEdit : null,
+                    child: isSaving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Save changes'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      titleController.dispose();
+      for (final controller in textControllers) {
+        controller.dispose();
+      }
+    }
+
+    if (!mounted || updated == null) return;
+    _applyEditedPost(updated);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Post updated.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = AuthService.instance.currentSession?.id.toString();
@@ -278,6 +602,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
           data: AppTheme.company(companyTheme),
           child: Scaffold(
             backgroundColor: companyTheme.backgroundColor,
+            appBar: widget.showStandaloneAppBar
+                ? AppBar(
+                    backgroundColor: companyTheme.surfaceColor,
+                    foregroundColor: companyTheme.inkColor,
+                    surfaceTintColor: Colors.transparent,
+                    elevation: 0,
+                    title: const Text('Community'),
+                  )
+                : null,
             body: Column(
               children: [
                 Padding(
@@ -399,6 +732,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               children: [
                                 NoteCard(
                                   note: note,
+                                  isHighlighted: note.id == _highlightedPostId,
                                   onPressed: () {
                                     debugPrint('Tapped ${note.title}');
                                   },
@@ -410,13 +744,28 @@ class _CommunityScreenState extends State<CommunityScreen> {
                                     right: 5,
                                     child: PopupMenuButton<String>(
                                       onSelected: (value) {
-                                        if (value == 'save') {
+                                        if (value == 'edit') {
+                                          unawaited(_editPost(note));
+                                        } else if (value == 'save') {
                                           _markAsSaved(note.id);
                                         } else if (value == 'delete') {
                                           _confirmDelete(note.id);
                                         }
                                       },
                                       itemBuilder: (context) => [
+                                        const PopupMenuItem(
+                                          value: 'edit',
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.edit_outlined,
+                                                color: Colors.deepPurple,
+                                              ),
+                                              SizedBox(width: 8),
+                                              Text('Edit'),
+                                            ],
+                                          ),
+                                        ),
                                         if (selectedCategory != 'Saved')
                                           const PopupMenuItem(
                                             value: 'save',

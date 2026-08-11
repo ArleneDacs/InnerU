@@ -14,6 +14,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/coaches/cha
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coach_carousel.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/my_accountability_meetings_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/coaches/coaches_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/emotion_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_tracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/fasting_tracker/fasting_timer_screen.dart';
@@ -28,6 +29,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/UsersData/u
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/coach_api_service.dart';
+import 'package:selfcare_projects/src/services/community_notification_target.dart';
 import 'package:selfcare_projects/src/services/dashboard_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/daily_score_service.dart';
@@ -1252,7 +1254,22 @@ class _DashboardScreenState extends State<DashboardScreen>
         );
         break;
       case 'community_comment':
-        Navigator.pushNamed(context, '/communityScreen');
+      case 'community_heart':
+      case 'comment_reply':
+      case 'comment_reaction':
+      case 'community_mention':
+        final target = CommunityNotificationTarget.fromNotification(
+          notification,
+        );
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CommunityScreen(
+              targetPostId: target.postId,
+              targetCommentId: target.commentId,
+            ),
+          ),
+        );
         break;
       case 'step_submission_approved':
       case 'step_submission_declined':

@@ -6,6 +6,50 @@ import 'package:selfcare_projects/src/services/app_update_service.dart';
 
 void main() {
   group('SplashScreen force-update gating', () {
+    testWidgets('restored session completes the gate without visiting login',
+        (tester) async {
+      var startupReady = false;
+
+      await tester.pumpWidget(MaterialApp(
+        home: SplashScreen(
+          checkForUpdate: () async => AppUpdateCheckResult.upToDate,
+          waitForSessionRestore: () async {},
+          hasRestoredSession: () => true,
+          skipBrandingDelayForRestoredSession: true,
+          onStartupReady: () => startupReady = true,
+        ),
+      ));
+
+      await tester.pump();
+      await tester.pump();
+
+      expect(startupReady, isTrue);
+      expect(find.byType(LoginScreen), findsNothing);
+    });
+
+    testWidgets('restored session still cannot bypass a forced update',
+        (tester) async {
+      var startupReady = false;
+
+      await tester.pumpWidget(MaterialApp(
+        home: SplashScreen(
+          checkForUpdate: () async =>
+              AppUpdateCheckResult.outdated('https://apps.apple.com/app/id1'),
+          onUpdateNow: (_) async {},
+          waitForSessionRestore: () async {},
+          hasRestoredSession: () => true,
+          skipBrandingDelayForRestoredSession: true,
+          onStartupReady: () => startupReady = true,
+        ),
+      ));
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('A new version is available'), findsOneWidget);
+      expect(startupReady, isFalse);
+    });
+
     testWidgets(
         'shows the blocking dialog when the update check reports outdated',
         (tester) async {
@@ -60,18 +104,21 @@ void main() {
         home: SplashScreen(
           checkForUpdate: () => Future.delayed(
             const Duration(seconds: 4),
-            () => AppUpdateCheckResult.outdated('https://apps.apple.com/app/id1'),
+            () =>
+                AppUpdateCheckResult.outdated('https://apps.apple.com/app/id1'),
           ),
           onUpdateNow: (_) async {},
         ),
       ));
 
       await tester.pump(const Duration(seconds: 3));
-      expect(find.byType(LoginScreen), findsNothing); // 3s branding delay elapsed, but check isn't done yet — must not have navigated
+      expect(find.byType(LoginScreen),
+          findsNothing); // 3s branding delay elapsed, but check isn't done yet — must not have navigated
 
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
-      expect(find.text('A new version is available'), findsOneWidget); // now the slow check has resolved and blocked correctly
+      expect(find.text('A new version is available'),
+          findsOneWidget); // now the slow check has resolved and blocked correctly
     });
   });
 }

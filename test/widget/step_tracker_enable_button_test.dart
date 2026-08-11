@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +19,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'inneru.app.session': '',
     });
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
 
     final session = AppSession(
       id: 42,
@@ -62,5 +64,9 @@ void main() {
 
     expect(find.text('Enable Step Tracking'), findsNothing);
     expect(find.text('Sync Apple Health'), findsNothing);
+
+    // Dispose the tracker before closing its debug streams in tearDown.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 }

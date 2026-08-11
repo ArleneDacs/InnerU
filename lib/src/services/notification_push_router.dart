@@ -9,6 +9,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/meditation/
 import 'package:selfcare_projects/src/features/authentication/screen/notifications/notifications_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/my_step_submissions_screen.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/community_notification_target.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notification_api_service.dart';
 
@@ -58,13 +59,15 @@ class NotificationPushRouter {
       case 'community_heart':
       case 'comment_reply':
       case 'comment_reaction':
-        final postId = data is Map ? data['postId'] as String? : null;
-        final commentId = data is Map ? data['commentId'] as String? : null;
+      case 'community_mention':
+        final target = CommunityNotificationTarget.fromNotification(
+          notification,
+        );
         navigator.push(
           MaterialPageRoute(
             builder: (context) => CommunityScreen(
-              targetPostId: postId,
-              targetCommentId: commentId,
+              targetPostId: target.postId,
+              targetCommentId: target.commentId,
             ),
           ),
         );

@@ -502,6 +502,64 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     }
   }
 
+  // Escape hatch for sessions that can never be saved -- most commonly a
+  // workout the user started and then forgot about for so long that the
+  // elapsed duration blows past the backend's sane-duration cap (24h, see
+  // ExerciseController::store's duration_seconds validation). Stop & save
+  // sends the real elapsed time, so once a session is that stale every save
+  // attempt fails the same way forever and there was previously no way out
+  // short of clearing the app's local storage.
+  Future<bool> _confirmDiscardSession() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Discard this workout?'),
+            content: const Text(
+              "This clears the in-progress session without saving it. "
+              "Use this if it's stuck (for example, left running for a "
+              'very long time) or was started by mistake.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _discardActiveSession() async {
+    if (_isSaving || !_isSessionActive) return;
+
+    final confirmed = await _confirmDiscardSession();
+    if (!confirmed || !mounted) return;
+
+    unawaited(_stopCompletionAlarm());
+    await _clearExerciseNotification();
+    await _clearActiveSessionCache();
+
+    if (!mounted) return;
+    setState(() {
+      _selectedType = _exerciseTypes.first;
+      _goalDurationSelection =
+          const ExerciseDurationSelection(hours: 0, minutes: 5, seconds: 0);
+      _intensity = 2;
+      _customTypeController.clear();
+      _notesController.clear();
+      _startPhotoUrl = null;
+      _sessionStartAt = null;
+      _sessionEndsAt = null;
+      _hasAnnouncedGoalReached = false;
+    });
+    _showMessage('Workout discarded.');
+  }
+
   Future<void> _deleteExercise(String logId) async {
     final session = AuthService.instance.currentSession;
     if (session == null) return;
@@ -828,6 +886,18 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
               ),
             ),
           ),
+          if (_isSessionActive) ...[
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                onPressed: _isSaving ? null : _discardActiveSession,
+                child: Text(
+                  'Discard workout',
+                  style: TextStyle(color: theme.mutedInkColor),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

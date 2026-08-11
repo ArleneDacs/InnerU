@@ -37,7 +37,7 @@ class _SetuppageState extends State<Setuppage> {
         StepTracker(),
         DashboardScreen(initialCompanyTheme: _companyTheme),
         TodoList(),
-        CommunityScreen(),
+        const CommunityScreen(showStandaloneAppBar: false),
       ];
 
   final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];
@@ -170,7 +170,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
         StepTracker(),
         CoachDashboardScreen(),
         TodoList(),
-        CommunityScreen(),
+        const CommunityScreen(showStandaloneAppBar: false),
       ];
 
   final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];

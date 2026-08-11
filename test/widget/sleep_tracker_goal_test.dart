@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
@@ -25,6 +26,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'inneru.app.session': '',
     });
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     final session = AppSession(
       id: 77,
       token: 'sleep-test-token',

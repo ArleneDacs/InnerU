@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/leaderboard/leaderboard_screen.dart';
@@ -100,6 +101,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     const session = AppSession(
       id: 42,
       token: 'leaderboard-rank-test-token',

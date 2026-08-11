@@ -22,6 +22,70 @@ class PostHeartState {
   }
 }
 
+/// A compact identity used only when someone asks to see who hearted a post.
+/// It is intentionally fetched on demand rather than being attached to every
+/// card in the community feed.
+class CommunityPostLiker {
+  const CommunityPostLiker({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  factory CommunityPostLiker.fromJson(Map<String, dynamic> json) {
+    final rawName = json['name']?.toString().trim() ?? '';
+    return CommunityPostLiker(
+      id: json['id']?.toString() ?? '',
+      name: rawName.isEmpty ? 'Member' : rawName,
+    );
+  }
+}
+
+/// One bounded page of post-heart identities.  [hasMore] lets the detail
+/// sheet load another small page for popular posts without turning hover into
+/// a large request.
+class CommunityPostLikersPage {
+  const CommunityPostLikersPage({
+    required this.likers,
+    required this.heartsCount,
+    required this.page,
+    required this.perPage,
+    required this.hasMore,
+  });
+
+  final List<CommunityPostLiker> likers;
+  final int heartsCount;
+  final int page;
+  final int perPage;
+  final bool hasMore;
+
+  factory CommunityPostLikersPage.fromJson(Map<String, dynamic> json) {
+    final rawLikers = json['likers'];
+    final likers = rawLikers is List
+        ? rawLikers
+            .whereType<Map>()
+            .map(
+              (liker) => CommunityPostLiker.fromJson(
+                Map<String, dynamic>.from(liker),
+              ),
+            )
+            .toList(growable: false)
+        : const <CommunityPostLiker>[];
+
+    int asInt(Object? value, int fallback) {
+      if (value is num) return value.toInt();
+      return int.tryParse(value?.toString() ?? '') ?? fallback;
+    }
+
+    return CommunityPostLikersPage(
+      likers: likers,
+      heartsCount: asInt(json['heartsCount'], 0),
+      page: asInt(json['page'], 1),
+      perPage: asInt(json['perPage'], 12),
+      hasMore: json['hasMore'] == true,
+    );
+  }
+}
+
 class CommunityApiService {
   CommunityApiService._();
 
@@ -45,6 +109,20 @@ class CommunityApiService {
         .whereType<Map>()
         .map((post) => Note.fromMap(Map<String, dynamic>.from(post)))
         .toList();
+  }
+
+  /// Fetches just one authorized post for a notification deep link.  This
+  /// avoids reloading every community category merely to find its target.
+  Future<Note> fetchPost(String postId) async {
+    final response = await _api.getJson(
+      '/api/community/posts/$postId',
+      token: _token,
+    );
+    final post = response['post'];
+    if (post is! Map) {
+      throw ApiException(500, 'Community post response was invalid.');
+    }
+    return Note.fromMap(Map<String, dynamic>.from(post));
   }
 
   Future<Note> createPost({
@@ -74,6 +152,30 @@ class CommunityApiService {
     }
 
     return Note.fromMap(post);
+  }
+
+  Future<Note> updatePost({
+    required String postId,
+    required String title,
+    required String category,
+    required List<Map<String, String>> note,
+  }) async {
+    final response = await _api.patchJson(
+      '/api/community/posts/$postId',
+      {
+        'title': title,
+        'category': category,
+        'note': note,
+      },
+      token: _token,
+    );
+
+    final post = response['post'];
+    if (post is! Map) {
+      throw ApiException(500, 'Community post update response was invalid.');
+    }
+
+    return Note.fromMap(Map<String, dynamic>.from(post));
   }
 
   Future<void> setSaved({
@@ -113,5 +215,20 @@ class CommunityApiService {
       token: _token,
     );
     return PostHeartState.fromJson(response);
+  }
+
+  Future<CommunityPostLikersPage> fetchPostLikers(
+    String postId, {
+    int page = 1,
+    int perPage = 12,
+  }) async {
+    final safePage = page < 1 ? 1 : page;
+    final safePerPage = perPage.clamp(1, 25).toInt();
+    final response = await _api.getJson(
+      '/api/community/posts/$postId/hearts'
+      '?page=$safePage&perPage=$safePerPage',
+      token: _token,
+    );
+    return CommunityPostLikersPage.fromJson(response);
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +17,7 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     await AppSessionService.instance.clear();
     AndroidFlutterLocalNotificationsPlugin.registerWith();
 

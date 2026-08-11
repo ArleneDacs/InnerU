@@ -153,7 +153,7 @@ class App extends StatelessWidget {
           child: child ?? const SizedBox.shrink(),
         ),
         home: GlobalPaddingWrapper(
-          child: SplashScreen(),
+          child: const LoginScreen(),
         ),
         routes: {
           '/home': (context) => DashboardScreen(),
@@ -250,6 +250,12 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
   String? _lastSeenUserId;
   String? _lastStepServiceUserId;
   bool _appleHealthPromptShowing = false;
+  bool _startupReady = false;
+
+  void _markStartupReady() {
+    if (!mounted || _startupReady) return;
+    setState(() => _startupReady = true);
+  }
 
   @override
   void initState() {
@@ -387,6 +393,20 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
               );
             });
           }
+        }
+
+        // The forced-update check is the top-level safety gate. Keep it in
+        // front of both the login and restored-session destinations so a
+        // cached session cannot bypass a required update. The splash waits
+        // only for local secure-session restoration, not its network refresh.
+        if (!_startupReady) {
+          return SplashScreen(
+            waitForSessionRestore: AppSessionService.instance.initialize,
+            hasRestoredSession: () =>
+                AuthService.instance.currentSession != null,
+            skipBrandingDelayForRestoredSession: true,
+            onStartupReady: _markStartupReady,
+          );
         }
 
         if (snapshot.hasData && snapshot.data != null) {

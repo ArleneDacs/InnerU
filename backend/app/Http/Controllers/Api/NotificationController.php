@@ -98,11 +98,10 @@ class NotificationController extends Controller
         return response()->json(['message' => 'Notification deleted.']);
     }
 
-    // Client-driven streak milestone notify-myself endpoint. Streaks are
-    // computed and tracked entirely on the client today (no backend streak
-    // model), so this is the one notification type with no server-side
-    // trigger point of its own — it only ever creates a notification for
-    // the calling user, never an arbitrary user_id from the body.
+    // Client-driven notify-myself endpoint retained for the legacy
+    // meditation/exercise/fasting streak flows. Step-goal awards are now
+    // calculated from DailyTracker rows on the server, so accepting a
+    // client-supplied Steps milestone here could create a duplicate.
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -119,6 +118,12 @@ class NotificationController extends Controller
         $days = (int) $validated['days'];
         $activity = trim((string) $validated['activity']);
         $milestone = trim((string) $validated['milestone']);
+
+        if (strtolower($activity) === 'steps') {
+            return response()->json([
+                'message' => 'Step-goal milestones are created automatically.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         $notification = Notification::createFor(
             (string) $user->id,

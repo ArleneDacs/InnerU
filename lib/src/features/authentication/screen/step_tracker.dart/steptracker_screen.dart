@@ -98,7 +98,6 @@ class _StepTrackerState extends State<StepTracker>
   Timer? _statePersistTimer;
   Timer? _appleHealthRefreshTimer;
   final ImagePicker _memoryPicker = ImagePicker();
-  final ActivityStreakService _activityStreakService = ActivityStreakService();
   final DailyTrackerApiService _dailyTrackerApiService =
       DailyTrackerApiService.instance;
 
@@ -1096,7 +1095,7 @@ class _StepTrackerState extends State<StepTracker>
           userData['displayName']?.toString();
 
       await PendingStepSyncService.instance.flush(userId: userId);
-      await _dailyTrackerApiService.recordCompletedActivities(
+      final response = await _dailyTrackerApiService.recordCompletedActivities(
         date: formattedDate,
         stepCount: _steps,
         stepGoal: _dailyGoal,
@@ -1110,6 +1109,7 @@ class _StepTrackerState extends State<StepTracker>
         companyName: userData['company_name']?.toString() ??
             userData['companyName']?.toString(),
       );
+      _handleStepGoalAchievementResponse(response);
     } catch (error) {
       debugPrint('Failed to save daily step activity: $error');
       await PendingStepSyncService.instance.queueStepProgress(
@@ -1189,12 +1189,13 @@ class _StepTrackerState extends State<StepTracker>
 
     try {
       await PendingStepSyncService.instance.flush(userId: userId);
-      await _dailyTrackerApiService.recordCompletedActivities(
+      final response = await _dailyTrackerApiService.recordCompletedActivities(
         date: formattedDate,
         stepCount: _steps,
         stepGoal: _dailyGoal,
         steps: _steps > 0,
       );
+      _handleStepGoalAchievementResponse(response);
       _lastSyncedStepCount = _steps;
     } catch (error) {
       debugPrint("Failed to sync step progress: $error");
@@ -1240,33 +1241,22 @@ class _StepTrackerState extends State<StepTracker>
   Future<void> _handleStepGoalCompleted() async {
     if (_stepGoalDialogVisible || !mounted || _isDisposed) return;
 
-    final unlockedRewards = await _recordStepStreak();
-    if (unlockedRewards.isNotEmpty && mounted && !_isDisposed) {
-      _showStreakRewardSnackBar(unlockedRewards.last);
-    }
-
     final shouldShowPrompt = await _markStepGoalPromptIfNeeded();
     if (!shouldShowPrompt || !mounted || _isDisposed) return;
 
     await _showStepGoalCompleteDialog();
   }
 
-  Future<List<ActivityStreakMilestone>> _recordStepStreak() async {
-    final userId = _currentUserId;
-    if (userId == null) return <ActivityStreakMilestone>[];
-
-    try {
-      return await _activityStreakService.recordCompletedSession(
-        userId: userId,
-        type: ActivityStreakType.steps,
-      );
-    } catch (error) {
-      debugPrint('Step streak update failed: $error');
-      return <ActivityStreakMilestone>[];
+  void _handleStepGoalAchievementResponse(Map<String, dynamic> response) {
+    if (!mounted || _isDisposed) return;
+    final rewards =
+        DailyTrackerApiService.newStepGoalRewardsFromResponse(response);
+    if (rewards.isNotEmpty) {
+      _showStreakRewardSnackBar(rewards.last);
     }
   }
 
-  void _showStreakRewardSnackBar(ActivityStreakMilestone reward) {
+  void _showStreakRewardSnackBar(StepGoalReward reward) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Step medal unlocked: ${reward.title}'),
