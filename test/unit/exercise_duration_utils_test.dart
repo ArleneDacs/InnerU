@@ -30,5 +30,27 @@ void main() {
       expect(formatExerciseDuration(const Duration(seconds: 59)), '0m 59s');
       expect(formatExerciseDuration(const Duration(minutes: 10)), '10m 00s');
     });
+
+    test('uses total API seconds without adding the minute field twice', () {
+      expect(
+        exerciseLogDuration(durationMinutes: 30, durationSeconds: 1800),
+        const Duration(minutes: 30),
+      );
+      expect(
+        exerciseLogDuration(durationMinutes: 60, durationSeconds: 3600),
+        const Duration(hours: 1),
+      );
+      expect(
+        exerciseLogDuration(durationMinutes: 120, durationSeconds: 7200),
+        const Duration(hours: 2),
+      );
+    });
+
+    test('uses legacy minutes when a log has no total seconds', () {
+      expect(
+        exerciseLogDuration(durationMinutes: 45, durationSeconds: 0),
+        const Duration(minutes: 45),
+      );
+    });
   });
 }

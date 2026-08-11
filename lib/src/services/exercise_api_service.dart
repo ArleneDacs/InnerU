@@ -1,5 +1,6 @@
 import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_session_limits.dart';
 
 class ExerciseApiService {
   ExerciseApiService._();
@@ -35,12 +36,20 @@ class ExerciseApiService {
     String? endPhotoUrl,
     String? date,
   }) async {
+    // Keep all client callers inside the API's seconds contract. The tracker
+    // already bounds elapsed time, but this final guard prevents a stale or
+    // future caller from creating an unsaveable request with conflicting
+    // minutes/seconds values.
+    final requestedDuration = durationSeconds > 0
+        ? Duration(seconds: durationSeconds)
+        : Duration(minutes: durationMinutes);
+    final safeDuration = boundedExerciseLogDuration(requestedDuration);
     return _api.postJson(
       '/api/exercise',
       {
         'type': type,
-        'duration_minutes': durationMinutes,
-        'duration_seconds': durationSeconds,
+        'duration_minutes': exerciseLogDurationMinutes(safeDuration),
+        'duration_seconds': safeDuration.inSeconds,
         'intensity': intensity,
         if (notes != null) 'notes': notes,
         if (startPhotoUrl != null) 'start_photo_url': startPhotoUrl,

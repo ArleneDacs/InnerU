@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
@@ -10,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_duration_utils.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_session_limits.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/image_storage_service.dart';
@@ -49,6 +49,11 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   static const String _sessionIntensityKey = 'exercise_session_intensity';
   static const String _sessionNotesKey = 'exercise_session_notes';
   static const String _sessionStartPhotoKey = 'exercise_session_start_photo';
+  static const String _sessionEndPhotoKey = 'exercise_session_end_photo';
+  static const String _sessionStoppedDurationKey =
+      'exercise_session_stopped_duration_seconds';
+  static const String _sessionOwnerKey = 'exercise_session_owner_uid';
+  static const Duration _photoUploadTimeout = Duration(seconds: 45);
   static final List<int> _durationHourOptions =
       List<int>.generate(24, (index) => index);
   static final List<int> _durationMinuteSecondOptions =
@@ -68,12 +73,17 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   int _intensity = 2;
   DateTime? _sessionStartAt;
   DateTime? _sessionEndsAt;
+  Duration? _stoppedElapsedDuration;
   String? _startPhotoUrl;
+  String? _pendingEndPhotoUrl;
   bool _isUploadingStartPhoto = false;
   bool _isUploadingEndPhoto = false;
+  bool _isStarting = false;
   bool _isSaving = false;
   bool _isLoadingLogs = true;
+  bool _isRestoringSession = true;
   bool _hasAnnouncedGoalReached = false;
+  String? _saveRecoveryError;
   Timer? _sessionTimer;
   Timer? _completionAlarmTimer;
   final AudioPlayer _alarmPlayer = AudioPlayer()
@@ -120,15 +130,19 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     }
   }
 
-  bool get _isSessionActive => _sessionStartAt != null && _sessionEndsAt != null;
+  bool get _isSessionActive =>
+      _sessionStartAt != null && _sessionEndsAt != null;
 
   Duration _elapsedSessionTime() {
+    final stoppedDuration = _stoppedElapsedDuration;
+    if (stoppedDuration != null) return stoppedDuration;
     if (_sessionStartAt == null) return Duration.zero;
     final elapsed = DateTime.now().difference(_sessionStartAt!);
     return elapsed.isNegative ? Duration.zero : elapsed;
   }
 
   Duration _remainingSessionTime() {
+    if (_stoppedElapsedDuration != null) return Duration.zero;
     if (_sessionEndsAt == null) return Duration.zero;
     final remaining = _sessionEndsAt!.difference(DateTime.now());
     return remaining.isNegative ? Duration.zero : remaining;
@@ -142,13 +156,11 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     if (!_isSessionActive) return 0;
     final total = _sessionEndsAt!.difference(_sessionStartAt!).inSeconds;
     if (total <= 0) return 0;
-    final elapsed =
-        DateTime.now().difference(_sessionStartAt!).inSeconds.clamp(0, total);
+    final elapsed = _elapsedSessionTime().inSeconds.clamp(0, total);
     return elapsed / total;
   }
 
-  Future<SharedPreferences> get _prefs async =>
-      SharedPreferences.getInstance();
+  Future<SharedPreferences> get _prefs async => SharedPreferences.getInstance();
 
   Future<void> _restoreActiveSession() async {
     try {
@@ -156,42 +168,105 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       final startMs = prefs.getInt(_sessionStartKey);
       if (startMs == null) return;
 
-      final start = DateTime.fromMillisecondsSinceEpoch(startMs);
-      final totalSeconds =
-          prefs.getInt(_sessionGoalSecondsKey) ??
+      final session = AuthService.instance.currentSession;
+      final ownerId = prefs.getString(_sessionOwnerKey);
+      if (session == null ||
+          (ownerId != null && ownerId != session.id.toString())) {
+        await _clearActiveSessionCache(prefs);
+        return;
+      }
+
+      final now = DateTime.now();
+      final rawStart = DateTime.fromMillisecondsSinceEpoch(startMs);
+      final start = rawStart.isAfter(now) ? now : rawStart;
+      final totalSeconds = prefs.getInt(_sessionGoalSecondsKey) ??
           Duration(minutes: prefs.getInt(_sessionGoalKey) ?? 5).inSeconds;
-      final goalDuration = Duration(seconds: totalSeconds);
+      final goalDuration = normalizedExerciseSessionGoalDuration(
+        Duration(seconds: totalSeconds),
+      );
       final end = start.add(goalDuration);
+      final stoppedSeconds = prefs.getInt(_sessionStoppedDurationKey);
+      final stoppedDuration = stoppedSeconds == null
+          ? null
+          : boundedExerciseLogDuration(Duration(seconds: stoppedSeconds));
+      final storedType = prefs.getString(_sessionTypeKey)?.trim();
+      final storedCustomType =
+          prefs.getString(_sessionCustomTypeKey)?.trim() ?? '';
+      final usesKnownType =
+          storedType != null && _exerciseTypes.contains(storedType);
+      final selectedType = usesKnownType ? storedType : 'Other';
+      final customType = usesKnownType
+          ? storedCustomType
+          : (storedCustomType.isNotEmpty
+              ? storedCustomType
+              : (storedType?.isNotEmpty == true ? storedType! : ''));
+      final storedIntensity = prefs.getInt(_sessionIntensityKey);
+      final intensity = storedIntensity != null &&
+              storedIntensity >= 1 &&
+              storedIntensity <= 3
+          ? storedIntensity
+          : 2;
 
       if (!mounted) return;
       setState(() {
         _sessionStartAt = start;
         _sessionEndsAt = end;
+        _stoppedElapsedDuration = stoppedDuration;
         _goalDurationSelection =
             exerciseDurationSelectionFromDuration(goalDuration);
-        _selectedType = prefs.getString(_sessionTypeKey) ?? _selectedType;
-        _customTypeController.text = prefs.getString(_sessionCustomTypeKey) ?? '';
-        _intensity = prefs.getInt(_sessionIntensityKey) ?? _intensity;
+        _selectedType = selectedType;
+        _customTypeController.text = customType;
+        _intensity = intensity;
         _notesController.text = prefs.getString(_sessionNotesKey) ?? '';
         _startPhotoUrl = prefs.getString(_sessionStartPhotoKey);
-        _hasAnnouncedGoalReached = false;
+        _pendingEndPhotoUrl = prefs.getString(_sessionEndPhotoKey);
+        // A restored expired workout should be recoverable without suddenly
+        // starting a looping alarm while the member is trying to stop it.
+        _hasAnnouncedGoalReached = stoppedDuration != null || !end.isAfter(now);
+        _saveRecoveryError = null;
       });
 
-      _startSessionTicker();
-      await _syncExerciseNotification();
+      if (stoppedDuration == null && _remainingSessionTime() > Duration.zero) {
+        _startSessionTicker();
+        await _syncExerciseNotification();
+      } else {
+        await _clearExerciseNotification();
+      }
+
+      // Repair malformed legacy cache so later app starts get the same safe
+      // picker-compatible data rather than rebuilding an invalid dropdown.
+      if (ownerId == null ||
+          rawStart != start ||
+          totalSeconds != goalDuration.inSeconds ||
+          (stoppedSeconds != null &&
+              stoppedSeconds != stoppedDuration!.inSeconds)) {
+        await _persistActiveSession();
+      }
     } catch (error) {
       debugPrint('Failed to restore exercise session: $error');
+      try {
+        await _clearActiveSessionCache();
+      } catch (_) {}
+    } finally {
+      if (mounted) {
+        setState(() => _isRestoringSession = false);
+      }
     }
   }
 
   Future<void> _persistActiveSession() async {
     final prefs = await _prefs;
     if (!_isSessionActive) return;
+    final userId = AuthService.instance.currentUserId;
+    if (userId == null || userId.isEmpty) {
+      throw StateError('Exercise session requires a signed-in user.');
+    }
 
     await prefs.setInt(
       _sessionStartKey,
       _sessionStartAt!.millisecondsSinceEpoch,
     );
+    await prefs.setString(_sessionOwnerKey, userId);
     await prefs.setInt(
       _sessionGoalSecondsKey,
       _selectedGoalDuration.inSeconds,
@@ -212,10 +287,24 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     } else {
       await prefs.remove(_sessionStartPhotoKey);
     }
+    if (_pendingEndPhotoUrl != null && _pendingEndPhotoUrl!.isNotEmpty) {
+      await prefs.setString(_sessionEndPhotoKey, _pendingEndPhotoUrl!);
+    } else {
+      await prefs.remove(_sessionEndPhotoKey);
+    }
+    if (_stoppedElapsedDuration != null) {
+      await prefs.setInt(
+        _sessionStoppedDurationKey,
+        boundedExerciseLogDuration(_stoppedElapsedDuration!).inSeconds,
+      );
+    } else {
+      await prefs.remove(_sessionStoppedDurationKey);
+    }
   }
 
-  Future<void> _clearActiveSessionCache() async {
-    final prefs = await _prefs;
+  Future<void> _clearActiveSessionCache(
+      [SharedPreferences? cachedPrefs]) async {
+    final prefs = cachedPrefs ?? await _prefs;
     await prefs.remove(_sessionStartKey);
     await prefs.remove(_sessionGoalSecondsKey);
     await prefs.remove(_sessionGoalKey);
@@ -224,12 +313,24 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     await prefs.remove(_sessionIntensityKey);
     await prefs.remove(_sessionNotesKey);
     await prefs.remove(_sessionStartPhotoKey);
+    await prefs.remove(_sessionEndPhotoKey);
+    await prefs.remove(_sessionStoppedDurationKey);
+    await prefs.remove(_sessionOwnerKey);
+  }
+
+  void _stopSessionTicker() {
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
   }
 
   void _startSessionTicker() {
-    _sessionTimer?.cancel();
+    _stopSessionTicker();
+    if (!_isSessionActive) return;
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
+      if (!mounted || !_isSessionActive) {
+        _stopSessionTicker();
+        return;
+      }
       final remaining = _remainingSessionTime();
       if (remaining == Duration.zero && !_hasAnnouncedGoalReached) {
         _hasAnnouncedGoalReached = true;
@@ -237,6 +338,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         _showMessage('Exercise goal reached. Great work!');
       }
       setState(() {});
+      if (remaining == Duration.zero) {
+        _stopSessionTicker();
+      }
     });
   }
 
@@ -333,7 +437,10 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
 
   String _effectiveType() {
     final custom = _customTypeController.text.trim();
-    if (_selectedType == 'Other' && custom.isNotEmpty) return custom;
+    // Keep legacy in-progress sessions recoverable. Older versions allowed
+    // an empty custom value and stored the literal "Other"; a new workout
+    // still validates that case before it can start.
+    if (_selectedType == 'Other') return custom.isEmpty ? 'Other' : custom;
     return _selectedType;
   }
 
@@ -347,7 +454,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
 
     final imageUrl = await ImageStorageService.uploadImageFile(
       File(pickedImage.path),
-    );
+    ).timeout(_photoUploadTimeout);
     if (imageUrl == null || imageUrl.isEmpty) {
       throw Exception(
         ImageStorageService.lastError ?? 'Failed to upload image.',
@@ -356,12 +463,53 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     return imageUrl;
   }
 
+  bool _matchesActiveSession(DateTime startedAt) =>
+      _sessionStartAt?.isAtSameMomentAs(startedAt) ?? false;
+
+  Future<void> _captureAndAttachStartPhoto(DateTime startedAt) async {
+    try {
+      final startPhotoUrl = await _captureExercisePhoto();
+      if (!mounted ||
+          !_matchesActiveSession(startedAt) ||
+          startPhotoUrl == null) {
+        return;
+      }
+
+      setState(() => _startPhotoUrl = startPhotoUrl);
+      try {
+        await _persistActiveSession();
+      } catch (error) {
+        debugPrint('Could not persist exercise start photo: $error');
+      }
+    } on TimeoutException {
+      if (mounted && _matchesActiveSession(startedAt)) {
+        _showMessage(
+            'Start photo upload timed out. Your workout is still running.');
+      }
+    } catch (error) {
+      debugPrint('Start photo capture failed: $error');
+    } finally {
+      if (mounted && _matchesActiveSession(startedAt)) {
+        setState(() => _isUploadingStartPhoto = false);
+      }
+    }
+  }
+
+  Future<void> _syncStartedExerciseNotification(DateTime startedAt) async {
+    final notificationsReady = await _syncExerciseNotification();
+    if (!mounted || !_matchesActiveSession(startedAt) || notificationsReady) {
+      return;
+    }
+    _showMessage(
+        'Exercise is running, but completion alerts are unavailable right now.');
+  }
+
   Future<void> _startExerciseSession() async {
     final session = AuthService.instance.currentSession;
-    if (session == null || _isSaving || _isSessionActive) return;
+    if (session == null || _isSaving || _isStarting || _isSessionActive) return;
 
-    final type = _effectiveType();
-    if (type.trim().isEmpty) {
+    final customType = _customTypeController.text.trim();
+    if (_selectedType == 'Other' && customType.isEmpty) {
       _showMessage('Enter an exercise type.');
       return;
     }
@@ -370,50 +518,58 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       return;
     }
 
-    setState(() {
-      _isUploadingStartPhoto = true;
-    });
-
+    final now = DateTime.now();
     try {
-      // A cancelled/failed photo should not block starting the workout —
-      // the photo is a nice-to-have on the log, not a required field.
-      String? startPhotoUrl;
-      try {
-        startPhotoUrl = await _captureExercisePhoto();
-      } catch (error) {
-        debugPrint('Start photo capture failed: $error');
-      }
-
       unawaited(_stopCompletionAlarm());
-      final now = DateTime.now();
       setState(() {
-        _selectedType = type;
+        _isStarting = true;
         _sessionStartAt = now;
         _sessionEndsAt = now.add(_selectedGoalDuration);
-        _startPhotoUrl = startPhotoUrl;
+        _stoppedElapsedDuration = null;
+        _startPhotoUrl = null;
+        _pendingEndPhotoUrl = null;
         _hasAnnouncedGoalReached = false;
+        _saveRecoveryError = null;
       });
 
+      // Save the start before optional camera/upload work. A slow photo
+      // upload can no longer delay or lose the timer itself.
       await _persistActiveSession();
       _startSessionTicker();
-      final notificationsReady = await _syncExerciseNotification();
-      final startedMessage = notificationsReady
-          ? 'Exercise started. We will alert you when the ${formatExerciseDuration(_selectedGoalDuration)} goal is done.'
-          : 'Exercise started, but completion alerts are unavailable right now.';
+      if (!mounted || !_matchesActiveSession(now)) return;
+      setState(() {
+        _isStarting = false;
+        _isUploadingStartPhoto = true;
+      });
+      unawaited(_syncStartedExerciseNotification(now));
+      unawaited(_captureAndAttachStartPhoto(now));
       _showMessage(
-        startPhotoUrl == null
-            ? '$startedMessage (no start photo saved.)'
-            : startedMessage,
+        'Exercise started. We will alert you when the '
+        '${formatExerciseDuration(_selectedGoalDuration)} goal is done.',
       );
     } catch (error) {
+      _stopSessionTicker();
+      try {
+        await _clearActiveSessionCache();
+      } catch (_) {}
       if (mounted) {
+        setState(() {
+          _sessionStartAt = null;
+          _sessionEndsAt = null;
+          _stoppedElapsedDuration = null;
+          _startPhotoUrl = null;
+          _pendingEndPhotoUrl = null;
+        });
         _showMessage('Could not start exercise. Please try again.');
       }
       debugPrint('Exercise start failed: $error');
     } finally {
       if (mounted) {
         setState(() {
-          _isUploadingStartPhoto = false;
+          _isStarting = false;
+          if (!_isSessionActive) {
+            _isUploadingStartPhoto = false;
+          }
         });
       }
     }
@@ -421,13 +577,25 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
 
   Future<void> _stopExerciseSession() async {
     final session = AuthService.instance.currentSession;
-    if (session == null || _isSaving || !_isSessionActive) return;
+    if (session == null ||
+        _isSaving ||
+        _isUploadingEndPhoto ||
+        !_isSessionActive) {
+      return;
+    }
 
     final type = _effectiveType();
     if (type.trim().isEmpty) {
       _showMessage('Enter an exercise type.');
       return;
     }
+
+    final startedAt = _sessionStartAt!;
+    final elapsedAtStop = _elapsedSessionTime();
+    final logDuration = boundedExerciseLogDuration(elapsedAtStop);
+    final durationWasCapped = exerciseLogDurationWasCapped(elapsedAtStop);
+    final isFirstStopAttempt = _stoppedElapsedDuration == null;
+    var exerciseStored = false;
 
     // Silence the alarm the instant Stop & save is tapped, not after
     // everything else below finishes. _captureExercisePhoto() alone can
@@ -437,38 +605,88 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     // did nothing until something else (like leaving the screen) tore the
     // player down instead.
     unawaited(_stopCompletionAlarm());
+    // Freeze the session at the member's Stop tap. A long photo/network
+    // operation must not advance the clock or restart the completion alarm
+    // while the member is deciding whether to retry or discard.
+    _stopSessionTicker();
+    unawaited(_clearExerciseNotification());
 
     setState(() {
+      if (isFirstStopAttempt) {
+        _stoppedElapsedDuration = elapsedAtStop;
+      }
       _isUploadingEndPhoto = true;
-      _isSaving = true;
+      _saveRecoveryError = null;
     });
     try {
-      // Same as the start photo: don't let a cancelled/failed camera
-      // capture throw away an already-completed workout's data.
-      String? endPhotoUrl;
-      try {
-        endPhotoUrl = await _captureExercisePhoto();
-      } catch (error) {
-        debugPrint('End photo capture failed: $error');
+      if (isFirstStopAttempt) {
+        try {
+          await _persistActiveSession();
+        } catch (error) {
+          // The in-memory duration is still frozen for this attempt. Keep
+          // the recovery controls usable even if local cache is unavailable.
+          debugPrint('Could not persist stopped exercise duration: $error');
+        }
       }
 
-      final elapsed = _elapsedSessionTime();
-      final actualSeconds = math.max(1, elapsed.inSeconds);
-      final actualMinutes = math.max(1, (actualSeconds / 60).round());
+      // Same as the start photo: don't let a cancelled/failed camera
+      // capture throw away an already-completed workout's data.
+      var endPhotoUrl = _pendingEndPhotoUrl;
+      if (endPhotoUrl == null || endPhotoUrl.isEmpty) {
+        try {
+          endPhotoUrl = await _captureExercisePhoto();
+        } on TimeoutException {
+          if (mounted && _matchesActiveSession(startedAt)) {
+            _showMessage(
+              'End photo upload timed out. You can still save this workout.',
+            );
+          }
+        } catch (error) {
+          debugPrint('End photo capture failed: $error');
+        }
+      }
+
+      // The member may choose Discard while a native camera/upload is open.
+      // Never let an older capture attach itself to a later workout.
+      if (!mounted || !_matchesActiveSession(startedAt)) return;
+      if (endPhotoUrl != null && endPhotoUrl.isNotEmpty) {
+        setState(() => _pendingEndPhotoUrl = endPhotoUrl);
+        try {
+          await _persistActiveSession();
+        } catch (error) {
+          // The session is already persisted from Start; a failed optional
+          // end-photo cache write must not make Stop unusable.
+          debugPrint('Could not persist exercise end photo: $error');
+        }
+      }
+
+      if (!mounted || !_matchesActiveSession(startedAt)) return;
+      setState(() {
+        _isUploadingEndPhoto = false;
+        _isSaving = true;
+      });
       await _exerciseApi.store(
         type: type,
-        durationMinutes: actualMinutes,
-        durationSeconds: actualSeconds,
+        durationMinutes: exerciseLogDurationMinutes(logDuration),
+        durationSeconds: logDuration.inSeconds,
         intensity: _intensity,
         notes: _notesController.text.trim(),
         startPhotoUrl: _startPhotoUrl,
         endPhotoUrl: endPhotoUrl,
         date: _todayDate,
       );
-      await _loadTodayLogs();
-      final unlockedRewards = await _recordExerciseStreak(session.id.toString());
+      exerciseStored = true;
+
+      // The API is the authoritative save. Once it succeeds, clear the
+      // replayable local session before any secondary refresh/reward work so
+      // a transient follow-up error cannot make a retry create a duplicate.
       await _clearExerciseNotification();
-      await _clearActiveSessionCache();
+      try {
+        await _clearActiveSessionCache();
+      } catch (error) {
+        debugPrint('Could not clear saved exercise session: $error');
+      }
+      _stopSessionTicker();
 
       if (!mounted) return;
       setState(() {
@@ -479,21 +697,50 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         _customTypeController.clear();
         _notesController.clear();
         _startPhotoUrl = null;
+        _pendingEndPhotoUrl = null;
         _sessionStartAt = null;
         _sessionEndsAt = null;
+        _stoppedElapsedDuration = null;
         _hasAnnouncedGoalReached = false;
+        _saveRecoveryError = null;
+        _isSaving = false;
+        _isUploadingEndPhoto = false;
       });
+      unawaited(_loadTodayLogs());
+      List<ActivityStreakMilestone> unlockedRewards =
+          <ActivityStreakMilestone>[];
+      try {
+        unlockedRewards = await _recordExerciseStreak(session.id.toString());
+      } catch (error) {
+        // Logging the workout already succeeded. Rewards are secondary and
+        // must never turn a saved workout into a misleading retry state.
+        debugPrint('Exercise reward update failed after save: $error');
+      }
+      if (!mounted) return;
       _showMessage(
         unlockedRewards.isEmpty
-            ? 'Exercise logged.'
+            ? (durationWasCapped
+                ? 'Exercise logged at the 24-hour maximum.'
+                : 'Exercise logged.')
             : 'Exercise medal unlocked: ${unlockedRewards.last.title}',
       );
     } catch (error) {
       if (!mounted) return;
-      _showMessage('Could not save exercise. Please try again.');
+      if (exerciseStored) {
+        debugPrint('Exercise follow-up failed after save: $error');
+        return;
+      }
+      final durationNote = durationWasCapped
+          ? ' The duration will be saved at the 24-hour maximum.'
+          : '';
+      final recoveryMessage =
+          'Could not save your workout. It is still on this device. '
+          'Retry save when you are connected, or discard it.$durationNote';
+      setState(() => _saveRecoveryError = recoveryMessage);
+      _showMessage(recoveryMessage);
       debugPrint('Exercise save failed: $error');
     } finally {
-      if (mounted) {
+      if (mounted && _matchesActiveSession(startedAt)) {
         setState(() {
           _isSaving = false;
           _isUploadingEndPhoto = false;
@@ -502,13 +749,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     }
   }
 
-  // Escape hatch for sessions that can never be saved -- most commonly a
-  // workout the user started and then forgot about for so long that the
-  // elapsed duration blows past the backend's sane-duration cap (24h, see
-  // ExerciseController::store's duration_seconds validation). Stop & save
-  // sends the real elapsed time, so once a session is that stale every save
-  // attempt fails the same way forever and there was previously no way out
-  // short of clearing the app's local storage.
+  // A deliberate recovery choice remains available for a mistaken workout,
+  // a session the member no longer wants to save, or a transient save that
+  // they prefer not to retry.
   Future<bool> _confirmDiscardSession() async {
     return await showDialog<bool>(
           context: context,
@@ -542,7 +785,12 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
 
     unawaited(_stopCompletionAlarm());
     await _clearExerciseNotification();
-    await _clearActiveSessionCache();
+    try {
+      await _clearActiveSessionCache();
+    } catch (error) {
+      debugPrint('Could not clear discarded exercise session: $error');
+    }
+    _stopSessionTicker();
 
     if (!mounted) return;
     setState(() {
@@ -553,9 +801,15 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       _customTypeController.clear();
       _notesController.clear();
       _startPhotoUrl = null;
+      _pendingEndPhotoUrl = null;
       _sessionStartAt = null;
       _sessionEndsAt = null;
+      _stoppedElapsedDuration = null;
       _hasAnnouncedGoalReached = false;
+      _isStarting = false;
+      _isUploadingStartPhoto = false;
+      _isUploadingEndPhoto = false;
+      _saveRecoveryError = null;
     });
     _showMessage('Workout discarded.');
   }
@@ -642,7 +896,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                     style: TextStyle(color: theme.inkColor),
                   ),
                 )
-              : _isLoadingLogs
+              : _isRestoringSession
                   ? const Center(child: CircularProgressIndicator())
                   : ListView(
                       padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
@@ -651,7 +905,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                         const SizedBox(height: 16),
                         _buildLogger(theme),
                         const SizedBox(height: 18),
-                        _buildTodayLogs(theme, _todayLogs),
+                        _isLoadingLogs
+                            ? const Center(child: CircularProgressIndicator())
+                            : _buildTodayLogs(theme, _todayLogs),
                       ],
                     ),
         );
@@ -767,7 +1023,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   }
 
   Widget _buildLogger(CompanyThemeData theme) {
-    final controlsDisabled = _isSaving || _isSessionActive;
+    final controlsDisabled = _isSaving || _isStarting || _isSessionActive;
+    final primaryActionDisabled =
+        _isSaving || _isStarting || _isUploadingEndPhoto;
     return _ThemedPanel(
       theme: theme,
       child: Column(
@@ -783,6 +1041,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
+            key: ValueKey('exercise-type-$_selectedType'),
             initialValue: _selectedType,
             isExpanded: true,
             dropdownColor: theme.surfaceColor,
@@ -796,9 +1055,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                   (type) => DropdownMenuItem<String>(
                     value: type,
                     child: Text(type),
-                ),
-              )
-              .toList(),
+                  ),
+                )
+                .toList(),
             onChanged: controlsDisabled
                 ? null
                 : (value) {
@@ -843,16 +1102,22 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
           ),
           const SizedBox(height: 18),
           _buildSessionStatus(theme),
+          if (_saveRecoveryError != null) ...[
+            const SizedBox(height: 12),
+            _buildSaveRecoveryNotice(theme),
+          ],
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _isSaving
+              onPressed: primaryActionDisabled
                   ? null
                   : _isSessionActive
                       ? _stopExerciseSession
                       : _startExerciseSession,
-              icon: (_isSaving ||
+              icon: (_isStarting ||
+                      _isSaving ||
+                      _isUploadingEndPhoto ||
                       (_isSessionActive
                           ? _isUploadingEndPhoto
                           : _isUploadingStartPhoto))
@@ -867,13 +1132,17 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                           : CupertinoIcons.play_circle_fill,
                     ),
               label: Text(
-                _isSaving
-                    ? 'Saving...'
-                    : _isSessionActive
-                        ? (_remainingSessionTime() == Duration.zero
-                            ? 'Stop & save'
-                            : 'Stop & save')
-                        : 'Play exercise',
+                _isStarting
+                    ? 'Starting...'
+                    : _isSaving
+                        ? 'Saving...'
+                        : _isUploadingEndPhoto
+                            ? 'Adding end photo...'
+                            : _isSessionActive
+                                ? (_saveRecoveryError != null
+                                    ? 'Retry save'
+                                    : 'Stop & save')
+                                : 'Play exercise',
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: theme.primaryColor,
@@ -994,6 +1263,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     required ValueChanged<int?>? onChanged,
   }) {
     return DropdownButtonFormField<int>(
+      key: ValueKey('exercise-duration-$label-$value'),
       initialValue: value,
       isExpanded: true,
       dropdownColor: theme.surfaceColor,
@@ -1014,9 +1284,46 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     );
   }
 
+  Widget _buildSaveRecoveryNotice(CompanyThemeData theme) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: theme.isDark ? 0.16 : 0.11),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.orange.withValues(alpha: theme.isDark ? 0.5 : 0.34),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.cloud_off_outlined, color: Colors.orange),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _saveRecoveryError!,
+              style: TextStyle(
+                color: theme.inkColor,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSessionStatus(CompanyThemeData theme) {
     final active = _isSessionActive;
     final remaining = _remainingSessionTime();
+    final elapsed = _elapsedSessionTime();
+    final waitingToSave = _stoppedElapsedDuration != null;
+    final durationWasCapped = exerciseLogDurationWasCapped(elapsed);
     final percent = (_sessionProgress() * 100).round().clamp(0, 100);
 
     return Container(
@@ -1052,7 +1359,11 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  active ? 'Workout in progress' : 'Ready to start',
+                  active
+                      ? (waitingToSave
+                          ? 'Workout ready to save'
+                          : 'Workout in progress')
+                      : 'Ready to start',
                   style: TextStyle(
                     color: theme.inkColor,
                     fontSize: 16,
@@ -1061,7 +1372,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                 ),
               ),
               Text(
-                active ? '$percent%' : formatExerciseDuration(_selectedGoalDuration),
+                active
+                    ? '$percent%'
+                    : formatExerciseDuration(_selectedGoalDuration),
                 style: TextStyle(
                   color: theme.mutedInkColor,
                   fontWeight: FontWeight.w700,
@@ -1082,18 +1395,60 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Remaining ${formatExerciseDuration(remaining)}',
+              waitingToSave
+                  ? 'Stopped at ${formatExerciseDuration(elapsed)}. '
+                      'Retry save when ready.'
+                  : 'Remaining ${formatExerciseDuration(remaining)}',
               style: TextStyle(
                 color: theme.mutedInkColor,
                 fontWeight: FontWeight.w700,
               ),
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Elapsed ${formatExerciseDuration(elapsed)}',
+              style: TextStyle(
+                color: theme.mutedInkColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (durationWasCapped) ...[
+              const SizedBox(height: 10),
+              Text(
+                'This workout has been open for more than 24 hours. '
+                'Stop & save will record the maximum valid duration '
+                '(24 hours), or you can discard it.',
+                style: TextStyle(
+                  color: theme.primaryColor,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+            ],
+            if (_isUploadingStartPhoto) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Adding your optional start photo…',
+                style: TextStyle(
+                  color: theme.mutedInkColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
             if (_startPhotoUrl != null) ...[
               const SizedBox(height: 12),
               _LogPhotoPreview(
                 theme: theme,
                 label: 'Start photo',
                 imageUrl: _startPhotoUrl!,
+              ),
+            ],
+            if (_pendingEndPhotoUrl != null) ...[
+              const SizedBox(height: 12),
+              _LogPhotoPreview(
+                theme: theme,
+                label: 'End photo ready for retry',
+                imageUrl: _pendingEndPhotoUrl!,
               ),
             ],
             if (_hasAnnouncedGoalReached) ...[

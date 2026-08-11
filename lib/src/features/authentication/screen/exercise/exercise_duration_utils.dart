@@ -30,6 +30,24 @@ Duration exerciseDurationFromSelection(ExerciseDurationSelection selection) {
   return selection.toDuration();
 }
 
+/// Builds a duration from an exercise API log.
+///
+/// `durationSeconds` is the canonical, total duration returned by the API.
+/// Older logs may not have it, so those fall back to their minute value.
+/// Never combine the two values: doing so turns a one-hour log
+/// (`60` minutes and `3600` seconds) into two hours.
+Duration exerciseLogDuration({
+  required int durationSeconds,
+  required int durationMinutes,
+}) {
+  final totalSeconds = durationSeconds > 0
+      ? durationSeconds
+      : durationMinutes > 0
+          ? durationMinutes * 60
+          : 0;
+  return Duration(seconds: totalSeconds);
+}
+
 ExerciseDurationSelection exerciseDurationSelectionFromDuration(
   Duration duration,
 ) {

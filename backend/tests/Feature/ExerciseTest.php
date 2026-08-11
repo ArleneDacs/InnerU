@@ -2,16 +2,142 @@
 
 namespace Tests\Feature;
 
-use App\Models\DailyTracker;
-use App\Models\ExerciseLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ExerciseTest extends TestCase
 {
     use RefreshDatabase;
+
+    #[DataProvider('canonicalDurationProvider')]
+    public function test_duration_seconds_is_the_canonical_exercise_duration(
+        int $durationMinutes,
+        int $durationSeconds,
+    ): void {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Run',
+            'duration_minutes' => $durationMinutes,
+            'duration_seconds' => $durationSeconds,
+            'intensity' => 2,
+            'date' => '2026-08-11',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('log.durationMinutes', $durationMinutes)
+            ->assertJsonPath('log.durationSeconds', $durationSeconds);
+
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'duration_minutes' => $durationMinutes,
+            'duration_seconds' => $durationSeconds,
+        ]);
+
+        // Daily totals remain derived from the same canonical seconds value,
+        // so this change cannot inflate activity/medal-related aggregates.
+        $this->assertDatabaseHas('daily_trackers', [
+            'user_id' => $user->id,
+            'date' => '2026-08-11',
+            'exercise_minutes' => $durationMinutes,
+        ]);
+    }
+
+    /**
+     * @return array<string, array{int, int}>
+     */
+    public static function canonicalDurationProvider(): array
+    {
+        return [
+            '30 minutes' => [30, 30 * 60],
+            '1 hour' => [60, 60 * 60],
+            '2 hours' => [120, 2 * 60 * 60],
+            '24-hour recovery cap' => [24 * 60, 24 * 60 * 60],
+        ];
+    }
+
+    public function test_legacy_minutes_only_payload_derives_canonical_seconds(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Yoga',
+            'duration_minutes' => 30,
+            'intensity' => 2,
+            'date' => '2026-08-11',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('log.durationMinutes', 30)
+            ->assertJsonPath('log.durationSeconds', 1_800);
+
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'duration_minutes' => 30,
+            'duration_seconds' => 1_800,
+        ]);
+    }
+
+    public function test_seconds_win_when_a_legacy_minutes_value_disagrees(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Cycling',
+            'duration_minutes' => 120,
+            'duration_seconds' => 3_600,
+            'intensity' => 3,
+            'date' => '2026-08-11',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('log.durationMinutes', 60)
+            ->assertJsonPath('log.durationSeconds', 3_600);
+
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'duration_minutes' => 60,
+            'duration_seconds' => 3_600,
+        ]);
+    }
+
+    #[DataProvider('overLimitDurationProvider')]
+    public function test_rejects_stale_or_long_exercise_sessions(
+        string $durationField,
+        int $duration,
+    ): void {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Walk',
+            $durationField => $duration,
+            'intensity' => 1,
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonValidationErrors([$durationField]);
+
+        $this->assertDatabaseCount('exercise_logs', 0);
+        $this->assertDatabaseCount('daily_trackers', 0);
+    }
+
+    /**
+     * @return array<string, array{string, int}>
+     */
+    public static function overLimitDurationProvider(): array
+    {
+        return [
+            'seconds over 24 hours' => ['duration_seconds', 86_401],
+            'legacy minutes over 24 hours' => ['duration_minutes', 1_441],
+        ];
+    }
 
     public function test_user_can_create_list_and_delete_exercise_logs(): void
     {

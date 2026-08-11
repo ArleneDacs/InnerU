@@ -16,9 +16,17 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ExerciseController extends Controller
 {
-    public function __construct(private readonly UserScoreService $userScoreService)
-    {
-    }
+    /**
+     * A stopped exercise session is an elapsed duration, not a calendar
+     * interval. Keep the same 24-hour ceiling for both modern seconds-based
+     * clients and legacy minutes-only clients so an old, restored session
+     * cannot bypass the cap by omitting duration_seconds.
+     */
+    private const MAX_DURATION_SECONDS = 86_400;
+
+    private const MAX_DURATION_MINUTES = self::MAX_DURATION_SECONDS / 60;
+
+    public function __construct(private readonly UserScoreService $userScoreService) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -57,8 +65,8 @@ class ExerciseController extends Controller
 
         $validated = $request->validate([
             'type' => ['required', 'string', 'max:120'],
-            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:10000', 'required_without:duration_seconds'],
-            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:86400', 'required_without:duration_minutes'],
+            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_MINUTES, 'required_without:duration_seconds'],
+            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_SECONDS, 'required_without:duration_minutes'],
             'intensity' => ['required', 'integer', 'min:1', 'max:3'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'start_photo_url' => ['nullable', 'string', 'max:2048'],
@@ -66,13 +74,11 @@ class ExerciseController extends Controller
             'date' => ['nullable', 'date'],
         ]);
 
-        $durationSeconds = (int) ($validated['duration_seconds'] ?? 0);
-        if ($durationSeconds <= 0) {
-            $durationMinutes = (int) ($validated['duration_minutes'] ?? 0);
-            $durationSeconds = $durationMinutes * 60;
-        }
-
-        $durationMinutes = max(1, (int) round($durationSeconds / 60));
+        // duration_seconds is the canonical total. duration_minutes exists
+        // for older app builds only and is derived when seconds are absent.
+        // Never combine the two values: they describe the same duration.
+        $durationSeconds = $this->durationSecondsFromPayload($validated);
+        $durationMinutes = $this->durationMinutesFromSeconds($durationSeconds);
 
         $date = isset($validated['date'])
             ? Carbon::parse($validated['date'])->toDateString()
@@ -229,13 +235,17 @@ class ExerciseController extends Controller
 
     private function logPayload(ExerciseLog $log): array
     {
+        $durationSeconds = $this->logDurationSeconds($log);
+
         return [
             'id' => $log->id,
             'userId' => (string) $log->user_id,
             'username' => $log->username,
             'type' => $log->type,
-            'durationMinutes' => $log->duration_minutes,
-            'durationSeconds' => $this->logDurationSeconds($log),
+            // Keep the response internally consistent even for older rows
+            // whose legacy minutes column does not match duration_seconds.
+            'durationMinutes' => $this->durationMinutesFromSeconds($durationSeconds),
+            'durationSeconds' => $durationSeconds,
             'intensity' => $log->intensity,
             'notes' => $log->notes,
             'startPhotoUrl' => $log->start_photo_url,
@@ -256,6 +266,27 @@ class ExerciseController extends Controller
 
     private function logDurationMinutes(ExerciseLog $log): int
     {
-        return max(1, (int) round($this->logDurationSeconds($log) / 60));
+        return $this->durationMinutesFromSeconds($this->logDurationSeconds($log));
+    }
+
+    /**
+     * Resolve the elapsed duration without adding legacy minutes to seconds.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function durationSecondsFromPayload(array $validated): int
+    {
+        $seconds = (int) ($validated['duration_seconds'] ?? 0);
+
+        if ($seconds > 0) {
+            return $seconds;
+        }
+
+        return (int) ($validated['duration_minutes'] ?? 0) * 60;
+    }
+
+    private function durationMinutesFromSeconds(int $durationSeconds): int
+    {
+        return max(1, (int) round($durationSeconds / 60));
     }
 }

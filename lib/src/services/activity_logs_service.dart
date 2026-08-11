@@ -6,6 +6,7 @@ import 'package:selfcare_projects/src/services/calorie_tracker_api_service.dart'
 import 'package:selfcare_projects/src/services/daily_tracker_api_service.dart';
 import 'package:selfcare_projects/src/services/exercise_api_service.dart';
 import 'package:selfcare_projects/src/services/fasting_api_service.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_duration_utils.dart';
 
 enum ActivityLogKind { meditation, steps, exercise, fasting, calories, sleep }
 
@@ -77,8 +78,8 @@ class ActivityLogsService {
         date: today,
       );
       final tracker = _map(trackerResponse['tracker']);
-      final meditationMinutes =
-          _intValue(tracker['meditationMinutes'] ?? tracker['meditation_minutes']);
+      final meditationMinutes = _intValue(
+          tracker['meditationMinutes'] ?? tracker['meditation_minutes']);
       final stepsTaken =
           _intValue(tracker['stepCount'] ?? tracker['step_count']);
 
@@ -108,8 +109,8 @@ class ActivityLogsService {
         date: today,
       );
       final calorieDay = _map(calorieResponse['day']);
-      final totalCalories =
-          _intValue(calorieDay['totalCalories'] ?? calorieDay['total_calories']);
+      final totalCalories = _intValue(
+          calorieDay['totalCalories'] ?? calorieDay['total_calories']);
       if (totalCalories > 0) {
         items.add(
           ActivityLogItem(
@@ -127,9 +128,13 @@ class ActivityLogsService {
             ? log['type'].toString().trim()
             : 'Exercise';
         final duration = _durationLabel(
-          Duration(
-            minutes: _intValue(log['durationMinutes']),
-            seconds: _intValue(log['durationSeconds']),
+          exerciseLogDuration(
+            durationMinutes: _intValue(
+              log['durationMinutes'] ?? log['duration_minutes'],
+            ),
+            durationSeconds: _intValue(
+              log['durationSeconds'] ?? log['duration_seconds'],
+            ),
           ),
         );
         final notes = (log['notes'] as String?)?.trim() ?? '';
@@ -160,7 +165,8 @@ class ActivityLogsService {
               DateTime.fromMillisecondsSinceEpoch(0);
           return bEnd.compareTo(aEnd);
         });
-        final latestHistory = fastingHistory.isNotEmpty ? fastingHistory.first : {};
+        final latestHistory =
+            fastingHistory.isNotEmpty ? fastingHistory.first : {};
         final completedHours = _doubleValue(
           latestHistory['completedHours'] ?? latestHistory['completed_hours'],
         );
@@ -183,10 +189,10 @@ class ActivityLogsService {
           final completedEnd = _dateFromValue(
             latestHistory['finishedAt'] ?? latestHistory['finished_at'],
           );
-          final completedDuration = completedStart != null &&
-                  completedEnd != null
-              ? completedEnd.difference(completedStart)
-              : Duration(minutes: (completedHours * 60).round());
+          final completedDuration =
+              completedStart != null && completedEnd != null
+                  ? completedEnd.difference(completedStart)
+                  : Duration(minutes: (completedHours * 60).round());
           items.add(
             ActivityLogItem(
               kind: ActivityLogKind.fasting,
@@ -272,7 +278,8 @@ class ActivityLogsService {
   }
 
   Future<ActivityLogItem?> _loadSleepItem() async {
-    final userId = AuthService.instance.currentSession?.id.toString() ?? 'guest';
+    final userId =
+        AuthService.instance.currentSession?.id.toString() ?? 'guest';
     final prefs = await SharedPreferences.getInstance();
     final historyKey = 'sleep_tracker_history_$userId';
     final activeKey = 'sleep_tracker_active_start_$userId';

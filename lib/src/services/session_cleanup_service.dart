@@ -37,13 +37,9 @@ class SessionCleanupService {
     await prefs.remove('sleep_tracker_history');
     await prefs.remove(stepCacheOwnerKey);
 
-    // An in-progress exercise session (see exercise_tracker_screen.dart)
-    // is cached locally so it survives app restarts. It was never cleared
-    // here, so a session left running (e.g. forgotten for days, until its
-    // elapsed duration exceeds what the backend will accept) stayed stuck
-    // on the device across sign-out/sign-in -- including into a different
-    // account on a shared device. Clearing it on sign-out gives a way to
-    // recover one without reinstalling the app.
+    // Clear the full locally persisted exercise session (including its owner
+    // and optional end photo) so an in-progress workout never follows a
+    // member across sign-out/sign-in on a shared device.
     await prefs.remove('exercise_session_start_ms');
     await prefs.remove('exercise_session_goal_seconds');
     await prefs.remove('exercise_session_goal_minutes');
@@ -52,6 +48,9 @@ class SessionCleanupService {
     await prefs.remove('exercise_session_intensity');
     await prefs.remove('exercise_session_notes');
     await prefs.remove('exercise_session_start_photo');
+    await prefs.remove('exercise_session_end_photo');
+    await prefs.remove('exercise_session_stopped_duration_seconds');
+    await prefs.remove('exercise_session_owner_uid');
 
     if (userId != null && userId.isNotEmpty) {
       await prefs.remove(savedStepsKey(userId));
