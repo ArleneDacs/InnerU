@@ -11,15 +11,6 @@ import 'package:selfcare_projects/src/utils/grapheme_text.dart';
 import 'package:selfcare_projects/src/widgets/linkified_text.dart';
 import 'package:selfcare_projects/src/widgets/member_profile_sheet.dart';
 
-// The app theme uses a text font that is not guaranteed to include color emoji
-// glyphs. Explicitly listing the platform emoji families lets Flutter select a
-// native emoji face instead of substituting a missing-glyph/question-mark box.
-const _communityEmojiFontFallback = <String>[
-  'Apple Color Emoji',
-  'Segoe UI Emoji',
-  'Noto Color Emoji',
-];
-
 const _communityPreviewCharacterLimit = 150;
 
 class NoteCard extends StatefulWidget {
@@ -290,13 +281,12 @@ class NoteCardState extends State<NoteCard> {
                   ),
                 ),
               // Title
-              Text(
+              EmojiAwareText(
                 widget.note.title,
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
                   color: Colors.black87,
-                  fontFamilyFallback: _communityEmojiFontFallback,
                 ),
               ),
               const SizedBox(height: 8),
@@ -320,7 +310,6 @@ class NoteCardState extends State<NoteCard> {
                           fontSize: 16,
                           color: Color.fromARGB(221, 19, 19, 19),
                           height: 1.5,
-                          fontFamilyFallback: _communityEmojiFontFallback,
                         ),
                         mentions: widget.note.mentions
                             .map((m) => MentionSpanTarget(
@@ -331,7 +320,6 @@ class NoteCardState extends State<NoteCard> {
                         mentionStyle: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.deepPurple,
-                          fontFamilyFallback: _communityEmojiFontFallback,
                         ),
                         onMentionTap: (userId) {
                           final mention = widget.note.mentions.firstWhere(

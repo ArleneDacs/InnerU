@@ -4,7 +4,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/notes/note_
 import 'package:selfcare_projects/src/models/note_model.dart';
 
 void main() {
-  testWidgets('uses native emoji fallbacks for Community titles and bodies', (
+  testWidgets('keeps Community text readable while preserving emoji', (
     tester,
   ) async {
     const title = 'Mom’s Birthday 🎂🎉';
@@ -27,18 +27,12 @@ void main() {
       ),
     );
 
-    const expectedFallbacks = [
-      'Apple Color Emoji',
-      'Segoe UI Emoji',
-      'Noto Color Emoji',
-    ];
     final titleText = tester.widget<Text>(find.text(title));
-    expect(titleText.style?.fontFamilyFallback, expectedFallbacks);
+    expect(titleText.textSpan?.toPlainText(), title);
 
     final bodyText = tester.widget<Text>(find.text(body));
     final bodySpan = bodyText.textSpan;
     expect(bodySpan, isA<TextSpan>());
-    final contentSpan = (bodySpan! as TextSpan).children!.single as TextSpan;
-    expect(contentSpan.style?.fontFamilyFallback, expectedFallbacks);
+    expect(bodySpan!.toPlainText(), body);
   });
 }

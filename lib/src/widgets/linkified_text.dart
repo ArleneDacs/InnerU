@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -34,6 +35,82 @@ class _SpanMatch {
   // The URL text itself for a url match, or the mentioned user's id for a
   // mention match.
   final String payload;
+}
+
+/// Returns a native color-emoji family only for emoji grapheme clusters.
+///
+/// This must not be attached as a fallback to an entire body [TextStyle]: on
+/// iOS, doing that can make CoreText choose Apple Color Emoji for ordinary
+/// letters too, which renders the regular text as missing-glyph boxes.  By
+/// giving *only* emoji clusters an explicit font family, normal text keeps the
+/// app's existing font while emoji uses the system's native color face.
+String _nativeEmojiFontFamily() {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.iOS:
+    case TargetPlatform.macOS:
+      return 'Apple Color Emoji';
+    case TargetPlatform.windows:
+      return 'Segoe UI Emoji';
+    case TargetPlatform.android:
+    case TargetPlatform.fuchsia:
+    case TargetPlatform.linux:
+      return 'Noto Color Emoji';
+  }
+}
+
+bool _isEmojiGrapheme(String grapheme) {
+  for (final rune in grapheme.runes) {
+    if ((rune >= 0x1F000 && rune <= 0x1FAFF) ||
+        (rune >= 0x2600 && rune <= 0x27BF) ||
+        (rune >= 0x2300 && rune <= 0x23FF) ||
+        rune == 0x00A9 ||
+        rune == 0x00AE ||
+        rune == 0x203C ||
+        rune == 0x2049 ||
+        rune == 0x2122 ||
+        rune == 0x2139 ||
+        rune == 0x3030 ||
+        rune == 0x303D ||
+        rune == 0x3297 ||
+        rune == 0x3299 ||
+        rune == 0x20E3 ||
+        rune == 0xFE0F) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Splits [text] only when it contains emoji, keeping every non-emoji span on
+/// [style] and putting just emoji grapheme clusters on the platform's native
+/// emoji font. The [characters] iterator keeps joined/skin-tone emoji intact.
+List<InlineSpan> buildEmojiAwareTextSpans(String text, TextStyle style) {
+  final spans = <InlineSpan>[];
+  final normalText = StringBuffer();
+
+  void flushNormalText() {
+    if (normalText.isEmpty) return;
+    spans.add(TextSpan(text: normalText.toString(), style: style));
+    normalText.clear();
+  }
+
+  for (final grapheme in text.characters) {
+    if (!_isEmojiGrapheme(grapheme)) {
+      normalText.write(grapheme);
+      continue;
+    }
+
+    flushNormalText();
+    spans.add(
+      TextSpan(
+        text: grapheme,
+        style: style.copyWith(fontFamily: _nativeEmojiFontFamily()),
+      ),
+    );
+  }
+
+  flushNormalText();
+  return spans;
 }
 
 /// Splits [text] into spans, wrapping any http(s) URL substring as a
@@ -101,7 +178,7 @@ List<InlineSpan> buildLinkifiedSpans(
     ..sort((a, b) => a.start.compareTo(b.start));
 
   if (matches.isEmpty) {
-    return [TextSpan(text: text, style: baseStyle)];
+    return buildEmojiAwareTextSpans(text, baseStyle);
   }
 
   final spans = <InlineSpan>[];
@@ -114,7 +191,12 @@ List<InlineSpan> buildLinkifiedSpans(
       continue;
     }
     if (match.start > cursor) {
-      spans.add(TextSpan(text: text.substring(cursor, match.start), style: baseStyle));
+      spans.addAll(
+        buildEmojiAwareTextSpans(
+          text.substring(cursor, match.start),
+          baseStyle,
+        ),
+      );
     }
     final matchText = text.substring(match.start, match.end);
     final isUrl = match.type == _SpanMatchType.url;
@@ -123,7 +205,8 @@ List<InlineSpan> buildLinkifiedSpans(
         ? (TapGestureRecognizer()..onTap = () => onTap(match.payload))
         : (onMentionTap == null
             ? null
-            : (TapGestureRecognizer()..onTap = () => onMentionTap(match.payload)));
+            : (TapGestureRecognizer()
+              ..onTap = () => onMentionTap(match.payload)));
     spans.add(
       TextSpan(
         text: matchText,
@@ -134,9 +217,40 @@ List<InlineSpan> buildLinkifiedSpans(
     cursor = match.end;
   }
   if (cursor < text.length) {
-    spans.add(TextSpan(text: text.substring(cursor), style: baseStyle));
+    spans.addAll(
+      buildEmojiAwareTextSpans(text.substring(cursor), baseStyle),
+    );
   }
   return spans;
+}
+
+/// A plain text widget that uses [buildEmojiAwareTextSpans].
+///
+/// Use this for non-linkified text such as Community post titles; linkified
+/// content already receives the same handling through [LinkifiedText].
+class EmojiAwareText extends StatelessWidget {
+  const EmojiAwareText(
+    this.text, {
+    super.key,
+    this.style,
+    this.maxLines,
+    this.overflow,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final int? maxLines;
+  final TextOverflow? overflow;
+
+  @override
+  Widget build(BuildContext context) {
+    final baseStyle = style ?? DefaultTextStyle.of(context).style;
+    return Text.rich(
+      TextSpan(children: buildEmojiAwareTextSpans(text, baseStyle)),
+      maxLines: maxLines,
+      overflow: overflow ?? TextOverflow.clip,
+    );
+  }
 }
 
 class LinkifiedText extends StatelessWidget {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +18,22 @@ void main() {
     expect(spans.length, 1);
     expect((spans.first as TextSpan).text, 'just some text');
     expect((spans.first as TextSpan).recognizer, isNull);
+  });
+
+  test('uses the native emoji font only for emoji graphemes', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    final spans = buildEmojiAwareTextSpans(
+      'Rest 🎂❤️ now',
+      baseStyle,
+    ).cast<TextSpan>();
+
+    expect(spans.map((span) => span.text), ['Rest ', '🎂', '❤️', ' now']);
+    expect(spans[0].style?.fontFamily, isNull);
+    expect(spans[1].style?.fontFamily, 'Apple Color Emoji');
+    expect(spans[2].style?.fontFamily, 'Apple Color Emoji');
+    expect(spans[3].style?.fontFamily, isNull);
   });
 
   test('detects a bare https URL and wraps only that substring as a link', () {
@@ -60,14 +77,18 @@ void main() {
       linkStyle: linkStyle,
       onTap: (url) => tapped = url,
     );
-    final linkSpan = spans.whereType<TextSpan>().firstWhere((s) => s.recognizer != null);
+    final linkSpan =
+        spans.whereType<TextSpan>().firstWhere((s) => s.recognizer != null);
     (linkSpan.recognizer as TapGestureRecognizer).onTap!();
     expect(tapped, 'https://example.com/page');
   });
 
-  const mentionStyle = TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold);
+  const mentionStyle =
+      TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold);
 
-  test('detects an @Name mention and wraps only that substring as a tappable span', () {
+  test(
+      'detects an @Name mention and wraps only that substring as a tappable span',
+      () {
     final spans = buildLinkifiedSpans(
       'hey @Jordan Rivera, welcome!',
       baseStyle: baseStyle,
@@ -83,7 +104,9 @@ void main() {
     expect((spans[1] as TextSpan).recognizer, isNotNull);
   });
 
-  test('tapping the mention span invokes onMentionTap with the mentioned userId', () {
+  test(
+      'tapping the mention span invokes onMentionTap with the mentioned userId',
+      () {
     String? tappedUserId;
     final spans = buildLinkifiedSpans(
       'hey @Jordan Rivera!',
@@ -113,7 +136,8 @@ void main() {
     expect(mentionSpan.style?.color, Colors.blue);
   });
 
-  test('a mention renders styled but non-tappable when onMentionTap is omitted', () {
+  test('a mention renders styled but non-tappable when onMentionTap is omitted',
+      () {
     final spans = buildLinkifiedSpans(
       'hey @Jordan Rivera!',
       baseStyle: baseStyle,
@@ -122,8 +146,9 @@ void main() {
       mentions: const [MentionSpanTarget(userId: 'u1', name: 'Jordan Rivera')],
       mentionStyle: mentionStyle,
     );
-    final mentionSpan =
-        spans.whereType<TextSpan>().firstWhere((s) => s.text == '@Jordan Rivera');
+    final mentionSpan = spans
+        .whereType<TextSpan>()
+        .firstWhere((s) => s.text == '@Jordan Rivera');
     expect(mentionSpan.style?.color, Colors.deepPurple);
     expect(mentionSpan.recognizer, isNull);
   });
