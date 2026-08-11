@@ -17,6 +17,7 @@ void main() {
       );
 
       expect(result.isOutdated, isTrue);
+      expect(result.isRequired, isTrue);
       expect(result.storeUrl, 'https://apps.apple.com/app/id1');
     });
 
@@ -92,6 +93,41 @@ void main() {
 
       expect(result.isOutdated, isFalse);
     });
+
+    test('returns a dismissible update when the server marks iOS optional', () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'ios': {
+            'latest_version': '1.1.0',
+            'store_url': 'https://apps.apple.com/app/id1',
+            'is_required': false,
+          },
+        },
+        isIOS: true,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isOutdated, isTrue);
+      expect(result.isRequired, isFalse);
+      expect(result.isOptional, isTrue);
+    });
+
+    test('defaults a legacy iOS response without requirement to forced', () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'ios': {
+            'latest_version': '1.1.0',
+            'store_url': 'https://apps.apple.com/app/id1',
+          },
+        },
+        isIOS: true,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isRequired, isTrue);
+    });
   });
 
   group('AppUpdateService.evaluate — Android build number comparison', () {
@@ -110,6 +146,7 @@ void main() {
       );
 
       expect(result.isOutdated, isTrue);
+      expect(result.isRequired, isTrue);
     });
 
     test('reports up to date when build numbers match', () {
@@ -157,7 +194,8 @@ void main() {
       expect(result.isOutdated, isFalse);
     });
 
-    test('fails open when android store_url has wrong type (int instead of string)',
+    test(
+        'fails open when android store_url has wrong type (int instead of string)',
         () {
       final result = AppUpdateService.evaluate(
         response: {
@@ -172,6 +210,44 @@ void main() {
       );
 
       expect(result.isOutdated, isFalse);
+    });
+
+    test('returns a dismissible update when the server marks Android optional',
+        () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'android': {
+            'latest_version_code': 40,
+            'store_url':
+                'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+            'is_required': false,
+          },
+        },
+        isIOS: false,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isOutdated, isTrue);
+      expect(result.isOptional, isTrue);
+    });
+
+    test('defaults a legacy Android response without requirement to forced',
+        () {
+      final result = AppUpdateService.evaluate(
+        response: {
+          'android': {
+            'latest_version_code': 40,
+            'store_url':
+                'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+          },
+        },
+        isIOS: false,
+        installedVersion: '1.0.4',
+        installedBuildNumber: '34',
+      );
+
+      expect(result.isRequired, isTrue);
     });
   });
 }

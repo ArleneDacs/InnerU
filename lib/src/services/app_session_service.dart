@@ -19,6 +19,7 @@ class AppSession {
     this.companyName,
     this.birthdate,
     this.profilePic,
+    this.defaultLandingScreen = 'dashboard',
   });
 
   final int id;
@@ -32,6 +33,7 @@ class AppSession {
   final String? companyName;
   final String? birthdate;
   final String? profilePic;
+  final String defaultLandingScreen;
 
   factory AppSession.fromJson(Map<String, dynamic> json) {
     return AppSession(
@@ -48,6 +50,37 @@ class AppSession {
       companyName: json['company_name'] as String?,
       birthdate: json['birthdate'] as String?,
       profilePic: json['profile_pic'] as String?,
+      defaultLandingScreen: json['default_landing_screen']?.toString() ??
+          json['defaultScreen']?.toString() ??
+          'dashboard',
+    );
+  }
+
+  AppSession copyWith({
+    String? name,
+    String? email,
+    String? role,
+    bool? isCoach,
+    String? number,
+    String? companyCode,
+    String? companyName,
+    String? birthdate,
+    String? profilePic,
+    String? defaultLandingScreen,
+  }) {
+    return AppSession(
+      id: id,
+      token: token,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      role: role ?? this.role,
+      isCoach: isCoach ?? this.isCoach,
+      number: number ?? this.number,
+      companyCode: companyCode ?? this.companyCode,
+      companyName: companyName ?? this.companyName,
+      birthdate: birthdate ?? this.birthdate,
+      profilePic: profilePic ?? this.profilePic,
+      defaultLandingScreen: defaultLandingScreen ?? this.defaultLandingScreen,
     );
   }
 
@@ -64,6 +97,7 @@ class AppSession {
       'company_name': companyName,
       'birthdate': birthdate,
       'profile_pic': profilePic,
+      'default_landing_screen': defaultLandingScreen,
     };
   }
 }

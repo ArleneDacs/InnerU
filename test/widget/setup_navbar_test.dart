@@ -1,9 +1,12 @@
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/features/abundance/screens/abundance_shell_screen.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/default_landing_screen.dart';
+import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 
 /// Task 13's integration point — the single highest-risk untested seam on this
 /// branch per the whole-branch review, and the file that decides whether
@@ -33,6 +36,45 @@ CompanyThemeData _abundanceTheme({
 
 void main() {
   group('Setuppage', () {
+    testWidgets('uses the saved Meditation default on the standard shell',
+        (tester) async {
+      await tester.pumpWidget(
+        ChangeNotifierProvider<TimeProvider>(
+          create: (_) => TimeProvider(),
+          child: const MaterialApp(
+            home: Setuppage(
+              defaultScreen: DefaultLandingScreen.meditation,
+              initialCompanyTheme: CompanyThemeData.standard,
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        tester
+            .widget<CurvedNavigationBar>(find.byType(CurvedNavigationBar))
+            .index,
+        0,
+      );
+    });
+
+    testWidgets('uses the saved Community default on the standard shell',
+        (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Setuppage(
+          defaultScreen: DefaultLandingScreen.community,
+          initialCompanyTheme: CompanyThemeData.standard,
+        ),
+      ));
+
+      expect(
+        tester
+            .widget<CurvedNavigationBar>(find.byType(CurvedNavigationBar))
+            .index,
+        4,
+      );
+    });
+
     testWidgets('renders AbundanceShellScreen for an Abundance company theme',
         (tester) async {
       await tester.pumpWidget(MaterialApp(
@@ -44,6 +86,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(AbundanceShellScreen), findsOneWidget);
+      expect(
+        tester
+            .widget<AbundanceShellScreen>(find.byType(AbundanceShellScreen))
+            .initialIndex,
+        1,
+      );
       // The standard chrome must be gone entirely, not merely hidden behind
       // the shell.
       expect(find.byType(CurvedNavigationBar), findsNothing);
@@ -94,6 +142,21 @@ void main() {
 
       expect(find.byType(AbundanceShellScreen), findsNothing);
       expect(find.byType(CurvedNavigationBar), findsOneWidget);
+    });
+
+    testWidgets('maps an unavailable saved default to Abundance Home',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Setuppage(
+          defaultScreen: DefaultLandingScreen.community,
+          initialCompanyTheme: _abundanceTheme(),
+        ),
+      ));
+
+      final shell = tester.widget<AbundanceShellScreen>(
+        find.byType(AbundanceShellScreen),
+      );
+      expect(shell.initialIndex, 0);
     });
   });
 

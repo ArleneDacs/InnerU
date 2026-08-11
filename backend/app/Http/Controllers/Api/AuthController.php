@@ -28,8 +28,7 @@ class AuthController extends Controller
     public function __construct(
         private readonly UserScoreService $userScoreService,
         private readonly FirebaseScryptVerifier $firebaseScryptVerifier,
-    ) {
-    }
+    ) {}
 
     public function register(Request $request): JsonResponse
     {
@@ -650,6 +649,7 @@ class AuthController extends Controller
             'companyIds' => $user->company_ids ?? [],
             'companyCodes' => $user->company_codes ?? [],
             'dailyStepGoal' => $user->daily_step_goal,
+            'defaultScreen' => $user->default_landing_screen ?? 'dashboard',
             'dailyTrackerItems' => $user->daily_tracker_items ?? [],
             'birthdate' => optional($user->birthdate)?->format('Y-m-d'),
             'profile_pic' => $user->profile_pic,
@@ -782,6 +782,7 @@ class AuthController extends Controller
             }
 
             $payload = $response->json('keys');
+
             return is_array($payload) ? $payload : [];
         });
 
@@ -858,7 +859,7 @@ class AuthController extends Controller
         foreach ($parts as $part) {
             $chunks = [];
             do {
-                $chunks[] = $part & 0x7f;
+                $chunks[] = $part & 0x7F;
                 $part >>= 7;
             } while ($part > 0);
 
@@ -876,13 +877,13 @@ class AuthController extends Controller
 
     private function encodeLength(int $length): string
     {
-        if ($length <= 0x7f) {
+        if ($length <= 0x7F) {
             return chr($length);
         }
 
         $temp = '';
         while ($length > 0) {
-            $temp = chr($length & 0xff).$temp;
+            $temp = chr($length & 0xFF).$temp;
             $length >>= 8;
         }
 
@@ -900,7 +901,7 @@ class AuthController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      */
     private function appleDisplayName(array $validated): string
     {
@@ -916,7 +917,7 @@ class AuthController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      */
     private function resolveActiveCompany(array $validated): ?Company
     {

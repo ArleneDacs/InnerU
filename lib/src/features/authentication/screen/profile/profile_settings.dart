@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/edit_profile/edit_profile.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/UsersData/user_service.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/privacy/privacy_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/step_goal_screen.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
@@ -7,6 +9,7 @@ import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_api_service.dart';
 import 'package:selfcare_projects/src/services/company_membership_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/default_landing_screen.dart';
 import 'package:selfcare_projects/src/utils/responsive.dart';
 
 class ProfileSettings extends StatelessWidget {
@@ -16,6 +19,8 @@ class ProfileSettings extends StatelessWidget {
   Widget build(BuildContext context) {
     return CompanyThemeBuilder(
       builder: (context, companyTheme) {
+        final session = AuthService.instance.currentSession;
+        final isAdmin = session?.role.toLowerCase() == 'admin';
         return Scaffold(
           backgroundColor: companyTheme.backgroundColor,
           appBar: AppBar(
@@ -77,6 +82,8 @@ class ProfileSettings extends StatelessWidget {
                     if (companyTheme.isCompanyTheme &&
                         companyTheme.companyCode.isNotEmpty)
                       _buildCompanyCodeCard(companyTheme),
+                    if (!isAdmin)
+                      _DefaultLandingScreenPanel(pageTheme: companyTheme),
                     _buildButton(
                       context,
                       "Privacy",
@@ -215,6 +222,190 @@ class ProfileSettings extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _DefaultLandingScreenPanel extends StatefulWidget {
+  const _DefaultLandingScreenPanel({required this.pageTheme});
+
+  final CompanyThemeData pageTheme;
+
+  @override
+  State<_DefaultLandingScreenPanel> createState() =>
+      _DefaultLandingScreenPanelState();
+}
+
+class _DefaultLandingScreenPanelState
+    extends State<_DefaultLandingScreenPanel> {
+  late DefaultLandingScreen _selected;
+  bool _isSaving = false;
+  String? _saveError;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = DefaultLandingScreen.fromStorageValue(
+      AuthService.instance.currentSession?.defaultLandingScreen,
+    );
+  }
+
+  bool get _isAbundance => AbundanceCompany.matches(
+        widget.pageTheme.companyCode,
+        widget.pageTheme.companyName,
+      );
+
+  List<DefaultLandingScreen> get _availableScreens =>
+      DefaultLandingScreen.availableFor(isAbundance: _isAbundance);
+
+  DefaultLandingScreen get _visibleSelection =>
+      _availableScreens.contains(_selected)
+          ? _selected
+          : DefaultLandingScreen.dashboard;
+
+  Future<void> _save(DefaultLandingScreen next) async {
+    final session = AuthService.instance.currentSession;
+    if (session == null || _isSaving) return;
+
+    final previous = _selected;
+    setState(() {
+      _selected = next;
+      _isSaving = true;
+      _saveError = null;
+    });
+
+    try {
+      final profile = await UserService.updateUserFields({
+        'default_landing_screen': next.storageValue,
+      });
+      final saved = DefaultLandingScreen.fromStorageValue(
+        profile['defaultScreen'] ?? next.storageValue,
+      );
+
+      // The backend remains the source of truth, while the existing secure
+      // session cache makes the saved destination immediately available on
+      // the next authenticated app restore without another startup request.
+      await AuthService.instance.updateDefaultLandingScreen(
+        saved.storageValue,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _selected = saved;
+        _isSaving = false;
+      });
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Default screen saved.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _selected = previous;
+        _isSaving = false;
+        _saveError = 'Could not save your default screen. Please try again.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.pageTheme;
+    final availableScreens = _availableScreens;
+    final selected = _visibleSelection;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+      decoration: BoxDecoration(
+        color: theme.isDark ? theme.surfaceColor : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.isDark
+              ? theme.primaryColor.withValues(alpha: 0.18)
+              : const Color(0xFFE3EAE8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.home_outlined, size: 19, color: theme.iconColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Default screen',
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w600,
+                    color: theme.inkColor,
+                  ),
+                ),
+              ),
+              if (_isSaving)
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: theme.primaryColor,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            'Choose where InnerU opens after you sign in.',
+            style: TextStyle(fontSize: 13, color: theme.mutedInkColor),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<DefaultLandingScreen>(
+            key: ValueKey(selected.storageValue),
+            initialValue: selected,
+            isExpanded: true,
+            decoration: InputDecoration(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: theme.primaryColor.withValues(alpha: 0.28),
+                ),
+              ),
+            ),
+            items: availableScreens
+                .map(
+                  (screen) => DropdownMenuItem(
+                    value: screen,
+                    child: Text(screen.labelFor(isAbundance: _isAbundance)),
+                  ),
+                )
+                .toList(growable: false),
+            onChanged: _isSaving
+                ? null
+                : (screen) {
+                    if (screen != null) {
+                      _save(screen);
+                    }
+                  },
+          ),
+          if (_isAbundance) ...[
+            const SizedBox(height: 8),
+            Text(
+              'This workspace currently supports Home and Quests.',
+              style: TextStyle(fontSize: 12, color: theme.mutedInkColor),
+            ),
+          ],
+          if (_saveError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _saveError!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+            ),
+          ],
+        ],
       ),
     );
   }

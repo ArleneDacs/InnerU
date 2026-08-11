@@ -16,6 +16,13 @@ class StoreVersionSyncServiceTest extends TestCase
 
     public function test_sync_all_updates_both_platforms_on_success(): void
     {
+        // Store polling owns only the latest version/store URL. An
+        // administrator's force-vs-optional decision must survive it.
+        AppVersion::current()->update([
+            'ios_update_required' => false,
+            'android_update_required' => false,
+        ]);
+
         Http::fake([
             'itunes.apple.com/*' => Http::response([
                 'results' => [
@@ -38,7 +45,9 @@ class StoreVersionSyncServiceTest extends TestCase
         $version = AppVersion::current();
         $this->assertSame('1.9.0', $version->ios_latest_version);
         $this->assertSame('https://apps.apple.com/app/id555', $version->ios_store_url);
+        $this->assertFalse($version->ios_update_required);
         $this->assertSame(50, $version->android_latest_version_code);
+        $this->assertFalse($version->android_update_required);
     }
 
     public function test_an_apple_failure_does_not_block_the_android_update(): void

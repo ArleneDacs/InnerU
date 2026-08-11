@@ -32,12 +32,15 @@ import 'package:selfcare_projects/src/features/authentication/screen/profile/pro
 import 'package:selfcare_projects/src/features/authentication/screen/profile/profile_settings.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/sleep_tracker/sleep_tracker.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/splash_screen/splash_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/splash_screen/force_update_dialog.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/meditation_song/meditation_song.dart';
 import 'package:selfcare_projects/src/models/note_model.dart';
 import 'package:selfcare_projects/src/services/Provider/time_provider.dart';
 import 'package:selfcare_projects/src/services/app_session_service.dart';
+import 'package:selfcare_projects/src/services/app_update_service.dart';
+import 'package:selfcare_projects/src/services/startup_optional_update_coordinator.dart';
 import 'package:selfcare_projects/src/services/apple_health_steps_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/onesignal_push_service.dart';
@@ -49,6 +52,7 @@ import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/step_background_service.dart';
 import 'package:selfcare_projects/src/services/watch_steps_receiver.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -251,10 +255,90 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
   String? _lastStepServiceUserId;
   bool _appleHealthPromptShowing = false;
   bool _startupReady = false;
+  final StartupOptionalUpdateCoordinator _optionalUpdateCoordinator =
+      StartupOptionalUpdateCoordinator();
+  bool _optionalUpdateDialogScheduled = false;
 
   void _markStartupReady() {
     if (!mounted || _startupReady) return;
     setState(() => _startupReady = true);
+    _scheduleOptionalUpdateDialog();
+  }
+
+  /// Called exactly once by the startup splash when the server reports a
+  /// newer, non-blocking release. The splash must not show it itself: that
+  /// route disappears as LoginScreen or the authenticated role/default
+  /// screen mounts. Scheduling from this persistent root makes the prompt
+  /// work for either landing path without tying it to DashboardScreen.
+  void _queueOptionalUpdate(AppUpdateCheckResult update) {
+    if (!update.isOptional || !_optionalUpdateCoordinator.queue(update)) {
+      return;
+    }
+
+    _scheduleOptionalUpdateDialog();
+  }
+
+  void _scheduleOptionalUpdateDialog() {
+    if (!mounted ||
+        !_startupReady ||
+        !_optionalUpdateCoordinator.hasPending ||
+        _optionalUpdateCoordinator.hasShown ||
+        _optionalUpdateDialogScheduled) {
+      return;
+    }
+
+    _optionalUpdateDialogScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _optionalUpdateDialogScheduled = false;
+      if (!mounted) return;
+      unawaited(_showOptionalUpdateDialog());
+    });
+  }
+
+  Future<void> _showOptionalUpdateDialog() async {
+    final update = _optionalUpdateCoordinator.consume();
+    if (!mounted || update == null || update.storeUrl == null) {
+      return;
+    }
+
+    // Consume the result before opening the route. Rebuilds caused by a
+    // session refresh, a non-Dashboard default screen, or the dialog itself
+    // can no longer enqueue a second prompt while this one is visible.
+    await showOptionalUpdateDialog(
+      context,
+      storeUrl: update.storeUrl!,
+      onUpdateNow: _launchOptionalUpdateStoreUrl,
+    );
+  }
+
+  Future<void> _launchOptionalUpdateStoreUrl(String storeUrl) async {
+    final uri = Uri.tryParse(storeUrl);
+    if (uri == null) {
+      _showOptionalUpdateLaunchFailure();
+      return;
+    }
+
+    try {
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showOptionalUpdateLaunchFailure();
+      }
+    } catch (error, stack) {
+      await _recordError(error, stack);
+      _showOptionalUpdateLaunchFailure();
+    }
+  }
+
+  void _showOptionalUpdateLaunchFailure() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Could not open the store automatically. Please update from the App Store or Play Store when convenient.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -406,6 +490,7 @@ class _GlobalPaddingWrapperState extends State<GlobalPaddingWrapper>
                 AuthService.instance.currentSession != null,
             skipBrandingDelayForRestoredSession: true,
             onStartupReady: _markStartupReady,
+            onOptionalUpdateAvailable: _queueOptionalUpdate,
           );
         }
 

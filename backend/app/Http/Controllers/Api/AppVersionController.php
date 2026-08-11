@@ -16,10 +16,12 @@ class AppVersionController extends Controller
             'ios' => [
                 'latest_version' => $version->ios_latest_version,
                 'store_url' => $version->ios_store_url,
+                'is_required' => $version->ios_update_required,
             ],
             'android' => [
                 'latest_version_code' => $version->android_latest_version_code,
                 'store_url' => $version->android_store_url,
+                'is_required' => $version->android_update_required,
             ],
         ]);
     }

@@ -13,16 +13,26 @@ import 'package:selfcare_projects/src/features/abundance/services/goals_service.
 import 'package:selfcare_projects/src/models/bottom_sheet.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
+import 'package:selfcare_projects/src/services/default_landing_screen.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
 class Setuppage extends StatefulWidget {
   const Setuppage({
     super.key,
-    this.initialIndex = 2,
+    this.initialIndex,
+    this.defaultScreen = DefaultLandingScreen.dashboard,
     this.initialCompanyTheme,
   });
 
-  final int initialIndex;
+  /// Explicit deep-link/tab destination. It takes precedence over the saved
+  /// [defaultScreen] and retains the existing callers' behavior.
+  final int? initialIndex;
+
+  /// Semantic startup destination restored from the authenticated session.
+  /// A semantic value can be mapped safely when a company uses a different
+  /// shell (such as Abundance) instead of treating a standard tab index as
+  /// valid everywhere.
+  final DefaultLandingScreen defaultScreen;
   final CompanyThemeData? initialCompanyTheme;
   @override
   State<Setuppage> createState() => _SetuppageState();
@@ -68,7 +78,7 @@ class _SetuppageState extends State<Setuppage> {
           AuthService.instance.currentUserId ?? '',
         ) ??
         CompanyThemeData.standard;
-    index = widget.initialIndex.clamp(0, 4);
+    index = _requestedStandardIndex;
     _loadCompanyTheme();
   }
 
@@ -82,6 +92,15 @@ class _SetuppageState extends State<Setuppage> {
       });
     }
   }
+
+  int get _requestedStandardIndex =>
+      (widget.initialIndex ?? widget.defaultScreen.standardSetupIndex)
+          .clamp(0, 4)
+          .toInt();
+
+  DefaultLandingScreen get _requestedScreen => widget.initialIndex == null
+      ? widget.defaultScreen
+      : DefaultLandingScreen.fromStandardSetupIndex(_requestedStandardIndex);
 
   Future<void> _loadCompanyTheme() async {
     final userId = AuthService.instance.currentUserId;
@@ -102,6 +121,10 @@ class _SetuppageState extends State<Setuppage> {
         service: GoalsService(),
         uid: AuthService.instance.currentUserId ?? '',
         companyTheme: theme,
+        // Abundance only exposes Dashboard/Home and Goals/Quests from the
+        // standard default-screen list. Unsupported preferences must land on
+        // Home, never on the shell's unrelated Profile tab.
+        initialIndex: _requestedScreen.safeAbundanceShellIndex,
       );
     }
     return Theme(
@@ -150,11 +173,13 @@ class _SetuppageState extends State<Setuppage> {
 class CoachSetuppage extends StatefulWidget {
   const CoachSetuppage({
     super.key,
-    this.initialIndex = 2,
+    this.initialIndex,
+    this.defaultScreen = DefaultLandingScreen.dashboard,
     this.initialCompanyTheme,
   });
 
-  final int initialIndex;
+  final int? initialIndex;
+  final DefaultLandingScreen defaultScreen;
   final CompanyThemeData? initialCompanyTheme;
 
   @override
@@ -199,7 +224,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
           AuthService.instance.currentUserId ?? '',
         ) ??
         CompanyThemeData.standard;
-    index = widget.initialIndex.clamp(0, 4);
+    index = _requestedStandardIndex;
     _loadCompanyTheme();
   }
 
@@ -213,6 +238,15 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
       });
     }
   }
+
+  int get _requestedStandardIndex =>
+      (widget.initialIndex ?? widget.defaultScreen.standardSetupIndex)
+          .clamp(0, 4)
+          .toInt();
+
+  DefaultLandingScreen get _requestedScreen => widget.initialIndex == null
+      ? widget.defaultScreen
+      : DefaultLandingScreen.fromStandardSetupIndex(_requestedStandardIndex);
 
   Future<void> _loadCompanyTheme() async {
     final userId = AuthService.instance.currentUserId;
@@ -233,6 +267,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
         service: GoalsService(),
         uid: AuthService.instance.currentUserId ?? '',
         companyTheme: theme,
+        initialIndex: _requestedScreen.safeAbundanceShellIndex,
       );
     }
     return Theme(

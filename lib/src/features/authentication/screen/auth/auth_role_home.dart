@@ -3,6 +3,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/adminscreen
 import 'package:selfcare_projects/src/features/authentication/screen/company_loading/company_loading_screen.dart';
 import 'package:selfcare_projects/setup_navbar.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
+import 'package:selfcare_projects/src/services/default_landing_screen.dart';
 
 class AuthRoleHome extends StatelessWidget {
   const AuthRoleHome({
@@ -24,11 +25,18 @@ class AuthRoleHome extends StatelessWidget {
 
     final preferredCoach = preferredRole?.toLowerCase() == 'coach';
     final preferredAdmin = preferredRole?.toLowerCase() == 'admin';
-    final isCoach = preferredCoach || session.isCoach || session.role.toLowerCase() == 'coach';
+    final isCoach = preferredCoach ||
+        session.isCoach ||
+        session.role.toLowerCase() == 'coach';
     final isAdmin = preferredAdmin || session.role.toLowerCase() == 'admin';
+    final defaultScreen = DefaultLandingScreen.fromStorageValue(
+      session.defaultLandingScreen,
+    );
     final companyGate = CompanyLoadingGate(
       uid: session.id.toString(),
-      child: isCoach ? const CoachSetuppage() : const Setuppage(),
+      child: isCoach
+          ? CoachSetuppage(defaultScreen: defaultScreen)
+          : Setuppage(defaultScreen: defaultScreen),
     );
 
     if (isAdmin) {

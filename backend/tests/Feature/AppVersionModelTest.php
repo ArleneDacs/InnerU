@@ -15,7 +15,9 @@ class AppVersionModelTest extends TestCase
         $version = AppVersion::current();
 
         $this->assertSame('1.0.4', $version->ios_latest_version);
+        $this->assertTrue($version->ios_update_required);
         $this->assertSame(34, $version->android_latest_version_code);
+        $this->assertTrue($version->android_update_required);
         $this->assertSame(
             'https://play.google.com/store/apps/details?id=com.valenin.inneru',
             $version->android_store_url,

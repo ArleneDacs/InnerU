@@ -46,6 +46,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'company_ids',
         'company_codes',
         'daily_step_goal',
+        'default_landing_screen',
         'fasting_target_hours',
         'fasting_start_at',
         'fasting_end_at',

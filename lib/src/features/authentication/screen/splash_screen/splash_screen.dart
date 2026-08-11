@@ -17,6 +17,7 @@ class SplashScreen extends StatefulWidget {
     this.hasRestoredSession,
     this.skipBrandingDelayForRestoredSession = false,
     this.onStartupReady,
+    this.onOptionalUpdateAvailable,
   });
 
   final Future<AppUpdateCheckResult> Function()? checkForUpdate;
@@ -33,17 +34,26 @@ class SplashScreen extends StatefulWidget {
   /// login screen after the forced-update gate has safely completed.
   final VoidCallback? onStartupReady;
 
+  /// Optional updates are intentionally shown after the startup destination
+  /// mounts, so they are visible over either LoginScreen or an authenticated
+  /// role/default screen rather than being lost with the splash route.
+  final ValueChanged<AppUpdateCheckResult>? onOptionalUpdateAvailable;
+
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
   Timer? _brandingTimer;
+  bool _hasStarted = false;
 
   @override
   void initState() {
     super.initState();
-    _runSplash();
+    if (!_hasStarted) {
+      _hasStarted = true;
+      _runSplash();
+    }
   }
 
   Future<void> _runSplash() async {
@@ -92,6 +102,37 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!mounted) return;
 
     if (updateResult.isOutdated && updateResult.storeUrl != null) {
+      if (!updateResult.isRequired) {
+        final onStartupReady = widget.onStartupReady;
+        final onOptionalUpdateAvailable = widget.onOptionalUpdateAvailable;
+
+        // The app root owns this path in production. It first mounts the
+        // login/authenticated destination, then presents the dismissible
+        // prompt from its stable navigator context. This avoids coupling the
+        // prompt to DashboardScreen (or any particular default screen).
+        if (onStartupReady != null && onOptionalUpdateAvailable != null) {
+          onStartupReady();
+          onOptionalUpdateAvailable(updateResult);
+          return;
+        }
+
+        // Keep SplashScreen self-contained for the direct/legacy route case.
+        // The prompt is intentionally dismissible, unlike a forced update.
+        await showOptionalUpdateDialog(
+          context,
+          storeUrl: updateResult.storeUrl!,
+          onUpdateNow: widget.onUpdateNow ?? _launchStoreUrl,
+        );
+        if (!mounted) return;
+        final afterOptionalPrompt = widget.onStartupReady;
+        if (afterOptionalPrompt != null) {
+          afterOptionalPrompt();
+        } else {
+          navigateToLogin();
+        }
+        return;
+      }
+
       await showForceUpdateDialog(
         context,
         storeUrl: updateResult.storeUrl!,

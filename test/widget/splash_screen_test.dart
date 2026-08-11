@@ -50,6 +50,32 @@ void main() {
       expect(startupReady, isFalse);
     });
 
+    testWidgets('optional update reaches the landing callback once',
+        (tester) async {
+      var startupReadyCalls = 0;
+      var optionalUpdateCalls = 0;
+
+      await tester.pumpWidget(MaterialApp(
+        home: SplashScreen(
+          checkForUpdate: () async => AppUpdateCheckResult.outdated(
+            'https://apps.apple.com/app/id1',
+            isRequired: false,
+          ),
+          waitForSessionRestore: () async {},
+          hasRestoredSession: () => false,
+          onStartupReady: () => startupReadyCalls += 1,
+          onOptionalUpdateAvailable: (_) => optionalUpdateCalls += 1,
+        ),
+      ));
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+
+      expect(startupReadyCalls, 1);
+      expect(optionalUpdateCalls, 1);
+      expect(find.text('A new version is available'), findsNothing);
+    });
+
     testWidgets(
         'shows the blocking dialog when the update check reports outdated',
         (tester) async {

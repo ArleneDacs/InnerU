@@ -33,6 +33,35 @@ class SetAppVersionCommandTest extends TestCase
         $this->assertSame(40, AppVersion::current()->android_latest_version_code);
     }
 
+    public function test_it_can_mark_a_release_optional_or_required(): void
+    {
+        $this->artisan('app:set-version', [
+            'platform' => 'ios',
+            'version' => '1.5.0',
+            '--optional' => true,
+        ])->assertExitCode(0);
+
+        $this->assertFalse(AppVersion::current()->ios_update_required);
+
+        $this->artisan('app:set-version', [
+            'platform' => 'ios',
+            'version' => '1.5.1',
+            '--required' => true,
+        ])->assertExitCode(0);
+
+        $this->assertTrue(AppVersion::current()->ios_update_required);
+    }
+
+    public function test_it_rejects_conflicting_requirement_options(): void
+    {
+        $this->artisan('app:set-version', [
+            'platform' => 'ios',
+            'version' => '1.5.0',
+            '--required' => true,
+            '--optional' => true,
+        ])->assertExitCode(1);
+    }
+
     public function test_it_rejects_a_non_numeric_android_version(): void
     {
         $this->artisan('app:set-version', [

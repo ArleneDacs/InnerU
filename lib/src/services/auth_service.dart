@@ -78,6 +78,17 @@ class AuthService {
   String? get currentUserId => _sessionService.currentUserId;
   String? get pendingVerificationEmail => _pendingVerificationEmail;
 
+  /// Persists a non-authentication profile preference alongside the existing
+  /// secure session payload so a restored session can use it before any
+  /// background profile refresh completes.
+  Future<void> updateDefaultLandingScreen(String defaultLandingScreen) async {
+    final session = _sessionService.current;
+    if (session == null) return;
+    await _sessionService.setSession(
+      session.copyWith(defaultLandingScreen: defaultLandingScreen),
+    );
+  }
+
   /// Whether the server actually delivered the verification email for the
   /// most recent signup, as opposed to just creating the pending account.
   /// SMTP failures are silent otherwise: the server still reports success
@@ -319,6 +330,9 @@ class AuthService {
       companyName: userJson['company_name']?.toString(),
       birthdate: userJson['birthdate']?.toString(),
       profilePic: userJson['profile_pic']?.toString(),
+      defaultLandingScreen: userJson['defaultScreen']?.toString() ??
+          userJson['default_landing_screen']?.toString() ??
+          'dashboard',
     );
     await _sessionService.setSession(session);
   }
@@ -349,6 +363,9 @@ class AuthService {
       birthdate: userJson['birthdate']?.toString() ?? fallbackSession.birthdate,
       profilePic:
           userJson['profile_pic']?.toString() ?? fallbackSession.profilePic,
+      defaultLandingScreen: userJson['defaultScreen']?.toString() ??
+          userJson['default_landing_screen']?.toString() ??
+          fallbackSession.defaultLandingScreen,
     );
     await _sessionService.setSession(session);
   }

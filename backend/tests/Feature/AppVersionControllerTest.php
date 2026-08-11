@@ -22,8 +22,10 @@ class AppVersionControllerTest extends TestCase
         AppVersion::current()->update([
             'ios_latest_version' => '1.2.0',
             'ios_store_url' => 'https://apps.apple.com/app/id123456789',
+            'ios_update_required' => false,
             'android_latest_version_code' => 40,
             'android_store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+            'android_update_required' => true,
         ]);
 
         $response = $this->getJson('/api/app-version');
@@ -32,10 +34,12 @@ class AppVersionControllerTest extends TestCase
             'ios' => [
                 'latest_version' => '1.2.0',
                 'store_url' => 'https://apps.apple.com/app/id123456789',
+                'is_required' => false,
             ],
             'android' => [
                 'latest_version_code' => 40,
                 'store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+                'is_required' => true,
             ],
         ]);
     }
@@ -45,8 +49,10 @@ class AppVersionControllerTest extends TestCase
         AppVersion::current()->update([
             'ios_latest_version' => '1.0.4',
             'ios_store_url' => null,
+            'ios_update_required' => true,
             'android_latest_version_code' => 34,
             'android_store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+            'android_update_required' => false,
         ]);
 
         $response = $this->getJson('/api/app-version');
@@ -55,10 +61,12 @@ class AppVersionControllerTest extends TestCase
             'ios' => [
                 'latest_version' => '1.0.4',
                 'store_url' => null,
+                'is_required' => true,
             ],
             'android' => [
                 'latest_version_code' => 34,
                 'store_url' => 'https://play.google.com/store/apps/details?id=com.valenin.inneru',
+                'is_required' => false,
             ],
         ]);
     }
