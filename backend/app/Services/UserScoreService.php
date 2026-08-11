@@ -132,6 +132,7 @@ class UserScoreService
         }
 
         $score = (float) ($user->score ?? 0);
+
         return [
             'goalScore' => $score,
             'coreTaskScore' => 0.0,
@@ -156,15 +157,15 @@ class UserScoreService
     /**
      * @param  Collection<int, User>  $users
      * @param  Company|null  $knownCompany  When the caller has already
-     *   resolved which company these users belong to (e.g. a company-scoped
-     *   leaderboard), pass it here so every user is scored against that
-     *   company instead of each user's own company fields being
-     *   independently re-derived via resolveCompaniesForUsers/matchCompany.
-     *   Those two resolvers don't always agree -- matchCompany prioritizes
-     *   active_company_id over company_id, so a user whose company_id
-     *   matches the caller's already-resolved company but whose
-     *   active_company_id has drifted elsewhere would otherwise silently
-     *   skip that company's configured leaderboard period.
+     *                                      resolved which company these users belong to (e.g. a company-scoped
+     *                                      leaderboard), pass it here so every user is scored against that
+     *                                      company instead of each user's own company fields being
+     *                                      independently re-derived via resolveCompaniesForUsers/matchCompany.
+     *                                      Those two resolvers don't always agree -- matchCompany prioritizes
+     *                                      active_company_id over company_id, so a user whose company_id
+     *                                      matches the caller's already-resolved company but whose
+     *                                      active_company_id has drifted elsewhere would otherwise silently
+     *                                      skip that company's configured leaderboard period.
      * @return array<string, array{goalScore:float, coreTaskScore:float, overallScore:float}>
      */
     public function resolveBreakdownForUsers(Collection $users, ?Company $knownCompany = null): array
@@ -223,7 +224,7 @@ class UserScoreService
                 ->orderBy('user_id')
                 ->orderBy('date')
                 ->orderByDesc('updated_at')
-            ->get([
+                ->get([
                     'user_id',
                     'date',
                     'step_count',
@@ -283,6 +284,7 @@ class UserScoreService
                         ->all(),
                     $user
                 );
+
                 continue;
             }
 
@@ -293,6 +295,7 @@ class UserScoreService
                         ->all(),
                     $user
                 );
+
                 continue;
             }
 
@@ -305,6 +308,7 @@ class UserScoreService
                     'coreTaskScore' => 0.0,
                     'overallScore' => 0.0,
                 ];
+
                 continue;
             }
 
@@ -358,6 +362,7 @@ class UserScoreService
         $query = DailyTracker::query()
             ->whereIn('user_id', $userIds)
             ->whereDate('date', $today->toDateString())
+            ->orderBy('leaderboard_completed_at')
             ->orderBy('updated_at')
             ->orderBy('created_at');
 
@@ -371,6 +376,7 @@ class UserScoreService
                 continue;
             }
 
+            $earliestCompletedAt = null;
             foreach ($trackers as $tracker) {
                 $taskIds = $this->dailyTrackerIdsForTracker($user, $tracker);
                 if ($taskIds === []) {
@@ -383,16 +389,76 @@ class UserScoreService
                     continue;
                 }
 
-                $firstCompletedAt[(string) $userId] = optional($tracker->updated_at ?? $tracker->created_at)?->toIso8601String();
-                break;
+                // `updated_at` changes whenever the tracker is edited. New
+                // records retain the one-time transition timestamp below;
+                // the mutable timestamp remains a best-effort fallback for
+                // rows created before leaderboard_completed_at existed.
+                $completedAt = $tracker->leaderboard_completed_at
+                    ?? $tracker->updated_at
+                    ?? $tracker->created_at;
+                if ($completedAt === null) {
+                    continue;
+                }
+
+                $completedAtIso = $completedAt->toIso8601String();
+                if ($earliestCompletedAt === null || strcmp($completedAtIso, $earliestCompletedAt) < 0) {
+                    $earliestCompletedAt = $completedAtIso;
+                }
+            }
+
+            if ($earliestCompletedAt !== null) {
+                $firstCompletedAt[(string) $userId] = $earliestCompletedAt;
             }
         }
 
         return array_filter($firstCompletedAt);
     }
 
+    /**
+     * Stores the first moment a user finishes every required Daily Tracker
+     * task today. This is deliberately never cleared or overwritten: later
+     * edits to an already-complete tracker must not change leaderboard
+     * placement. The conditional update also makes concurrent activity
+     * saves safe -- exactly one request wins the timestamp.
+     */
+    public function recordFirstCompletedDailyTrackerAt(User $user, DailyTracker $tracker): void
+    {
+        if ($tracker->leaderboard_completed_at !== null) {
+            return;
+        }
+
+        $trackerDate = $tracker->date;
+        if ($trackerDate === null || ! Carbon::parse($trackerDate)->isSameDay(Carbon::now())) {
+            return;
+        }
+
+        $taskIds = $this->dailyTrackerIdsForTracker($user, $tracker);
+        if ($taskIds === [] || ! collect($taskIds)
+            ->every(fn (string $taskId): bool => $this->dailyTrackerTaskCompleted($tracker, $taskId))) {
+            return;
+        }
+
+        $completedAt = Carbon::now();
+        $recorded = DailyTracker::query()
+            ->whereKey($tracker->getKey())
+            ->whereNull('leaderboard_completed_at')
+            ->update(['leaderboard_completed_at' => $completedAt]);
+
+        if ($recorded === 1) {
+            $tracker->setAttribute('leaderboard_completed_at', $completedAt);
+        }
+    }
+
     public function syncForUser(User $user, ?float $score = null): int
     {
+        $todayTracker = DailyTracker::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', Carbon::now()->toDateString())
+            ->first();
+        if ($todayTracker !== null) {
+            $this->recordFirstCompletedDailyTrackerAt($user, $todayTracker);
+        }
+
         $resolvedScore = $this->normalizeScore($score ?? $this->resolveForUser($user));
 
         User::query()
@@ -449,6 +515,7 @@ class UserScoreService
     {
         if ($breakdowns === []) {
             $score = (float) ($user->score ?? 0);
+
             return [
                 'goalScore' => $score,
                 'coreTaskScore' => 0.0,
@@ -501,8 +568,7 @@ class UserScoreService
         User $user,
         DailyTracker $tracker,
         ?float $goalScore = null
-    ): array
-    {
+    ): array {
         $dailyTrackerScore = $this->scoreDailyTrackerTasks($user, $tracker);
 
         // goalScore is still resolved and returned below for informational
@@ -528,8 +594,7 @@ class UserScoreService
     private function scoreBreakdownFromUserPoint(
         UserPoint $point,
         ?float $goalScore = null
-    ): array
-    {
+    ): array {
         $dailyTrackerScore = (float) $point->daily_tracker_score;
         // goalScore is still resolved and returned below for informational
         // display, but the leaderboard ranking score (overallScore) is a
@@ -545,6 +610,7 @@ class UserScoreService
         }
 
         $resolved = (float) ($point->user_total_score ?: $point->total_points);
+
         return [
             'goalScore' => $resolvedGoalScore,
             'coreTaskScore' => $dailyTrackerScore,
@@ -760,8 +826,7 @@ class UserScoreService
         Carbon $start,
         Carbon $end,
         ?float $goalScore = null
-    ): array
-    {
+    ): array {
         $today = Carbon::now()->startOfDay();
         $start = $start->copy()->startOfDay();
 
@@ -911,7 +976,7 @@ class UserScoreService
             foreach ($usersWithoutGoalScore as $user) {
                 $userId = (string) $user->id;
                 $company = $companiesByUser[$userId] ?? null;
-                $companyKey = $company !== null ? 'company:' . (string) $company->id : 'user:' . $userId;
+                $companyKey = $company !== null ? 'company:'.(string) $company->id : 'user:'.$userId;
 
                 $usersByCompanyKey[$companyKey] ??= [
                     'company' => $company,
@@ -1013,8 +1078,7 @@ class UserScoreService
         Collection $users,
         ?Carbon $periodStart = null,
         ?Carbon $periodEnd = null
-    ): array
-    {
+    ): array {
         $userIds = $users
             ->pluck('id')
             ->map(static fn ($id) => (string) $id)

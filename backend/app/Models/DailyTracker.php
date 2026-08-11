@@ -58,6 +58,7 @@ class DailyTracker extends Model
             'todo_list_included_in_total' => 'boolean',
             'user_total_score' => 'integer',
             'custom_daily_tasks' => 'array',
+            'leaderboard_completed_at' => 'datetime',
         ];
     }
 }

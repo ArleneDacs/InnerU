@@ -10,7 +10,8 @@ import 'package:selfcare_projects/src/services/leaderboard_api_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('leaderboard score sheet shows only daily tracker, not goal score', (
+  testWidgets(
+      'leaderboard score sheet shows only daily tracker, not goal score', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -35,7 +36,7 @@ void main() {
     expect(find.text('Arlene score'), findsOneWidget);
     expect(find.text('Goal score'), findsNothing);
     expect(find.text('Daily tracker'), findsOneWidget);
-    expect(find.text('Overall score (ranking)'), findsOneWidget);
+    expect(find.text('Overall score (tie-breaker)'), findsOneWidget);
     expect(find.text('A12'), findsNothing);
     expect(find.text('Consistency'), findsNothing);
     expect(find.text('Streak'), findsNothing);
@@ -73,13 +74,16 @@ void main() {
 
     expect(find.text('Jenny score'), findsOneWidget);
     expect(
-      find.text('Leaderboard rank is based on the Daily tracker score only.'),
+      find.text(
+        'Leaderboard rank is based on when today\'s Daily Tracker is '
+        'completed. Score breaks an exact completion-time tie.',
+      ),
       findsOneWidget,
     );
     expect(find.text('Team: 2B-ASCEND'), findsOneWidget);
     expect(find.text('Goal score'), findsNothing);
     expect(find.text('Daily tracker'), findsOneWidget);
-    expect(find.text('Overall score (ranking)'), findsOneWidget);
+    expect(find.text('Overall score (tie-breaker)'), findsOneWidget);
     expect(find.text('82'), findsNothing);
     expect(find.text('82 pts'), findsNothing);
     expect(find.text('64'), findsOneWidget);
@@ -96,6 +100,88 @@ void main() {
     expect(find.text('Goals'), findsNothing);
     expect(find.text('Total Points'), findsNothing);
   });
+
+  testWidgets(
+    'company leaderboard places an earlier finisher above a later higher score',
+    (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
+      const session = AppSession(
+        id: 77,
+        token: 'leaderboard-completion-order-token',
+        name: 'Viewer',
+        email: 'viewer@example.com',
+        role: 'member',
+        isCoach: false,
+      );
+      await AppSessionService.instance.setSession(session);
+      CompanyThemeService.cacheThemeForUser('77', CompanyThemeData.standard);
+      addTearDown(AppSessionService.instance.clear);
+      addTearDown(() => CompanyThemeService.clearCachedThemeForUser('77'));
+
+      const snapshot = LeaderboardApiSnapshot(
+        companyCode: 'STANDARD',
+        companyName: 'Standard Company',
+        leaderboardPeriodStart: null,
+        leaderboardPeriodEnd: null,
+        entries: <LeaderboardApiCompanyEntry>[
+          LeaderboardApiCompanyEntry(
+            userId: 'later-high-score',
+            name: 'A Later High Score',
+            score: 98,
+            goalScore: 98,
+            coreTaskScore: 98,
+            overallScore: 98,
+            rank: 1,
+            firstCompletedTrackerAt: '2026-08-11T10:00:00Z',
+          ),
+          LeaderboardApiCompanyEntry(
+            userId: 'earlier-low-score',
+            name: 'Z Earlier Low Score',
+            score: 10,
+            goalScore: 10,
+            coreTaskScore: 10,
+            overallScore: 10,
+            rank: 2,
+            firstCompletedTrackerAt: '2026-08-11T09:00:00Z',
+          ),
+          LeaderboardApiCompanyEntry(
+            userId: 'latest',
+            name: 'M Latest',
+            score: 100,
+            goalScore: 100,
+            coreTaskScore: 100,
+            overallScore: 100,
+            rank: 3,
+            firstCompletedTrackerAt: '2026-08-11T11:00:00Z',
+          ),
+        ],
+        groups: <LeaderboardApiGroup>[],
+        menteeEntries: <LeaderboardApiGroupMember>[],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Leaderboard(debugLoader: () async => snapshot),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final earlierFinisherPodium = find
+          .ancestor(
+            of: find.text('Z Earlier Low Score'),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(
+        find.descendant(
+          of: earlierFinisherPodium,
+          matching: find.text('Top 1'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('tapping score card scrolls to the current user rank', (
     tester,

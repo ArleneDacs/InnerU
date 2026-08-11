@@ -6,9 +6,10 @@ use App\Models\DailyTracker;
 use App\Models\User;
 use App\Services\UserScoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Mockery;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class DailyTrackerTest extends TestCase
@@ -228,6 +229,59 @@ class DailyTrackerTest extends TestCase
         $this->assertEquals(17, $storedScore);
     }
 
+    public function test_first_completed_tracker_time_is_persisted_and_survives_later_edits(): void
+    {
+        Carbon::setTestNow('2026-08-11 09:00:00');
+
+        $user = User::factory()->create([
+            'name' => 'First Finisher',
+            'email' => 'first-finisher@example.com',
+        ]);
+        Sanctum::actingAs($user);
+
+        $completed = $this->postJson('/api/daily-tracker', [
+            'date' => '2026-08-11',
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+
+        $completed->assertOk();
+        $firstCompletion = DailyTracker::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', '2026-08-11')
+            ->value('leaderboard_completed_at');
+        $this->assertNotNull($firstCompletion);
+
+        Carbon::setTestNow('2026-08-11 11:00:00');
+        $laterEdit = $this->postJson('/api/daily-tracker', [
+            'date' => '2026-08-11',
+            'step_count' => 9000,
+        ]);
+
+        $laterEdit->assertOk()
+            ->assertJsonPath('tracker.stepCount', 9000);
+        $tracker = DailyTracker::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', '2026-08-11')
+            ->firstOrFail();
+        $this->assertTrue(
+            Carbon::parse($firstCompletion)->equalTo($tracker->leaderboard_completed_at),
+            'A later tracker edit must not move the completion timestamp.',
+        );
+        $this->assertTrue($tracker->updated_at->gt($tracker->leaderboard_completed_at));
+
+        $completionTimes = app(UserScoreService::class)
+            ->firstCompletedDailyTrackerAtForUsers(collect([$user->fresh()]));
+        $this->assertSame(
+            $tracker->leaderboard_completed_at->toIso8601String(),
+            $completionTimes[(string) $user->id],
+        );
+    }
+
     public function test_score_averages_daily_tracker_completion_across_all_recorded_days(): void
     {
         // Leaderboard score must not reset to today's completion alone.
@@ -378,6 +432,7 @@ class DailyTrackerTest extends TestCase
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow(null);
         Mockery::close();
         parent::tearDown();
     }

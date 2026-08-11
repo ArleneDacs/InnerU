@@ -6,10 +6,9 @@ import 'package:selfcare_projects/src/services/coach_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 
-/// A coach's view across every accountability meeting they've scheduled,
-/// for any of their groups. Scheduling a new one from here starts with a
-/// group picker since (unlike scheduling from a specific group's card)
-/// this screen isn't already scoped to one group.
+/// A coach's view across meetings scheduled in any group they manage.
+/// Coaches can edit or delete only meetings they personally created;
+/// member-created group meetings remain visible here as read-only.
 class CoachAccountabilityMeetingsScreen extends StatefulWidget {
   const CoachAccountabilityMeetingsScreen({super.key});
 
@@ -234,6 +233,7 @@ class _CoachAccountabilityMeetingsScreenState
     final groupName = (meeting['groupName'] as String?)?.trim();
     final zoomLink = (meeting['zoomLink'] as String?)?.trim() ?? '';
     final menteeCount = (meeting['menteeCount'] as num?)?.toInt();
+    final isCreator = meeting['isCreator'] == true;
     final scheduledAtRaw = meeting['scheduledAt'] as String?;
     final scheduledAt =
         scheduledAtRaw != null ? DateTime.tryParse(scheduledAtRaw) : null;
@@ -320,51 +320,61 @@ class _CoachAccountabilityMeetingsScreenState
             ),
           ],
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _editMeeting(meeting),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.primaryColor,
-                    side: BorderSide(
-                      color: theme.primaryColor.withValues(alpha: 0.30),
+          if (isCreator)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _editMeeting(meeting),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.primaryColor,
+                      side: BorderSide(
+                        color: theme.primaryColor.withValues(alpha: 0.30),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text(
+                      'Edit',
+                      style: TextStyle(fontWeight: FontWeight.w800),
                     ),
-                  ),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text(
-                    'Edit',
-                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _deleteMeeting(meeting),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE56B6F),
-                    side: BorderSide(
-                      color: const Color(0xFFE56B6F).withValues(alpha: 0.30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _deleteMeeting(meeting),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE56B6F),
+                      side: BorderSide(
+                        color: const Color(0xFFE56B6F).withValues(alpha: 0.30),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text(
+                      'Delete',
+                      style: TextStyle(fontWeight: FontWeight.w800),
                     ),
-                  ),
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text(
-                    'Delete',
-                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
+              ],
+            )
+          else
+            Text(
+              'Scheduled by a group member',
+              style: TextStyle(
+                color: theme.mutedInkColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
+            ),
         ],
       ),
     );

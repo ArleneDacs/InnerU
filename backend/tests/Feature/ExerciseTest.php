@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ExerciseLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -221,5 +222,74 @@ class ExerciseTest extends TestCase
             'user_id' => $user->id,
             'type' => 'Yoga',
         ]);
+    }
+
+    public function test_exercise_gallery_history_is_paged_photo_only_and_private(): void
+    {
+        $user = User::factory()->create(['name' => 'Gallery User']);
+        $otherUser = User::factory()->create(['name' => 'Other User']);
+
+        $startPhotoLog = ExerciseLog::create([
+            'id' => 'exercise-gallery-start-photo',
+            'user_id' => $user->id,
+            'username' => $user->name,
+            'type' => 'Yoga',
+            'duration_minutes' => 30,
+            'duration_seconds' => 1800,
+            'intensity' => 2,
+            'start_photo_url' => 'https://example.test/yoga-start.jpg',
+            'date' => '2026-07-22',
+        ]);
+        $endPhotoLog = ExerciseLog::create([
+            'id' => 'exercise-gallery-end-photo',
+            'user_id' => $user->id,
+            'username' => $user->name,
+            'type' => 'Run',
+            'duration_minutes' => 45,
+            'duration_seconds' => 2700,
+            'intensity' => 3,
+            'end_photo_url' => 'https://example.test/run-end.jpg',
+            'date' => '2026-07-21',
+        ]);
+        ExerciseLog::create([
+            'id' => 'exercise-gallery-no-photo',
+            'user_id' => $user->id,
+            'username' => $user->name,
+            'type' => 'Walk',
+            'duration_minutes' => 20,
+            'duration_seconds' => 1200,
+            'intensity' => 1,
+            'date' => '2026-07-23',
+        ]);
+        ExerciseLog::create([
+            'id' => 'exercise-gallery-other-user',
+            'user_id' => $otherUser->id,
+            'username' => $otherUser->name,
+            'type' => 'Cycling',
+            'duration_minutes' => 60,
+            'duration_seconds' => 3600,
+            'intensity' => 2,
+            'start_photo_url' => 'https://example.test/private.jpg',
+            'date' => '2026-07-24',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $firstPage = $this->getJson('/api/exercise/history?perPage=1');
+        $firstPage->assertOk()
+            ->assertJsonCount(1, 'logs')
+            ->assertJsonPath('logs.0.id', $startPhotoLog->id)
+            ->assertJsonPath('logs.0.startPhotoUrl', 'https://example.test/yoga-start.jpg')
+            ->assertJsonPath('page', 1)
+            ->assertJsonPath('perPage', 1)
+            ->assertJsonPath('hasMore', true);
+
+        $secondPage = $this->getJson('/api/exercise/history?perPage=1&page=2');
+        $secondPage->assertOk()
+            ->assertJsonCount(1, 'logs')
+            ->assertJsonPath('logs.0.id', $endPhotoLog->id)
+            ->assertJsonPath('logs.0.endPhotoUrl', 'https://example.test/run-end.jpg')
+            ->assertJsonPath('page', 2)
+            ->assertJsonPath('hasMore', false);
     }
 }

@@ -6,7 +6,6 @@ use App\Models\AccountabilityMeeting;
 use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\DailyTracker;
-use App\Models\MeetingAttendance;
 use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -101,6 +100,183 @@ class AccountabilityMeetingTest extends TestCase
         ]);
 
         $response->assertCreated();
+    }
+
+    public function test_a_group_member_can_schedule_a_meeting_and_it_is_visible_to_peers_and_coaches(): void
+    {
+        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $schedulingMember = User::factory()->create(['name' => 'Scheduling Member']);
+        $peer = User::factory()->create(['name' => 'Group Peer']);
+        $group = $this->makeGroup($coach);
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $schedulingMember->id,
+            'group_id' => $group->id,
+        ]);
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $peer->id,
+            'group_id' => $group->id,
+        ]);
+
+        Sanctum::actingAs($schedulingMember);
+        $created = $this->postJson('/api/accountability-meetings', [
+            'group_id' => $group->id,
+            'title' => 'Member-led check-in',
+            'zoom_link' => 'https://zoom.us/j/123456789?pwd=member',
+            'scheduled_at' => now()->addDays(2)->toIso8601String(),
+        ]);
+
+        $created->assertCreated()
+            ->assertJsonPath('meeting.coachId', (string) $schedulingMember->id)
+            ->assertJsonPath('meeting.isCreator', true);
+
+        Sanctum::actingAs($peer);
+        $peerMeetings = $this->getJson('/api/accountability-meetings/mine');
+        $peerMeetings->assertOk()
+            ->assertJsonCount(1, 'meetings')
+            ->assertJsonPath('meetings.0.title', 'Member-led check-in')
+            ->assertJsonPath('meetings.0.isCreator', false);
+
+        Sanctum::actingAs($coach);
+        $coachMeetings = $this->getJson('/api/coach/accountability-meetings');
+        $coachMeetings->assertOk()
+            ->assertJsonCount(1, 'meetings')
+            ->assertJsonPath('meetings.0.title', 'Member-led check-in')
+            ->assertJsonPath('meetings.0.isCreator', false);
+
+        // Coach reminder taps open the same member-facing list, so managed
+        // groups must be visible and joinable there too.
+        $coachMine = $this->getJson('/api/accountability-meetings/mine');
+        $coachMine->assertOk()
+            ->assertJsonCount(1, 'meetings')
+            ->assertJsonPath('meetings.0.title', 'Member-led check-in');
+        $this->postJson('/api/accountability-meetings/'.$created->json('meeting.id').'/join')
+            ->assertOk()
+            ->assertJsonPath('alreadyJoined', false);
+    }
+
+    public function test_group_member_can_list_only_their_schedulable_groups(): void
+    {
+        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $member = User::factory()->create();
+        $myGroup = $this->makeGroup($coach, 'My Group');
+        $otherGroup = $this->makeGroup($coach, 'Other Group');
+        CoachMentee::create([
+            'coach_id' => (string) $coach->id,
+            'mentee_id' => (string) $member->id,
+            'group_id' => $myGroup->id,
+        ]);
+
+        Sanctum::actingAs($member);
+        $response = $this->getJson('/api/accountability-meetings/groups');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'groups')
+            ->assertJsonPath('groups.0.id', $myGroup->id)
+            ->assertJsonPath('groups.0.name', 'My Group');
+        $response->assertJsonMissing(['id' => $otherGroup->id]);
+    }
+
+    public function test_a_user_outside_the_group_cannot_schedule_a_meeting_for_it(): void
+    {
+        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $outsider = User::factory()->create();
+        $group = $this->makeGroup($coach);
+
+        Sanctum::actingAs($outsider);
+        $response = $this->postJson('/api/accountability-meetings', [
+            'group_id' => $group->id,
+            'title' => 'Unauthorized meeting',
+            'zoom_link' => 'https://zoom.us/j/123456789',
+            'scheduled_at' => now()->addDays(2)->toIso8601String(),
+        ]);
+
+        $response->assertForbidden();
+        $this->assertDatabaseMissing('accountability_meetings', ['group_id' => $group->id]);
+    }
+
+    public function test_a_member_can_manage_only_the_meetings_they_created(): void
+    {
+        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $creator = User::factory()->create();
+        $peer = User::factory()->create();
+        $group = $this->makeGroup($coach);
+        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $creator->id, 'group_id' => $group->id]);
+        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $peer->id, 'group_id' => $group->id]);
+
+        Sanctum::actingAs($creator);
+        $created = $this->postJson('/api/accountability-meetings', [
+            'group_id' => $group->id,
+            'title' => 'Creator meeting',
+            'zoom_link' => 'https://zoom.us/j/123456789',
+            'scheduled_at' => now()->addDays(2)->toIso8601String(),
+        ])->assertCreated();
+        $meetingId = $created->json('meeting.id');
+
+        $this->patchJson('/api/accountability-meetings/'.$meetingId, [
+            'title' => 'Updated creator meeting',
+            'zoom_link' => 'https://zoom.us/j/123456789',
+            'scheduled_at' => now()->addDays(3)->toIso8601String(),
+        ])->assertOk()->assertJsonPath('meeting.title', 'Updated creator meeting');
+
+        Sanctum::actingAs($peer);
+        $this->patchJson('/api/accountability-meetings/'.$meetingId, [
+            'title' => 'Peer cannot edit',
+            'zoom_link' => 'https://zoom.us/j/123456789',
+            'scheduled_at' => now()->addDays(3)->toIso8601String(),
+        ])->assertForbidden();
+        $this->deleteJson('/api/accountability-meetings/'.$meetingId)->assertForbidden();
+
+        $this->assertDatabaseHas('accountability_meetings', [
+            'id' => $meetingId,
+            'title' => 'Updated creator meeting',
+        ]);
+    }
+
+    public function test_member_created_meeting_reminders_reach_each_group_member_and_coach_once(): void
+    {
+        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $coCoach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+        $creator = User::factory()->create();
+        $peer = User::factory()->create();
+        $group = CoachGroup::create([
+            'id' => (string) Str::uuid(),
+            'coach_id' => (string) $coach->id,
+            'coach_ids' => [(string) $coach->id, (string) $coCoach->id],
+            'name' => 'Shared Group',
+        ]);
+        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $creator->id, 'group_id' => $group->id]);
+        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $peer->id, 'group_id' => $group->id]);
+
+        Sanctum::actingAs($creator);
+        $created = $this->postJson('/api/accountability-meetings', [
+            'group_id' => $group->id,
+            'title' => 'Tomorrow member meeting',
+            'zoom_link' => 'https://zoom.us/j/999999',
+            'scheduled_at' => now()->addDay()->toIso8601String(),
+        ])->assertCreated();
+
+        $this->assertSame(0, Notification::query()->where('type', 'meeting_reminder_day_before')->count());
+
+        $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
+
+        foreach ([$creator, $peer, $coach, $coCoach] as $recipient) {
+            $this->assertSame(
+                1,
+                Notification::query()
+                    ->where('user_id', (string) $recipient->id)
+                    ->where('type', 'meeting_reminder_day_before')
+                    ->count(),
+            );
+        }
+
+        $this->assertNotNull(
+            AccountabilityMeeting::query()->find($created->json('meeting.id'))?->day_before_notified_at,
+        );
+
+        $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
+        $this->assertSame(4, Notification::query()->where('type', 'meeting_reminder_day_before')->count());
     }
 
     public function test_scheduled_at_in_the_past_is_rejected(): void

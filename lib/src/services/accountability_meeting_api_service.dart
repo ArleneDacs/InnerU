@@ -107,6 +107,17 @@ class AccountabilityMeetingApiService {
   Stream<List<Map<String, dynamic>>> watchForCoach() =>
       _poll(fetchForCoach, fallback: const <Map<String, dynamic>>[]);
 
+  /// Returns groups the current user can schedule for: their memberships and
+  /// groups they manage as a coach. The backend owns this authorization; the
+  /// picker must never trust a group ID supplied by the app alone.
+  Future<List<Map<String, dynamic>>> fetchMyGroups() async {
+    final response = await _api.getJson(
+      '/api/accountability-meetings/groups',
+      token: _token,
+    );
+    return _listFrom(response, 'groups');
+  }
+
   Future<List<Map<String, dynamic>>> fetchMine() async {
     final response = await _api.getJson(
       '/api/accountability-meetings/mine',

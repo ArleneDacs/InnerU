@@ -54,6 +54,28 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
     }
 
+    private function completeDailyTracker(User $user, string $date, string $completedAt): DailyTracker
+    {
+        $tracker = DailyTracker::create([
+            'user_id' => (string) $user->id,
+            'username' => $user->name,
+            'date' => $date,
+            'call' => true,
+            'steps' => true,
+            'exercise' => true,
+            'meditation' => true,
+            'learning' => true,
+            'add_value' => true,
+        ]);
+
+        $tracker->forceFill([
+            'created_at' => $completedAt,
+            'updated_at' => $completedAt,
+        ])->save();
+
+        return $tracker;
+    }
+
     public function test_a_user_with_no_resolvable_company_only_sees_themselves_and_no_groups(): void
     {
         $companyA = $this->makeCompany('CompanyA', 'COMPA');
@@ -799,7 +821,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         }
     }
 
-    public function test_score_ties_are_ranked_by_todays_first_completed_daily_tracker_time(): void
+    public function test_earlier_daily_tracker_completion_ranks_a_user_above_a_later_higher_score(): void
     {
         Carbon::setTestNow('2026-08-06 12:00:00');
 
@@ -822,69 +844,24 @@ class LeaderboardCompanyScopeTest extends TestCase
             'company_name' => $company->name,
         ]);
 
-        $oldPeriodTracker = DailyTracker::create([
-            'user_id' => (string) $laterAlphabeticallyFirst->id,
-            'username' => $laterAlphabeticallyFirst->name,
-            'date' => '2026-08-01',
-            'call' => true,
-            'steps' => true,
-            'exercise' => true,
-            'meditation' => true,
-            'learning' => true,
-            'add_value' => true,
-        ]);
-        $oldPeriodTracker->forceFill([
-            'created_at' => '2026-08-01 08:00:00',
-            'updated_at' => '2026-08-01 08:00:00',
-        ])->save();
-
-        $oldPeriodTrackerForEarlierUser = DailyTracker::create([
-            'user_id' => (string) $earlierAlphabeticallyLast->id,
-            'username' => $earlierAlphabeticallyLast->name,
-            'date' => '2026-08-01',
-            'call' => true,
-            'steps' => true,
-            'exercise' => true,
-            'meditation' => true,
-            'learning' => true,
-            'add_value' => true,
-        ]);
-        $oldPeriodTrackerForEarlierUser->forceFill([
-            'created_at' => '2026-08-01 11:00:00',
-            'updated_at' => '2026-08-01 11:00:00',
-        ])->save();
-
-        $laterTracker = DailyTracker::create([
-            'user_id' => (string) $laterAlphabeticallyFirst->id,
-            'username' => $laterAlphabeticallyFirst->name,
-            'date' => '2026-08-06',
-            'call' => true,
-            'steps' => true,
-            'exercise' => true,
-            'meditation' => true,
-            'learning' => true,
-            'add_value' => true,
-        ]);
-        $laterTracker->forceFill([
-            'created_at' => '2026-08-06 10:00:00',
-            'updated_at' => '2026-08-06 10:00:00',
-        ])->save();
-
-        $earlierTracker = DailyTracker::create([
-            'user_id' => (string) $earlierAlphabeticallyLast->id,
-            'username' => $earlierAlphabeticallyLast->name,
-            'date' => '2026-08-06',
-            'call' => true,
-            'steps' => true,
-            'exercise' => true,
-            'meditation' => true,
-            'learning' => true,
-            'add_value' => true,
-        ]);
-        $earlierTracker->forceFill([
-            'created_at' => '2026-08-06 09:00:00',
-            'updated_at' => '2026-08-06 09:00:00',
-        ])->save();
+        // The later finisher has an additional full day in the period, so
+        // their existing Daily Tracker score is higher. Completion order,
+        // not that score or their alphabetic name, controls placement.
+        $this->completeDailyTracker(
+            $laterAlphabeticallyFirst,
+            '2026-08-01',
+            '2026-08-01 08:00:00',
+        );
+        $this->completeDailyTracker(
+            $laterAlphabeticallyFirst,
+            '2026-08-06',
+            '2026-08-06 10:00:00',
+        );
+        $this->completeDailyTracker(
+            $earlierAlphabeticallyLast,
+            '2026-08-06',
+            '2026-08-06 09:00:00',
+        );
 
         Sanctum::actingAs($laterAlphabeticallyFirst);
 
@@ -897,6 +874,66 @@ class LeaderboardCompanyScopeTest extends TestCase
         );
         $this->assertNotNull($response->json('companyLeaderboard.0.firstCompletedTrackerAt'));
         $this->assertNotNull($response->json('companyLeaderboard.1.firstCompletedTrackerAt'));
+        $this->assertLessThan(
+            (float) $response->json('companyLeaderboard.1.score'),
+            (float) $response->json('companyLeaderboard.0.score'),
+            'The earlier finisher should remain first even with a lower score.',
+        );
+    }
+
+    public function test_score_breaks_an_exact_daily_tracker_completion_time_tie(): void
+    {
+        Carbon::setTestNow('2026-08-06 12:00:00');
+
+        $company = $this->makeCompany('Same Time Company', 'SAMETIME');
+        $company->update([
+            'leaderboard_period_start' => '2026-08-01',
+            'leaderboard_period_end' => '2026-12-31',
+        ]);
+
+        $lowerScoreAlphabeticallyFirst = User::factory()->create([
+            'name' => 'A Lower Score',
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+        $higherScoreAlphabeticallyLast = User::factory()->create([
+            'name' => 'Z Higher Score',
+            'company_id' => $company->id,
+            'company_code' => $company->code,
+            'company_name' => $company->name,
+        ]);
+
+        $this->completeDailyTracker(
+            $higherScoreAlphabeticallyLast,
+            '2026-08-01',
+            '2026-08-01 08:00:00',
+        );
+        $this->completeDailyTracker(
+            $lowerScoreAlphabeticallyFirst,
+            '2026-08-06',
+            '2026-08-06 09:00:00',
+        );
+        $this->completeDailyTracker(
+            $higherScoreAlphabeticallyLast,
+            '2026-08-06',
+            '2026-08-06 09:00:00',
+        );
+
+        Sanctum::actingAs($lowerScoreAlphabeticallyFirst);
+
+        $response = $this->getJson('/api/leaderboard');
+
+        $response->assertOk();
+        $this->assertSame(
+            ['Z Higher Score', 'A Lower Score'],
+            collect($response->json('companyLeaderboard'))->take(2)->pluck('name')->all(),
+        );
+        $this->assertGreaterThan(
+            (float) $response->json('companyLeaderboard.1.score'),
+            (float) $response->json('companyLeaderboard.0.score'),
+            'Score should only decide a matching completion timestamp.',
+        );
     }
 
     public function test_a_users_score_still_respects_the_period_even_when_their_active_company_id_has_drifted_elsewhere(): void

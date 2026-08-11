@@ -139,6 +139,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/fasting/history', [FastingController::class, 'history']);
     Route::post('/fasting/start', [FastingController::class, 'start']);
     Route::post('/fasting/end', [FastingController::class, 'end']);
+    Route::get('/exercise/history', [ExerciseController::class, 'history']);
     Route::get('/exercise', [ExerciseController::class, 'index']);
     Route::post('/exercise', [ExerciseController::class, 'store']);
     Route::delete('/exercise/{logId}', [ExerciseController::class, 'destroy']);
@@ -176,6 +177,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/accountability-meetings', [AccountabilityMeetingController::class, 'store']);
     Route::patch('/accountability-meetings/{accountabilityMeeting}', [AccountabilityMeetingController::class, 'update']);
     Route::delete('/accountability-meetings/{accountabilityMeeting}', [AccountabilityMeetingController::class, 'destroy']);
+    Route::get('/accountability-meetings/groups', [AccountabilityMeetingController::class, 'groups']);
     Route::get('/accountability-meetings/mine', [AccountabilityMeetingController::class, 'mine']);
     Route::post('/accountability-meetings/{accountabilityMeeting}/join', [AccountabilityMeetingController::class, 'join']);
     Route::get('/coach/accountability-meetings', [AccountabilityMeetingController::class, 'index']);

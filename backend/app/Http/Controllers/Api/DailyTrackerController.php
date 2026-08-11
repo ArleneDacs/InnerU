@@ -205,7 +205,7 @@ class DailyTrackerController extends Controller
                     'todayCompletedCount' => $todayTracker
                         ? collect($this->trackerPayload($todayTracker))->filter()->count()
                         : 0,
-                    'todayTaskCount' => count($this->trackerPayload($todayTracker ?? new DailyTracker())),
+                    'todayTaskCount' => count($this->trackerPayload($todayTracker ?? new DailyTracker)),
                     'todayUpdatedAt' => $todayTracker?->updated_at?->toIso8601String(),
                     'progress' => $progress,
                 ];
@@ -399,6 +399,7 @@ class DailyTrackerController extends Controller
             'companyId' => $tracker->company_id,
             'companyCode' => $tracker->company_code,
             'companyName' => $tracker->company_name,
+            'leaderboardCompletedAt' => $tracker->leaderboard_completed_at?->toIso8601String(),
             'createdAt' => $tracker->created_at?->toIso8601String(),
             'updatedAt' => $tracker->updated_at?->toIso8601String(),
         ];
@@ -531,12 +532,14 @@ class DailyTrackerController extends Controller
     private function isCoach(User $user): bool
     {
         $role = strtolower(trim((string) $user->role));
+
         return $role === 'coach' || (bool) $user->is_coach;
     }
 
     private function isAdmin(User $user): bool
     {
         $role = strtolower(trim((string) $user->role));
+
         return $role === 'admin' || (bool) $user->is_admin;
     }
 

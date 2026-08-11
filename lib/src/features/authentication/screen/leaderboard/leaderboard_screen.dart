@@ -342,15 +342,15 @@ class _LeaderboardState extends State<Leaderboard>
           )
           .toList()
         ..sort((a, b) {
-          if (a.score != b.score) {
-            return b.score.compareTo(a.score);
-          }
           final completedComparison = _compareCompletedTrackerAt(
             a.firstCompletedTrackerAt,
             b.firstCompletedTrackerAt,
           );
           if (completedComparison != 0) {
             return completedComparison;
+          }
+          if (a.score != b.score) {
+            return b.score.compareTo(a.score);
           }
           if (a.rank != b.rank) {
             return a.rank.compareTo(b.rank);
@@ -859,12 +859,12 @@ class LeaderboardInfoSheet extends StatelessWidget {
       _LeaderboardInfoSection(
         icon: Icons.leaderboard_rounded,
         title: 'Leaderboard ranking',
-        body: 'Your rank is simply the average of your Daily Tracker score. '
-            'We add up your score for every day, then divide by $divisorLabel '
-            'in your company\'s tracking period to get '
-            'that average. Everyone in your company is ranked by it, '
-            'highest first. When scores are tied, the person who completes '
-            'today\'s Daily Tracker first is ranked higher.',
+        body: 'Your rank is determined by who completes today\'s Daily '
+            'Tracker first. Everyone who completes it is placed in that '
+            'completion order. If two people finish at the same time, we use '
+            'their Daily Tracker average as the tie-breaker. We add up that '
+            'score for every day, then divide by $divisorLabel in your '
+            'company\'s tracking period.',
         example: 'Daily Tracker scores of 70%, 90%, and 50%\n'
             '$averageExample',
       ),
@@ -1121,7 +1121,8 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Leaderboard rank is based on the Daily tracker score only.',
+          'Leaderboard rank is based on when today\'s Daily Tracker is '
+          'completed. Score breaks an exact completion-time tie.',
           style: TextStyle(
             fontSize: 14,
             color: theme.mutedInkColor,
@@ -1152,7 +1153,7 @@ class LeaderboardScoreBreakdownSheet extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Overall score (ranking)',
+                'Overall score (tie-breaker)',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -2405,15 +2406,15 @@ class _A12LeaderboardBoardState extends State<_A12LeaderboardBoard> {
   List<A12LeaderboardEntry> get _sortedEntries {
     final sorted = [...entries];
     sorted.sort((a, b) {
-      if (a.score.overallScore != b.score.overallScore) {
-        return b.score.overallScore.compareTo(a.score.overallScore);
-      }
       final completedComparison = _compareCompletedTrackerAt(
         a.firstCompletedTrackerAt,
         b.firstCompletedTrackerAt,
       );
       if (completedComparison != 0) {
         return completedComparison;
+      }
+      if (a.score.overallScore != b.score.overallScore) {
+        return b.score.overallScore.compareTo(a.score.overallScore);
       }
       if (a.leaderboardRank != b.leaderboardRank) {
         return a.leaderboardRank.compareTo(b.leaderboardRank);

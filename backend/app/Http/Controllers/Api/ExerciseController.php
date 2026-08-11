@@ -56,6 +56,61 @@ class ExerciseController extends Controller
         ]);
     }
 
+    /**
+     * Return just the logged sessions that have a photo, in small pages for
+     * the personal exercise gallery. Keeping this separate from the daily
+     * logger endpoint means opening the tracker never downloads a user's
+     * entire photo history.
+     */
+    public function history(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $validated = $request->validate([
+            'page' => ['nullable', 'integer', 'min:1'],
+            'perPage' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        // A grid page contains at most two thumbnails per log. Bound it so a
+        // long-running account cannot accidentally turn one scroll request
+        // into a large media payload.
+        $requestedPerPage = (int) ($validated['perPage'] ?? 18);
+        $perPage = min(30, max(1, $requestedPerPage));
+        $page = (int) ($validated['page'] ?? 1);
+
+        $logs = ExerciseLog::query()
+            ->where('user_id', $user->id)
+            ->where(function ($photos): void {
+                $photos
+                    ->where(function ($startPhoto): void {
+                        $startPhoto
+                            ->whereNotNull('start_photo_url')
+                            ->where('start_photo_url', '!=', '');
+                    })
+                    ->orWhere(function ($endPhoto): void {
+                        $endPhoto
+                            ->whereNotNull('end_photo_url')
+                            ->where('end_photo_url', '!=', '');
+                    });
+            })
+            ->orderByDesc('date')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'logs' => $logs->getCollection()
+                ->map(fn (ExerciseLog $log) => $this->logPayload($log))
+                ->values(),
+            'page' => (int) $logs->currentPage(),
+            'perPage' => (int) $logs->perPage(),
+            'hasMore' => $logs->hasMorePages(),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -158,7 +213,7 @@ class ExerciseController extends Controller
             ->whereDate('date', $date)
             ->first();
 
-        DailyTracker::updateOrCreate(
+        $tracker = DailyTracker::updateOrCreate(
             [
                 'user_id' => $user->id,
                 'date' => $date,
@@ -191,6 +246,8 @@ class ExerciseController extends Controller
                 'company_name' => $user->company_name,
             ]
         );
+
+        $this->userScoreService->recordFirstCompletedDailyTrackerAt($user, $tracker);
     }
 
     private function syncUserPoints(User $user, string $date): void

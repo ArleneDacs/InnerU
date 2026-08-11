@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/coach_dashboard/schedule_meeting_dialog.dart';
 import 'package:selfcare_projects/src/services/accountability_meeting_api_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// A mentee's upcoming accountability meetings for the groups they belong
-/// to. Joining marks attendance (which checks off today's Call task on the
-/// real daily tracker) and opens the Zoom link. Also the one place that
-/// schedules the on-device day-before/day-of reminders, since there's no
-/// server push in this app to wake the client otherwise.
+/// A group member's upcoming accountability meetings. Members can schedule
+/// a meeting for one of their own groups, join it, and receive on-device
+/// reminders. Joining marks attendance (which checks off today's Call task
+/// on the real daily tracker) and opens the Zoom link.
 class MyAccountabilityMeetingsScreen extends StatefulWidget {
   const MyAccountabilityMeetingsScreen({super.key});
 
@@ -23,6 +23,85 @@ class _MyAccountabilityMeetingsScreenState
     extends State<MyAccountabilityMeetingsScreen> {
   final Set<String> _remindersScheduledForIds = <String>{};
   final Set<String> _joiningIds = <String>{};
+
+  Future<void> _pickGroupAndSchedule() async {
+    List<Map<String, dynamic>> groups;
+    try {
+      groups = await AccountabilityMeetingApiService.instance.fetchMyGroups();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load your groups.')),
+      );
+      return;
+    }
+
+    if (groups.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Join a group before scheduling a meeting.'),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.60,
+            ),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Choose a group',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                ...groups.map((group) {
+                  final name =
+                      (group['name'] as String?)?.trim().isNotEmpty == true
+                          ? (group['name'] as String).trim()
+                          : 'Group';
+                  return ListTile(
+                    title: Text(name),
+                    onTap: () => Navigator.pop(sheetContext, group),
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !mounted) return;
+    final groupId = (selected['id'] as String?)?.trim() ?? '';
+    final groupName = (selected['name'] as String?)?.trim().isNotEmpty == true
+        ? (selected['name'] as String).trim()
+        : 'Group';
+    if (groupId.isEmpty) return;
+
+    final scheduled = await showScheduleMeetingDialog(
+      context,
+      groupId: groupId,
+      groupName: groupName,
+    );
+    if (scheduled != true || !mounted) return;
+
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Meeting scheduled for $groupName.')),
+    );
+  }
 
   void _ensureLocalReminders(List<Map<String, dynamic>> meetings) {
     for (final meeting in meetings) {
@@ -100,6 +179,13 @@ class _MyAccountabilityMeetingsScreenState
                 'Accountability meetings',
                 style: TextStyle(color: theme.inkColor),
               ),
+              actions: [
+                IconButton(
+                  tooltip: 'Schedule meeting',
+                  icon: const Icon(Icons.add),
+                  onPressed: _pickGroupAndSchedule,
+                ),
+              ],
             ),
             body: StreamBuilder<List<Map<String, dynamic>>>(
               stream: AccountabilityMeetingApiService.instance.watchMine(),

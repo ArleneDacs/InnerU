@@ -8,10 +8,12 @@ use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\DailyTracker;
 use App\Models\MeetingAttendance;
+use App\Models\User;
 use App\Services\AccountabilityMeetingReminderService;
 use App\Services\UserScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,15 +23,14 @@ class AccountabilityMeetingController extends Controller
     public function __construct(
         private readonly UserScoreService $userScoreService,
         private readonly AccountabilityMeetingReminderService $reminderService,
-    ) {
-    }
+    ) {}
 
     /**
-     * A coach schedules a recurring/one-off accountability meeting for one
-     * of their groups. No notifications are sent here — the day-before /
-     * day-of sweep (see AccountabilityMeetingReminderService) is the only
-     * notifier, so that mentees aren't spammed the moment a meeting is
-     * created regardless of how far out it is.
+     * A group coach or a current group member schedules a recurring/one-off
+     * accountability meeting. No notifications are sent here — the
+     * day-before / day-of sweep (see AccountabilityMeetingReminderService)
+     * is the only notifier, so that group members aren't spammed the moment
+     * a meeting is created regardless of how far out it is.
      */
     public function store(Request $request): JsonResponse
     {
@@ -46,20 +47,17 @@ class AccountabilityMeetingController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $group = CoachGroup::query()
-            ->where('id', $validated['group_id'])
-            ->where(function ($builder) use ($user): void {
-                $builder->where('coach_id', (string) $user->id)
-                    ->orWhereJsonContains('coach_ids', (string) $user->id);
-            })
-            ->first();
+        $group = CoachGroup::query()->find($validated['group_id']);
 
-        if ($group === null) {
-            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        if ($group === null || ! $this->canScheduleForGroup($user, $group)) {
+            return response()->json(['message' => 'You must belong to this group to schedule a meeting.'], Response::HTTP_FORBIDDEN);
         }
 
         $meeting = AccountabilityMeeting::create([
             'id' => (string) Str::uuid(),
+            // This legacy column is the meeting creator identifier. It keeps
+            // its established name so existing coach-created meetings and
+            // clients remain compatible; it may now contain a member ID.
             'coach_id' => (string) $user->id,
             'group_id' => (string) $group->id,
             'title' => $validated['title'],
@@ -70,7 +68,13 @@ class AccountabilityMeetingController extends Controller
             'day_of_notified_at' => null,
         ]);
 
-        return response()->json(['meeting' => $this->payload($meeting, groupName: $group->name)], Response::HTTP_CREATED);
+        return response()->json([
+            'meeting' => $this->payload(
+                $meeting,
+                groupName: $group->name,
+                isCreator: true,
+            ),
+        ], Response::HTTP_CREATED);
     }
 
     public function update(Request $request, AccountabilityMeeting $accountabilityMeeting): JsonResponse
@@ -80,7 +84,7 @@ class AccountabilityMeetingController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        if ((string) $accountabilityMeeting->coach_id !== (string) $user->id) {
+        if (! $this->isMeetingCreator($user, $accountabilityMeeting)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_FORBIDDEN);
         }
 
@@ -115,7 +119,7 @@ class AccountabilityMeetingController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        if ((string) $accountabilityMeeting->coach_id !== (string) $user->id) {
+        if (! $this->isMeetingCreator($user, $accountabilityMeeting)) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_FORBIDDEN);
         }
 
@@ -131,12 +135,10 @@ class AccountabilityMeetingController extends Controller
     }
 
     /**
-     * The authenticated coach's own scheduled meetings — scoped to
-     * coach_id === the acting coach, not "every group they co-coach", so
-     * this list only ever shows what this coach personally scheduled. A
-     * co-coach of the same group sees their own scheduled meetings for it
-     * via their own call to this endpoint; mentees always see every
-     * meeting for their group regardless of who scheduled it via `mine`.
+     * Meetings visible to an authenticated coach: every meeting scheduled
+     * for a group they manage, plus anything they personally created. A
+     * meeting can therefore be created by a member without hiding it from
+     * the group's coaches. Editing/deletion remains creator-only.
      */
     public function index(Request $request): JsonResponse
     {
@@ -147,8 +149,13 @@ class AccountabilityMeetingController extends Controller
 
         $this->reminderService->sweepDueReminders();
 
+        $managedGroupIds = $this->managedGroupIds($user);
+
         $meetings = AccountabilityMeeting::query()
-            ->where('coach_id', (string) $user->id)
+            ->where(function ($builder) use ($user, $managedGroupIds): void {
+                $builder->where('coach_id', (string) $user->id)
+                    ->orWhereIn('group_id', $managedGroupIds);
+            })
             ->orderBy('scheduled_at')
             ->get();
 
@@ -167,12 +174,16 @@ class AccountabilityMeetingController extends Controller
                 $meeting,
                 groupName: $groupNames[$meeting->group_id] ?? null,
                 menteeCount: (int) ($menteeCounts[$meeting->group_id] ?? 0),
+                isCreator: $this->isMeetingCreator($user, $meeting),
             ))->values(),
         ]);
     }
 
     /**
-     * Meetings for every group the authenticated mentee belongs to.
+     * Meetings for every group the authenticated user participates in:
+     * either as a current member or as one of that group's coaches. This is
+     * also the destination for meeting reminder taps, so a coach never lands
+     * on an empty list for a meeting they were notified about.
      */
     public function mine(Request $request): JsonResponse
     {
@@ -183,10 +194,15 @@ class AccountabilityMeetingController extends Controller
 
         $this->reminderService->sweepDueReminders();
 
-        $groupIds = CoachMentee::query()
+        $memberGroupIds = CoachMentee::query()
             ->where('mentee_id', (string) $user->id)
             ->whereNotNull('group_id')
             ->pluck('group_id');
+        $groupIds = $memberGroupIds
+            ->merge($this->managedGroupIds($user))
+            ->filter()
+            ->unique()
+            ->values();
 
         $meetings = AccountabilityMeeting::query()
             ->whereIn('group_id', $groupIds)
@@ -208,15 +224,54 @@ class AccountabilityMeetingController extends Controller
                 $meeting,
                 groupName: $groupNames[$meeting->group_id] ?? null,
                 hasJoined: in_array((string) $meeting->id, $joinedMeetingIds, true),
+                isCreator: $this->isMeetingCreator($user, $meeting),
             ))->values(),
         ]);
     }
 
     /**
-     * A mentee taps "join": records attendance (idempotent — repeat taps
-     * don't double-count) and, on the genuinely first join, marks today's
-     * "Call" daily-tracker task complete for them before the client is
-     * handed the Zoom link to open.
+     * Groups the authenticated user may schedule an accountability meeting
+     * for: current memberships and groups they manage as a coach. This
+     * deliberately comes from server-side membership/coach records rather
+     * than client-provided IDs.
+     */
+    public function groups(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user === null) {
+            return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $memberGroupIds = CoachMentee::query()
+            ->where('mentee_id', (string) $user->id)
+            ->whereNotNull('group_id')
+            ->distinct()
+            ->pluck('group_id');
+        $groupIds = $memberGroupIds
+            ->merge($this->managedGroupIds($user))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $groups = CoachGroup::query()
+            ->whereIn('id', $groupIds)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (CoachGroup $group) => [
+                'id' => (string) $group->id,
+                'name' => $group->name,
+                'photoUrl' => $group->photo_url,
+            ])
+            ->values();
+
+        return response()->json(['groups' => $groups]);
+    }
+
+    /**
+     * A group member or coach taps "join": records attendance (idempotent
+     * — repeat taps don't double-count) and, on the genuinely first join,
+     * marks today's "Call" daily-tracker task complete for them before the
+     * client is handed the Zoom link to open.
      */
     public function join(Request $request, string $accountabilityMeeting): JsonResponse
     {
@@ -230,10 +285,9 @@ class AccountabilityMeetingController extends Controller
             return response()->json(['message' => 'Meeting not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        $isInGroup = CoachMentee::query()
-            ->where('mentee_id', (string) $user->id)
-            ->where('group_id', $meeting->group_id)
-            ->exists();
+        $group = CoachGroup::query()->find($meeting->group_id);
+        $isInGroup = $group !== null
+            && ($this->isGroupMember($user, $group) || $this->isGroupCoach($user, $group));
         if (! $isInGroup) {
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
@@ -319,6 +373,7 @@ class AccountabilityMeetingController extends Controller
         ?string $groupName = null,
         ?int $menteeCount = null,
         ?bool $hasJoined = null,
+        ?bool $isCreator = null,
     ): array {
         if ($groupName === null) {
             $groupName = CoachGroup::find($meeting->group_id)?->name;
@@ -335,6 +390,57 @@ class AccountabilityMeetingController extends Controller
             'scheduledAt' => $meeting->scheduled_at?->toIso8601String(),
             'menteeCount' => $menteeCount,
             'hasJoined' => $hasJoined,
+            'isCreator' => $isCreator,
         ];
+    }
+
+    private function isMeetingCreator(User $user, AccountabilityMeeting $meeting): bool
+    {
+        return (string) $meeting->coach_id === (string) $user->id;
+    }
+
+    private function canScheduleForGroup(User $user, CoachGroup $group): bool
+    {
+        return $this->isGroupCoach($user, $group) || $this->isGroupMember($user, $group);
+    }
+
+    private function isGroupMember(User $user, CoachGroup $group): bool
+    {
+        return CoachMentee::query()
+            ->where('mentee_id', (string) $user->id)
+            ->where('group_id', (string) $group->id)
+            ->exists();
+    }
+
+    private function isGroupCoach(User $user, CoachGroup $group): bool
+    {
+        return in_array((string) $user->id, $this->groupCoachIds($group), true);
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function managedGroupIds(User $user): Collection
+    {
+        return CoachGroup::query()
+            ->where(function ($builder) use ($user): void {
+                $builder->where('coach_id', (string) $user->id)
+                    ->orWhereJsonContains('coach_ids', (string) $user->id);
+            })
+            ->pluck('id')
+            ->map(static fn ($groupId) => (string) $groupId);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function groupCoachIds(CoachGroup $group): array
+    {
+        $coachIds = [(string) $group->coach_id];
+        foreach (is_array($group->coach_ids) ? $group->coach_ids : [] as $coachId) {
+            $coachIds[] = trim((string) $coachId);
+        }
+
+        return array_values(array_unique(array_filter($coachIds)));
     }
 }

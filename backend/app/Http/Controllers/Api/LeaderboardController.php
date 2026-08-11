@@ -43,7 +43,7 @@ class LeaderboardController extends Controller
         $companyUsers = $this->companyUsersForScope($company, $user);
 
         $companyScores = $this->userScoreService->resolveBreakdownForUsers($companyUsers, $company);
-        $companyCompletionTimes = $this->userScoreService->firstCompletedDailyTrackerAtForUsers($companyUsers, $company);
+        $companyCompletionTimes = $this->completionTimesForUsers($companyUsers, $company);
         $companyLeaderboard = $companyUsers
             ->map(function (User $candidate) use ($companyScores, $companyCompletionTimes): array {
                 $breakdown = $this->leaderboardBreakdownForUser($candidate, $companyScores);
@@ -141,7 +141,7 @@ class LeaderboardController extends Controller
                     ->whereIn('id', array_unique(array_merge($coachIds, $memberIds)))
                     ->get()
                     ->keyBy(fn (User $candidate) => (string) $candidate->id);
-                $groupCompletionTimes = $this->userScoreService->firstCompletedDailyTrackerAtForUsers(
+                $groupCompletionTimes = $this->completionTimesForUsers(
                     $groupUsersById->values(),
                     $company,
                 );
@@ -297,16 +297,26 @@ class LeaderboardController extends Controller
             $companyUsers->push($user);
         }
 
+        $companyCompletionTimes = $this->completionTimesForUsers($companyUsers, $company);
         $companyLeaderboard = $companyUsers
-            ->sortByDesc(fn (User $candidate): float => (float) ($candidate->score ?? 0))
+            ->map(fn (User $candidate): array => $this->fallbackEntry(
+                $candidate,
+                0,
+                $candidate->company_name,
+                $companyCompletionTimes[(string) $candidate->id] ?? null,
+            ))
+            ->sort(fn (array $left, array $right): int => $this->compareLeaderboardEntries(
+                $left,
+                $right,
+                $companyCompletionTimes,
+            ))
             ->values()
-            ->map(
-                fn (User $candidate, int $index): array => $this->fallbackEntry(
-                    $candidate,
-                    $index + 1,
-                    $candidate->company_name,
-                ),
-            );
+            ->map(function (array $entry, int $index): array {
+                $entry['rank'] = $index + 1;
+
+                return $entry;
+            })
+            ->values();
         $usersById = $companyUsers->keyBy(fn (User $candidate): string => (string) $candidate->id);
 
         $groupLeaderboards = CoachGroup::query()
@@ -326,7 +336,7 @@ class LeaderboardController extends Controller
                         ->contains(fn ($memberId): bool => $usersById->has((string) $memberId));
             })
             ->values()
-            ->map(function (CoachGroup $group) use ($usersById, $company): array {
+            ->map(function (CoachGroup $group) use ($usersById, $company, $companyCompletionTimes): array {
                 $memberIds = collect(is_array($group->member_ids) ? $group->member_ids : [])
                     ->map(static fn ($memberId): string => (string) $memberId)
                     ->filter()
@@ -335,15 +345,24 @@ class LeaderboardController extends Controller
                 $entries = $memberIds
                     ->map(fn (string $memberId): ?User => $usersById->get($memberId))
                     ->filter()
-                    ->sortByDesc(fn (User $member): float => (float) ($member->score ?? 0))
+                    ->map(fn (User $member): array => $this->fallbackEntry(
+                        $member,
+                        0,
+                        $group->name,
+                        $companyCompletionTimes[(string) $member->id] ?? null,
+                    ))
+                    ->sort(fn (array $left, array $right): int => $this->compareLeaderboardEntries(
+                        $left,
+                        $right,
+                        $companyCompletionTimes,
+                    ))
                     ->values()
-                    ->map(
-                        fn (User $member, int $index): array => $this->fallbackEntry(
-                            $member,
-                            $index + 1,
-                            $group->name,
-                        ),
-                    )
+                    ->map(function (array $entry, int $index): array {
+                        $entry['rank'] = $index + 1;
+
+                        return $entry;
+                    })
+                    ->values()
                     ->all();
                 $coachNames = collect($this->groupCoachIds($group))
                     ->map(fn (string $coachId): ?string => $usersById->get($coachId)?->name)
@@ -365,7 +384,12 @@ class LeaderboardController extends Controller
                 ];
             });
 
-        $currentUserEntry = $this->fallbackEntry($user, 0, $user->company_name);
+        $currentUserEntry = $this->fallbackEntry(
+            $user,
+            0,
+            $user->company_name,
+            $companyCompletionTimes[(string) $user->id] ?? null,
+        );
 
         return response()->json([
             'company' => [
@@ -400,13 +424,14 @@ class LeaderboardController extends Controller
         array $right,
         array $completedTrackerAtByUserId = []
     ): int {
-        if ($left['score'] !== $right['score']) {
-            return $right['score'] <=> $left['score'];
-        }
-
         $leftCompletedAt = $completedTrackerAtByUserId[(string) $left['userId']] ?? null;
         $rightCompletedAt = $completedTrackerAtByUserId[(string) $right['userId']] ?? null;
 
+        // A completed Daily Tracker earns leaderboard placement before the
+        // score tiebreaker. This intentionally puts an earlier finisher
+        // ahead of a later finisher even if the latter has a larger rolling
+        // score, while people who have not completed today remain below all
+        // finishers.
         if ($leftCompletedAt !== $rightCompletedAt) {
             if ($leftCompletedAt === null) {
                 return 1;
@@ -416,6 +441,10 @@ class LeaderboardController extends Controller
             }
 
             return strcmp($leftCompletedAt, $rightCompletedAt);
+        }
+
+        if ($left['score'] !== $right['score']) {
+            return $right['score'] <=> $left['score'];
         }
 
         return strcmp($left['name'], $right['name']);
@@ -431,11 +460,16 @@ class LeaderboardController extends Controller
      *   overallScore:float,
      *   rank:int,
      *   profilePic:?string,
-     *   teamName:?string
+     *   teamName:?string,
+     *   firstCompletedTrackerAt:?string
      * }
      */
-    private function fallbackEntry(User $user, int $rank, ?string $teamName): array
-    {
+    private function fallbackEntry(
+        User $user,
+        int $rank,
+        ?string $teamName,
+        ?string $firstCompletedTrackerAt = null,
+    ): array {
         $score = max(0, min(100, (float) ($user->score ?? 0)));
 
         return [
@@ -448,7 +482,27 @@ class LeaderboardController extends Controller
             'rank' => $rank,
             'profilePic' => $user->profile_pic,
             'teamName' => $teamName,
+            'firstCompletedTrackerAt' => $firstCompletedTrackerAt,
         ];
+    }
+
+    /**
+     * The normal response should not be blocked if the optional completion
+     * timestamp lookup fails. The fallback response calls this too, so keep
+     * that safety net independent from score calculation failures.
+     *
+     * @param  Collection<int, User>  $users
+     * @return array<string, string>
+     */
+    private function completionTimesForUsers(Collection $users, ?Company $company): array
+    {
+        try {
+            return $this->userScoreService->firstCompletedDailyTrackerAtForUsers($users, $company);
+        } catch (Throwable $error) {
+            report($error);
+
+            return [];
+        }
     }
 
     /**

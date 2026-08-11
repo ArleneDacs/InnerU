@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AccountabilityMeeting;
+use App\Models\CoachGroup;
 use App\Models\CoachMentee;
 use App\Models\Notification;
 
@@ -50,13 +51,25 @@ class AccountabilityMeetingReminderService
             ->get();
 
         foreach ($meetings as $meeting) {
-            $menteeIds = CoachMentee::query()
+            // coach_mentees can contain one row per coach/group relationship.
+            // Notify the distinct union of current members and both group
+            // coaches: a member-created meeting must be visible to its
+            // coaches too, without duplicate reminders in co-coached groups.
+            $memberIds = CoachMentee::query()
                 ->where('group_id', $meeting->group_id)
-                ->pluck('mentee_id');
+                ->distinct()
+                ->pluck('mentee_id')
+                ->map(static fn ($memberId) => (string) $memberId);
+            $group = CoachGroup::query()->find($meeting->group_id);
+            $recipientIds = $memberIds
+                ->merge($group === null ? [] : $this->groupCoachIds($group))
+                ->filter()
+                ->unique()
+                ->values();
 
-            foreach ($menteeIds as $menteeId) {
+            foreach ($recipientIds as $memberId) {
                 Notification::createFor(
-                    (string) $menteeId,
+                    (string) $memberId,
                     $type,
                     $titleFor($meeting),
                     $body,
@@ -71,5 +84,18 @@ class AccountabilityMeetingReminderService
 
             $meeting->forceFill([$dateColumn => now()])->save();
         }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function groupCoachIds(CoachGroup $group): array
+    {
+        $coachIds = [(string) $group->coach_id];
+        foreach (is_array($group->coach_ids) ? $group->coach_ids : [] as $coachId) {
+            $coachIds[] = trim((string) $coachId);
+        }
+
+        return array_values(array_unique(array_filter($coachIds)));
     }
 }

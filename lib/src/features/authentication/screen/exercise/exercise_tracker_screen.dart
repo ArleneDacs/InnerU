@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_gallery_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_duration_utils.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_session_limits.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
@@ -881,6 +882,17 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
             surfaceTintColor: Colors.transparent,
             title: const Text('Exercise'),
             actions: [
+              IconButton(
+                onPressed: () {
+                  Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (context) => const ExerciseGalleryScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.photo_library_outlined),
+                tooltip: 'Exercise gallery',
+              ),
               IconButton(
                 onPressed: _openExerciseRewards,
                 icon: const Icon(Icons.workspace_premium_rounded),

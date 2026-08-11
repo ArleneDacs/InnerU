@@ -26,11 +26,18 @@ void main() {
     expect(find.text('Goals & To-Do completion'), findsNothing);
     expect(find.text('Leaderboard ranking'), findsOneWidget);
     expect(find.text('Medals & streaks'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'Your rank is determined by who completes today\'s Daily Tracker first.',
+      ),
+      findsOneWidget,
+    );
 
     // Each section carries a worked numeric example, not just prose.
     expect(find.text('EXAMPLE'), findsNWidgets(3));
     expect(
-      find.text('Completed 4 of 6 activities\n4 ÷ 6 × 100 = 66.7% for that day'),
+      find.text(
+          'Completed 4 of 6 activities\n4 ÷ 6 × 100 = 66.7% for that day'),
       findsOneWidget,
     );
     expect(
