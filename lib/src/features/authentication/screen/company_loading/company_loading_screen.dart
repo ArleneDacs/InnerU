@@ -299,11 +299,14 @@ class CompanyLoadingGate extends StatefulWidget {
   const CompanyLoadingGate({
     super.key,
     required this.uid,
-    required this.child,
+    required this.builder,
   });
 
   final String uid;
-  final Widget child;
+  final Widget Function(
+    BuildContext context,
+    CompanyThemeData? initialCompanyTheme,
+  ) builder;
 
   @override
   State<CompanyLoadingGate> createState() => _CompanyLoadingGateState();
@@ -317,6 +320,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
   bool _isChecking = true;
   bool _showLoading = false;
   bool _isDisposed = false;
+  CompanyThemeData? _initialCompanyTheme;
   String _loadingImageUrl = '';
   String _loadingVideoUrl = '';
   _CompanyLoadingBrand _loadingBrand = _CompanyLoadingBrand.gencys;
@@ -365,6 +369,9 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
 
   Future<void> _prepareLoadingScreen() async {
     try {
+      _initialCompanyTheme =
+          await CompanyThemeService.loadPersistedThemeForUser(widget.uid);
+
       // A valid session restored from secure storage is not a new login. The
       // old code treated every cold process start as one because its
       // `_playedLoginSessions` set is in-memory, then blocked the dashboard
@@ -375,6 +382,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
       if (AppSessionService.instance.restoredSessionOnLaunch) {
         if (!mounted) return;
         setState(() => _isChecking = false);
+        unawaited(_refreshPersistedTheme());
         return;
       }
 
@@ -434,6 +442,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
         widget.uid,
         resolvedInitialTheme,
       );
+      _initialCompanyTheme = resolvedInitialTheme;
       if (loadingConfig.showLoading && role != 'admin') {
         _loadingImageUrl = loadingConfig.imageUrl;
         _loadingVideoUrl = loadingConfig.videoUrl;
@@ -454,6 +463,14 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
     setState(() {
       _isChecking = false;
     });
+  }
+
+  Future<void> _refreshPersistedTheme() async {
+    try {
+      final theme = await CompanyThemeService.resolveForUser(widget.uid);
+      if (!mounted) return;
+      setState(() => _initialCompanyTheme = theme);
+    } catch (_) {}
   }
 
   Future<void> _startLoadingSequence(String loginSessionKey) async {
@@ -573,7 +590,7 @@ class _CompanyLoadingGateState extends State<CompanyLoadingGate>
       );
     }
 
-    if (!_showLoading) return widget.child;
+    if (!_showLoading) return widget.builder(context, _initialCompanyTheme);
 
     return Scaffold(
       backgroundColor: Colors.black,

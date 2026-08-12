@@ -61,9 +61,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? selectedEmotion;
   String? currentUserEmotion;
   String? _profilePic;
+  String? _cachedUsername;
   Map<String, dynamic>? _dashboardData;
   num? _cachedScore;
   late CompanyThemeData _companyTheme;
+  late Future<String> _usernameFuture;
   final Map<String, DateTime> _localChatReadOverrides = <String, DateTime>{};
   final Set<String> _pressedTiles = <String>{};
   final EmotionService _emotionService = EmotionService();
@@ -133,6 +135,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     _companyTheme = widget.initialCompanyTheme ??
         CompanyThemeService.cachedThemeForUser(currentUserId) ??
         CompanyThemeData.standard;
+    _cachedUsername = _fallbackUsername();
+    _usernameFuture = _loadUsername();
     _introController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 950),
@@ -1152,20 +1156,75 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<String> _getUsername() async {
+    final cachedUsername = _cachedUsername;
+    if (cachedUsername != null &&
+        cachedUsername.trim().isNotEmpty &&
+        cachedUsername.trim() != 'there') {
+      return cachedUsername;
+    }
+    return _usernameFuture;
+  }
+
+  String _fallbackUsername() {
+    final session = AuthService.instance.currentSession;
+    if (session == null) return "there";
+
+    if (session.email.isNotEmpty) {
+      final emailName = session.email.split('@')[0].trim();
+      if (emailName.isNotEmpty) return emailName;
+    }
+
+    return "there";
+  }
+
+  Future<String> _loadUsername() async {
     final session = AuthService.instance.currentSession;
     if (session == null) return "User";
 
-    final userData = await UserService.getUserData();
-    final username = userData['username']?.toString().trim() ?? '';
-    if (username.isNotEmpty) {
-      return username;
+    final userId = session.id.toString();
+    final savedUsername = await UserPreferences.loadUsernameForUser(userId);
+    if (savedUsername != null && savedUsername.trim().isNotEmpty) {
+      await _setCachedUsername(savedUsername);
     }
 
-    if (session.email.isNotEmpty) {
-      return session.email.split('@')[0];
+    try {
+      final userData = await UserService.getUserData();
+      final username = userData['username']?.toString().trim() ?? '';
+      if (username.isNotEmpty) {
+        await _setCachedUsername(username);
+        return username;
+      }
+    } catch (e) {
+      debugPrint("Error fetching username: $e");
     }
 
-    return "User";
+    final fallback = (savedUsername != null && savedUsername.trim().isNotEmpty)
+        ? savedUsername.trim()
+        : _fallbackUsername();
+    if (fallback != 'there') {
+      await _setCachedUsername(fallback);
+    }
+    return fallback == 'there' ? 'User' : fallback;
+  }
+
+  Future<void> _setCachedUsername(String username) async {
+    final cleaned = username.trim();
+    if (cleaned.isEmpty) return;
+
+    if (_cachedUsername != cleaned) {
+      if (mounted) {
+        setState(() => _cachedUsername = cleaned);
+      } else {
+        _cachedUsername = cleaned;
+      }
+    }
+
+    final userId = AuthService.instance.currentSession?.id.toString();
+    if (userId == null || userId.isEmpty) {
+      await UserPreferences.saveUsername(cleaned);
+    } else {
+      await UserPreferences.saveUsernameForUser(userId, cleaned);
+    }
   }
 
   Future<void> _openCoachChat({
@@ -1542,28 +1601,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                       start: 0.0,
                       end: 0.42,
                       child: FutureBuilder<String>(
-                        future: _getUsername(),
+                        future: _usernameFuture,
                         builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                                  ConnectionState.done &&
-                              snapshot.hasData) {
-                            final userId = AuthService
-                                .instance.currentSession?.id
-                                .toString();
-                            if (userId == null || userId.isEmpty) {
-                              UserPreferences.saveUsername(snapshot.data!);
-                            } else {
-                              UserPreferences.saveUsernameForUser(
-                                userId,
-                                snapshot.data!,
-                              );
-                            }
-                          }
-
-                          final username = snapshot.connectionState ==
-                                  ConnectionState.waiting
-                              ? "there"
-                              : snapshot.data ?? "there";
+                          final username = _cachedUsername ??
+                              snapshot.data ??
+                              _fallbackUsername();
 
                           return _buildWelcomeHero(
                             context,

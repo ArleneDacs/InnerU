@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -91,6 +93,71 @@ class CompanyThemeData {
       isCompanyTheme: isCompanyTheme ?? this.isCompanyTheme,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'companyName': companyName,
+      'companyCode': companyCode,
+      'primaryColor': CompanyThemeService.colorToHex(primaryColor),
+      'accentColor': CompanyThemeService.colorToHex(accentColor),
+      'backgroundColor': CompanyThemeService.colorToHex(backgroundColor),
+      'surfaceColor': CompanyThemeService.colorToHex(surfaceColor),
+      'inkColor': CompanyThemeService.colorToHex(inkColor),
+      'mutedInkColor': CompanyThemeService.colorToHex(mutedInkColor),
+      'iconColor': CompanyThemeService.colorToHex(iconColor),
+      'logoUrl': logoUrl,
+      'tagline': tagline,
+      'isDark': isDark,
+      'isCompanyTheme': isCompanyTheme,
+    };
+  }
+
+  static CompanyThemeData? fromJson(Map<String, dynamic> json) {
+    try {
+      return CompanyThemeData(
+        companyName: (json['companyName'] as String?)?.trim() ??
+            CompanyThemeData.standard.companyName,
+        companyCode: (json['companyCode'] as String?)?.trim().toUpperCase() ??
+            CompanyThemeData.standard.companyCode,
+        primaryColor: CompanyThemeService.parseColor(
+          json['primaryColor'] as String?,
+          CompanyThemeData.standard.primaryColor,
+        ),
+        accentColor: CompanyThemeService.parseColor(
+          json['accentColor'] as String?,
+          CompanyThemeData.standard.accentColor,
+        ),
+        backgroundColor: CompanyThemeService.parseColor(
+          json['backgroundColor'] as String?,
+          CompanyThemeData.standard.backgroundColor,
+        ),
+        surfaceColor: CompanyThemeService.parseColor(
+          json['surfaceColor'] as String?,
+          CompanyThemeData.standard.surfaceColor,
+        ),
+        inkColor: CompanyThemeService.parseColor(
+          json['inkColor'] as String?,
+          CompanyThemeData.standard.inkColor,
+        ),
+        mutedInkColor: CompanyThemeService.parseColor(
+          json['mutedInkColor'] as String?,
+          CompanyThemeData.standard.mutedInkColor,
+        ),
+        iconColor: CompanyThemeService.parseColor(
+          json['iconColor'] as String?,
+          CompanyThemeData.standard.iconColor,
+        ),
+        logoUrl: (json['logoUrl'] as String?)?.trim() ??
+            CompanyThemeData.standard.logoUrl,
+        tagline: (json['tagline'] as String?)?.trim() ??
+            CompanyThemeData.standard.tagline,
+        isDark: json['isDark'] == true,
+        isCompanyTheme: json['isCompanyTheme'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class CompanyThemeService {
@@ -152,13 +219,34 @@ class CompanyThemeService {
     return _userThemeCache[uid];
   }
 
+  static Future<CompanyThemeData?> loadPersistedThemeForUser(String uid) async {
+    final cachedTheme = _userThemeCache[uid];
+    if (cachedTheme != null) return cachedTheme;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawTheme = prefs.getString(_themeCacheKey(uid));
+      if (rawTheme == null || rawTheme.isEmpty) return null;
+      final decoded = jsonDecode(rawTheme);
+      if (decoded is! Map<String, dynamic>) return null;
+      final theme = CompanyThemeData.fromJson(decoded);
+      if (theme == null) return null;
+      _userThemeCache[uid] = theme;
+      return theme;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static void cacheThemeForUser(String uid, CompanyThemeData theme) {
     _userThemeCache[uid] = theme;
+    unawaited(_persistThemeForUser(uid, theme));
     themePreferenceVersion.value++;
   }
 
   static void clearCachedThemeForUser(String uid) {
     _userThemeCache.remove(uid);
+    unawaited(_clearPersistedThemeForUser(uid));
     themePreferenceVersion.value++;
   }
 
@@ -179,7 +267,7 @@ class CompanyThemeService {
     final theme = _ensureReadableDarkTheme(
       applyThemeChoice(companyTheme, themeChoice),
     );
-    _userThemeCache[uid] = theme;
+    cacheThemeForUser(uid, theme);
     return theme;
   }
 
@@ -199,14 +287,16 @@ class CompanyThemeService {
           );
         }
 
-        final companyName = ((userData['activeCompanyName'] as String?)?.trim() ??
-                (userData['companyName'] as String?)?.trim() ??
-                '')
-            .trim();
-        final companyCode = ((userData['activeCompanyCode'] as String?)?.trim() ??
-                (userData['companyCode'] as String?)?.trim() ??
-                '')
-            .toUpperCase();
+        final companyName =
+            ((userData['activeCompanyName'] as String?)?.trim() ??
+                    (userData['companyName'] as String?)?.trim() ??
+                    '')
+                .trim();
+        final companyCode =
+            ((userData['activeCompanyCode'] as String?)?.trim() ??
+                    (userData['companyCode'] as String?)?.trim() ??
+                    '')
+                .toUpperCase();
         if (companyName.isNotEmpty || companyCode.isNotEmpty) {
           return _resolveFromCompanyData(
             <String, dynamic>{
@@ -237,6 +327,7 @@ class CompanyThemeService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themePreferenceKey(uid), choiceId);
     _userThemeCache.remove(uid);
+    await prefs.remove(_themeCacheKey(uid));
     themePreferenceVersion.value++;
   }
 
@@ -381,6 +472,27 @@ class CompanyThemeService {
 
   static String _themePreferenceKey(String uid) {
     return 'inneru_theme_choice_$uid';
+  }
+
+  static String _themeCacheKey(String uid) {
+    return 'inneru_company_theme_cache_$uid';
+  }
+
+  static Future<void> _persistThemeForUser(
+    String uid,
+    CompanyThemeData theme,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_themeCacheKey(uid), jsonEncode(theme.toJson()));
+    } catch (_) {}
+  }
+
+  static Future<void> _clearPersistedThemeForUser(String uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_themeCacheKey(uid));
+    } catch (_) {}
   }
 
   static CompanyThemeData fromCompanyData(
@@ -532,7 +644,8 @@ class CompanyThemeService {
   static Future<Map<String, dynamic>?> _companyDataForUser(
     Map<String, dynamic> userData,
   ) async {
-    final lookupKeys = CompanyMembershipService.lookupKeysFromUserData(userData);
+    final lookupKeys =
+        CompanyMembershipService.lookupKeysFromUserData(userData);
     for (final lookupKey in lookupKeys) {
       try {
         final company = await CompanyApiService.instance.findByCode(lookupKey);

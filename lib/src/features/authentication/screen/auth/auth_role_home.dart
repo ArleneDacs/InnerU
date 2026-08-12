@@ -34,9 +34,15 @@ class AuthRoleHome extends StatelessWidget {
     );
     final companyGate = CompanyLoadingGate(
       uid: session.id.toString(),
-      child: isCoach
-          ? CoachSetuppage(defaultScreen: defaultScreen)
-          : Setuppage(defaultScreen: defaultScreen),
+      builder: (context, initialCompanyTheme) => isCoach
+          ? CoachSetuppage(
+              defaultScreen: defaultScreen,
+              initialCompanyTheme: initialCompanyTheme,
+            )
+          : Setuppage(
+              defaultScreen: defaultScreen,
+              initialCompanyTheme: initialCompanyTheme,
+            ),
     );
 
     if (isAdmin) {

@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 
 void main() {
@@ -95,6 +98,27 @@ void main() {
         _contrastRatio(resolved.backgroundColor, resolved.inkColor),
         greaterThanOrEqualTo(4.5),
       );
+    });
+
+    test('loads a persisted user theme before network resolution', () async {
+      SharedPreferences.setMockInitialValues({
+        'inneru_company_theme_cache_persisted-user': jsonEncode(
+          companyTheme.toJson(),
+        ),
+      });
+      addTearDown(
+        () => CompanyThemeService.clearCachedThemeForUser('persisted-user'),
+      );
+
+      final restored =
+          await CompanyThemeService.loadPersistedThemeForUser('persisted-user');
+
+      expect(restored, isNotNull);
+      expect(restored!.companyName, 'Gencys');
+      expect(restored.companyCode, 'GENCYS');
+      expect(restored.backgroundColor, const Color(0xFF07120F));
+      expect(restored.isDark, isTrue);
+      expect(restored.isCompanyTheme, isTrue);
     });
   });
 }
