@@ -239,9 +239,12 @@ class CompanyThemeService {
   }
 
   static void cacheThemeForUser(String uid, CompanyThemeData theme) {
+    final previous = _userThemeCache[uid];
     _userThemeCache[uid] = theme;
     unawaited(_persistThemeForUser(uid, theme));
-    themePreferenceVersion.value++;
+    if (previous == null || !_sameTheme(previous, theme)) {
+      themePreferenceVersion.value++;
+    }
   }
 
   static void clearCachedThemeForUser(String uid) {
@@ -493,6 +496,22 @@ class CompanyThemeService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_themeCacheKey(uid));
     } catch (_) {}
+  }
+
+  static bool _sameTheme(CompanyThemeData left, CompanyThemeData right) {
+    return left.companyName == right.companyName &&
+        left.companyCode == right.companyCode &&
+        left.primaryColor == right.primaryColor &&
+        left.accentColor == right.accentColor &&
+        left.backgroundColor == right.backgroundColor &&
+        left.surfaceColor == right.surfaceColor &&
+        left.inkColor == right.inkColor &&
+        left.mutedInkColor == right.mutedInkColor &&
+        left.iconColor == right.iconColor &&
+        left.logoUrl == right.logoUrl &&
+        left.tagline == right.tagline &&
+        left.isDark == right.isDark &&
+        left.isCompanyTheme == right.isCompanyTheme;
   }
 
   static CompanyThemeData fromCompanyData(
@@ -986,7 +1005,7 @@ class CompanyThemeChoice {
   final CompanyThemeData theme;
 }
 
-class CompanyThemeBuilder extends StatelessWidget {
+class CompanyThemeBuilder extends StatefulWidget {
   const CompanyThemeBuilder({
     super.key,
     required this.builder,
@@ -999,39 +1018,98 @@ class CompanyThemeBuilder extends StatelessWidget {
   final bool applyUserPreference;
 
   @override
+  State<CompanyThemeBuilder> createState() => _CompanyThemeBuilderState();
+}
+
+class _CompanyThemeBuilderState extends State<CompanyThemeBuilder> {
+  String? _userId;
+  Future<CompanyThemeData>? _themeFuture;
+  CompanyThemeData? _cachedTheme;
+  int _observedPreferenceVersion = CompanyThemeService.themePreferenceVersion.value;
+
+  @override
+  void initState() {
+    super.initState();
+    CompanyThemeService.themePreferenceVersion.addListener(_refreshTheme);
+    _syncThemeFuture();
+  }
+
+  @override
+  void didUpdateWidget(covariant CompanyThemeBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncThemeFuture();
+  }
+
+  @override
+  void dispose() {
+    CompanyThemeService.themePreferenceVersion.removeListener(_refreshTheme);
+    super.dispose();
+  }
+
+  void _refreshTheme() {
+    final currentVersion = CompanyThemeService.themePreferenceVersion.value;
+    if (_observedPreferenceVersion == currentVersion) return;
+    _observedPreferenceVersion = currentVersion;
+    _syncThemeFuture(forceRefresh: true);
+  }
+
+  void _syncThemeFuture({bool forceRefresh = false}) {
+    final session = AuthService.instance.currentSession;
+    if (session == null) {
+      if (_userId != null || _themeFuture != null || _cachedTheme != null) {
+        setState(() {
+          _userId = null;
+          _themeFuture = null;
+          _cachedTheme = null;
+        });
+      }
+      return;
+    }
+
+    final userId = session.id.toString();
+    final cachedTheme = CompanyThemeService.cachedThemeForUser(userId);
+    final userChanged = _userId != userId;
+    if (!forceRefresh && !userChanged && _themeFuture != null) {
+      return;
+    }
+
+    _userId = userId;
+    _cachedTheme = cachedTheme;
+    _themeFuture = widget.applyUserPreference
+        ? CompanyThemeService.resolveForUser(userId)
+        : CompanyThemeService.resolveCompanyThemeForUser(
+            userId,
+            fallback: cachedTheme,
+          );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final session = AuthService.instance.currentSession;
     if (session == null) {
-      return builder(context, CompanyThemeData.standard);
+      return widget.builder(context, CompanyThemeData.standard);
     }
     final userId = session.id.toString();
-    final cachedTheme = CompanyThemeService.cachedThemeForUser(userId);
+    if (_userId != userId || _themeFuture == null) {
+      _syncThemeFuture(forceRefresh: _userId != userId);
+    }
 
-    return ValueListenableBuilder<int>(
-      valueListenable: CompanyThemeService.themePreferenceVersion,
-      builder: (context, _, __) {
-        return FutureBuilder<CompanyThemeData>(
-            future: applyUserPreference
-                ? CompanyThemeService.resolveForUser(userId)
-                : CompanyThemeService.resolveCompanyThemeForUser(
-                    userId,
-                    fallback: cachedTheme,
-                  ),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                if (cachedTheme != null) {
-                  return builder(context, cachedTheme);
-                }
-                if (loadingBuilder != null) {
-                  return loadingBuilder!(context);
-                }
-              }
+    return FutureBuilder<CompanyThemeData>(
+      future: _themeFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          if (_cachedTheme != null) {
+            return widget.builder(context, _cachedTheme!);
+          }
+          if (widget.loadingBuilder != null) {
+            return widget.loadingBuilder!(context);
+          }
+        }
 
-              return builder(
-                context,
-                snapshot.data ?? cachedTheme ?? CompanyThemeData.standard,
-              );
-            });
+        return widget.builder(
+          context,
+          snapshot.data ?? _cachedTheme ?? CompanyThemeData.standard,
+        );
       },
     );
   }
