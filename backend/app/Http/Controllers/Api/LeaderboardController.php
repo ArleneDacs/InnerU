@@ -427,11 +427,14 @@ class LeaderboardController extends Controller
         $leftCompletedAt = $completedTrackerAtByUserId[(string) $left['userId']] ?? null;
         $rightCompletedAt = $completedTrackerAtByUserId[(string) $right['userId']] ?? null;
 
-        // A completed Daily Tracker earns leaderboard placement before the
-        // score tiebreaker. This intentionally puts an earlier finisher
-        // ahead of a later finisher even if the latter has a larger rolling
-        // score, while people who have not completed today remain below all
-        // finishers.
+        if ($left['score'] !== $right['score']) {
+            return $right['score'] <=> $left['score'];
+        }
+
+        // Score decides placement first. If two people have the same score,
+        // the one who completed today's Daily Tracker earlier wins the tie,
+        // while people who have not completed today remain below finishers
+        // with the same score.
         if ($leftCompletedAt !== $rightCompletedAt) {
             if ($leftCompletedAt === null) {
                 return 1;
@@ -441,10 +444,6 @@ class LeaderboardController extends Controller
             }
 
             return strcmp($leftCompletedAt, $rightCompletedAt);
-        }
-
-        if ($left['score'] !== $right['score']) {
-            return $right['score'] <=> $left['score'];
         }
 
         return strcmp($left['name'], $right['name']);

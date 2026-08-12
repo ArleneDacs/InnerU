@@ -821,7 +821,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         }
     }
 
-    public function test_earlier_daily_tracker_completion_ranks_a_user_above_a_later_higher_score(): void
+    public function test_higher_score_ranks_above_an_earlier_daily_tracker_completion(): void
     {
         Carbon::setTestNow('2026-08-06 12:00:00');
 
@@ -845,8 +845,9 @@ class LeaderboardCompanyScopeTest extends TestCase
         ]);
 
         // The later finisher has an additional full day in the period, so
-        // their existing Daily Tracker score is higher. Completion order,
-        // not that score or their alphabetic name, controls placement.
+        // their existing Daily Tracker score is higher. Score should decide
+        // placement before completion order; the earlier completion only
+        // breaks a score tie.
         $this->completeDailyTracker(
             $laterAlphabeticallyFirst,
             '2026-08-01',
@@ -869,15 +870,15 @@ class LeaderboardCompanyScopeTest extends TestCase
 
         $response->assertOk();
         $this->assertSame(
-            ['Z Earlier', 'A Later'],
+            ['A Later', 'Z Earlier'],
             collect($response->json('companyLeaderboard'))->take(2)->pluck('name')->all(),
         );
         $this->assertNotNull($response->json('companyLeaderboard.0.firstCompletedTrackerAt'));
         $this->assertNotNull($response->json('companyLeaderboard.1.firstCompletedTrackerAt'));
-        $this->assertLessThan(
+        $this->assertGreaterThan(
             (float) $response->json('companyLeaderboard.1.score'),
             (float) $response->json('companyLeaderboard.0.score'),
-            'The earlier finisher should remain first even with a lower score.',
+            'Higher score should rank first even when completed later.',
         );
     }
 
@@ -932,7 +933,7 @@ class LeaderboardCompanyScopeTest extends TestCase
         $this->assertGreaterThan(
             (float) $response->json('companyLeaderboard.1.score'),
             (float) $response->json('companyLeaderboard.0.score'),
-            'Score should only decide a matching completion timestamp.',
+            'Completion timestamp should only break a score tie.',
         );
     }
 

@@ -75,8 +75,8 @@ void main() {
     expect(find.text('Jenny score'), findsOneWidget);
     expect(
       find.text(
-        'Leaderboard rank is based on when today\'s Daily Tracker is '
-        'completed. Score breaks an exact completion-time tie.',
+        'Leaderboard rank is based on your score first. If scores tie, '
+        'whoever completed today\'s Daily Tracker earlier ranks higher.',
       ),
       findsOneWidget,
     );
@@ -102,7 +102,7 @@ void main() {
   });
 
   testWidgets(
-    'company leaderboard places an earlier finisher above a later higher score',
+    'company leaderboard keeps the higher score above an earlier lower score',
     (tester) async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       FlutterSecureStorage.setMockInitialValues(<String, String>{});
@@ -148,10 +148,10 @@ void main() {
           LeaderboardApiCompanyEntry(
             userId: 'latest',
             name: 'M Latest',
-            score: 100,
-            goalScore: 100,
-            coreTaskScore: 100,
-            overallScore: 100,
+            score: 5,
+            goalScore: 5,
+            coreTaskScore: 5,
+            overallScore: 5,
             rank: 3,
             firstCompletedTrackerAt: '2026-08-11T11:00:00Z',
           ),
@@ -167,6 +167,20 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      final higherScorePodium = find
+          .ancestor(
+            of: find.text('A Later High Score'),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(
+        find.descendant(
+          of: higherScorePodium,
+          matching: find.text('Top 1'),
+        ),
+        findsOneWidget,
+      );
+
       final earlierFinisherPodium = find
           .ancestor(
             of: find.text('Z Earlier Low Score'),
@@ -176,7 +190,7 @@ void main() {
       expect(
         find.descendant(
           of: earlierFinisherPodium,
-          matching: find.text('Top 1'),
+          matching: find.text('Top 2'),
         ),
         findsOneWidget,
       );

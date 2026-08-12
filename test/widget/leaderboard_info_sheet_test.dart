@@ -28,7 +28,7 @@ void main() {
     expect(find.text('Medals & streaks'), findsOneWidget);
     expect(
       find.textContaining(
-        'Your rank is determined by who completes today\'s Daily Tracker first.',
+        'Your rank is determined by your leaderboard score first. If two people have the same score',
       ),
       findsOneWidget,
     );
