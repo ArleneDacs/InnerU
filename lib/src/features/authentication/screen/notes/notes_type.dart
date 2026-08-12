@@ -296,7 +296,7 @@ class _NotesTypeState extends State<NotesType> {
                 ),
                 actions: <Widget>[
                   TextButton(
-                    onPressed: _isFormValid
+                    onPressed: _isFormValid && !_isSaving
                         ? () {
                             showDialog(
                               context: context,
@@ -330,15 +330,24 @@ class _NotesTypeState extends State<NotesType> {
                             );
                           }
                         : null, // Disabled when _isFormValid is false
-                    child: Text("Save",
-                        style: TextStyle(
-                            fontSize: 15,
-                            color: _isFormValid
-                                ? companyTheme.inkColor
-                                : companyTheme.mutedInkColor)),
+                    child: _isSaving
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: companyTheme.iconColor,
+                            ),
+                          )
+                        : Text("Save",
+                            style: TextStyle(
+                                fontSize: 15,
+                                color: _isFormValid
+                                    ? companyTheme.inkColor
+                                    : companyTheme.mutedInkColor)),
                   ),
                   TextButton(
-                    onPressed: _isFormValid
+                    onPressed: _isFormValid && !_isSaving
                         ? () {
                             showDialog(
                               context: context,
@@ -387,12 +396,21 @@ class _NotesTypeState extends State<NotesType> {
                             );
                           }
                         : null, // Disabled when _isFormValid is false
-                    child: Text("Post",
-                        style: TextStyle(
-                            fontSize: 15,
-                            color: _isFormValid
-                                ? companyTheme.inkColor
-                                : companyTheme.mutedInkColor)),
+                    child: _isSaving
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: companyTheme.iconColor,
+                            ),
+                          )
+                        : Text("Post",
+                            style: TextStyle(
+                                fontSize: 15,
+                                color: _isFormValid
+                                    ? companyTheme.inkColor
+                                    : companyTheme.mutedInkColor)),
                   ),
                 ],
               ),

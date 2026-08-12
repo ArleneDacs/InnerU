@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_streak_rewards_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_gallery_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_duration_utils.dart';

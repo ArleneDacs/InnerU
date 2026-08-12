@@ -90,4 +90,20 @@ class CommunityPostUpdateTest extends TestCase
             'title' => 'Original title',
         ]);
     }
+
+    public function test_owner_can_edit_title_up_to_one_hundred_characters(): void
+    {
+        $owner = User::factory()->create();
+        $post = $this->makePost($owner);
+        $longTitle = str_repeat('x', 100);
+
+        Sanctum::actingAs($owner);
+        $this->patchJson('/api/community/posts/'.$post->id, [
+            'title' => $longTitle,
+        ])->assertOk()->assertJsonPath('post.title', $longTitle);
+
+        $this->patchJson('/api/community/posts/'.$post->id, [
+            'title' => str_repeat('x', 101),
+        ])->assertUnprocessable()->assertJsonValidationErrors('title');
+    }
 }

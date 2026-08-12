@@ -57,6 +57,7 @@ import 'package:selfcare_projects/src/utils/theme/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+StreamSubscription<AppSession?>? _meditationReminderSessionSubscription;
 
 void main() {
   runZonedGuarded(() async {
@@ -102,6 +103,7 @@ void main() {
 Future<void> _initializeBackgroundServices() async {
   try {
     await AuthService.instance.initialize();
+    _bindDailyMeditationReminderToSession();
   } catch (error, stack) {
     await _recordError(error, stack);
   }
@@ -136,6 +138,33 @@ Future<void> _initializeBackgroundServices() async {
   }
   try {
     WatchStepsReceiver.instance.start();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+}
+
+void _bindDailyMeditationReminderToSession() {
+  if (_meditationReminderSessionSubscription != null) return;
+
+  _meditationReminderSessionSubscription =
+      AuthService.instance.sessionStream.listen((session) {
+    unawaited(_syncDailyMeditationReminderForSession(session));
+  });
+  unawaited(
+    _syncDailyMeditationReminderForSession(AuthService.instance.currentSession),
+  );
+}
+
+Future<void> _syncDailyMeditationReminderForSession(
+  AppSession? session,
+) async {
+  try {
+    if (session == null) {
+      await FastingNotificationService.instance.cancelDailyMeditationReminder();
+      return;
+    }
+
+    await FastingNotificationService.instance.scheduleDailyMeditationReminder();
   } catch (error, stack) {
     await _recordError(error, stack);
   }

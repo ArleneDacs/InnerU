@@ -491,6 +491,11 @@ class FastingNotificationService {
     );
   }
 
+  Future<void> cancelDailyMeditationReminder() async {
+    await initialize();
+    await _notifications.cancel(id: dailyMeditationReminderNotificationId);
+  }
+
   @visibleForTesting
   static tz.TZDateTime nextDailyMeditationReminderDate({
     required tz.TZDateTime now,
