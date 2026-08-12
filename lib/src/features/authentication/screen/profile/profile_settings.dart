@@ -394,7 +394,7 @@ class _DefaultLandingScreenPanelState
           if (_isAbundance) ...[
             const SizedBox(height: 8),
             Text(
-              'This workspace currently supports Home and Quests.',
+              'This workspace currently supports Home, Quests, and Profile.',
               style: TextStyle(fontSize: 12, color: theme.mutedInkColor),
             ),
           ],

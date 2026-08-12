@@ -21,6 +21,7 @@ void main() {
       expect(DefaultLandingScreen.dashboard.standardSetupIndex, 2);
       expect(DefaultLandingScreen.goals.standardSetupIndex, 3);
       expect(DefaultLandingScreen.community.standardSetupIndex, 4);
+      expect(DefaultLandingScreen.profile.standardSetupIndex, 5);
       expect(
         DefaultLandingScreen.fromStandardSetupIndex(3),
         DefaultLandingScreen.goals,
@@ -34,10 +35,12 @@ void main() {
         orderedEquals([
           DefaultLandingScreen.dashboard,
           DefaultLandingScreen.goals,
+          DefaultLandingScreen.profile,
         ]),
       );
       expect(DefaultLandingScreen.dashboard.safeAbundanceShellIndex, 0);
       expect(DefaultLandingScreen.goals.safeAbundanceShellIndex, 1);
+      expect(DefaultLandingScreen.profile.safeAbundanceShellIndex, 3);
       expect(DefaultLandingScreen.community.safeAbundanceShellIndex, 0);
     });
 

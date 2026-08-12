@@ -88,6 +88,7 @@ class ProfileController extends Controller
                 'steps',
                 'goals',
                 'community',
+                'profile',
             ])],
             'meditation_streak_current' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'meditation_streak_longest' => ['sometimes', 'nullable', 'integer', 'min:0'],

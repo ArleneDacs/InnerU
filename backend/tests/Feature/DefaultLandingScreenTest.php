@@ -22,23 +22,23 @@ class DefaultLandingScreenTest extends TestCase
         Sanctum::actingAs($user);
 
         $this->patchJson('/api/me', [
-            'default_landing_screen' => 'community',
+            'default_landing_screen' => 'profile',
         ])->assertOk()
-            ->assertJsonPath('user.defaultScreen', 'community');
+            ->assertJsonPath('user.defaultScreen', 'profile');
 
         $this->assertDatabaseHas('users', [
             'id' => $user->id,
-            'default_landing_screen' => 'community',
+            'default_landing_screen' => 'profile',
         ]);
 
         $this->getJson('/api/me')->assertOk()
-            ->assertJsonPath('user.defaultScreen', 'community');
+            ->assertJsonPath('user.defaultScreen', 'profile');
 
         $this->postJson('/api/auth/login', [
             'email' => $user->email,
             'password' => 'Password123',
         ])->assertOk()
-            ->assertJsonPath('user.defaultScreen', 'community')
+            ->assertJsonPath('user.defaultScreen', 'profile')
             ->assertJsonStructure([
                 'token_type',
                 'token',

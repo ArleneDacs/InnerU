@@ -5,6 +5,7 @@ import 'package:selfcare_projects/src/features/authentication/screen/coach_dashb
 import 'package:selfcare_projects/src/features/authentication/screen/community/community_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/dashboard/dashboard_screen.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/meditation/meditation_screen.dart';
+import 'package:selfcare_projects/src/features/authentication/screen/profile/profile.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/todo_list.dart';
 import 'package:selfcare_projects/src/features/authentication/screen/step_tracker.dart/steptracker_screen.dart';
 import 'package:selfcare_projects/src/features/abundance/domain/abundance_company.dart';
@@ -48,9 +49,17 @@ class _SetuppageState extends State<Setuppage> {
         DashboardScreen(initialCompanyTheme: _companyTheme),
         TodoList(),
         const CommunityScreen(showStandaloneAppBar: false),
+        const ProfilePage(title: 'Profile'),
       ];
 
-  final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];
+  final _titles = [
+    "Meditation",
+    "Step Tracker",
+    "",
+    "Goals",
+    "Community",
+    "Profile",
+  ];
 
   // Default (unselected) icons
   final List<Widget> _defaultIcons = [
@@ -59,6 +68,7 @@ class _SetuppageState extends State<Setuppage> {
     Icon(Icons.dashboard_outlined, size: 30),
     Icon(CupertinoIcons.lightbulb, size: 30),
     Icon(Icons.edit_outlined, size: 30),
+    Icon(Icons.person_outline, size: 30),
   ];
 
   // Selected (active) icons
@@ -68,6 +78,7 @@ class _SetuppageState extends State<Setuppage> {
     Icon(Icons.dashboard, size: 30),
     Icon(CupertinoIcons.lightbulb_fill, size: 30),
     Icon(Icons.edit, size: 30),
+    Icon(Icons.person, size: 30),
   ];
 
   @override
@@ -95,7 +106,7 @@ class _SetuppageState extends State<Setuppage> {
 
   int get _requestedStandardIndex =>
       (widget.initialIndex ?? widget.defaultScreen.standardSetupIndex)
-          .clamp(0, 4)
+          .clamp(0, 5)
           .toInt();
 
   DefaultLandingScreen get _requestedScreen => widget.initialIndex == null
@@ -131,7 +142,7 @@ class _SetuppageState extends State<Setuppage> {
       data: AppTheme.company(theme),
       child: Scaffold(
         backgroundColor: theme.backgroundColor,
-        appBar: index == 2
+        appBar: index == 2 || index == 5
             ? null
             : AppBar(
                 backgroundColor: theme.surfaceColor,
@@ -196,9 +207,17 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
         CoachDashboardScreen(),
         TodoList(),
         const CommunityScreen(showStandaloneAppBar: false),
+        const ProfilePage(title: 'Profile'),
       ];
 
-  final _titles = ["Meditation", "Step Tracker", "", "Goals", "Community"];
+  final _titles = [
+    "Meditation",
+    "Step Tracker",
+    "",
+    "Goals",
+    "Community",
+    "Profile",
+  ];
 
   final List<Widget> _defaultIcons = [
     Icon(CupertinoIcons.suit_heart, size: 30),
@@ -206,6 +225,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
     Icon(Icons.dashboard_outlined, size: 30),
     Icon(CupertinoIcons.lightbulb, size: 30),
     Icon(Icons.edit_outlined, size: 30),
+    Icon(Icons.person_outline, size: 30),
   ];
 
   final List<Widget> _selectedIcons = [
@@ -214,6 +234,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
     Icon(Icons.dashboard, size: 30),
     Icon(CupertinoIcons.lightbulb_fill, size: 30),
     Icon(Icons.edit, size: 30),
+    Icon(Icons.person, size: 30),
   ];
 
   @override
@@ -241,7 +262,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
 
   int get _requestedStandardIndex =>
       (widget.initialIndex ?? widget.defaultScreen.standardSetupIndex)
-          .clamp(0, 4)
+          .clamp(0, 5)
           .toInt();
 
   DefaultLandingScreen get _requestedScreen => widget.initialIndex == null
@@ -274,7 +295,7 @@ class _CoachSetuppageState extends State<CoachSetuppage> {
       data: AppTheme.company(theme),
       child: Scaffold(
         backgroundColor: theme.backgroundColor,
-        appBar: index == 2
+        appBar: index == 2 || index == 5
             ? null
             : AppBar(
                 backgroundColor: theme.surfaceColor,

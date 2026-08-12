@@ -9,7 +9,8 @@ enum DefaultLandingScreen {
   meditation('meditation', 'Meditation', 0, null),
   steps('steps', 'Step Tracker', 1, null),
   goals('goals', 'Goals', 3, 1),
-  community('community', 'Community', 4, null);
+  community('community', 'Community', 4, null),
+  profile('profile', 'Profile', 5, 3);
 
   const DefaultLandingScreen(
     this.storageValue,
