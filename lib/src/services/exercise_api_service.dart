@@ -210,6 +210,9 @@ class ExerciseApiService {
     String? startPhotoUrl,
     String? endPhotoUrl,
     String? date,
+    String? clientSessionId,
+    DateTime? startedAt,
+    DateTime? endedAt,
   }) async {
     // Keep all client callers inside the API's seconds contract. The tracker
     // already bounds elapsed time, but this final guard prevents a stale or
@@ -230,6 +233,13 @@ class ExerciseApiService {
         if (startPhotoUrl != null) 'start_photo_url': startPhotoUrl,
         if (endPhotoUrl != null) 'end_photo_url': endPhotoUrl,
         if (date != null) 'date': date,
+        if (clientSessionId != null && clientSessionId.trim().isNotEmpty)
+          'client_session_id': clientSessionId.trim(),
+        // The accompanying `date` is deliberately a local calendar date.
+        // Keep timestamped sessions in that same calendar context so a
+        // workout near midnight is not shifted to the previous server day.
+        if (startedAt != null) 'started_at': startedAt.toIso8601String(),
+        if (endedAt != null) 'ended_at': endedAt.toIso8601String(),
       },
       token: _token,
     );

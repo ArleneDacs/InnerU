@@ -7,11 +7,13 @@ use App\Models\DailyTracker;
 use App\Models\ExerciseLog;
 use App\Models\User;
 use App\Services\UserScoreService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class ExerciseController extends Controller
@@ -25,6 +27,19 @@ class ExerciseController extends Controller
     private const MAX_DURATION_SECONDS = 86_400;
 
     private const MAX_DURATION_MINUTES = self::MAX_DURATION_SECONDS / 60;
+
+    /**
+     * A small allowance handles devices whose clocks are slightly ahead while
+     * still rejecting a queued payload that claims to end far in the future.
+     */
+    private const MAX_FUTURE_CLOCK_SKEW_SECONDS = 300;
+
+    /**
+     * A minutes-only client can only describe a whole minute. Permit a small
+     * difference when timestamps are present, but keep the timestamps as the
+     * authoritative elapsed duration.
+     */
+    private const MAX_DURATION_TIMESTAMP_DRIFT_SECONDS = 60;
 
     public function __construct(private readonly UserScoreService $userScoreService) {}
 
@@ -120,46 +135,281 @@ class ExerciseController extends Controller
 
         $validated = $request->validate([
             'type' => ['required', 'string', 'max:120'],
-            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_MINUTES, 'required_without:duration_seconds'],
-            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_SECONDS, 'required_without:duration_minutes'],
+            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_MINUTES],
+            'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_DURATION_SECONDS],
             'intensity' => ['required', 'integer', 'min:1', 'max:3'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'start_photo_url' => ['nullable', 'string', 'max:2048'],
             'end_photo_url' => ['nullable', 'string', 'max:2048'],
             'date' => ['nullable', 'date'],
+            // Clients generate this once when a session begins and retain it
+            // in their offline queue. It is deliberately optional for older
+            // installed builds that only know the legacy date/duration API.
+            'client_session_id' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9][A-Za-z0-9_-]*$/'],
+            'started_at' => ['nullable', 'date', 'required_with:ended_at'],
+            'ended_at' => ['nullable', 'date', 'required_with:started_at'],
         ]);
 
-        // duration_seconds is the canonical total. duration_minutes exists
-        // for older app builds only and is derived when seconds are absent.
-        // Never combine the two values: they describe the same duration.
-        $durationSeconds = $this->durationSecondsFromPayload($validated);
+        $clientSessionId = isset($validated['client_session_id'])
+            ? trim($validated['client_session_id'])
+            : null;
+
+        // Return a prior successful write before calculating totals or
+        // touching daily tracker/points data. This is the normal path when a
+        // local-first client lost the first response and retries later.
+        if ($clientSessionId !== null) {
+            $existing = $this->findLogByClientSessionId($user, $clientSessionId);
+            if ($existing !== null) {
+                return $this->idempotentStoreResponse(
+                    $this->attachMissingPhotoUrls($existing, $validated),
+                );
+            }
+        }
+
+        [$durationSeconds, $startedAt, $endedAt] = $this->resolveDurationAndTiming($validated);
         $durationMinutes = $this->durationMinutesFromSeconds($durationSeconds);
+        $date = $this->resolveLogDate($validated, $startedAt, $endedAt);
 
-        $date = isset($validated['date'])
-            ? Carbon::parse($validated['date'])->toDateString()
-            : now()->toDateString();
+        try {
+            [$log, $created] = DB::transaction(function () use (
+                $user,
+                $validated,
+                $clientSessionId,
+                $durationMinutes,
+                $durationSeconds,
+                $startedAt,
+                $endedAt,
+                $date,
+            ): array {
+                // The first lookup above handles ordinary retries. This
+                // locked lookup covers two simultaneous retries that both
+                // reached the database before either created its row.
+                if ($clientSessionId !== null) {
+                    $existing = ExerciseLog::query()
+                        ->where('user_id', $user->id)
+                        ->where('client_session_id', $clientSessionId)
+                        ->lockForUpdate()
+                        ->first();
 
-        $log = ExerciseLog::create([
-            'id' => (string) Str::uuid(),
-            'user_id' => $user->id,
-            'username' => $user->name,
-            'type' => trim($validated['type']),
-            'duration_minutes' => $durationMinutes,
-            'duration_seconds' => $durationSeconds,
-            'intensity' => $validated['intensity'],
-            'notes' => trim((string) ($validated['notes'] ?? '')),
-            'start_photo_url' => $validated['start_photo_url'] ?? null,
-            'end_photo_url' => $validated['end_photo_url'] ?? null,
-            'date' => $date,
-        ]);
+                    if ($existing !== null) {
+                        return [
+                            $this->attachMissingPhotoUrls($existing, $validated),
+                            false,
+                        ];
+                    }
+                }
 
-        $this->syncDailyTracker($user, $date);
-        $this->syncUserPoints($user, $date);
+                $log = ExerciseLog::create([
+                    'id' => (string) Str::uuid(),
+                    'user_id' => $user->id,
+                    'client_session_id' => $clientSessionId,
+                    'username' => $user->name,
+                    'type' => trim($validated['type']),
+                    'duration_minutes' => $durationMinutes,
+                    'duration_seconds' => $durationSeconds,
+                    'intensity' => $validated['intensity'],
+                    'notes' => trim((string) ($validated['notes'] ?? '')),
+                    'start_photo_url' => $validated['start_photo_url'] ?? null,
+                    'end_photo_url' => $validated['end_photo_url'] ?? null,
+                    'date' => $date,
+                    'started_at' => $startedAt,
+                    'ended_at' => $endedAt,
+                ]);
+
+                // Keep the log and derived activity data atomic. In
+                // particular, a retry which loses its original response can
+                // never apply these side effects for a second time.
+                $this->syncDailyTracker($user, $date);
+                $this->syncUserPoints($user, $date);
+
+                return [$log, true];
+            });
+        } catch (QueryException $exception) {
+            // A unique index is the final protection against a concurrent
+            // insert. Once its winner commits, return that owned log rather
+            // than applying tracker/points updates on the losing retry.
+            if ($clientSessionId !== null && $this->isClientSessionUniqueViolation($exception)) {
+                $existing = $this->findLogByClientSessionId($user, $clientSessionId);
+                if ($existing !== null) {
+                    return $this->idempotentStoreResponse(
+                        $this->attachMissingPhotoUrls($existing, $validated),
+                    );
+                }
+            }
+
+            throw $exception;
+        }
+
+        if (! $created) {
+            return $this->idempotentStoreResponse($log);
+        }
+
+        return $this->createdStoreResponse($log);
+    }
+
+    private function createdStoreResponse(ExerciseLog $log): JsonResponse
+    {
+        $date = $log->date?->toDateString() ?? now()->toDateString();
 
         return response()->json([
             'log' => $this->logPayload($log),
-            'logs' => $this->logsForUser($user->id, $date),
+            'logs' => $this->logsForUser($log->user_id, $date),
+            'alreadySynced' => false,
         ], Response::HTTP_CREATED);
+    }
+
+    private function idempotentStoreResponse(ExerciseLog $log): JsonResponse
+    {
+        $date = $log->date?->toDateString() ?? now()->toDateString();
+
+        return response()->json([
+            'log' => $this->logPayload($log),
+            'logs' => $this->logsForUser($log->user_id, $date),
+            'alreadySynced' => true,
+        ]);
+    }
+
+    private function findLogByClientSessionId(User $user, string $clientSessionId): ?ExerciseLog
+    {
+        return ExerciseLog::query()
+            ->where('user_id', $user->id)
+            ->where('client_session_id', $clientSessionId)
+            ->first();
+    }
+
+    /**
+     * A record may have been saved before a delayed end-photo upload finished.
+     * On a safe retry, fill empty photo slots on that same record but never
+     * replace an already persisted photo URL with a later request's value.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function attachMissingPhotoUrls(ExerciseLog $log, array $validated): ExerciseLog
+    {
+        $changes = [];
+
+        foreach (['start_photo_url', 'end_photo_url'] as $field) {
+            $value = $validated[$field] ?? null;
+            if (is_string($value) && trim($value) !== '' && blank($log->{$field})) {
+                $changes[$field] = trim($value);
+            }
+        }
+
+        if ($changes === []) {
+            return $log;
+        }
+
+        $log->fill($changes)->save();
+
+        return $log->refresh();
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: int, 1: Carbon|null, 2: Carbon|null}
+     */
+    private function resolveDurationAndTiming(array $validated): array
+    {
+        $startedAt = isset($validated['started_at'])
+            ? Carbon::parse($validated['started_at'])
+            : null;
+        $endedAt = isset($validated['ended_at'])
+            ? Carbon::parse($validated['ended_at'])
+            : null;
+
+        if ($startedAt === null && $endedAt === null) {
+            $durationSeconds = $this->durationSecondsFromPayload($validated);
+            if ($durationSeconds < 1) {
+                throw ValidationException::withMessages([
+                    'duration_seconds' => [
+                        'Provide duration_seconds, duration_minutes, or both started_at and ended_at.',
+                    ],
+                ]);
+            }
+
+            return [$durationSeconds, null, null];
+        }
+
+        if ($startedAt === null || $endedAt === null) {
+            throw ValidationException::withMessages([
+                'started_at' => ['started_at and ended_at must be provided together.'],
+                'ended_at' => ['started_at and ended_at must be provided together.'],
+            ]);
+        }
+
+        if (! $endedAt->greaterThan($startedAt)) {
+            throw ValidationException::withMessages([
+                'ended_at' => ['ended_at must be after started_at.'],
+            ]);
+        }
+
+        $durationSeconds = (int) $startedAt->diffInSeconds($endedAt);
+        if ($durationSeconds < 1 || $durationSeconds > self::MAX_DURATION_SECONDS) {
+            throw ValidationException::withMessages([
+                'ended_at' => ['The elapsed session duration must be between 1 second and 24 hours.'],
+            ]);
+        }
+
+        if ($endedAt->greaterThan(now()->addSeconds(self::MAX_FUTURE_CLOCK_SKEW_SECONDS))) {
+            throw ValidationException::withMessages([
+                'ended_at' => ['ended_at cannot be more than five minutes in the future.'],
+            ]);
+        }
+
+        $reportedDurationSeconds = $this->durationSecondsFromPayload($validated);
+        if (
+            $reportedDurationSeconds > 0
+            && abs($reportedDurationSeconds - $durationSeconds) > self::MAX_DURATION_TIMESTAMP_DRIFT_SECONDS
+        ) {
+            throw ValidationException::withMessages([
+                'duration_seconds' => ['The supplied duration does not match started_at and ended_at.'],
+            ]);
+        }
+
+        return [$durationSeconds, $startedAt, $endedAt];
+    }
+
+    /**
+     * Timestamped sessions are attributed to their end date by default. A
+     * supplied date can match either endpoint so a session crossing midnight
+     * remains valid; old clients that send no timestamps retain date-only
+     * behavior exactly as before.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function resolveLogDate(array $validated, ?Carbon $startedAt, ?Carbon $endedAt): string
+    {
+        $requestedDate = isset($validated['date'])
+            ? Carbon::parse($validated['date'])->toDateString()
+            : null;
+
+        if ($startedAt === null || $endedAt === null) {
+            return $requestedDate ?? now()->toDateString();
+        }
+
+        $startedDate = $startedAt->toDateString();
+        $endedDate = $endedAt->toDateString();
+
+        if (
+            $requestedDate !== null
+            && ! in_array($requestedDate, [$startedDate, $endedDate], true)
+        ) {
+            throw ValidationException::withMessages([
+                'date' => ['The logged date must match started_at or ended_at.'],
+            ]);
+        }
+
+        return $requestedDate ?? $endedDate;
+    }
+
+    private function isClientSessionUniqueViolation(QueryException $exception): bool
+    {
+        $sqlState = (string) $exception->getCode();
+        $message = strtolower($exception->getMessage());
+
+        return in_array($sqlState, ['23000', '23505'], true)
+            || str_contains($message, 'exercise_logs_user_client_session_unique')
+            || str_contains($message, 'unique constraint failed');
     }
 
     public function destroy(Request $request, string $logId): JsonResponse
@@ -297,6 +547,7 @@ class ExerciseController extends Controller
         return [
             'id' => $log->id,
             'userId' => (string) $log->user_id,
+            'clientSessionId' => $log->client_session_id,
             'username' => $log->username,
             'type' => $log->type,
             // Keep the response internally consistent even for older rows
@@ -308,6 +559,8 @@ class ExerciseController extends Controller
             'startPhotoUrl' => $log->start_photo_url,
             'endPhotoUrl' => $log->end_photo_url,
             'date' => $log->date?->toDateString(),
+            'startedAt' => $log->started_at?->toIso8601String(),
+            'endedAt' => $log->ended_at?->toIso8601String(),
             'createdAt' => $log->created_at?->toIso8601String(),
         ];
     }

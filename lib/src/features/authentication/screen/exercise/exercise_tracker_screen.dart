@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/cupertino.dart';
@@ -13,10 +14,10 @@ import 'package:selfcare_projects/src/features/authentication/screen/exercise/ex
 import 'package:selfcare_projects/src/features/authentication/screen/exercise/exercise_session_limits.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
-import 'package:selfcare_projects/src/services/image_storage_service.dart';
 import 'package:selfcare_projects/src/services/exercise_api_service.dart';
 import 'package:selfcare_projects/src/services/meditation_streak_service.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/pending_exercise_sync_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ExerciseTrackerScreen extends StatefulWidget {
@@ -54,19 +55,19 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   static const String _sessionStoppedDurationKey =
       'exercise_session_stopped_duration_seconds';
   static const String _sessionOwnerKey = 'exercise_session_owner_uid';
-  static const Duration _photoUploadTimeout = Duration(seconds: 45);
   static final List<int> _durationHourOptions =
       List<int>.generate(24, (index) => index);
   static final List<int> _durationMinuteSecondOptions =
       List<int>.generate(60, (index) => index);
 
-  final ActivityStreakService _activityStreakService = ActivityStreakService();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _customTypeController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final ExerciseApiService _exerciseApi = ExerciseApiService.instance;
   final FastingNotificationService _notificationService =
       FastingNotificationService.instance;
+  final PendingExerciseSyncService _pendingExerciseSync =
+      PendingExerciseSyncService.instance;
 
   String _selectedType = _exerciseTypes.first;
   ExerciseDurationSelection _goalDurationSelection =
@@ -75,9 +76,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   DateTime? _sessionStartAt;
   DateTime? _sessionEndsAt;
   Duration? _stoppedElapsedDuration;
+  DateTime? _stoppedAt;
   String? _startPhotoUrl;
   String? _pendingEndPhotoUrl;
-  bool _isUploadingStartPhoto = false;
   bool _isUploadingEndPhoto = false;
   bool _isStarting = false;
   bool _isSaving = false;
@@ -85,6 +86,8 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   bool _isRestoringSession = true;
   bool _hasAnnouncedGoalReached = false;
   String? _saveRecoveryError;
+  String? _clientSessionId;
+  ExerciseSyncStatus _syncStatus = const ExerciseSyncStatus.idle();
   Timer? _sessionTimer;
   Timer? _completionAlarmTimer;
   final AudioPlayer _alarmPlayer = AudioPlayer()
@@ -92,10 +95,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   bool _alarmAudioContextConfigured = false;
   List<Map<String, dynamic>> _todayLogs = [];
 
-  String get _todayDate => DateFormat('yyyy-MM-dd').format(DateTime.now());
-
   @override
   void dispose() {
+    _pendingExerciseSync.status.removeListener(_onExerciseSyncStatusChanged);
     _sessionTimer?.cancel();
     _completionAlarmTimer?.cancel();
     // dispose() stops playback itself; no need to await the separate
@@ -110,7 +112,27 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
   void initState() {
     super.initState();
     _loadTodayLogs();
-    _restoreActiveSession();
+    _pendingExerciseSync.status.addListener(_onExerciseSyncStatusChanged);
+    unawaited(_restoreAndRecoverExerciseSession());
+  }
+
+  Future<void> _restoreAndRecoverExerciseSession() async {
+    await _restoreActiveSession();
+    await _recoverLostExerciseCameraData();
+    final userId = AuthService.instance.currentUserId;
+    if (userId != null && userId.isNotEmpty) {
+      await _pendingExerciseSync.refreshStatus(userId);
+    }
+  }
+
+  void _onExerciseSyncStatusChanged() {
+    final nextStatus = _pendingExerciseSync.status.value;
+    final userId = AuthService.instance.currentUserId;
+    if (!mounted || userId == null || nextStatus.userId != userId) return;
+    setState(() => _syncStatus = nextStatus);
+    if (nextStatus.phase == ExerciseSyncPhase.synced) {
+      unawaited(_loadTodayLogs());
+    }
   }
 
   Future<void> _loadTodayLogs() async {
@@ -165,14 +187,24 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
 
   Future<void> _restoreActiveSession() async {
     try {
+      final session = AuthService.instance.currentSession;
+      if (session == null) return;
+      final userId = session.id.toString();
+      final localSession = await _pendingExerciseSync.loadActiveSession(userId);
+      if (localSession != null) {
+        await _hydrateLocalSession(localSession);
+        return;
+      }
+
+      // Migration fallback for an active workout saved by the prior
+      // remote-first tracker. New sessions are only written through the v2
+      // local queue service above.
       final prefs = await _prefs;
       final startMs = prefs.getInt(_sessionStartKey);
       if (startMs == null) return;
 
-      final session = AuthService.instance.currentSession;
       final ownerId = prefs.getString(_sessionOwnerKey);
-      if (session == null ||
-          (ownerId != null && ownerId != session.id.toString())) {
+      if (ownerId != null && ownerId != session.id.toString()) {
         await _clearActiveSessionCache(prefs);
         return;
       }
@@ -213,6 +245,8 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         _sessionStartAt = start;
         _sessionEndsAt = end;
         _stoppedElapsedDuration = stoppedDuration;
+        _stoppedAt =
+            stoppedDuration == null ? null : start.add(stoppedDuration);
         _goalDurationSelection =
             exerciseDurationSelectionFromDuration(goalDuration);
         _selectedType = selectedType;
@@ -221,6 +255,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
         _notesController.text = prefs.getString(_sessionNotesKey) ?? '';
         _startPhotoUrl = prefs.getString(_sessionStartPhotoKey);
         _pendingEndPhotoUrl = prefs.getString(_sessionEndPhotoKey);
+        _clientSessionId = _legacyClientSessionId(session.id.toString(), start);
         // A restored expired workout should be recoverable without suddenly
         // starting a looping alarm while the member is trying to stop it.
         _hasAnnouncedGoalReached = stoppedDuration != null || !end.isAfter(now);
@@ -255,57 +290,84 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     }
   }
 
+  Future<void> _hydrateLocalSession(ExerciseLocalSession local) async {
+    final now = DateTime.now();
+    final rawStart = local.startedAt;
+    final start = rawStart.isAfter(now) ? now : rawStart;
+    final goalDuration = normalizedExerciseSessionGoalDuration(
+      Duration(seconds: local.goalDurationSeconds),
+    );
+    final end = start.add(goalDuration);
+    final stoppedDuration = local.stoppedDurationSeconds == null
+        ? null
+        : boundedExerciseLogDuration(
+            Duration(seconds: local.stoppedDurationSeconds!),
+          );
+    final usesKnownType = _exerciseTypes.contains(local.type);
+    if (!mounted) return;
+    setState(() {
+      _clientSessionId = local.clientSessionId;
+      _sessionStartAt = start;
+      _sessionEndsAt = end;
+      _stoppedElapsedDuration = stoppedDuration;
+      _stoppedAt = local.stoppedAt ??
+          (stoppedDuration == null ? null : start.add(stoppedDuration));
+      _goalDurationSelection =
+          exerciseDurationSelectionFromDuration(goalDuration);
+      _selectedType = usesKnownType ? local.type : 'Other';
+      _customTypeController.text = usesKnownType ? '' : local.type;
+      _intensity = local.intensity.clamp(1, 3).toInt();
+      _notesController.text = local.notes;
+      _startPhotoUrl = local.startPhotoReference;
+      _pendingEndPhotoUrl = local.pendingEndPhotoReference;
+      _hasAnnouncedGoalReached = stoppedDuration != null || !end.isAfter(now);
+      _saveRecoveryError = null;
+    });
+    if (stoppedDuration == null && _remainingSessionTime() > Duration.zero) {
+      _startSessionTicker();
+      unawaited(_syncExerciseNotification());
+    } else {
+      unawaited(_clearExerciseNotification());
+    }
+  }
+
   Future<void> _persistActiveSession() async {
-    final prefs = await _prefs;
     if (!_isSessionActive) return;
     final userId = AuthService.instance.currentUserId;
     if (userId == null || userId.isEmpty) {
       throw StateError('Exercise session requires a signed-in user.');
     }
-
-    await prefs.setInt(
-      _sessionStartKey,
-      _sessionStartAt!.millisecondsSinceEpoch,
-    );
-    await prefs.setString(_sessionOwnerKey, userId);
-    await prefs.setInt(
-      _sessionGoalSecondsKey,
-      _selectedGoalDuration.inSeconds,
-    );
-    await prefs.setInt(
-      _sessionGoalKey,
-      _selectedGoalDuration.inMinutes,
-    );
-    await prefs.setString(_sessionTypeKey, _selectedType);
-    await prefs.setString(
-      _sessionCustomTypeKey,
-      _customTypeController.text.trim(),
-    );
-    await prefs.setInt(_sessionIntensityKey, _intensity);
-    await prefs.setString(_sessionNotesKey, _notesController.text.trim());
-    if (_startPhotoUrl != null && _startPhotoUrl!.isNotEmpty) {
-      await prefs.setString(_sessionStartPhotoKey, _startPhotoUrl!);
-    } else {
-      await prefs.remove(_sessionStartPhotoKey);
+    final clientSessionId = _clientSessionId;
+    if (clientSessionId == null || clientSessionId.isEmpty) {
+      throw StateError('Exercise session is missing its local client ID.');
     }
-    if (_pendingEndPhotoUrl != null && _pendingEndPhotoUrl!.isNotEmpty) {
-      await prefs.setString(_sessionEndPhotoKey, _pendingEndPhotoUrl!);
-    } else {
-      await prefs.remove(_sessionEndPhotoKey);
-    }
-    if (_stoppedElapsedDuration != null) {
-      await prefs.setInt(
-        _sessionStoppedDurationKey,
-        boundedExerciseLogDuration(_stoppedElapsedDuration!).inSeconds,
-      );
-    } else {
-      await prefs.remove(_sessionStoppedDurationKey);
-    }
+    await _pendingExerciseSync.saveActiveSession(
+      ExerciseLocalSession(
+        clientSessionId: clientSessionId,
+        userId: userId,
+        type: _effectiveType(),
+        goalDurationSeconds: _selectedGoalDuration.inSeconds,
+        intensity: _intensity,
+        notes: _notesController.text.trim(),
+        startedAt: _sessionStartAt!,
+        startPhotoReference: _startPhotoUrl,
+        stoppedDurationSeconds: _stoppedElapsedDuration == null
+            ? null
+            : boundedExerciseLogDuration(_stoppedElapsedDuration!).inSeconds,
+        stoppedAt: _stoppedAt,
+        pendingEndPhotoReference: _pendingEndPhotoUrl,
+      ),
+    );
   }
 
   Future<void> _clearActiveSessionCache(
       [SharedPreferences? cachedPrefs]) async {
     final prefs = cachedPrefs ?? await _prefs;
+    final userId = AuthService.instance.currentUserId;
+    if (userId != null && userId.isNotEmpty) {
+      await _pendingExerciseSync.clearActiveSession(userId: userId);
+      await _pendingExerciseSync.clearCaptureIntent(userId: userId);
+    }
     await prefs.remove(_sessionStartKey);
     await prefs.remove(_sessionGoalSecondsKey);
     await prefs.remove(_sessionGoalKey);
@@ -318,6 +380,12 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     await prefs.remove(_sessionStoppedDurationKey);
     await prefs.remove(_sessionOwnerKey);
   }
+
+  String _legacyClientSessionId(String userId, DateTime start) =>
+      'legacy_${userId}_${start.millisecondsSinceEpoch}';
+
+  String _newClientSessionId() =>
+      'exercise_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(1 << 32)}';
 
   void _stopSessionTicker() {
     _sessionTimer?.cancel();
@@ -445,56 +513,125 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     return _selectedType;
   }
 
-  Future<String?> _captureExercisePhoto() async {
-    final pickedImage = await _imagePicker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 85,
-      maxWidth: 1800,
-    );
-    if (pickedImage == null) return null;
-
-    final imageUrl = await ImageStorageService.uploadImageFile(
-      File(pickedImage.path),
-    ).timeout(_photoUploadTimeout);
-    if (imageUrl == null || imageUrl.isEmpty) {
-      throw Exception(
-        ImageStorageService.lastError ?? 'Failed to upload image.',
+  /// Opens the native camera only after recording enough intent to recover an
+  /// Android process kill via `retrieveLostData`. The returned value is an
+  /// opaque local reference; it is intentionally never uploaded here.
+  Future<String?> _captureExercisePhotoLocally(
+    ExerciseCaptureIntent intent,
+  ) async {
+    await _pendingExerciseSync.saveCaptureIntent(intent);
+    try {
+      final pickedImage = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1800,
       );
+      if (pickedImage == null) {
+        await _pendingExerciseSync.clearCaptureIntent(userId: intent.userId);
+        return null;
+      }
+      final bytes = await pickedImage.readAsBytes();
+      if (bytes.isEmpty) {
+        throw StateError('The camera did not return a usable photo.');
+      }
+      final reference = await _pendingExerciseSync.persistPhoto(
+        userId: intent.userId,
+        clientSessionId: intent.clientSessionId,
+        slot: intent.slot,
+        bytes: bytes,
+      );
+      await _pendingExerciseSync.clearCaptureIntent(userId: intent.userId);
+      return reference;
+    } catch (error) {
+      debugPrint('Could not capture exercise photo locally: $error');
+      rethrow;
     }
-    return imageUrl;
+  }
+
+  Future<void> _recoverLostExerciseCameraData() async {
+    final userId = AuthService.instance.currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    final intent = await _pendingExerciseSync.loadCaptureIntent(userId);
+    if (intent == null) return;
+    try {
+      final lost = await _imagePicker.retrieveLostData();
+      final image = lost.file;
+      if (image == null) return;
+      final bytes = await image.readAsBytes();
+      if (bytes.isEmpty) return;
+      final reference = await _pendingExerciseSync.persistPhoto(
+        userId: intent.userId,
+        clientSessionId: intent.clientSessionId,
+        slot: intent.slot,
+        bytes: bytes,
+      );
+      await _pendingExerciseSync.clearCaptureIntent(userId: intent.userId);
+      if (intent.slot == ExerciseCaptureSlot.start) {
+        if (!mounted || _isSessionActive) return;
+        final startedAt = DateTime.now();
+        if (mounted) {
+          setState(() {
+            _clientSessionId = intent.clientSessionId;
+            _selectedType =
+                _exerciseTypes.contains(intent.type) ? intent.type : 'Other';
+            _customTypeController.text =
+                _exerciseTypes.contains(intent.type) ? '' : intent.type;
+            _goalDurationSelection = exerciseDurationSelectionFromDuration(
+              normalizedExerciseSessionGoalDuration(
+                Duration(seconds: intent.goalDurationSeconds),
+              ),
+            );
+            _intensity = intent.intensity.clamp(1, 3).toInt();
+            _notesController.text = intent.notes;
+            _startPhotoUrl = reference;
+            _sessionStartAt = startedAt;
+            _sessionEndsAt = startedAt.add(_selectedGoalDuration);
+            _stoppedElapsedDuration = null;
+            _hasAnnouncedGoalReached = false;
+          });
+        }
+        await _persistActiveSession();
+        _startSessionTicker();
+        unawaited(_syncStartedExerciseNotification(startedAt));
+        if (mounted) {
+          _showMessage('Recovered your start photo. Exercise is running.');
+        }
+        return;
+      }
+
+      final active = await _pendingExerciseSync.loadActiveSession(userId);
+      final startedAt = intent.startedAt ?? active?.startedAt;
+      final endedAt = intent.endedAt;
+      if (startedAt == null || endedAt == null) return;
+      final duration =
+          boundedExerciseLogDuration(endedAt.difference(startedAt));
+      final record = PendingExerciseRecord(
+        clientSessionId: intent.clientSessionId,
+        userId: userId,
+        type: intent.type,
+        durationSeconds: duration.inSeconds,
+        intensity: intent.intensity,
+        notes: intent.notes,
+        startedAt: startedAt,
+        endedAt: endedAt,
+        startPhotoReference:
+            intent.startPhotoReference ?? active?.startPhotoReference,
+        endPhotoReference: reference,
+      );
+      await _pendingExerciseSync.queueCompleted(record);
+      await _pendingExerciseSync.clearActiveSession(userId: userId);
+      if (mounted) {
+        _resetCompletedSessionState();
+        _showMessage('Recovered your end photo — saved on this device.');
+      }
+      unawaited(_pendingExerciseSync.flush(userId: userId));
+    } catch (error) {
+      debugPrint('Could not recover an exercise camera photo: $error');
+    }
   }
 
   bool _matchesActiveSession(DateTime startedAt) =>
       _sessionStartAt?.isAtSameMomentAs(startedAt) ?? false;
-
-  Future<void> _captureAndAttachStartPhoto(DateTime startedAt) async {
-    try {
-      final startPhotoUrl = await _captureExercisePhoto();
-      if (!mounted ||
-          !_matchesActiveSession(startedAt) ||
-          startPhotoUrl == null) {
-        return;
-      }
-
-      setState(() => _startPhotoUrl = startPhotoUrl);
-      try {
-        await _persistActiveSession();
-      } catch (error) {
-        debugPrint('Could not persist exercise start photo: $error');
-      }
-    } on TimeoutException {
-      if (mounted && _matchesActiveSession(startedAt)) {
-        _showMessage(
-            'Start photo upload timed out. Your workout is still running.');
-      }
-    } catch (error) {
-      debugPrint('Start photo capture failed: $error');
-    } finally {
-      if (mounted && _matchesActiveSession(startedAt)) {
-        setState(() => _isUploadingStartPhoto = false);
-      }
-    }
-  }
 
   Future<void> _syncStartedExerciseNotification(DateTime startedAt) async {
     final notificationsReady = await _syncExerciseNotification();
@@ -519,59 +656,69 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       return;
     }
 
-    final now = DateTime.now();
+    final userId = session.id.toString();
+    final clientSessionId = _newClientSessionId();
+    final goalDuration = _selectedGoalDuration;
+    final type = _effectiveType();
     try {
       unawaited(_stopCompletionAlarm());
+      setState(() => _isStarting = true);
+      final startPhotoReference = await _captureExercisePhotoLocally(
+        ExerciseCaptureIntent(
+          userId: userId,
+          clientSessionId: clientSessionId,
+          slot: ExerciseCaptureSlot.start,
+          type: type,
+          goalDurationSeconds: goalDuration.inSeconds,
+          intensity: _intensity,
+          notes: _notesController.text.trim(),
+        ),
+      );
+      if (startPhotoReference == null) {
+        if (mounted) {
+          _showMessage('Start photo was not captured. Tap play to try again.');
+        }
+        return;
+      }
+      final startedAt = DateTime.now();
+      final localSession = ExerciseLocalSession(
+        clientSessionId: clientSessionId,
+        userId: userId,
+        type: type,
+        goalDurationSeconds: goalDuration.inSeconds,
+        intensity: _intensity,
+        notes: _notesController.text.trim(),
+        startedAt: startedAt,
+        startPhotoReference: startPhotoReference,
+      );
+      // The start image and session must be durable before the timer begins.
+      await _pendingExerciseSync.saveActiveSession(localSession);
+      if (!mounted || AuthService.instance.currentUserId != userId) return;
       setState(() {
-        _isStarting = true;
-        _sessionStartAt = now;
-        _sessionEndsAt = now.add(_selectedGoalDuration);
+        _clientSessionId = clientSessionId;
+        _sessionStartAt = startedAt;
+        _sessionEndsAt = startedAt.add(goalDuration);
         _stoppedElapsedDuration = null;
-        _startPhotoUrl = null;
+        _stoppedAt = null;
+        _startPhotoUrl = startPhotoReference;
         _pendingEndPhotoUrl = null;
         _hasAnnouncedGoalReached = false;
         _saveRecoveryError = null;
       });
-
-      // Save the start before optional camera/upload work. A slow photo
-      // upload can no longer delay or lose the timer itself.
-      await _persistActiveSession();
       _startSessionTicker();
-      if (!mounted || !_matchesActiveSession(now)) return;
-      setState(() {
-        _isStarting = false;
-        _isUploadingStartPhoto = true;
-      });
-      unawaited(_syncStartedExerciseNotification(now));
-      unawaited(_captureAndAttachStartPhoto(now));
+      unawaited(_syncStartedExerciseNotification(startedAt));
       _showMessage(
         'Exercise started. We will alert you when the '
-        '${formatExerciseDuration(_selectedGoalDuration)} goal is done.',
+        '${formatExerciseDuration(goalDuration)} goal is done.',
       );
     } catch (error) {
-      _stopSessionTicker();
-      try {
-        await _clearActiveSessionCache();
-      } catch (_) {}
-      if (mounted) {
-        setState(() {
-          _sessionStartAt = null;
-          _sessionEndsAt = null;
-          _stoppedElapsedDuration = null;
-          _startPhotoUrl = null;
-          _pendingEndPhotoUrl = null;
-        });
-        _showMessage('Could not start exercise. Please try again.');
-      }
       debugPrint('Exercise start failed: $error');
+      if (mounted) {
+        _showMessage('Could not save the start photo. Please try again.');
+      }
     } finally {
       if (mounted) {
-        setState(() {
-          _isStarting = false;
-          if (!_isSessionActive) {
-            _isUploadingStartPhoto = false;
-          }
-        });
+        setState(() => _isStarting = false);
       }
     }
   }
@@ -591,163 +738,160 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       return;
     }
 
-    final startedAt = _sessionStartAt!;
+    final userId = session.id.toString();
+    final originalStartedAt = _sessionStartAt!;
+    final clientSessionId =
+        _clientSessionId ?? _legacyClientSessionId(userId, originalStartedAt);
     final elapsedAtStop = _elapsedSessionTime();
     final logDuration = boundedExerciseLogDuration(elapsedAtStop);
     final durationWasCapped = exerciseLogDurationWasCapped(elapsedAtStop);
     final isFirstStopAttempt = _stoppedElapsedDuration == null;
-    var exerciseStored = false;
+    final endedAt = _stoppedAt ?? DateTime.now();
 
-    // Silence the alarm the instant Stop & save is tapped, not after
-    // everything else below finishes. _captureExercisePhoto() alone can
-    // wait on the user through the entire native camera UI, so leaving the
-    // alarm stop until after it (and the network calls that follow) meant
-    // the alarm kept blaring through all of that -- it looked like Stop
-    // did nothing until something else (like leaving the screen) tore the
-    // player down instead.
+    // Freeze immediately while the member uses the native camera. No network
+    // work happens in this path, so Stop remains responsive offline.
     unawaited(_stopCompletionAlarm());
-    // Freeze the session at the member's Stop tap. A long photo/network
-    // operation must not advance the clock or restart the completion alarm
-    // while the member is deciding whether to retry or discard.
     _stopSessionTicker();
     unawaited(_clearExerciseNotification());
 
     setState(() {
       if (isFirstStopAttempt) {
         _stoppedElapsedDuration = elapsedAtStop;
+        _stoppedAt = endedAt;
       }
       _isUploadingEndPhoto = true;
       _saveRecoveryError = null;
     });
     try {
-      if (isFirstStopAttempt) {
-        try {
-          await _persistActiveSession();
-        } catch (error) {
-          // The in-memory duration is still frozen for this attempt. Keep
-          // the recovery controls usable even if local cache is unavailable.
-          debugPrint('Could not persist stopped exercise duration: $error');
-        }
+      final frozenDuration = isFirstStopAttempt
+          ? logDuration
+          : boundedExerciseLogDuration(_stoppedElapsedDuration!);
+      final frozenEndedAt = _stoppedAt ?? endedAt;
+      // Persist the frozen stop state before presenting the camera. If the
+      // OS kills the app, restore/lost-data recovery retains this exact time.
+      await _pendingExerciseSync.saveActiveSession(
+        ExerciseLocalSession(
+          clientSessionId: clientSessionId,
+          userId: userId,
+          type: type,
+          goalDurationSeconds: _selectedGoalDuration.inSeconds,
+          intensity: _intensity,
+          notes: _notesController.text.trim(),
+          startedAt: originalStartedAt,
+          startPhotoReference: _startPhotoUrl,
+          stoppedDurationSeconds: frozenDuration.inSeconds,
+          stoppedAt: frozenEndedAt,
+          pendingEndPhotoReference: _pendingEndPhotoUrl,
+        ),
+      );
+      var endPhotoReference = _pendingEndPhotoUrl;
+      if (endPhotoReference == null || endPhotoReference.isEmpty) {
+        endPhotoReference = await _captureExercisePhotoLocally(
+          ExerciseCaptureIntent(
+            userId: userId,
+            clientSessionId: clientSessionId,
+            slot: ExerciseCaptureSlot.end,
+            type: type,
+            goalDurationSeconds: _selectedGoalDuration.inSeconds,
+            intensity: _intensity,
+            notes: _notesController.text.trim(),
+            startedAt: originalStartedAt,
+            endedAt: frozenEndedAt,
+            startPhotoReference: _startPhotoUrl,
+          ),
+        );
       }
-
-      // Same as the start photo: don't let a cancelled/failed camera
-      // capture throw away an already-completed workout's data.
-      var endPhotoUrl = _pendingEndPhotoUrl;
-      if (endPhotoUrl == null || endPhotoUrl.isEmpty) {
-        try {
-          endPhotoUrl = await _captureExercisePhoto();
-        } on TimeoutException {
-          if (mounted && _matchesActiveSession(startedAt)) {
-            _showMessage(
-              'End photo upload timed out. You can still save this workout.',
-            );
-          }
-        } catch (error) {
-          debugPrint('End photo capture failed: $error');
+      if (endPhotoReference == null) {
+        if (mounted) {
+          _showMessage('End photo was not captured. Tap stop to try again.');
         }
+        return;
       }
-
-      // The member may choose Discard while a native camera/upload is open.
-      // Never let an older capture attach itself to a later workout.
-      if (!mounted || !_matchesActiveSession(startedAt)) return;
-      if (endPhotoUrl != null && endPhotoUrl.isNotEmpty) {
-        setState(() => _pendingEndPhotoUrl = endPhotoUrl);
-        try {
-          await _persistActiveSession();
-        } catch (error) {
-          // The session is already persisted from Start; a failed optional
-          // end-photo cache write must not make Stop unusable.
-          debugPrint('Could not persist exercise end photo: $error');
-        }
-      }
-
-      if (!mounted || !_matchesActiveSession(startedAt)) return;
+      if (!mounted || !_matchesActiveSession(originalStartedAt)) return;
       setState(() {
+        _pendingEndPhotoUrl = endPhotoReference;
         _isUploadingEndPhoto = false;
         _isSaving = true;
       });
-      await _exerciseApi.store(
+      // Attach the locally saved end image to the active session first, then
+      // enqueue its immutable completed record. If the queue write fails, the
+      // frozen session/photo remain available for a safe retry.
+      await _pendingExerciseSync.saveActiveSession(
+        ExerciseLocalSession(
+          clientSessionId: clientSessionId,
+          userId: userId,
+          type: type,
+          goalDurationSeconds: _selectedGoalDuration.inSeconds,
+          intensity: _intensity,
+          notes: _notesController.text.trim(),
+          startedAt: originalStartedAt,
+          startPhotoReference: _startPhotoUrl,
+          stoppedDurationSeconds: frozenDuration.inSeconds,
+          stoppedAt: frozenEndedAt,
+          pendingEndPhotoReference: endPhotoReference,
+        ),
+      );
+      final record = PendingExerciseRecord(
+        clientSessionId: clientSessionId,
+        userId: userId,
         type: type,
-        durationMinutes: exerciseLogDurationMinutes(logDuration),
-        durationSeconds: logDuration.inSeconds,
+        durationSeconds: frozenDuration.inSeconds,
         intensity: _intensity,
         notes: _notesController.text.trim(),
-        startPhotoUrl: _startPhotoUrl,
-        endPhotoUrl: endPhotoUrl,
-        date: _todayDate,
+        startedAt: originalStartedAt,
+        endedAt: frozenEndedAt,
+        startPhotoReference: _startPhotoUrl,
+        endPhotoReference: endPhotoReference,
       );
-      exerciseStored = true;
-
-      // The API is the authoritative save. Once it succeeds, clear the
-      // replayable local session before any secondary refresh/reward work so
-      // a transient follow-up error cannot make a retry create a duplicate.
-      await _clearExerciseNotification();
-      try {
-        await _clearActiveSessionCache();
-      } catch (error) {
-        debugPrint('Could not clear saved exercise session: $error');
-      }
-      _stopSessionTicker();
-
+      await _pendingExerciseSync.queueCompleted(record);
+      await _pendingExerciseSync.clearActiveSession(userId: userId);
       if (!mounted) return;
-      setState(() {
-        _selectedType = _exerciseTypes.first;
-        _goalDurationSelection =
-            const ExerciseDurationSelection(hours: 0, minutes: 5, seconds: 0);
-        _intensity = 2;
-        _customTypeController.clear();
-        _notesController.clear();
-        _startPhotoUrl = null;
-        _pendingEndPhotoUrl = null;
-        _sessionStartAt = null;
-        _sessionEndsAt = null;
-        _stoppedElapsedDuration = null;
-        _hasAnnouncedGoalReached = false;
-        _saveRecoveryError = null;
-        _isSaving = false;
-        _isUploadingEndPhoto = false;
-      });
-      unawaited(_loadTodayLogs());
-      List<ActivityStreakMilestone> unlockedRewards =
-          <ActivityStreakMilestone>[];
-      try {
-        unlockedRewards = await _recordExerciseStreak(session.id.toString());
-      } catch (error) {
-        // Logging the workout already succeeded. Rewards are secondary and
-        // must never turn a saved workout into a misleading retry state.
-        debugPrint('Exercise reward update failed after save: $error');
-      }
-      if (!mounted) return;
+      _resetCompletedSessionState();
       _showMessage(
-        unlockedRewards.isEmpty
-            ? (durationWasCapped
-                ? 'Exercise logged at the 24-hour maximum.'
-                : 'Exercise logged.')
-            : 'Exercise medal unlocked: ${unlockedRewards.last.title}',
+        durationWasCapped
+            ? 'Saved on this device at the 24-hour maximum — pending sync.'
+            : 'Saved on this device — pending sync.',
       );
+      unawaited(_pendingExerciseSync.flush(userId: userId));
     } catch (error) {
-      if (!mounted) return;
-      if (exerciseStored) {
-        debugPrint('Exercise follow-up failed after save: $error');
-        return;
+      debugPrint('Could not save exercise locally: $error');
+      if (mounted) {
+        final message = 'Could not save locally. Your stopped workout remains '
+            'on this device; tap stop to retry.';
+        setState(() => _saveRecoveryError = message);
+        _showMessage(message);
       }
-      final durationNote = durationWasCapped
-          ? ' The duration will be saved at the 24-hour maximum.'
-          : '';
-      final recoveryMessage =
-          'Could not save your workout. It is still on this device. '
-          'Retry save when you are connected, or discard it.$durationNote';
-      setState(() => _saveRecoveryError = recoveryMessage);
-      _showMessage(recoveryMessage);
-      debugPrint('Exercise save failed: $error');
     } finally {
-      if (mounted && _matchesActiveSession(startedAt)) {
+      if (mounted && _matchesActiveSession(originalStartedAt)) {
         setState(() {
           _isSaving = false;
           _isUploadingEndPhoto = false;
         });
       }
     }
+  }
+
+  void _resetCompletedSessionState() {
+    if (!mounted) return;
+    setState(() {
+      _selectedType = _exerciseTypes.first;
+      _goalDurationSelection =
+          const ExerciseDurationSelection(hours: 0, minutes: 5, seconds: 0);
+      _intensity = 2;
+      _customTypeController.clear();
+      _notesController.clear();
+      _clientSessionId = null;
+      _startPhotoUrl = null;
+      _pendingEndPhotoUrl = null;
+      _sessionStartAt = null;
+      _sessionEndsAt = null;
+      _stoppedElapsedDuration = null;
+      _stoppedAt = null;
+      _hasAnnouncedGoalReached = false;
+      _saveRecoveryError = null;
+      _isSaving = false;
+      _isUploadingEndPhoto = false;
+    });
   }
 
   // A deliberate recovery choice remains available for a mistaken workout,
@@ -806,9 +950,9 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       _sessionStartAt = null;
       _sessionEndsAt = null;
       _stoppedElapsedDuration = null;
+      _stoppedAt = null;
       _hasAnnouncedGoalReached = false;
       _isStarting = false;
-      _isUploadingStartPhoto = false;
       _isUploadingEndPhoto = false;
       _saveRecoveryError = null;
     });
@@ -828,20 +972,6 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
       if (!mounted) return;
       _showMessage('Could not remove exercise.');
       debugPrint('Exercise delete failed: $error');
-    }
-  }
-
-  Future<List<ActivityStreakMilestone>> _recordExerciseStreak(
-    String userId,
-  ) async {
-    try {
-      return await _activityStreakService.recordCompletedSession(
-        userId: userId,
-        type: ActivityStreakType.exercise,
-      );
-    } catch (error) {
-      debugPrint('Exercise streak update failed: $error');
-      return <ActivityStreakMilestone>[];
     }
   }
 
@@ -1127,12 +1257,7 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                   : _isSessionActive
                       ? _stopExerciseSession
                       : _startExerciseSession,
-              icon: (_isStarting ||
-                      _isSaving ||
-                      _isUploadingEndPhoto ||
-                      (_isSessionActive
-                          ? _isUploadingEndPhoto
-                          : _isUploadingStartPhoto))
+              icon: (_isStarting || _isSaving || _isUploadingEndPhoto)
                   ? const SizedBox(
                       height: 18,
                       width: 18,
@@ -1145,11 +1270,11 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                     ),
               label: Text(
                 _isStarting
-                    ? 'Starting...'
+                    ? 'Opening camera...'
                     : _isSaving
-                        ? 'Saving...'
+                        ? 'Saving locally...'
                         : _isUploadingEndPhoto
-                            ? 'Adding end photo...'
+                            ? 'Opening camera...'
                             : _isSessionActive
                                 ? (_saveRecoveryError != null
                                     ? 'Retry save'
@@ -1337,6 +1462,15 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
     final waitingToSave = _stoppedElapsedDuration != null;
     final durationWasCapped = exerciseLogDurationWasCapped(elapsed);
     final percent = (_sessionProgress() * 100).round().clamp(0, 100);
+    final syncText = switch (_syncStatus.phase) {
+      ExerciseSyncPhase.savingLocally => 'Saving on this device…',
+      ExerciseSyncPhase.pendingSync => _syncStatus.error == null
+          ? 'Saved on this device — pending sync.'
+          : 'Saved on this device — sync will retry.',
+      ExerciseSyncPhase.syncing => 'Syncing saved exercise…',
+      ExerciseSyncPhase.synced => 'Exercise synced.',
+      ExerciseSyncPhase.idle => null,
+    };
 
     return Container(
       width: double.infinity,
@@ -1437,16 +1571,6 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
                 ),
               ),
             ],
-            if (_isUploadingStartPhoto) ...[
-              const SizedBox(height: 10),
-              Text(
-                'Adding your optional start photo…',
-                style: TextStyle(
-                  color: theme.mutedInkColor,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
             if (_startPhotoUrl != null) ...[
               const SizedBox(height: 12),
               _LogPhotoPreview(
@@ -1480,6 +1604,18 @@ class _ExerciseTrackerScreenState extends State<ExerciseTrackerScreen> {
               style: TextStyle(
                 color: theme.mutedInkColor,
                 height: 1.35,
+              ),
+            ),
+          ],
+          if (syncText != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              syncText,
+              style: TextStyle(
+                color: _syncStatus.phase == ExerciseSyncPhase.pendingSync
+                    ? theme.primaryColor
+                    : theme.mutedInkColor,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -1801,7 +1937,7 @@ class _ExerciseLogTile extends StatelessWidget {
   }
 }
 
-class _LogPhotoPreview extends StatelessWidget {
+class _LogPhotoPreview extends StatefulWidget {
   const _LogPhotoPreview({
     required this.theme,
     required this.label,
@@ -1812,7 +1948,36 @@ class _LogPhotoPreview extends StatelessWidget {
   final String label;
   final String imageUrl;
 
-  void _openFullScreenImage(BuildContext context) {
+  @override
+  State<_LogPhotoPreview> createState() => _LogPhotoPreviewState();
+}
+
+class _LogPhotoPreviewState extends State<_LogPhotoPreview> {
+  Future<Uint8List?>? _localPhotoFuture;
+
+  bool get _isLocalReference =>
+      widget.imageUrl.startsWith('file:') ||
+      widget.imageUrl.startsWith('exercise-web-photo:');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalPhoto();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LogPhotoPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) _loadLocalPhoto();
+  }
+
+  void _loadLocalPhoto() {
+    _localPhotoFuture = _isLocalReference
+        ? PendingExerciseSyncService.instance.readPhoto(widget.imageUrl)
+        : null;
+  }
+
+  void _openFullScreenImage(BuildContext context, Uint8List? localBytes) {
     showDialog<void>(
       context: context,
       barrierColor: Colors.black,
@@ -1825,25 +1990,27 @@ class _LogPhotoPreview extends StatelessWidget {
             child: InteractiveViewer(
               minScale: 1,
               maxScale: 5,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Icon(
-                      Icons.broken_image_rounded,
-                      size: 72,
-                      color: Colors.white54,
-                    ),
-                  );
-                },
-              ),
+              child: localBytes == null
+                  ? Image.network(
+                      widget.imageUrl,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return const Center(
+                          child: CircularProgressIndicator(color: Colors.white),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Center(
+                          child: Icon(
+                            Icons.broken_image_rounded,
+                            size: 72,
+                            color: Colors.white54,
+                          ),
+                        );
+                      },
+                    )
+                  : Image.memory(localBytes, fit: BoxFit.contain),
             ),
           ),
         );
@@ -1853,31 +2020,64 @@ class _LogPhotoPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final future = _localPhotoFuture;
+    if (future != null) {
+      return FutureBuilder<Uint8List?>(
+        future: future,
+        builder: (context, snapshot) => _buildPreview(
+          context,
+          snapshot.data,
+          isLoading: snapshot.connectionState != ConnectionState.done,
+        ),
+      );
+    }
+    return _buildPreview(context, null);
+  }
+
+  Widget _buildPreview(
+    BuildContext context,
+    Uint8List? localBytes, {
+    bool isLoading = false,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          label,
+          widget.label,
           style: TextStyle(
-            color: theme.mutedInkColor,
+            color: widget.theme.mutedInkColor,
             fontSize: 12,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 4),
         GestureDetector(
-          onTap: () => _openFullScreenImage(context),
+          onTap: isLoading
+              ? null
+              : () => _openFullScreenImage(context, localBytes),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Stack(
               alignment: Alignment.bottomRight,
               children: [
-                Image.network(
-                  imageUrl,
-                  height: 72,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
+                isLoading
+                    ? const SizedBox(
+                        height: 72,
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : localBytes == null
+                        ? Image.network(
+                            widget.imageUrl,
+                            height: 72,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          )
+                        : Image.memory(
+                            localBytes,
+                            height: 72,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
                 Container(
                   margin: const EdgeInsets.all(4),
                   padding: const EdgeInsets.all(3),

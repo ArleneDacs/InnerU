@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -35,6 +36,8 @@ class NotesType extends StatefulWidget {
 }
 
 class _NotesTypeState extends State<NotesType> {
+  static const int _communityTitleMaxLength = 100;
+
   String? selectedCategory;
   List<Widget> contentWidgets = []; // This will store text and image widgets
   final ImagePicker _picker = ImagePicker();
@@ -47,6 +50,7 @@ class _NotesTypeState extends State<NotesType> {
   late List<dynamic> noteString;
   late int color;
   bool _isSaving = false;
+  String _clientSubmissionId = _newClientSubmissionId();
   bool _isPickingFromGallery = false;
   late SnackBar alertContent;
 
@@ -364,11 +368,13 @@ class _NotesTypeState extends State<NotesType> {
                                       // complete-dialog flow (meditation_screen.dart _shareWithMemories):
                                       // the pop's transition and the next push's transition can overlap and
                                       // paint a black frame before either settles. Same fix here.
-                                      await Future<void>.delayed(const Duration(milliseconds: 180));
+                                      await Future<void>.delayed(
+                                          const Duration(milliseconds: 180));
                                       if (!mounted || !context.mounted) return;
 
                                       if (widget.openCommunityAfterPost) {
-                                        Navigator.pushReplacementNamed(context, '/communityScreen');
+                                        Navigator.pushReplacementNamed(
+                                            context, '/communityScreen');
                                       } else {
                                         Navigator.pop(context);
                                       }
@@ -443,14 +449,12 @@ class _NotesTypeState extends State<NotesType> {
                         height: 1.25,
                       ),
                       controller: titleController,
-                      // A title is a single line by definition (and the
-                      // 50-char cap makes wrapping to a 2nd/3rd line all
-                      // but impossible on a real device width) -- maxLines:
+                      // A title is a single line by definition. maxLines:
                       // 1 pins the field's height to exactly one line plus
                       // contentPadding, with no ambiguity left for a
                       // "reserved extra lines" gap to reappear in.
                       maxLines: 1,
-                      maxLength: 50,
+                      maxLength: _communityTitleMaxLength,
                       textAlignVertical: TextAlignVertical.center,
                       keyboardType: TextInputType.text,
                       textInputAction: TextInputAction.done,
@@ -551,9 +555,10 @@ class _NotesTypeState extends State<NotesType> {
     final userId = AuthService.instance.currentSession?.id.toString();
     if (userId == null) return;
     final sessionUser = AuthService.instance.currentSession;
-    final displayName = (await UserService.getUserData())['username']?.toString() ??
-        sessionUser?.name ??
-        'Unknown';
+    final displayName =
+        (await UserService.getUserData())['username']?.toString() ??
+            sessionUser?.name ??
+            'Unknown';
     final membershipData = await CompanyMembershipService.loadForUser(userId);
     await DailyTrackerApiService.instance.recordCompletedActivities(
       date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
@@ -570,19 +575,33 @@ class _NotesTypeState extends State<NotesType> {
 
   Future<bool> saveNotes({required bool isSaved}) async {
     if (_isSaving) return false;
-    _isSaving = true;
+    setState(() {
+      _isSaving = true;
+    });
 
     // Get the current user's ID
     final session = AuthService.instance.currentSession;
     final userId = session?.id.toString();
     if (userId == null || session == null) {
       print("Error: User not logged in.");
-      _isSaving = false;
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      } else {
+        _isSaving = false;
+      }
       return false;
     }
     final category = selectedCategory?.trim();
     if (category == null || category.isEmpty) {
-      _isSaving = false;
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      } else {
+        _isSaving = false;
+      }
       return false;
     }
 
@@ -637,11 +656,18 @@ class _NotesTypeState extends State<NotesType> {
         note: contentList,
         color: color,
         saved: isSaved,
+        clientSubmissionId: _clientSubmissionId,
         mentions: mentions,
       );
     } catch (e) {
       print("Error saving note: $e");
-      _isSaving = false;
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      } else {
+        _isSaving = false;
+      }
       return false;
     }
 
@@ -668,8 +694,20 @@ class _NotesTypeState extends State<NotesType> {
         Colors.white,
       );
     }
-    _isSaving = false;
+    _clientSubmissionId = _newClientSubmissionId();
+    if (mounted) {
+      setState(() {
+        _isSaving = false;
+      });
+    } else {
+      _isSaving = false;
+    }
     return true;
+  }
+
+  static String _newClientSubmissionId() {
+    final randomPart = Random().nextInt(1 << 32).toRadixString(16);
+    return 'community_${DateTime.now().microsecondsSinceEpoch}_$randomPart';
   }
 
   Future<void> _addPickedImage(XFile image) async {
@@ -794,50 +832,52 @@ class _NotesTypeState extends State<NotesType> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: isUploading
-                              ? Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Image.file(
-                                      File(previewPath),
-                                      width: imageWidth,
-                                      height: imageHeight,
-                                      fit: BoxFit.cover,
-                                      frameBuilder:
-                                          (context, child, frame, wasLoaded) {
-                                        if (wasLoaded || frame != null) {
-                                          return child;
-                                        }
-                                        return Container(
-                                          width: imageWidth,
-                                          height: imageHeight,
-                                          color: Colors.grey[300],
-                                          child: const Center(
-                                            child: CircularProgressIndicator(),
-                                          ),
-                                        );
-                                      },
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                        return Container(
-                                          width: imageWidth,
-                                          height: imageHeight,
+                                ? Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.file(
+                                        File(previewPath),
+                                        width: imageWidth,
+                                        height: imageHeight,
+                                        fit: BoxFit.cover,
+                                        frameBuilder:
+                                            (context, child, frame, wasLoaded) {
+                                          if (wasLoaded || frame != null) {
+                                            return child;
+                                          }
+                                          return Container(
+                                            width: imageWidth,
+                                            height: imageHeight,
+                                            color: Colors.grey[300],
+                                            child: const Center(
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            ),
+                                          );
+                                        },
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                          return Container(
+                                            width: imageWidth,
+                                            height: imageHeight,
                                             color: Colors.grey[300],
                                             child: const Center(
                                               child: Icon(
-                                                Icons.image_not_supported_rounded,
+                                                Icons
+                                                    .image_not_supported_rounded,
                                                 color: Colors.black54,
                                               ),
                                             ),
-                                        );
-                                      },
-                                    ),
-                                    const Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                    Positioned(
-                                      left: 12,
-                                      bottom: 12,
-                                      child: Container(
+                                          );
+                                        },
+                                      ),
+                                      const Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                      Positioned(
+                                        left: 12,
+                                        bottom: 12,
+                                        child: Container(
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 10,
                                             vertical: 6,
@@ -862,7 +902,8 @@ class _NotesTypeState extends State<NotesType> {
                                     ],
                                   )
                                 : Image.network(
-                                    ImageStorageService.normalizeCommunityMediaUrl(
+                                    ImageStorageService
+                                        .normalizeCommunityMediaUrl(
                                       currentImage,
                                     ),
                                     width: imageWidth,

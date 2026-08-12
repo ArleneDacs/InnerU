@@ -131,6 +131,7 @@ class CommunityApiService {
     required List<Map<String, String>> note,
     required int color,
     bool saved = false,
+    String? clientSubmissionId,
     List<Map<String, String>> mentions = const [],
   }) async {
     final response = await _api.postJson(
@@ -141,6 +142,8 @@ class CommunityApiService {
         'note': note,
         'color': color,
         'saved': saved,
+        if (clientSubmissionId != null && clientSubmissionId.trim().isNotEmpty)
+          'clientSubmissionId': clientSubmissionId.trim(),
         if (mentions.isNotEmpty) 'mentions': mentions,
       },
       token: _token,

@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\ExerciseLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -82,6 +84,195 @@ class ExerciseTest extends TestCase
             'duration_minutes' => 30,
             'duration_seconds' => 1_800,
         ]);
+    }
+
+    #[DataProvider('timestampedDurationProvider')]
+    public function test_timestamped_session_derives_the_canonical_duration(
+        int $durationMinutes,
+        int $durationSeconds,
+    ): void {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $startedAt = Carbon::parse('2026-08-10T08:00:00+08:00');
+        $endedAt = $startedAt->copy()->addSeconds($durationSeconds);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Run',
+            'duration_minutes' => $durationMinutes,
+            'duration_seconds' => $durationSeconds,
+            'intensity' => 2,
+            'client_session_id' => "timestamped-{$durationMinutes}-minutes",
+            'started_at' => $startedAt->toIso8601String(),
+            'ended_at' => $endedAt->toIso8601String(),
+            'date' => $endedAt->toDateString(),
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('log.durationMinutes', $durationMinutes)
+            ->assertJsonPath('log.durationSeconds', $durationSeconds)
+            ->assertJsonPath('log.clientSessionId', "timestamped-{$durationMinutes}-minutes")
+            ->assertJsonPath('alreadySynced', false);
+
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'client_session_id' => "timestamped-{$durationMinutes}-minutes",
+            'duration_minutes' => $durationMinutes,
+            'duration_seconds' => $durationSeconds,
+        ]);
+    }
+
+    /**
+     * @return array<string, array{int, int}>
+     */
+    public static function timestampedDurationProvider(): array
+    {
+        return [
+            '30 minutes' => [30, 30 * 60],
+            '1 hour' => [60, 60 * 60],
+            '2 hours' => [120, 2 * 60 * 60],
+        ];
+    }
+
+    public function test_client_session_replay_reuses_its_log_without_reapplying_activity_side_effects(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $payload = [
+            'type' => 'Run',
+            'duration_minutes' => 60,
+            'duration_seconds' => 3600,
+            'intensity' => 2,
+            'client_session_id' => 'offline-session-001',
+            'started_at' => '2026-08-10T08:00:00+08:00',
+            'ended_at' => '2026-08-10T09:00:00+08:00',
+            'date' => '2026-08-10',
+            'start_photo_url' => 'https://media.example.test/offline-session-001/start.jpg',
+        ];
+
+        $created = $this->postJson('/api/exercise', $payload);
+        $created->assertCreated()
+            ->assertJsonPath('alreadySynced', false);
+        $logId = $created->json('log.id');
+
+        // Proves the replay returns before syncDailyTracker/syncUserPoints:
+        // if either ran again these rows would be recreated below.
+        DB::table('daily_trackers')
+            ->where('user_id', $user->id)
+            ->whereDate('date', '2026-08-10')
+            ->delete();
+        DB::table('user_points')
+            ->where('user_id', $user->id)
+            ->whereDate('date', '2026-08-10')
+            ->delete();
+
+        $replay = $this->postJson('/api/exercise', [
+            ...$payload,
+            'end_photo_url' => 'https://media.example.test/offline-session-001/end.jpg',
+        ]);
+
+        $replay->assertOk()
+            ->assertJsonPath('alreadySynced', true)
+            ->assertJsonPath('log.id', $logId)
+            ->assertJsonPath('log.startPhotoUrl', $payload['start_photo_url'])
+            ->assertJsonPath('log.endPhotoUrl', 'https://media.example.test/offline-session-001/end.jpg');
+
+        $this->assertDatabaseCount('exercise_logs', 1);
+        $this->assertDatabaseHas('exercise_logs', [
+            'id' => $logId,
+            'user_id' => $user->id,
+            'client_session_id' => 'offline-session-001',
+            'start_photo_url' => $payload['start_photo_url'],
+            'end_photo_url' => 'https://media.example.test/offline-session-001/end.jpg',
+        ]);
+        $this->assertDatabaseMissing('daily_trackers', [
+            'user_id' => $user->id,
+            'date' => '2026-08-10',
+        ]);
+        $this->assertDatabaseMissing('user_points', [
+            'user_id' => $user->id,
+            'date' => '2026-08-10',
+        ]);
+    }
+
+    public function test_client_session_id_is_unique_per_user_not_globally(): void
+    {
+        $firstUser = User::factory()->create();
+        $secondUser = User::factory()->create();
+        $payload = [
+            'type' => 'Walk',
+            'duration_seconds' => 1800,
+            'intensity' => 1,
+            'client_session_id' => 'shared-device-session-id',
+            'date' => '2026-08-10',
+        ];
+
+        Sanctum::actingAs($firstUser);
+        $this->postJson('/api/exercise', $payload)->assertCreated();
+
+        Sanctum::actingAs($secondUser);
+        $this->postJson('/api/exercise', $payload)->assertCreated();
+
+        $this->assertDatabaseCount('exercise_logs', 2);
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $firstUser->id,
+            'client_session_id' => 'shared-device-session-id',
+        ]);
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $secondUser->id,
+            'client_session_id' => 'shared-device-session-id',
+        ]);
+    }
+
+    public function test_timestamped_session_rejects_mismatched_duration_or_unrelated_date(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $mismatchedDuration = $this->postJson('/api/exercise', [
+            'type' => 'Walk',
+            'duration_seconds' => 7200,
+            'intensity' => 1,
+            'started_at' => '2026-08-10T08:00:00+08:00',
+            'ended_at' => '2026-08-10T08:30:00+08:00',
+            'date' => '2026-08-10',
+        ]);
+
+        $mismatchedDuration->assertUnprocessable()
+            ->assertJsonValidationErrors(['duration_seconds']);
+
+        $unrelatedDate = $this->postJson('/api/exercise', [
+            'type' => 'Walk',
+            'duration_seconds' => 1800,
+            'intensity' => 1,
+            'started_at' => '2026-08-10T08:00:00+08:00',
+            'ended_at' => '2026-08-10T08:30:00+08:00',
+            'date' => '2026-08-12',
+        ]);
+
+        $unrelatedDate->assertUnprocessable()
+            ->assertJsonValidationErrors(['date']);
+        $this->assertDatabaseCount('exercise_logs', 0);
+    }
+
+    public function test_timestamped_session_rejects_an_elapsed_period_over_twenty_four_hours(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/exercise', [
+            'type' => 'Walk',
+            'intensity' => 1,
+            'client_session_id' => 'stale-timestamped-session',
+            'started_at' => '2026-08-09T08:00:00+08:00',
+            'ended_at' => '2026-08-10T09:00:01+08:00',
+            'date' => '2026-08-10',
+        ]);
+
+        $response->assertUnprocessable()
+            ->assertJsonValidationErrors(['ended_at']);
+        $this->assertDatabaseCount('exercise_logs', 0);
     }
 
     public function test_seconds_win_when_a_legacy_minutes_value_disagrees(): void

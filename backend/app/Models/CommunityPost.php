@@ -9,6 +9,7 @@ class CommunityPost extends Model
 {
     protected $fillable = [
         'firestore_id',
+        'client_submission_id',
         'user_id',
         'username',
         'title',

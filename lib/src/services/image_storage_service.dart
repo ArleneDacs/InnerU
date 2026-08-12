@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:selfcare_projects/src/services/api_config.dart';
+import 'package:selfcare_projects/src/services/api_client.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 
 class ImageStorageService {
@@ -44,6 +45,41 @@ class ImageStorageService {
       fileName: fileName,
       kind: 'step_proof',
     );
+  }
+
+  /// Uploads a photo only after the Exercise queue has safely persisted its
+  /// original bytes. The deterministic file name is supplied by the queue so
+  /// a timeout/retry cannot create an unbounded set of duplicate uploads.
+  static Future<String?> uploadExerciseImageBytes(
+    Uint8List bytes, {
+    required String fileName,
+  }) async {
+    lastError = null;
+    final session = AuthService.instance.currentSession;
+    if (session == null || session.token.isEmpty) {
+      lastError = 'Media upload requires a signed-in session.';
+      return null;
+    }
+
+    try {
+      final response = await ApiClient.instance.postMultipart(
+        '/api/media/upload',
+        token: session.token,
+        fields: const <String, String>{'kind': 'exercise'},
+        files: <http.MultipartFile>[
+          http.MultipartFile.fromBytes('file', bytes, filename: fileName),
+        ],
+      );
+      final url = response['url']?.toString().trim() ?? '';
+      if (url.isEmpty) {
+        lastError = 'Media upload did not return a photo URL.';
+        return null;
+      }
+      return url;
+    } catch (error) {
+      lastError = error.toString();
+      return null;
+    }
   }
 
   static Future<String?> uploadGroupPhotoBytes(

@@ -5,6 +5,7 @@ import 'package:selfcare_projects/src/services/audio_helper.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
 import 'package:selfcare_projects/src/services/pending_step_sync_service.dart';
 import 'package:selfcare_projects/src/services/pending_recorded_walk_sync_service.dart';
+import 'package:selfcare_projects/src/services/pending_exercise_sync_service.dart';
 import 'package:selfcare_projects/src/services/spotify_native_service.dart';
 import 'package:selfcare_projects/src/services/auth_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -61,6 +62,7 @@ class SessionCleanupService {
       await prefs.remove(appleHealthLastReadableStepsKey(userId));
       await PendingStepSyncService.instance.clearForUser(userId);
       await PendingRecordedWalkSyncService.instance.clearForUser(userId);
+      await PendingExerciseSyncService.instance.clearForUser(userId);
     }
 
     await AudioHelper.stopAudio();

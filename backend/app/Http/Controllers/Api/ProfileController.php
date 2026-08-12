@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class ProfileController extends Controller
@@ -123,14 +124,28 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'max:20480'],
-            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'community', 'video', 'step_proof', 'group_photo'])],
+            'kind' => ['nullable', 'string', Rule::in(['avatar', 'image', 'community', 'video', 'step_proof', 'group_photo', 'exercise'])],
+            // Optional because current clients carry the key in the exercise
+            // filename. New clients may send it explicitly without changing
+            // the deterministic storage contract.
+            'upload_key' => ['nullable', 'string', 'max:160'],
         ]);
 
         $file = $validated['file'];
         $kind = $validated['kind'] ?? 'image';
         $disk = $this->resolveUploadDisk($kind);
+        $exerciseUpload = $kind === 'exercise'
+            ? $this->exerciseUploadTarget($file, $user->id, $validated['upload_key'] ?? null)
+            : null;
 
-        [$path, $disk] = $this->storeUploadedMedia($file, $user->id, $kind, $disk);
+        [$path, $disk] = $this->storeUploadedMedia(
+            $file,
+            $user->id,
+            $kind,
+            $disk,
+            $exerciseUpload['fileName'] ?? null,
+            $exerciseUpload['directory'] ?? null,
+        );
 
         if ($path === null) {
             return response()->json([
@@ -142,12 +157,20 @@ class ProfileController extends Controller
 
         // Uploading media is storage-only. A profile picture changes only
         // through the explicit profile update endpoint.
-        return response()->json([
+        $payload = [
             'url' => $url,
             'profile_pic' => $url,
             'path' => $path,
             'user' => $this->userPayload($user->refresh()),
-        ]);
+        ];
+
+        if ($exerciseUpload !== null) {
+            $payload['uploadKey'] = $exerciseUpload['uploadKey'];
+            $payload['clientSessionId'] = $exerciseUpload['clientSessionId'];
+            $payload['slot'] = $exerciseUpload['slot'];
+        }
+
+        return response()->json($payload);
     }
 
     private function userPayload(User $user): array
@@ -207,19 +230,22 @@ class ProfileController extends Controller
         UploadedFile $file,
         int $userId,
         string $kind,
-        string $preferredDisk
+        string $preferredDisk,
+        ?string $deterministicFileName = null,
+        ?string $deterministicDirectory = null,
     ): array {
         $extension = $file->getClientOriginalExtension()
             ?: $file->extension()
             ?: 'jpg';
 
-        $fileName = $kind.'_'.now()->format('YmdHis').'.'.$extension;
-        $directory = match ($kind) {
+        $fileName = $deterministicFileName ?? $kind.'_'.now()->format('YmdHis').'.'.$extension;
+        $directory = $deterministicDirectory ?? match ($kind) {
             'avatar' => "users/{$userId}/avatars",
             'community' => "users/{$userId}/community-images",
             'video' => "users/{$userId}/videos",
             'step_proof' => "users/{$userId}/step-proofs",
             'group_photo' => "users/{$userId}/group-photos",
+            'exercise' => "users/{$userId}/exercise-sessions",
             default => "users/{$userId}/images",
         };
         $prefix = trim((string) config('filesystems.media_upload_path', ''), '/');
@@ -233,6 +259,15 @@ class ProfileController extends Controller
 
         foreach ($disks as $disk) {
             try {
+                $path = "{$directory}/{$fileName}";
+
+                // Reusing a deterministic exercise target avoids creating a
+                // second media object when an offline queue retries the same
+                // start/end upload after an uncertain network response.
+                if ($deterministicFileName !== null && Storage::disk($disk)->exists($path)) {
+                    return [$path, $disk];
+                }
+
                 $path = $file->storePubliclyAs($directory, $fileName, $disk);
 
                 if (is_string($path) && $path !== '') {
@@ -244,6 +279,47 @@ class ProfileController extends Controller
         }
 
         return [null, $preferredDisk];
+    }
+
+    /**
+     * Resolve an authenticated exercise image to a stable, user-scoped path.
+     * Existing Flutter builds already name files
+     * "exercise_<client-session-id>_<start|end>.jpg". An explicit upload_key
+     * is accepted as the same key for future callers, but never required.
+     *
+     * @return array{clientSessionId: string, slot: string, uploadKey: string, fileName: string, directory: string}
+     */
+    private function exerciseUploadTarget(UploadedFile $file, int $userId, ?string $uploadKey): array
+    {
+        $key = is_string($uploadKey) && trim($uploadKey) !== ''
+            ? trim($uploadKey)
+            : pathinfo(basename($file->getClientOriginalName()), PATHINFO_FILENAME);
+
+        if (! preg_match('/\Aexercise_([A-Za-z0-9][A-Za-z0-9_-]{0,119})_(start|end)\z/iD', $key, $matches)) {
+            throw ValidationException::withMessages([
+                'file' => [
+                    'Exercise uploads must use exercise_<client-session-id>_<start|end> as their filename or upload_key.',
+                ],
+            ]);
+        }
+
+        $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'jpg');
+        if (! preg_match('/\A[a-z0-9]{1,10}\z/D', $extension)) {
+            throw ValidationException::withMessages([
+                'file' => ['The exercise upload file extension is invalid.'],
+            ]);
+        }
+
+        $clientSessionId = $matches[1];
+        $slot = strtolower($matches[2]);
+
+        return [
+            'clientSessionId' => $clientSessionId,
+            'slot' => $slot,
+            'uploadKey' => "exercise_{$clientSessionId}_{$slot}",
+            'fileName' => "{$slot}.{$extension}",
+            'directory' => "users/{$userId}/exercise-sessions/{$clientSessionId}",
+        ];
     }
 
     private function resolveUploadDisk(string $kind): string

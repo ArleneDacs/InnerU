@@ -76,19 +76,54 @@ class CommunityMentionTest extends TestCase
             ->assertJsonPath('posts.0.mentions.0.userId', (string) $mentioned->id);
     }
 
-    public function test_post_titles_cannot_exceed_fifty_characters(): void
+    public function test_post_titles_allow_one_hundred_characters_but_no_more(): void
     {
         $author = User::factory()->create(['company_code' => 'ACME']);
 
         Sanctum::actingAs($author);
+        $this->postJson('/api/community/posts', [
+            'title' => str_repeat('x', 100),
+            'category' => 'General',
+            'note' => [['type' => 'text', 'value' => 'A post body']],
+            'color' => 0xFFFFFFFF,
+        ])->assertCreated()->assertJsonPath('post.title', str_repeat('x', 100));
+
         $response = $this->postJson('/api/community/posts', [
-            'title' => str_repeat('x', 51),
+            'title' => str_repeat('x', 101),
             'category' => 'General',
             'note' => [['type' => 'text', 'value' => 'A post body']],
             'color' => 0xFFFFFFFF,
         ]);
 
         $response->assertUnprocessable()->assertJsonValidationErrors('title');
+    }
+
+    public function test_repeating_a_post_submission_id_returns_the_existing_post_once(): void
+    {
+        $author = User::factory()->create(['company_code' => 'ACME']);
+        $mentioned = User::factory()->create(['company_code' => 'ACME']);
+        $submissionId = 'community-test-123';
+
+        Sanctum::actingAs($author);
+        $payload = [
+            'title' => 'Slow connection post',
+            'category' => 'General',
+            'note' => [['type' => 'text', 'value' => 'A post body']],
+            'color' => 0xFFFFFFFF,
+            'clientSubmissionId' => $submissionId,
+            'mentions' => [['userId' => (string) $mentioned->id, 'name' => $mentioned->name]],
+        ];
+
+        $first = $this->postJson('/api/community/posts', $payload);
+        $second = $this->postJson('/api/community/posts', $payload);
+
+        $first->assertCreated()->assertJsonPath('alreadySubmitted', null);
+        $second->assertOk()
+            ->assertJsonPath('alreadySubmitted', true)
+            ->assertJsonPath('post.id', $first->json('post.id'));
+
+        $this->assertSame(1, CommunityPost::query()->where('client_submission_id', $submissionId)->count());
+        $this->assertDatabaseCount('notifications', 1);
     }
 
     public function test_mentioning_a_user_outside_the_company_is_rejected(): void

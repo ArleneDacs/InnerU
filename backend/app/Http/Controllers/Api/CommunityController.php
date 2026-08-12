@@ -9,6 +9,7 @@ use App\Models\Notification;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -89,7 +90,7 @@ class CommunityController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        if (!$this->canViewPost($post, $user)) {
+        if (! $this->canViewPost($post, $user)) {
             // Returning Not Found avoids turning this endpoint into a way to
             // enumerate posts that belong to another company.
             return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
@@ -113,7 +114,7 @@ class CommunityController extends Controller
             return response()->json(['message' => 'Unauthorized.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        if (!$this->canViewPost($post, $user)) {
+        if (! $this->canViewPost($post, $user)) {
             return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
         }
 
@@ -172,7 +173,7 @@ class CommunityController extends Controller
                 }
             })
             ->where('id', '!=', $user->id)
-            ->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%'])
+            ->whereRaw('LOWER(name) LIKE ?', ['%'.strtolower($query).'%'])
             ->orderBy('name')
             ->limit(10)
             ->get(['id', 'name', 'profile_pic']);
@@ -192,31 +193,68 @@ class CommunityController extends Controller
         }
 
         $validated = $request->validate([
-            'title' => ['required', 'string', 'max:50'],
+            'title' => ['required', 'string', 'max:100'],
             'category' => ['required', 'string', 'max:80'],
             'note' => ['required', 'array'],
             'color' => ['nullable', 'integer'],
             'saved' => ['nullable', 'boolean'],
+            'clientSubmissionId' => ['sometimes', 'nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_.:-]+$/'],
             'mentions' => ['sometimes', 'nullable', 'array'],
             'mentions.*.userId' => ['required_with:mentions', 'string'],
             'mentions.*.name' => ['required_with:mentions', 'string'],
         ]);
 
+        $clientSubmissionId = trim((string) ($validated['clientSubmissionId'] ?? ''));
+        if ($clientSubmissionId !== '') {
+            $existingPost = CommunityPost::query()
+                ->where('user_id', $user->id)
+                ->where('client_submission_id', $clientSubmissionId)
+                ->first();
+
+            if ($existingPost !== null) {
+                return response()->json([
+                    'post' => $this->mapPost($existingPost, (int) $user->id),
+                    'alreadySubmitted' => true,
+                ]);
+            }
+        }
+
         $mentions = $this->validateAndFilterMentions($validated['mentions'] ?? null, $user);
 
-        $post = CommunityPost::create([
-            'user_id' => $user->id,
-            'username' => $user->name,
-            'title' => $validated['title'],
-            'note' => $validated['note'],
-            'mentions' => $mentions,
-            'color' => $validated['color'] ?? 0xFFFFFFFF,
-            'category' => $validated['category'],
-            'saved' => (bool) ($validated['saved'] ?? false),
-            'company_id' => $user->company_code,
-            'company_code' => $user->company_code,
-            'company_name' => $user->company_name,
-        ]);
+        try {
+            $post = CommunityPost::create([
+                'client_submission_id' => $clientSubmissionId === '' ? null : $clientSubmissionId,
+                'user_id' => $user->id,
+                'username' => $user->name,
+                'title' => $validated['title'],
+                'note' => $validated['note'],
+                'mentions' => $mentions,
+                'color' => $validated['color'] ?? 0xFFFFFFFF,
+                'category' => $validated['category'],
+                'saved' => (bool) ($validated['saved'] ?? false),
+                'company_id' => $user->company_code,
+                'company_code' => $user->company_code,
+                'company_name' => $user->company_name,
+            ]);
+        } catch (QueryException $exception) {
+            if ($clientSubmissionId === '' || ! $this->isUniqueConstraintViolation($exception)) {
+                throw $exception;
+            }
+
+            $post = CommunityPost::query()
+                ->where('user_id', $user->id)
+                ->where('client_submission_id', $clientSubmissionId)
+                ->first();
+
+            if ($post === null) {
+                throw $exception;
+            }
+
+            return response()->json([
+                'post' => $this->mapPost($post, (int) $user->id),
+                'alreadySubmitted' => true,
+            ]);
+        }
 
         foreach ($mentions as $mention) {
             if ((string) $mention['userId'] === (string) $user->id) {
@@ -244,7 +282,7 @@ class CommunityController extends Controller
         }
 
         $validated = $request->validate([
-            'title' => ['sometimes', 'required', 'string', 'max:50'],
+            'title' => ['sometimes', 'required', 'string', 'max:100'],
             'category' => ['sometimes', 'required', 'string', 'max:80'],
             'note' => ['sometimes', 'required', 'array'],
             'color' => ['sometimes', 'integer'],
@@ -291,6 +329,7 @@ class CommunityController extends Controller
         }
 
         $post->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 
@@ -350,6 +389,15 @@ class CommunityController extends Controller
             || ($companyName !== '' && (string) $post->company_name === $companyName);
     }
 
+    private function isUniqueConstraintViolation(QueryException $exception): bool
+    {
+        $sqlState = (string) ($exception->errorInfo[0] ?? '');
+        $driverCode = (string) ($exception->errorInfo[1] ?? '');
+
+        return in_array($sqlState, ['23000', '23505'], true)
+            || in_array($driverCode, ['1062', '1555', '2067'], true);
+    }
+
     /**
      * Validate that every mentioned userId is a real user in the same
      * company as the author, then return the (unchanged) mentions array.
@@ -369,7 +417,7 @@ class CommunityController extends Controller
         $companyCode = trim((string) ($author->active_company_code ?? $author->company_code ?? ''));
         $companyName = trim((string) ($author->active_company_name ?? $author->company_name ?? ''));
 
-        $validIds = \App\Models\User::query()
+        $validIds = User::query()
             ->whereIn('id', collect($mentions)->pluck('userId'))
             ->where(function ($q) use ($companyCode, $companyName) {
                 if ($companyCode !== '') {

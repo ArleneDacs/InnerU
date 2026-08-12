@@ -48,6 +48,8 @@ import 'package:selfcare_projects/src/services/email_link_auth_service.dart';
 import 'package:selfcare_projects/src/services/company_theme_service.dart';
 import 'package:selfcare_projects/src/services/app_route_observer.dart';
 import 'package:selfcare_projects/src/services/notifications/fasting_notification_service.dart';
+import 'package:selfcare_projects/src/services/pending_exercise_sync_service.dart';
+import 'package:selfcare_projects/src/services/pending_sync_retry_coordinator.dart';
 import 'package:selfcare_projects/src/services/session_cleanup_service.dart';
 import 'package:selfcare_projects/src/services/step_background_service.dart';
 import 'package:selfcare_projects/src/services/watch_steps_receiver.dart';
@@ -100,6 +102,18 @@ void main() {
 Future<void> _initializeBackgroundServices() async {
   try {
     await AuthService.instance.initialize();
+  } catch (error, stack) {
+    await _recordError(error, stack);
+  }
+  try {
+    // Persisted feature queues register their own flushers. Starting the
+    // coordinator after secure-session restoration gives a restored member
+    // an immediate best-effort retry without delaying the first frame, while
+    // keeping it entirely idle for signed-out users.
+    PendingSyncRetryCoordinator.instance.registerExerciseSync(
+      (userId) => PendingExerciseSyncService.instance.flush(userId: userId),
+    );
+    PendingSyncRetryCoordinator.instance.start();
   } catch (error, stack) {
     await _recordError(error, stack);
   }

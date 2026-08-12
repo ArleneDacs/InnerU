@@ -21,6 +21,8 @@ class FastingNotificationService {
   static const int meditationCompleteNotificationId = 5001;
   static const int dailyMeditationReminderNotificationId = 5002;
   static const int dailySleepBedtimeReminderNotificationId = 7001;
+  static const int defaultDailyMeditationReminderHour = 8;
+  static const int defaultDailyMeditationReminderMinute = 0;
   static const int sleepWakeNotificationId = 7002;
   static const int sleepOngoingNotificationId = 7003;
   static const int sleepAlarmBurstBaseId = 7100;
@@ -455,25 +457,19 @@ class FastingNotificationService {
   }
 
   Future<void> scheduleDailyMeditationReminder({
-    int hour = 20,
-    int minute = 0,
+    int hour = defaultDailyMeditationReminderHour,
+    int minute = defaultDailyMeditationReminderMinute,
   }) async {
     await initialize();
 
     final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
+    final scheduledDate = nextDailyMeditationReminderDate(
+      now: now,
+      hour: hour,
+      minute: minute,
     );
 
-    if (!scheduledDate.isAfter(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
-    }
-
+    await _notifications.cancel(id: dailyMeditationReminderNotificationId);
     await _notifications.zonedSchedule(
       id: dailyMeditationReminderNotificationId,
       title: 'Time to meditate',
@@ -493,6 +489,30 @@ class FastingNotificationService {
       matchDateTimeComponents: DateTimeComponents.time,
       payload: 'daily_meditation_reminder',
     );
+  }
+
+  @visibleForTesting
+  static tz.TZDateTime nextDailyMeditationReminderDate({
+    required tz.TZDateTime now,
+    int hour = defaultDailyMeditationReminderHour,
+    int minute = defaultDailyMeditationReminderMinute,
+  }) {
+    final safeHour = hour.clamp(0, 23).toInt();
+    final safeMinute = minute.clamp(0, 59).toInt();
+    var scheduledDate = tz.TZDateTime(
+      now.location,
+      now.year,
+      now.month,
+      now.day,
+      safeHour,
+      safeMinute,
+    );
+
+    if (!scheduledDate.isAfter(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+
+    return scheduledDate;
   }
 
   Future<void> scheduleTodoDueNotification({

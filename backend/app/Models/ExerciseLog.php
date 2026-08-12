@@ -15,6 +15,7 @@ class ExerciseLog extends Model
     protected $fillable = [
         'id',
         'user_id',
+        'client_session_id',
         'username',
         'type',
         'duration_minutes',
@@ -24,6 +25,8 @@ class ExerciseLog extends Model
         'start_photo_url',
         'end_photo_url',
         'date',
+        'started_at',
+        'ended_at',
     ];
 
     protected function casts(): array
@@ -33,6 +36,8 @@ class ExerciseLog extends Model
             'intensity' => 'integer',
             'duration_minutes' => 'integer',
             'duration_seconds' => 'integer',
+            'started_at' => 'datetime',
+            'ended_at' => 'datetime',
         ];
     }
 }
