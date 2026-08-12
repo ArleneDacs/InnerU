@@ -9,6 +9,7 @@ use App\Models\DailyTracker;
 use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -366,34 +367,40 @@ class AccountabilityMeetingTest extends TestCase
 
     public function test_sweep_sends_day_of_reminders_and_is_idempotent(): void
     {
-        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
-        $mentee = User::factory()->create();
-        $group = $this->makeGroup($coach);
-        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $mentee->id, 'group_id' => $group->id]);
+        Carbon::setTestNow(Carbon::parse('2026-08-12 10:00:00'));
 
-        $meeting = AccountabilityMeeting::create([
-            'id' => (string) Str::uuid(),
-            'coach_id' => (string) $coach->id,
-            'group_id' => $group->id,
-            'title' => 'Today Meeting',
-            'zoom_link' => 'https://zoom.us/j/456',
-            'scheduled_at' => now()->addHours(2),
-        ]);
+        try {
+            $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+            $mentee = User::factory()->create();
+            $group = $this->makeGroup($coach);
+            CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $mentee->id, 'group_id' => $group->id]);
 
-        $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
+            $meeting = AccountabilityMeeting::create([
+                'id' => (string) Str::uuid(),
+                'coach_id' => (string) $coach->id,
+                'group_id' => $group->id,
+                'title' => 'Today Meeting',
+                'zoom_link' => 'https://zoom.us/j/456',
+                'scheduled_at' => now()->addHours(2),
+            ]);
 
-        $this->assertSame(
-            1,
-            Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
-        );
-        $this->assertNotNull($meeting->fresh()->day_of_notified_at);
+            $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
 
-        $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
+            $this->assertSame(
+                1,
+                Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
+            );
+            $this->assertNotNull($meeting->fresh()->day_of_notified_at);
 
-        $this->assertSame(
-            1,
-            Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
-        );
+            $this->artisan('meetings:sweep-reminders')->assertExitCode(0);
+
+            $this->assertSame(
+                1,
+                Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_a_meeting_far_in_the_future_gets_no_reminder_yet(): void
@@ -422,29 +429,35 @@ class AccountabilityMeetingTest extends TestCase
 
     public function test_index_opportunistically_triggers_the_sweep(): void
     {
-        $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
-        $mentee = User::factory()->create();
-        $group = $this->makeGroup($coach);
-        CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $mentee->id, 'group_id' => $group->id]);
+        Carbon::setTestNow(Carbon::parse('2026-08-12 10:00:00'));
 
-        $meeting = AccountabilityMeeting::create([
-            'id' => (string) Str::uuid(),
-            'coach_id' => (string) $coach->id,
-            'group_id' => $group->id,
-            'title' => 'Today Meeting',
-            'zoom_link' => 'https://zoom.us/j/456',
-            'scheduled_at' => now()->addHours(1),
-        ]);
+        try {
+            $coach = User::factory()->create(['is_coach' => true, 'role' => 'coach']);
+            $mentee = User::factory()->create();
+            $group = $this->makeGroup($coach);
+            CoachMentee::create(['coach_id' => (string) $coach->id, 'mentee_id' => (string) $mentee->id, 'group_id' => $group->id]);
 
-        Sanctum::actingAs($coach);
-        $response = $this->getJson('/api/coach/accountability-meetings');
+            $meeting = AccountabilityMeeting::create([
+                'id' => (string) Str::uuid(),
+                'coach_id' => (string) $coach->id,
+                'group_id' => $group->id,
+                'title' => 'Today Meeting',
+                'zoom_link' => 'https://zoom.us/j/456',
+                'scheduled_at' => now()->addHours(1),
+            ]);
 
-        $response->assertOk()->assertJsonPath('meetings.0.title', 'Today Meeting');
-        $this->assertNotNull($meeting->fresh()->day_of_notified_at);
-        $this->assertSame(
-            1,
-            Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
-        );
+            Sanctum::actingAs($coach);
+            $response = $this->getJson('/api/coach/accountability-meetings');
+
+            $response->assertOk()->assertJsonPath('meetings.0.title', 'Today Meeting');
+            $this->assertNotNull($meeting->fresh()->day_of_notified_at);
+            $this->assertSame(
+                1,
+                Notification::query()->where('user_id', (string) $mentee->id)->where('type', 'meeting_reminder_day_of')->count(),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_mine_only_returns_meetings_for_groups_the_mentee_belongs_to(): void
