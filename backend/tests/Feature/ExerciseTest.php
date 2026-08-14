@@ -256,7 +256,7 @@ class ExerciseTest extends TestCase
         $this->assertDatabaseCount('exercise_logs', 0);
     }
 
-    public function test_timestamped_session_rejects_an_elapsed_period_over_twenty_four_hours(): void
+    public function test_timestamped_session_over_twenty_four_hours_is_capped_to_a_valid_recovery_window(): void
     {
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -270,9 +270,22 @@ class ExerciseTest extends TestCase
             'date' => '2026-08-10',
         ]);
 
-        $response->assertUnprocessable()
-            ->assertJsonValidationErrors(['ended_at']);
-        $this->assertDatabaseCount('exercise_logs', 0);
+        $response->assertCreated()
+            ->assertJsonPath('log.clientSessionId', 'stale-timestamped-session')
+            ->assertJsonPath('log.durationSeconds', 86_400)
+            ->assertJsonPath('log.durationMinutes', 1_440)
+            ->assertJsonPath('log.startedAt', '2026-08-09T09:00:01+08:00')
+            ->assertJsonPath('log.endedAt', '2026-08-10T09:00:01+08:00')
+            ->assertJsonPath('log.date', '2026-08-10');
+
+        $this->assertDatabaseCount('exercise_logs', 1);
+        $this->assertDatabaseHas('exercise_logs', [
+            'user_id' => $user->id,
+            'client_session_id' => 'stale-timestamped-session',
+            'duration_seconds' => 86_400,
+            'duration_minutes' => 1_440,
+            'date' => '2026-08-10',
+        ]);
     }
 
     public function test_seconds_win_when_a_legacy_minutes_value_disagrees(): void

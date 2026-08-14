@@ -344,10 +344,19 @@ class ExerciseController extends Controller
         }
 
         $durationSeconds = (int) $startedAt->diffInSeconds($endedAt);
-        if ($durationSeconds < 1 || $durationSeconds > self::MAX_DURATION_SECONDS) {
+        if ($durationSeconds < 1) {
             throw ValidationException::withMessages([
                 'ended_at' => ['The elapsed session duration must be between 1 second and 24 hours.'],
             ]);
+        }
+
+        if ($durationSeconds > self::MAX_DURATION_SECONDS) {
+            // Forgotten exercise sessions can stay open for days on older
+            // clients. Recover them by preserving the stop moment and local
+            // calendar date while capping the elapsed duration to the same
+            // 24-hour maximum enforced for modern local-first saves.
+            $durationSeconds = self::MAX_DURATION_SECONDS;
+            $startedAt = $endedAt->copy()->subSeconds($durationSeconds);
         }
 
         if ($endedAt->greaterThan(now()->addSeconds(self::MAX_FUTURE_CLOCK_SKEW_SECONDS))) {
