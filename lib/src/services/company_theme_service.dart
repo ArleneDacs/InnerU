@@ -283,7 +283,7 @@ class CompanyThemeService {
       if (userData.isNotEmpty) {
         final companyData = await _companyDataForUser(userData);
         if (companyData != null) {
-          return _resolveFromCompanyData(
+          return await _resolveFromCompanyData(
             companyData,
             fallbackName: (companyData['name'] as String?)?.trim() ?? '',
             fallbackCode: (companyData['code'] as String?)?.trim() ?? '',
@@ -301,7 +301,7 @@ class CompanyThemeService {
                     '')
                 .toUpperCase();
         if (companyName.isNotEmpty || companyCode.isNotEmpty) {
-          return _resolveFromCompanyData(
+          return await _resolveFromCompanyData(
             <String, dynamic>{
               'name': companyName,
               'code': companyCode,

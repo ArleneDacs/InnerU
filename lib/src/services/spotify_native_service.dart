@@ -81,7 +81,7 @@ class SpotifyNativeService {
           _needsExplicitAuthorization(error)) {
         try {
           await authorize();
-          return connect(authorizeIfNeeded: false);
+          return await connect(authorizeIfNeeded: false);
         } catch (authorizationError) {
           throw _toSpotifyException(authorizationError);
         }
